@@ -17,7 +17,7 @@ use scout4all_core::{
     competition_form::{CompetitionForm, CompetitionFormError},
     db,
     detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
-    domain::{CompetitionFormat, ScoutingMode, Stage},
+    domain::{CompetitionFormat, ScoutingMode, Side as ScoutSide, Stage},
     dvw::{
         self,
         import::{
@@ -1428,6 +1428,9 @@ pub struct ScoutingPlayer {
 pub struct EventChoice {
     pub value: EventTypeEnum,
     pub name: String,
+    /// scouting both sides: the event is B's
+    #[uniffi(default)]
+    pub side_b: bool,
 }
 
 /// An evaluation of the event being chosen, e.g. "ace" for a perfect serve.
@@ -1507,6 +1510,9 @@ pub struct ScoutedEvent {
     pub blockers: Option<String>,
     /// where our serve started from, if told: e.g. "1"
     pub serve_start: Option<String>,
+    /// scouting both sides: the event is B's
+    #[uniffi(default)]
+    pub side_b: bool,
 }
 
 /// An event of a set, in the list to correct it.
@@ -1604,6 +1610,12 @@ pub struct ScoutingState {
     /// whether the team can make the event chosen, no player: our fault
     /// (e.g. a rotation fault), see `choose_team`
     pub team_choice: bool,
+    /// scouting both sides: the scores, the court and the choices are of
+    /// the side on screen, B's when `side_b`
+    #[uniffi(default)]
+    pub both: bool,
+    #[uniffi(default)]
+    pub side_b: bool,
 }
 
 /// The sets the statistics are of: one of the match, or all of them so
@@ -2079,10 +2091,12 @@ impl Scouting {
         let snapshot = session.snapshot();
         let lineup = &snapshot.current_lineup;
         let current_match = session.current_match();
-        let team = &current_match.team;
-        let (won, lost) = current_match
-            .get_status()
-            .map_or((0, 0), |s| (s.us_wins, s.them_wins));
+        let team = session.team();
+        let side = session.side();
+        let (won, lost) = current_match.get_status().map_or((0, 0), |s| match side {
+            ScoutSide::A => (s.us_wins, s.them_wins),
+            ScoutSide::B => (s.them_wins, s.us_wins),
+        });
         let choices = session.player_choices();
         let selectable = |id: &Uuid| match (session.step(), session.player()) {
             (ScoutingStep::Event, None) => !session.player_events(id).is_empty(),
@@ -2144,13 +2158,35 @@ impl Scouting {
                 receives: receivers.contains(&position),
             })
             .collect();
-        let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
-        events.sort_by_key(|e| e.timestamp);
+        let events: Vec<ScoutedEvent> = match session.is_both() {
+            true => session
+                .touches()
+                .iter()
+                .rev()
+                .filter_map(|(of, e)| {
+                    session.team_of(*of).map(|t| ScoutedEvent {
+                        side_b: *of == ScoutSide::B,
+                        ..self.scouted_event(t, e)
+                    })
+                })
+                .collect(),
+            false => {
+                let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
+                events.sort_by_key(|e| e.timestamp);
+                events
+                    .into_iter()
+                    .rev()
+                    .map(|e| self.scouted_event(team, e))
+                    .collect()
+            }
+        };
         ScoutingState {
             women: team.gender == Some(GenderEnum::Women),
             set_number: session.set().set_number,
             team: team.name.clone(),
-            opponent: current_match.opponent.clone(),
+            opponent: session
+                .team_of(side.other())
+                .map_or_else(|| current_match.opponent.clone(), |t| t.name.clone()),
             home: current_match.home,
             score_us: snapshot.score_us,
             score_them: snapshot.score_them,
@@ -2174,11 +2210,7 @@ impl Scouting {
                 .player()
                 .and_then(|id| team.find_player(id))
                 .map(|p| self.scouting_player(team, p)),
-            events: events
-                .into_iter()
-                .rev()
-                .map(|e| self.scouted_event(team, e))
-                .collect(),
+            events,
             ball: snapshot.get_ball_side(),
             last_touch: snapshot
                 .get_last_touch()
@@ -2188,7 +2220,43 @@ impl Scouting {
             reception: session.reception().players(),
             reception_open: session.can_tell_reception(),
             team_choice: session.team_choice(),
+            both: session.is_both(),
+            side_b: side == ScoutSide::B,
         }
+    }
+
+    /// The events that can follow: scouting both sides, with their side
+    /// (the active one's first), see `ScoutingSession::event_choices`.
+    pub fn event_choices(&self) -> Vec<EventChoice> {
+        let session = self.session();
+        session
+            .event_choices()
+            .into_iter()
+            .map(|(of, e)| EventChoice {
+                side_b: of == ScoutSide::B,
+                ..self.event_choice(&session, e)
+            })
+            .collect()
+    }
+
+    /// The scout chooses the event of a side, among `event_choices`.
+    pub fn choose_event_of(
+        &self,
+        side_b: bool,
+        event: EventTypeEnum,
+    ) -> Result<Progress, MobileError> {
+        let side = match side_b {
+            true => ScoutSide::B,
+            false => ScoutSide::A,
+        };
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_event_of(side, event)))
+    }
+
+    /// Swaps the side the choices are for (F5): true when it is B's now.
+    pub fn swap_side(&self) -> Result<bool, MobileError> {
+        let mut session = self.session();
+        self.scouted(session.swap_side().map(|side| side == ScoutSide::B))
     }
 
     /// The events that can follow.
@@ -2836,6 +2904,7 @@ fn detail_of(
             .map(|e| EventChoice {
                 value: *e,
                 name: fundamental_name(*e),
+                side_b: false,
             })
             .collect(),
         players,
@@ -2937,6 +3006,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         target: e.flags.target().map(|t| t.described()),
         blockers: e.flags.blockers().map(|b| b.name(labels).to_string()),
         serve_start: e.flags.serve_start().map(|z| z.to_string()),
+        side_b: false,
     }
 }
 
@@ -3102,8 +3172,8 @@ impl Scouting {
     ) -> Vec<ScoutingPlayer> {
         choices
             .into_iter()
-            .filter_map(|c| session.current_match().team.find_player(c.id))
-            .map(|p| self.scouting_player(&session.current_match().team, p))
+            .filter_map(|c| session.team().find_player(c.id))
+            .map(|p| self.scouting_player(session.team(), p))
             .collect()
     }
 
@@ -3116,6 +3186,7 @@ impl Scouting {
                 .snapshot()
                 .next_event_name(event, self.labels)
                 .to_string(),
+            side_b: false,
         }
     }
 
@@ -3402,6 +3473,7 @@ impl Correction {
                 .map(|e| EventChoice {
                     value: e,
                     name: e.friendly_name(labels).to_string(),
+                    side_b: false,
                 })
                 .collect(),
             evals: edit

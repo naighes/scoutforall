@@ -319,7 +319,7 @@ impl ScoutingSession {
     }
 
     /// The team of the side the scout is choosing for.
-    fn active_team(&self) -> &TeamEntry {
+    pub fn team(&self) -> &TeamEntry {
         self.team_of(self.side).unwrap_or(&self.current_match.team)
     }
 
@@ -770,7 +770,7 @@ impl ScoutingSession {
                     Some(EventTypeEnum::CS) => lineup.get_setter_diagonal() == Some(*id),
                     Some(event) => self.active().can_play(event, id),
                 })
-                .and_then(|id| self.active_team().find_player(id))
+                .and_then(|id| self.team().find_player(id))
                 .map(|player| PlayerChoice {
                     index,
                     id: player.id,
@@ -828,7 +828,7 @@ impl ScoutingSession {
             (Some(EventTypeEnum::R), Some(replaced)) => self
                 .active()
                 .current_lineup
-                .get_available_replacements(self.active_team(), replaced)
+                .get_available_replacements(self.team(), replaced)
                 .into_iter()
                 .map(|(index, player)| PlayerChoice {
                     index,

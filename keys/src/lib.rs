@@ -31,6 +31,9 @@ pub const STATS_KEY: KeyCombination = key!(f3);
 /// Opens the preview of the recording in a window of its own, and closes
 /// it: on every screen of the desktop app, while recording.
 pub const PREVIEW_KEY: KeyCombination = key!(f4);
+/// Scouting both teams, swaps the side the choices are for: the ball isn't
+/// where it seems.
+pub const SWAP_SIDE_KEY: KeyCombination = key!(f5);
 
 /// Move the cursor on the court where the ball went, while evaluating.
 pub const ZONE_CURSOR_KEYS: [KeyCombination; 4] = [key!(left), key!(up), key!(down), key!(right)];
@@ -50,6 +53,7 @@ pub fn is_reserved_key(ck: &KeyCombination) -> bool {
         BACK_KEY,
         STATS_KEY,
         PREVIEW_KEY,
+        SWAP_SIDE_KEY,
         ZONE_KEY,
         BLOCKERS_KEY,
     ]
@@ -728,6 +732,7 @@ fn test_reserved_and_fixed_keys() {
         key!(shift - u),
         key!(esc),
         key!(f2),
+        key!(f5),
         key!(space),
         key!(up),
         key!(left),

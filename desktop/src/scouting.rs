@@ -30,8 +30,8 @@ use {
         },
     },
     scout4all_keys::{
-        BACK_KEY, BLOCKERS_KEY, KeyCombination, PlayerKeysEnum, STATS_KEY, ScoutingKeys,
-        ScoutingOptionEnum, UNDO_KEY, ZONE_KEY, key,
+        BACK_KEY, BLOCKERS_KEY, KeyCombination, PlayerKeysEnum, STATS_KEY, SWAP_SIDE_KEY,
+        ScoutingKeys, ScoutingOptionEnum, UNDO_KEY, ZONE_KEY, key,
         shirt::{self, Pick},
     },
     scout4all_mobile::{
@@ -52,7 +52,10 @@ const TEAM_SHIRT_KEYS: [char; 2] = [TEAM_SHIRT_KEY, ','];
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Event(EventTypeEnum),
+    /// an event of a side (B's when `true`)
+    Event(bool, EventTypeEnum),
+    /// F5: the choices for the other side
+    Swap,
     Option(ScoutingOptionEnum),
     Player(String),
     Team,
@@ -79,6 +82,7 @@ pub enum Outcome {
 /// draws it.
 struct Snapshot {
     state: ScoutingState,
+    /// each with its side, scouting both
     events: Vec<EventChoice>,
     players: Vec<PlayerChoice>,
     replacements: Vec<PlayerChoice>,
@@ -197,9 +201,13 @@ impl ScoutingScreen {
         let mobile = |r: Result<Progress, MobileError>| r.map_err(|e| e.to_string());
         let outcome = match message {
             Message::Dismiss => return self.dismiss(),
-            Message::Event(e) => {
-                let r = mobile(self.scouting.choose_event(e));
+            Message::Event(side_b, e) => {
+                let r = mobile(self.scouting.choose_event_of(side_b, e));
                 self.show(r);
+                Outcome::Stay
+            }
+            Message::Swap => {
+                self.swap();
                 Outcome::Stay
             }
             Message::Option(o) => {
@@ -329,6 +337,7 @@ impl ScoutingScreen {
             (k, _) if k == BACK_KEY => return Outcome::Leave,
             (k, _) if k == UNDO_KEY => return self.update(Message::Undo),
             (k, _) if k == STATS_KEY => self.show_stats = !self.show_stats,
+            (k, _) if k == SWAP_SIDE_KEY => self.swap(),
             (_, ScoutingStep::Event) => self.event_key(ck),
             (_, ScoutingStep::Player) => self.player_key(ck),
             (_, ScoutingStep::Eval) => self.eval_key(ck),
@@ -338,6 +347,16 @@ impl ScoutingScreen {
         Outcome::Stay
     }
 
+    /// The choices for the other side, before anything is chosen.
+    fn swap(&mut self) {
+        if !self.snapshot.state.both {
+            return;
+        }
+        if let Err(e) = self.scouting.swap_side() {
+            self.notice = Some((e.to_string(), true));
+        }
+    }
+
     fn event_key(&mut self, ck: KeyCombination) {
         let option = self.keys.option_keybindings.action_for(&ck).copied();
         let event = self
@@ -345,13 +364,13 @@ impl ScoutingScreen {
             .scouting_keybindings
             .action_for(&ck)
             .copied()
-            .filter(|e| self.snapshot.events.iter().any(|c| c.value == *e));
+            .and_then(|e| self.snapshot.events.iter().find(|c| c.value == e))
+            .map(|c| (c.side_b, c.value));
         match (option, event) {
             (Some(option), _) => self.option(option),
-            (None, Some(event)) => {
-                let r = self.with(|s, rt| rt.block_on(s.choose_event(event)));
-                let r = self.core(r);
-                self.show(r);
+            (None, Some((side_b, value))) => {
+                let r = self.scouting.choose_event_of(side_b, value);
+                self.show(r.map_err(|e| e.to_string()));
             }
             (None, None) => {}
         }
@@ -645,7 +664,7 @@ fn read(scouting: &Scouting, match_scope: bool) -> Snapshot {
         },
     };
     Snapshot {
-        events: scouting.available_events(),
+        events: scouting.event_choices(),
         players,
         replacements,
         evals: scouting.available_evals(),
@@ -679,6 +698,14 @@ impl Trend {
 
 // --- view ----------------------------------------------------------------
 
+/// The colour of a side where both are scouted: A's light blue, B's pink.
+fn side_color(side_b: bool) -> Color {
+    match side_b {
+        true => theme::TEAM_THEM,
+        false => theme::TEAM_US,
+    }
+}
+
 fn pct(v: Option<f64>) -> String {
     v.map_or_else(|| "–".to_string(), |v| format!("{v:.0}%"))
 }
@@ -697,6 +724,11 @@ impl ScoutingScreen {
     /// The keys of the screen, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         let typing = (!self.typed.is_empty()).then(|| ("Enter".to_string(), s.choose.to_string()));
+        let swap = self
+            .snapshot
+            .state
+            .both
+            .then(|| ("F5".to_string(), s.swap_side.to_string()));
         typing
             .into_iter()
             .chain([
@@ -705,6 +737,7 @@ impl ScoutingScreen {
                 ("F2".to_string(), s.settings.to_string()),
                 ("F3".to_string(), s.stats.to_string()),
             ])
+            .chain(swap)
             .collect()
     }
 
@@ -758,7 +791,7 @@ impl ScoutingScreen {
     fn header<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let st = &self.snapshot.state;
         let bold = theme::fonts().bold;
-        let side = |name: String, score: u8, serving: bool, ours: bool| {
+        let side = |name: String, score: u8, serving: bool, ours: bool, tint: Option<Color>| {
             let dot: Element<'a, Message> = match serving {
                 true => text("●").size(SIZE_SMALL).color(c.accent).into(),
                 false => space::horizontal().width(Length::Fixed(10.0)).into(),
@@ -768,10 +801,10 @@ impl ScoutingScreen {
                 text(name)
                     .size(SIZE_BODY)
                     .font(bold)
-                    .color(match ours {
+                    .color(tint.unwrap_or(match ours {
                         true => c.text,
                         false => c.muted,
-                    })
+                    }))
                     .width(Length::Fill),
                 text(score.to_string())
                     .size(SIZE_SCORE)
@@ -794,6 +827,14 @@ impl ScoutingScreen {
             ui::pill(&format!("{}–{}", st.won, st.lost), false, None, c),
             ui::pill(&format!("⇄ {}", st.substitutions_left), false, None, c),
         ]
+        .push(st.both.then(|| {
+            ui::pill(
+                &format!("F5 {}", s.swap_side),
+                false,
+                Some(Message::Swap),
+                c,
+            )
+        }))
         .spacing(6)
         .wrap();
         // the phase at a glance: its color, its icon, its name; then the
@@ -836,13 +877,15 @@ impl ScoutingScreen {
                     st.team.clone(),
                     st.score_us,
                     st.serving_team == TeamSideEnum::Us,
-                    true
+                    true,
+                    st.both.then(|| side_color(st.side_b))
                 ),
                 side(
                     st.opponent.clone(),
                     st.score_them,
                     st.serving_team == TeamSideEnum::Them,
-                    false
+                    false,
+                    st.both.then(|| side_color(!st.side_b))
                 ),
                 info
             ]
@@ -908,11 +951,23 @@ impl ScoutingScreen {
             ScoutingStep::Event => {
                 for e in &snap.events {
                     let key = self.keys.scouting_keybindings.key_for(&e.value);
-                    list = list.push(choice(
+                    // scouting both sides, the team of the event in its colour
+                    let label: Element<'a, Message> = match st.both {
+                        true => row![
+                            ui::body(self.side_name(e.side_b).to_string())
+                                .color(side_color(e.side_b)),
+                            ui::body(e.name.clone()),
+                        ]
+                        .spacing(8)
+                        .into(),
+                        false => ui::body(e.name.clone()).into(),
+                    };
+                    list = list.push(ui::choice(
                         key.as_ref().map(|k| keymap::label(k, s)),
-                        e.name.clone(),
+                        label,
                         false,
-                        Message::Event(e.value),
+                        Some(Message::Event(e.side_b, e.value)),
+                        c,
                     ));
                 }
                 // the title only over options there are
@@ -1129,6 +1184,15 @@ impl ScoutingScreen {
         }
     }
 
+    /// The name of the team of a side.
+    fn side_name(&self, side_b: bool) -> &str {
+        let st = &self.snapshot.state;
+        match side_b == st.side_b {
+            true => &st.team,
+            false => &st.opponent,
+        }
+    }
+
     fn server(&self) -> Option<&scout4all_mobile::CourtPlayer> {
         let st = &self.snapshot.state;
         match (st.serving_team, &st.last_touch, &st.event) {
@@ -1275,7 +1339,15 @@ impl ScoutingScreen {
                 .flatten()
                 .collect::<Vec<_>>()
                 .join(" ");
+            let side: Element<'a, Message> = match self.snapshot.state.both {
+                true => text("●")
+                    .size(SIZE_SMALL)
+                    .color(side_color(e.side_b))
+                    .into(),
+                false => space::horizontal().width(0).into(),
+            };
             row![
+                side,
                 text(e.symbol.clone().unwrap_or_default())
                     .size(SIZE_BODY)
                     .font(theme::fonts().bold)
@@ -1617,6 +1689,131 @@ mod tests {
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
             .unwrap();
         (dir, ScoutingScreen::new(scouting, keys, team, m))
+    }
+
+    /// Both sides scouted: one side on screen, F5 swaps it, the choices
+    /// carry their side and the last events both.
+    #[test]
+    fn both_sides_show_one_side_and_f5_swaps_it() {
+        use scout4all_core::{
+            match_form::MatchForm,
+            player_form::PlayerForm,
+            shapes::{
+                country::CountryCode,
+                enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
+            },
+            team_form::TeamForm,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team_of = |name: &str| {
+            let team = core
+                .save_team(
+                    None,
+                    TeamForm {
+                        name: name.into(),
+                        classification: Some(TeamClassificationEnum::Regional),
+                        gender: Some(GenderEnum::Women),
+                        country: CountryCode::known("IT"),
+                        year: "2026".into(),
+                    },
+                )
+                .unwrap();
+            let ids: Vec<String> = (1..=7)
+                .map(|n| {
+                    core.save_player(
+                        team.clone(),
+                        None,
+                        PlayerForm {
+                            name: format!("{name} P{n}"),
+                            role: Some(match n {
+                                1 => RoleEnum::Setter,
+                                7 => RoleEnum::Libero,
+                                _ => RoleEnum::OutsideHitter,
+                            }),
+                            number: n.to_string(),
+                            ..PlayerForm::default()
+                        },
+                        false,
+                    )
+                    .unwrap()
+                })
+                .collect();
+            (team, ids)
+        };
+        let (team, ids_a) = team_of("Cortona");
+        let (b, ids_b) = team_of("Arezzo");
+        let m = core
+            .save_match(
+                team.clone(),
+                None,
+                MatchForm {
+                    opponent: "Arezzo".into(),
+                    opponent_team: b.parse().ok(),
+                    both: true,
+                    date: chrono::DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").ok(),
+                    home: true,
+                    max_substitutions: "6".into(),
+                    ..MatchForm::default()
+                },
+            )
+            .unwrap();
+        core.save_roster_of_b(team.clone(), m.clone(), MatchForm::default())
+            .unwrap();
+        let start = core.set_start(team.clone(), m.clone()).unwrap();
+        start.choose_serving_team(TeamSideEnum::Us);
+        let of_b = core
+            .set_start_of_b(team.clone(), m.clone())
+            .unwrap()
+            .unwrap();
+        for (set_start, ids) in [(&start, &ids_a), (&of_b, &ids_b)] {
+            for (position, id) in (1..=6).zip(ids) {
+                set_start.place(position, Some(id.clone())).unwrap();
+            }
+            set_start.choose_setter(Some(ids[0].clone())).unwrap();
+            set_start.choose_libero(Some(ids[6].clone())).unwrap();
+        }
+        core.start_set_both(start, of_b).unwrap();
+        let scouting = core
+            .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
+            .unwrap();
+        let mut screen = ScoutingScreen::new(scouting, ScoutingKeys::default(), team, m);
+        let state = &screen.snapshot.state;
+        assert!(state.both && !state.side_b);
+        assert_eq!(
+            (state.team.as_str(), state.opponent.as_str()),
+            ("Cortona", "Arezzo")
+        );
+        // the serve of A first; B can be told apart by its side
+        assert!(screen.snapshot.events.iter().any(|e| !e.side_b));
+        screen.key(SWAP_SIDE_KEY);
+        let state = &screen.snapshot.state;
+        assert!(state.side_b);
+        assert_eq!(
+            (state.team.as_str(), state.opponent.as_str()),
+            ("Arezzo", "Cortona")
+        );
+        assert_eq!(state.court.len(), 6);
+        assert!(state.court.iter().all(|p| p.name.starts_with("Arezzo")));
+        screen.key(SWAP_SIDE_KEY);
+        assert!(!screen.snapshot.state.side_b);
+        assert!(
+            screen
+                .snapshot
+                .state
+                .court
+                .iter()
+                .all(|p| p.name.starts_with("Cortona"))
+        );
+        // a touch of A in the list of the last events
+        let (side_b, event) = screen
+            .snapshot
+            .events
+            .first()
+            .map(|e| (e.side_b, e.value))
+            .unwrap();
+        screen.update(Message::Event(side_b, event));
+        assert!(screen.snapshot.state.step != ScoutingStep::Event);
     }
 
     fn offered(screen: &ScoutingScreen) -> Vec<u8> {

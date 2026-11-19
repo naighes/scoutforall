@@ -38,6 +38,7 @@ pub fn combination(key: &Key, modifiers: Modifiers) -> Option<KeyCombination> {
         Key::Named(Named::F2) => Some(KeyCode::F(2)),
         Key::Named(Named::F3) => Some(KeyCode::F(3)),
         Key::Named(Named::F4) => Some(KeyCode::F(4)),
+        Key::Named(Named::F5) => Some(KeyCode::F(5)),
         Key::Character(s) => s.chars().next().map(KeyCode::Char),
         _ => None,
     }?;
