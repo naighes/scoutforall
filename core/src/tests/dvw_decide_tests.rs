@@ -241,6 +241,11 @@ mod tests {
                     ('/', '=') => assert_eq!(rally, vec!["*A=", "aB/"]),
                     ('/', _) => assert_eq!(rally, vec!["aB/"], "A{attack} B/"),
                     _ => {
+                        // a block touching a kill is a block `=`
+                        let block = match (attack, block) {
+                            ('#', '+' | '-') => '=',
+                            _ => block,
+                        };
                         assert_eq!(
                             rally.get(1).map(String::as_str),
                             Some(format!("aB{block}").as_str())
@@ -259,6 +264,25 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+
+    /// A kill touched by the block, the ball deflected and not dug (the
+    /// real files, Cortona–Savinese and Cortona–Cascina): the kill stays,
+    /// the block is a block `=`, the dig of the blockers stays after it.
+    #[test]
+    fn a_block_touching_a_kill_is_a_block_error() {
+        for block in ['-', '+'] {
+            let codes = [
+                "a72AT#".to_string(),
+                format!("*11BT{block}"),
+                "*13DT=".to_string(),
+            ];
+            let codes: Vec<&str> = codes.iter().map(String::as_str).collect();
+            assert_eq!(
+                decided(&codes).expect("the kill, the block, the dig"),
+                vec!["aA#", "*B=", "*D="]
+            );
         }
     }
 

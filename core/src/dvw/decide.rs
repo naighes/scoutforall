@@ -10,6 +10,8 @@
 //!   cover);
 //! - the block decides the attack, its error always (`A+ B=` is `A#`,
 //!   `B=`); after an invasion (`B/`) the attack is left out;
+//! - a block touching the other team's kill (`A# B-`) is a block `=`: the kill
+//!   stays (DataVolley credits it);
 //! - a block in play is decided by who plays next: the attackers, the block
 //!   `!` and the attack `!` (the ball back to them); the blockers, their
 //!   dig decides it (`+`/`#` the block `+`, `-`/`/` the block `-`), `+`
@@ -321,6 +323,35 @@ fn evaluations<'a>(
         if let Some((_, t)) = touches.get_mut(i) {
             *t = with(t, None, Some('+'));
             mapped.push("D! of an attack or after a block: D+");
+        }
+    }
+    // a block touching the other team's kill (`A# B-`, the ball down all
+    // the same: DataVolley credits the kill) is a block `=`: the kill
+    // stays, the dig after it is the blockers' own
+    let touching: Vec<usize> = (0..touches.len())
+        .filter(|i| {
+            let previous = touches
+                .get(..*i)
+                .unwrap_or_default()
+                .iter()
+                .rev()
+                .find_map(|(_, t)| played(t));
+            match (touches.get(*i).and_then(|(_, t)| played(t)), previous) {
+                (Some((side, block, false)), Some((before, attack, false))) => {
+                    block.skill == Skill::Block
+                        && matches!(block.evaluation, '+' | '-')
+                        && before != side
+                        && attack.skill == Skill::Attack
+                        && symbols.winning(Skill::Attack).contains(&attack.evaluation)
+                }
+                _ => false,
+            }
+        })
+        .collect();
+    for i in touching {
+        if let Some((_, t)) = touches.get_mut(i) {
+            *t = with(t, None, Some('='));
+            mapped.push("B touching a kill: B=");
         }
     }
     let blocks = changes(&touches, |touch, next| match (touch, next) {
