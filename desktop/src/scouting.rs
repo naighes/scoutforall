@@ -359,13 +359,7 @@ impl ScoutingScreen {
 
     fn event_key(&mut self, ck: KeyCombination) {
         let option = self.keys.option_keybindings.action_for(&ck).copied();
-        let event = self
-            .keys
-            .scouting_keybindings
-            .action_for(&ck)
-            .copied()
-            .and_then(|e| self.snapshot.events.iter().find(|c| c.value == e))
-            .map(|c| (c.side_b, c.value));
+        let event = self.event_of_key(&ck);
         match (option, event) {
             (Some(option), _) => self.option(option),
             (None, Some((side_b, value))) => {
@@ -374,6 +368,24 @@ impl ScoutingScreen {
             }
             (None, None) => {}
         }
+    }
+
+    /// The choice a key makes: the event of the key for the side on screen,
+    /// or with shift the same event for the other side, where both can
+    /// make it (the changes of the lineup while the ball is still).
+    fn event_of_key(&self, ck: &KeyCombination) -> Option<(bool, EventTypeEnum)> {
+        let events = &self.snapshot.events;
+        let own = |e: EventTypeEnum| events.iter().find(|c| c.value == e);
+        let other = |e: EventTypeEnum| other_side_choice(events, e);
+        let plain = self.keys.scouting_keybindings.action_for(ck).copied();
+        let shifted = scout4all_keys::unshifted(ck)
+            .and_then(|plain| self.keys.scouting_keybindings.action_for(&plain).copied());
+        match (plain, shifted) {
+            (Some(e), _) => own(e),
+            (None, Some(e)) => other(e),
+            (None, None) => None,
+        }
+        .map(|c| (c.side_b, c.value))
     }
 
     fn player_key(&mut self, ck: KeyCombination) {
@@ -699,6 +711,14 @@ impl Trend {
 // --- view ----------------------------------------------------------------
 
 /// The colour of a side where both are scouted: A's light blue, B's pink.
+/// The choice of the event for the side that isn't the first to offer it:
+/// the one the shift key of the event makes.
+fn other_side_choice(events: &[EventChoice], event: EventTypeEnum) -> Option<&EventChoice> {
+    let mut of_event = events.iter().filter(|c| c.value == event);
+    let first = of_event.next()?;
+    of_event.find(|c| c.side_b != first.side_b)
+}
+
 fn side_color(side_b: bool) -> Color {
     match side_b {
         true => theme::TEAM_THEM,
@@ -950,7 +970,15 @@ impl ScoutingScreen {
         match st.step {
             ScoutingStep::Event => {
                 for e in &snap.events {
+                    // the first choice of an event has the key of the event, the
+                    // same event of the other side its shift
                     let key = self.keys.scouting_keybindings.key_for(&e.value);
+                    let key = match other_side_choice(&snap.events, e.value) {
+                        Some(other) if std::ptr::eq(other, e) => {
+                            key.as_ref().and_then(scout4all_keys::shifted)
+                        }
+                        Some(_) | None => key,
+                    };
                     // scouting both sides, the team of the event in its colour
                     let label: Element<'a, Message> = match st.both {
                         true => row![
@@ -1821,6 +1849,56 @@ pub(crate) mod tests {
             .unwrap();
         screen.update(Message::Event(side_b, event));
         assert!(screen.snapshot.state.step != ScoutingStep::Event);
+    }
+
+    /// The change of the lineup while the ball is still: its key makes it
+    /// for the side on screen, shift and the key for the other side, which
+    /// shows the shift in the list.
+    #[test]
+    fn the_shift_key_makes_the_change_of_the_other_side() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = both_sides_started(&core);
+        let new = || {
+            let scouting = core
+                .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
+                .unwrap();
+            ScoutingScreen::new(scouting, ScoutingKeys::default(), team.clone(), m.clone())
+        };
+        let mut screen = new();
+        let r = |screen: &ScoutingScreen| {
+            screen
+                .snapshot
+                .events
+                .iter()
+                .filter(|e| e.value == EventTypeEnum::R)
+                .map(|e| e.side_b)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(r(&screen), vec![false, true]);
+        let key = screen
+            .keys
+            .scouting_keybindings
+            .key_for(&EventTypeEnum::R)
+            .unwrap();
+        screen.key(key);
+        assert_eq!(screen.snapshot.state.step, ScoutingStep::Player);
+        assert!(!screen.snapshot.state.side_b);
+        // the same key with shift, for B
+        let mut screen = new();
+        let shifted = scout4all_keys::shifted(&key).unwrap();
+        assert_eq!(shifted, key!(shift - r));
+        screen.key(shifted);
+        assert_eq!(screen.snapshot.state.step, ScoutingStep::Player);
+        assert!(screen.snapshot.state.side_b);
+        assert!(
+            screen
+                .snapshot
+                .state
+                .court
+                .iter()
+                .all(|p| p.name.starts_with("Arezzo"))
+        );
     }
 
     fn offered(screen: &ScoutingScreen) -> Vec<u8> {

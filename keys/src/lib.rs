@@ -69,6 +69,38 @@ pub fn is_fixed_key(ck: &KeyCombination) -> bool {
     is_reserved_key(ck) || ck.as_letter().is_some_and(|c| c.is_ascii_digit())
 }
 
+/// The letter of a key without modifiers: `r` for `r`.
+fn plain_letter(ck: &KeyCombination) -> Option<char> {
+    match (ck.codes, ck.modifiers) {
+        (OneToThree::One(KeyCode::Char(c)), KeyModifiers::NONE) if c.is_alphabetic() => Some(c),
+        _ => None,
+    }
+}
+
+/// The key with shift: shift-r for `r`. It's the key of the same choice for
+/// the other side, when both sides scouted can make it.
+pub fn shifted(ck: &KeyCombination) -> Option<KeyCombination> {
+    plain_letter(ck).map(|c| {
+        KeyCombination::one_key(KeyCode::Char(c.to_ascii_uppercase()), KeyModifiers::SHIFT)
+    })
+}
+
+/// The key a shifted letter comes from: `r` for shift-r (or a capital R,
+/// as some terminals report it).
+pub fn unshifted(ck: &KeyCombination) -> Option<KeyCombination> {
+    match (ck.codes, ck.modifiers) {
+        (OneToThree::One(KeyCode::Char(c)), KeyModifiers::SHIFT | KeyModifiers::NONE)
+            if c.is_alphabetic() && (c.is_uppercase() || ck.modifiers == KeyModifiers::SHIFT) =>
+        {
+            Some(KeyCombination::one_key(
+                KeyCode::Char(c.to_ascii_lowercase()),
+                KeyModifiers::NONE,
+            ))
+        }
+        _ => None,
+    }
+}
+
 /// Some terminals report shift along with the symbols it produces (e.g.
 /// "shift-+" for "+"): the symbol alone is what users mean.
 pub fn normalized(ck: KeyCombination) -> KeyCombination {
@@ -633,6 +665,25 @@ fn test_normalized_symbols() {
     assert_eq!(normalized(key!(shift - e)), key!(shift - e));
     let ctrl_shift_plus = KeyCombination::one_key(Char('+'), M::SHIFT | M::CONTROL);
     assert_eq!(normalized(ctrl_shift_plus), ctrl_shift_plus);
+}
+
+#[test]
+fn test_shifted_letters() {
+    use crokey::crossterm::event::{KeyCode::Char, KeyModifiers as M};
+    assert_eq!(shifted(&key!(r)), Some(key!(shift - r)));
+    assert_eq!(unshifted(&key!(shift - r)), Some(key!(r)));
+    // some terminals report the capital, with or without shift
+    let capital = KeyCombination::one_key(Char('R'), M::NONE);
+    assert_eq!(unshifted(&capital), Some(key!(r)));
+    assert_eq!(
+        unshifted(&KeyCombination::one_key(Char('R'), M::SHIFT)),
+        Some(key!(r))
+    );
+    // only letters, and only a plain one has a shifted key
+    assert_eq!(unshifted(&key!(r)), None);
+    assert_eq!(shifted(&key!(shift - r)), None);
+    assert_eq!(shifted(&key!('+')), None);
+    assert_eq!(unshifted(&key!(ctrl - r)), None);
 }
 
 #[test]

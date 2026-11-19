@@ -974,7 +974,7 @@ impl ScoutingSession {
         use EventTypeEnum::*;
         let available = self.available_events().contains(&event);
         let substitutions_left = !self
-            .snapshot
+            .active()
             .current_lineup
             .was_max_number_of_substitutions_reached();
         match (self.step, available, event) {

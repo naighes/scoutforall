@@ -53,7 +53,13 @@ mod tests {
 
     /// Six players and the libero (7).
     async fn team(p: &Sqlite, name: &str) -> TeamEntry {
-        let players = (1..=7)
+        team_of(p, name, 7).await
+    }
+
+    /// The players 1 to `last`, the libero being the 7: the ones after
+    /// the 7 are on the bench.
+    async fn team_of(p: &Sqlite, name: &str, last: u8) -> TeamEntry {
+        let players = (1..=last)
             .map(|n| PlayerEntry {
                 id: Uuid::new_v4(),
                 name: format!("{name} {n}"),
@@ -828,6 +834,146 @@ mod tests {
         assert_eq!(again.touches().len(), 2);
         assert_eq!(again.side(), session.side());
         assert_eq!(again.event_choices(), session.event_choices());
+    }
+
+    /// The changes of the lineup of both sides while the ball is still:
+    /// the substitutions (counted for the side they are of), the libero
+    /// and the setter of B as well as A's.
+    #[tokio::test]
+    async fn both_sides_change_their_lineup_while_the_ball_is_still() {
+        let p = Sqlite::new();
+        let (a, b) = (
+            team_of(&p, "Cortona", 9).await,
+            team_of(&p, "Cascina", 9).await,
+        );
+        let m = p
+            .match_writer
+            .create(
+                &a,
+                MatchInput {
+                    opponent: Opponent::Team(b.id),
+                    ..MatchInput::against("", date(), true, 1, "", vec![])
+                },
+            )
+            .await
+            .unwrap();
+        p.match_writer
+            .save_scouting(&m, ScoutingMode::Both)
+            .await
+            .unwrap();
+        let start = |t: &TeamEntry, serving| {
+            SetEntry::new(1, serving, positions(t), libero(t), None, t.players[0].id).unwrap()
+        };
+        let (start_a, start_b) = (start(&a, TeamSideEnum::Us), start(&b, TeamSideEnum::Them));
+        let side = |s: &SetEntry| crate::set_start::SideInput {
+            positions: s.initial_positions,
+            setter: s.setter,
+            libero: s.libero,
+            fallback_libero: None,
+        };
+        let input = crate::set_start::SetStartInput {
+            set_number: 1,
+            serving_team: TeamSideEnum::Us,
+            positions: start_a.initial_positions,
+            setter: start_a.setter,
+            libero: start_a.libero,
+            fallback_libero: None,
+            opponent: Some(side(&start_b)),
+        };
+        let writer: std::sync::Arc<dyn SetWriter + Send + Sync> =
+            std::sync::Arc::new(crate::providers::sqlite::sets::SqliteSetWriter::new(
+                p.db.clone(),
+                crate::localization::Language::default(),
+            ));
+        let mut session = crate::set_start::start(m.clone(), input, writer, Some(b.clone()))
+            .await
+            .unwrap();
+        // B substitutes (the only one the match allows)
+        assert_eq!(session.side(), Side::A);
+        session.choose_event_of(Side::B, R).await.unwrap();
+        assert_eq!(session.side(), Side::B);
+        let out = session.player_choices()[1].id;
+        session.choose_player(out).await.unwrap();
+        let bench = session.replacement_choices();
+        assert!(!bench.is_empty());
+        session.choose_replacement(bench[0].id).await.unwrap();
+        assert_eq!(session.touches().len(), 1);
+        assert_eq!(session.touches()[0].0, Side::B);
+        let lineup_b = &session.snapshot_of(Side::B).unwrap().current_lineup;
+        assert!(lineup_b.find_position(&bench[0].id).is_some());
+        assert!(lineup_b.find_position(&out).is_none());
+        // A's lineup is as it was, and its substitution is still to be made
+        let lineup_a = &session.snapshot_of(Side::A).unwrap().current_lineup;
+        assert_eq!(
+            lineup_a.get_positions_without_libero(),
+            start_a.initial_positions
+        );
+        assert!(
+            !session
+                .snapshot_of(Side::A)
+                .unwrap()
+                .current_lineup
+                .was_max_number_of_substitutions_reached()
+        );
+        // B has made its one: the next is refused, A's is not
+        assert!(
+            session
+                .snapshot_of(Side::B)
+                .unwrap()
+                .current_lineup
+                .was_max_number_of_substitutions_reached()
+        );
+        assert!(session.choose_event_of(Side::B, R).await.is_err());
+        session.choose_event_of(Side::A, R).await.unwrap();
+        let out = session.player_choices()[1].id;
+        session.choose_player(out).await.unwrap();
+        let bench = session.replacement_choices();
+        session.choose_replacement(bench[0].id).await.unwrap();
+        assert_eq!(session.touches().len(), 2);
+        // the libero of B goes out and in (A's stays); its setter changes on the diagonal
+        let choices = session.event_choices();
+        for side in [Side::A, Side::B] {
+            for event in [LR, CS] {
+                assert!(
+                    choices.contains(&(side, event)),
+                    "{side:?} {event:?} {choices:?}"
+                );
+            }
+        }
+        session.choose_event_of(Side::B, LR).await.unwrap();
+        assert_eq!(session.touches().len(), 3);
+        assert!(
+            session
+                .snapshot_of(Side::B)
+                .unwrap()
+                .current_lineup
+                .is_libero_out()
+        );
+        assert!(
+            !session
+                .snapshot_of(Side::A)
+                .unwrap()
+                .current_lineup
+                .is_libero_out()
+        );
+        session.choose_event_of(Side::B, LR).await.unwrap();
+        session.choose_event_of(Side::B, CS).await.unwrap();
+        assert_eq!(session.side(), Side::B);
+        let diagonal = session.player_choices();
+        assert_eq!(diagonal.len(), 1);
+        session.choose_player(diagonal[0].id).await.unwrap();
+        assert_eq!(session.touches().len(), 5);
+        assert_eq!(
+            session
+                .snapshot_of(Side::B)
+                .unwrap()
+                .current_lineup
+                .get_setter(),
+            Some(diagonal[0].id)
+        );
+        // all of it comes back when the set is scouted again
+        let touches = reader(&p).read_touches(&m, 1).unwrap().unwrap();
+        assert_eq!(touches.touches.len(), 5);
     }
 
     /// A touch corrected on a set of both sides: its pair follows with the
