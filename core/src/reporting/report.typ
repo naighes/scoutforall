@@ -285,29 +285,46 @@
   })
 }
 
-// the first page as DataVolley's scoresheet: the sets, the players with
-// the team and its sets under them, the closing box
-#header(report.header)
+// the pages of a team: the first as DataVolley's scoresheet (the sets, the
+// players with the team and its sets under them, the closing box), then the
+// analysis of the team: every block stays in one piece, on the next page
+// when it doesn't fit
+#let team-pages(r, lead: none) = [
+#header(r.header)
+#lead
 #section("set")
-#simple-table(report.sets, columns: (auto, 1fr, auto, auto, auto, 1fr, auto, auto))
-#stats-table(report.players)
+#simple-table(r.sets, columns: (auto, 1fr, auto, auto, auto, 1fr, auto, auto))
+#stats-table(r.players)
 #legend
-#summary(report.summary)
+#summary(r.summary)
 
-// then the analysis of the team: every block stays in one piece, on the
-// next page when it doesn't fit
 #pagebreak(weak: true)
-#kpis(report.kpis)
-#stats-table(report.rotations)
+#kpis(r.kpis)
+#stats-table(r.rotations)
 #v(8pt)
-#grid(columns: (1fr, 1fr, 1fr), column-gutter: 12pt, ..report.courts.map(court))
+#grid(columns: (1fr, 1fr, 1fr), column-gutter: 12pt, ..r.courts.map(court))
 #v(8pt)
 #grid(
   columns: (1fr, 1fr),
   column-gutter: 12pt,
   row-gutter: 10pt,
-  simple-table(report.first_rallies), simple-table(report.freeballs),
-  simple-table(report.attack_by_phase), simple-table(report.side_out_possessions),
-  simple-table(report.points_won), simple-table(report.points_lost),
+  simple-table(r.first_rallies), simple-table(r.freeballs),
+  simple-table(r.attack_by_phase), simple-table(r.side_out_possessions),
+  simple-table(r.points_won), simple-table(r.points_lost),
 )
-#point-sequence(report.point_sequence)
+#point-sequence(r.point_sequence)
+
+]
+
+#team-pages(report)
+
+// then the opponent: the two teams side by side under the match, and its pages
+#if report.versus != none {
+  pagebreak(weak: true)
+  team-pages(report.opponent, lead: {
+    v(6pt)
+    comparison(report.versus.fundamentals)
+    v(8pt)
+    comparison(report.versus.phases)
+  })
+}

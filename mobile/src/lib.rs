@@ -4827,11 +4827,21 @@ impl Scout4All {
     /// The report of the match as a PDF, in the language of the app: the
     /// file to save or print, as the TUI opens it.
     pub fn match_pdf(&self, team_id: String, match_id: String) -> Result<Vec<u8>, MobileError> {
+        use scout4all_core::reporting::pdf::{render_both_pdf, render_match_pdf};
         let m = self.read_match(&team_id, &match_id)?;
-        Ok(scout4all_core::reporting::pdf::render_match_pdf(
-            &m,
-            self.language.labels(),
-        )?)
+        let labels = self.language.labels();
+        // a match scouted on both sides has the opponent's pages too
+        match self
+            .match_reader
+            .read_of_b(&self.read_team(&team_id)?, &match_id)
+        {
+            Ok(Some(mut b)) => {
+                name_the_removed(&mut b.team, labels);
+                Ok(render_both_pdf(&m, &b, labels)?)
+            }
+            Ok(None) => Ok(render_match_pdf(&m, labels)?),
+            Err(e) => Err(unreadable(&e, labels.unreadable_match)),
+        }
     }
 
     /// What the archive holds, unless it can't be imported: e.g. a match
@@ -9996,6 +10006,25 @@ mod tests {
         let (pa, pb) = (players(MatchSide::A), players(MatchSide::B));
         assert!(!pa.is_empty() && pa.iter().all(|p| of_a.contains(p)));
         assert!(!pb.is_empty() && pb.iter().all(|p| !of_a.contains(p)));
+    }
+
+    /// The report of a match on both sides is longer than the one of a
+    /// match scouted on one: it has the opponent's pages.
+    #[test]
+    fn the_report_of_a_match_on_both_sides_has_the_opponent() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let report = |opponent| {
+            let choice = DvwChoice {
+                opponent,
+                ..dvw_choice(DvwSide::Home, None)
+            };
+            let imported = app.import_dvw(THREE_SETS.to_vec(), choice).unwrap();
+            app.match_pdf(imported.team_id, imported.match_id).unwrap()
+        };
+        let (one, both) = (report(DvwOpponent::Name), report(DvwOpponent::NewTeam));
+        assert!(one.starts_with(b"%PDF") && both.starts_with(b"%PDF"));
+        assert!(both.len() > one.len());
     }
 
     /// B of a match scouted on A's side only: said so, no panic.

@@ -43,6 +43,18 @@ pub struct Report {
     pub points_won: Table,
     pub points_lost: Table,
     pub point_sequence: PointSequence,
+    /// the two teams side by side, A | B: only when both sides are scouted
+    pub versus: Option<Versus>,
+    /// the pages of the other team, as the report of its own match
+    pub opponent: Option<Box<Report>>,
+}
+
+/// The figures of the two teams of a match scouted on both sides, the same
+/// ones each has in its own pages: no new calculation.
+#[derive(Debug, Serialize)]
+pub struct Versus {
+    pub fundamentals: Comparison,
+    pub phases: Comparison,
 }
 
 /// The closing box of the scoresheet, where DataVolley has it: the points
@@ -274,7 +286,90 @@ pub fn build_report(m: &MatchEntry, labels: &Labels) -> Result<Report, AppError>
         points_won: points_won_table(labels, &replay),
         points_lost: points_lost_table(labels, &replay),
         point_sequence: point_sequence(labels, m, &replay),
+        versus: None,
+        opponent: None,
     })
+}
+
+/// The report of a match scouted on both sides: ours, the two teams side by
+/// side, then the pages of the opponent, from `b`, the same match seen by
+/// its team.
+pub fn build_report_of_both(
+    a: &MatchEntry,
+    b: &MatchEntry,
+    labels: &Labels,
+) -> Result<Report, AppError> {
+    let ours = Replay::new(a)?;
+    let theirs = Replay::new(b)?;
+    let versus = versus(
+        labels,
+        [&a.team.name, &b.team.name],
+        [&ours.stats, &theirs.stats],
+    );
+    Ok(Report {
+        versus: Some(versus),
+        opponent: Some(Box::new(build_report(b, labels)?)),
+        ..build_report(a, labels)?
+    })
+}
+
+fn versus(labels: &Labels, names: [&String; 2], stats: [&Stats; 2]) -> Versus {
+    use EventTypeEnum::*;
+    let all = StatsFilter::default();
+    let groups = names.map(|name| name.clone());
+    let fundamental = |label: &str, event: EventTypeEnum| ComparisonRow {
+        label: label.to_string(),
+        values: stats.map(|stats| {
+            vec![
+                stats.event_count(event, None, &all).to_string(),
+                stats
+                    .event_count(event, Some(EvalEnum::Error), &all)
+                    .to_string(),
+                fmt_pct(stats.event_percentage(event, EvalEnum::Perfect, &all)),
+                fmt_pct(stats.metric_percentage(event, Metric::Positive, &all)),
+                fmt_pct(stats.metric_percentage(event, Metric::Efficiency, &all)),
+            ]
+        }),
+    };
+    let phase = |phase: PhaseEnum| ComparisonRow {
+        label: phase.friendly_name(labels).to_string(),
+        values: stats.map(|stats| {
+            match stats.rallies_won(&StatsFilter::new(Some(phase), None, None)) {
+                Some((value, won, total)) => {
+                    vec![total.to_string(), won.to_string(), fmt_pct(Some(value))]
+                }
+                None => vec![String::new(), String::new(), fmt_pct(None)],
+            }
+        }),
+    };
+    Versus {
+        fundamentals: Comparison {
+            title: labels.comparison.to_string(),
+            groups: groups.clone(),
+            columns: vec![
+                labels.tot.to_string(),
+                labels.err.to_string(),
+                labels.prf_perc.to_string(),
+                labels.pos_perc.to_string(),
+                labels.eff_perc.to_string(),
+            ],
+            rows: vec![
+                fundamental(labels.reception, P),
+                fundamental(labels.serve, S),
+                fundamental(labels.attack, A),
+            ],
+        },
+        phases: Comparison {
+            title: String::new(),
+            groups,
+            columns: vec![
+                labels.tot.to_string(),
+                labels.pt.to_string(),
+                labels.pt_perc.to_string(),
+            ],
+            rows: vec![phase(PhaseEnum::SideOut), phase(PhaseEnum::Break)],
+        },
+    }
 }
 
 /// The values of us and them, in the order of the scoresheet: the home
