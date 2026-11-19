@@ -315,7 +315,7 @@ fn touches_ball(entry: &EventEntry) -> bool {
 /// Whether the touch answers the other side's touch, telling the same
 /// transition: the reception of a serve, the dig or the block of an
 /// attack, the cover after a block.
-pub(crate) fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
+pub fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
     matches!(
         (answered, touch),
         (EventTypeEnum::S, EventTypeEnum::P)

@@ -1159,6 +1159,12 @@ impl StatsScreen {
             .is_some_and(|a| a.competitions.len() > 1 || self.competition.is_some())
     }
 
+    /// Few filters: a bar over the page. The team of a match doesn't
+    /// count, so a match of both sides lays out as one of a side.
+    fn filters_on_top(&self) -> bool {
+        self.page_filters().len() <= FILTERS_ON_TOP
+    }
+
     fn current(&self) -> Page {
         PAGES.get(self.page).copied().unwrap_or(Page::Summary)
     }
@@ -1240,12 +1246,11 @@ impl StatsScreen {
         match filter {
             Filter::Side => {
                 let now = (!self.compare).then_some(self.side);
-                ui::cycle(
-                    &[None, Some(MatchSide::A), Some(MatchSide::B)],
-                    &now,
-                    forward,
-                )
-                .map(Message::Side)
+                let all: &[Option<MatchSide>] = match self.current() {
+                    Page::Summary => &[None, Some(MatchSide::A), Some(MatchSide::B)],
+                    _ => &[Some(MatchSide::A), Some(MatchSide::B)],
+                };
+                ui::cycle(all, &now, forward).map(Message::Side)
             }
             Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
             Filter::Period => ui::cycle(&KINDS, &self.kind, forward).map(Message::Kind),
@@ -1691,7 +1696,7 @@ impl StatsScreen {
         .spacing(6);
         let filters = self.filters();
         // a few filters: a bar over the page, the page as wide as the screen
-        let few = filters.len() <= FILTERS_ON_TOP;
+        let few = self.filters_on_top();
         let filters: Vec<Element<'a, Message>> = filters
             .into_iter()
             .enumerate()
@@ -1821,17 +1826,21 @@ impl StatsScreen {
         };
         let (name, pills): (&str, Vec<Element<'a, Message>>) = match filter {
             Filter::Period => return self.period_row(on, s, c),
-            Filter::Side => (
-                s.stats_team,
-                self.sides
+            // no name, no marker: the teams speak for themselves; "compare"
+            // only where the page has a comparison (the summary)
+            Filter::Side => {
+                let compare = self.current() == Page::Summary;
+                let pills: Vec<Element<'a, Message>> = self
+                    .sides
                     .iter()
                     .flat_map(|(a, b)| {
                         [
-                            (s.compare.to_string(), None),
-                            (a.clone(), Some(MatchSide::A)),
-                            (b.clone(), Some(MatchSide::B)),
+                            compare.then(|| (s.compare.to_string(), None)),
+                            Some((a.clone(), Some(MatchSide::A))),
+                            Some((b.clone(), Some(MatchSide::B))),
                         ]
                     })
+                    .flatten()
                     .map(|(name, side)| {
                         let chosen = match side {
                             None => self.compare,
@@ -1839,8 +1848,13 @@ impl StatsScreen {
                         };
                         pill(name, chosen, Message::Side(side))
                     })
-                    .collect(),
-            ),
+                    .collect();
+                return iced::widget::Row::with_children(pills)
+                    .spacing(4)
+                    .wrap()
+                    .vertical_spacing(4)
+                    .into();
+            }
             Filter::Opponent => (
                 s.stats_team,
                 [pill(
@@ -3051,11 +3065,11 @@ impl StatsScreen {
         };
         ui::panel(
             Some(s.distribution),
-            column![
+            ui::court_frame(
                 row![cell(4), cell(3), cell(2)],
                 row![space::horizontal(), cell(8), cell(9)],
-            ]
-            .spacing(10),
+                c,
+            ),
             c,
         )
     }
@@ -3327,13 +3341,14 @@ fn summary<'a>(
     };
     let distribution: Element<'a, Message> = match live.distribution.is_empty() {
         true => small(s.no_attacks, c).into(),
-        false => column![
-            share(row![zone(4), zone(3), zone(2)], tall),
-            share(row![space::horizontal(), zone(8), zone(9)], tall),
-        ]
-        .spacing(10)
-        .height(height(tall))
-        .into(),
+        false => share(
+            ui::court_frame(
+                row![zone(4), zone(3), zone(2)],
+                row![space::horizontal(), zone(8), zone(9)],
+                c,
+            ),
+            tall,
+        ),
     };
     let third = ui::panel(Some(s.distribution), distribution, c);
     let most = live
@@ -4374,6 +4389,30 @@ pub(crate) mod tests {
         assert_eq!((screen.compare, screen.side), (false, MatchSide::A));
         assert!(screen.versus.is_none());
         assert_eq!(screen.filters().first(), Some(&Filter::Side));
+        // the trend: the bar over the page as in a match of one side, no
+        // "compare" (nothing to compare there), B's own trend and names
+        screen.update(Message::Page(1));
+        assert!(screen.filters_on_top());
+        assert_eq!(
+            screen.filters(),
+            [Filter::Side, Filter::Series, Filter::Mode]
+        );
+        let name_a = screen.live.as_ref().map(|l| l.team_name.clone());
+        screen.key(key!(left));
+        assert_eq!((screen.compare, screen.side), (false, MatchSide::B));
+        assert_ne!(screen.live.as_ref().map(|l| l.team_name.clone()), name_a);
+        screen.key(key!(right));
+        assert_eq!((screen.compare, screen.side), (false, MatchSide::A));
+        screen.key(key!(left));
+        screen.key(key!(left));
+        assert_eq!(
+            (screen.compare, screen.side),
+            (false, MatchSide::A),
+            "round A, B: no comparison on the way"
+        );
+        screen.key(key!(left));
+        screen.update(Message::Page(2));
+        screen.update(Message::Side(Some(MatchSide::A)));
         screen.update(Message::Event(EventTypeEnum::S));
         let players = |screen: &StatsScreen| -> Vec<String> {
             screen

@@ -238,12 +238,11 @@ pub fn comparison<'a, M: 'a>(
             .width(Length::Fill)
             .into()
         };
-        column![
+        ui::court_frame(
             row![zone(4), zone(3), zone(2)],
             row![space::horizontal(), zone(8), zone(9)],
-        ]
-        .spacing(8)
-        .into()
+            c,
+        )
     };
     let zones = row![
         container(grid(a)).width(Length::Fill),

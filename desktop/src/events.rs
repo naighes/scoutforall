@@ -301,6 +301,32 @@ impl EventsScreen {
         Outcome::Stay
     }
 
+    /// The touches the one chosen is paired with, in a set of both sides:
+    /// the one it answers before it, the one answering it after it (a
+    /// block has both), as `touch_edit` moves them with it.
+    fn paired(&self) -> Vec<usize> {
+        let events = &self.set.events;
+        let at = |i: usize| events.get(i).filter(|_| self.set.both);
+        let Some(chosen) = at(self.selected) else {
+            return vec![];
+        };
+        let before = self
+            .selected
+            .checked_sub(1)
+            .and_then(|i| Some((i, at(i)?)))
+            .filter(|(_, e)| {
+                e.event.side_b != chosen.event.side_b
+                    && scout4all_core::rally::answers(chosen.event.event, e.event.event)
+            });
+        let after = Some(self.selected + 1)
+            .and_then(|i| Some((i, at(i)?)))
+            .filter(|(_, e)| {
+                e.event.side_b != chosen.event.side_b
+                    && scout4all_core::rally::answers(e.event.event, chosen.event.event)
+            });
+        before.into_iter().chain(after).map(|(i, _)| i).collect()
+    }
+
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.correcting {
             Some(_) => vec![
@@ -318,12 +344,13 @@ impl EventsScreen {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let paired = self.paired();
         let rows = self
             .set
             .events
             .iter()
             .enumerate()
-            .map(|(i, e)| event_row(e, i == self.selected, i, c));
+            .map(|(i, e)| event_row(e, i == self.selected, paired.contains(&i), i, c));
         let list: Element<'a, Message> = match self.set.events.is_empty() {
             true => ui::body(s.no_events).color(c.muted).into(),
             false => scrollable(Column::with_children(rows).spacing(2))
@@ -526,7 +553,13 @@ fn player_line<'a>(e: &SetEvent, c: Colors) -> Element<'a, Message> {
 
 /// An event: its place, the symbol of the evaluation, the event and the
 /// player, the score after it; the changes of the lineup dimmed.
-fn event_row<'a>(e: &SetEvent, chosen: bool, i: usize, c: Colors) -> Element<'a, Message> {
+fn event_row<'a>(
+    e: &SetEvent,
+    chosen: bool,
+    paired: bool,
+    i: usize,
+    c: Colors,
+) -> Element<'a, Message> {
     let color = match e.editable {
         true => c.text,
         false => c.muted,
@@ -559,7 +592,30 @@ fn event_row<'a>(e: &SetEvent, chosen: bool, i: usize, c: Colors) -> Element<'a,
     ]
     .spacing(10)
     .align_y(Alignment::Center);
-    ui::list_row(body, chosen, Some(Message::Event(i)), c)
+    // the touch paired with the chosen one moves with it: a mark and a tint
+    let mark = text(match paired {
+        true => "↔",
+        false => " ",
+    })
+    .size(SIZE_BODY + 2.0)
+    .color(c.accent)
+    .width(Length::Fixed(18.0));
+    let tinted =
+        container(row![mark, body].align_y(Alignment::Center)).style(move |_| container::Style {
+            background: paired.then(|| {
+                iced::Color {
+                    a: 0.08,
+                    ..c.accent
+                }
+                .into()
+            }),
+            border: iced::Border {
+                radius: 4.0.into(),
+                ..iced::Border::default()
+            },
+            ..container::Style::default()
+        });
+    ui::list_row(tinted, chosen, Some(Message::Event(i)), c)
 }
 
 #[cfg(test)]
@@ -626,6 +682,11 @@ mod tests {
         let rows = &events.set.events;
         assert_eq!(rows.len(), 2);
         assert!(!rows[0].event.side_b && rows[1].event.side_b);
+        // the pair is shown from either touch: a mark on the other
+        events.selected = 0;
+        assert_eq!(events.paired(), [1]);
+        events.selected = 1;
+        assert_eq!(events.paired(), [0]);
         // the reception: its evaluation can be `+` (the serve follows, to `-`)
         events.update(Message::Event(1));
         let Some(correcting) = &events.correcting else {

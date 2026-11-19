@@ -826,6 +826,43 @@ pub fn choice_line<'a, M: 'a>(
     labelled_choices(name, on, pills, Length::Fixed(130.0), c)
 }
 
+/// Zones on the court they belong to: the net on top, the attack line
+/// between the front row and the back, the court's lines around.
+pub fn court_frame<'a, M: 'a>(
+    front: impl Into<Element<'a, M>>,
+    back: impl Into<Element<'a, M>>,
+    c: Colors,
+) -> Element<'a, M> {
+    let line = |thick: f32| {
+        container(space::horizontal())
+            .width(Length::Fill)
+            .height(Length::Fixed(thick))
+            .style(move |_| container::Style {
+                background: Some(c.court_lines.into()),
+                ..container::Style::default()
+            })
+    };
+    container(
+        column![
+            line(4.0),
+            container(front).padding([6, 4]),
+            line(2.0),
+            container(back).padding([6, 4]),
+        ]
+        .width(Length::Fill),
+    )
+    .style(move |_| container::Style {
+        background: Some(c.court.into()),
+        border: iced::Border {
+            color: c.court_lines,
+            width: 2.0,
+            radius: 0.0.into(),
+        },
+        ..container::Style::default()
+    })
+    .into()
+}
+
 /// A choice in a bar of a few, beside the others: the name as wide as it
 /// is, the pills after it.
 pub fn choice_inline<'a, M: 'a>(
