@@ -34,6 +34,15 @@ pub struct Projected {
     pub source: usize,
 }
 
+/// A set scouted on both sides as saved: the starts of the sides (their
+/// events aside) and the touches in order.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Touches {
+    pub a: SetEntry,
+    pub b: SetEntry,
+    pub touches: Vec<(Side, EventEntry)>,
+}
+
 /// The streams of the two sides of a set.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Streams {
@@ -262,6 +271,22 @@ pub fn replay(
     }
 }
 
+/// The side the ball is on after `touches`: where the last touch of the
+/// ball left it as its side sees it while the rally goes on, the serving
+/// team's (as `a`, the snapshot of A, tells it) before the serve and once a
+/// point is over.
+pub fn ball_side(touches: &[(Side, EventEntry)], a: &Snapshot) -> Side {
+    touches
+        .iter()
+        .rev()
+        .find(|(_, e)| touches_ball(e))
+        .and_then(|(s, e)| ball_after(*s, e))
+        .unwrap_or(match a.get_ball_side() {
+            TeamSideEnum::Us => Side::A,
+            TeamSideEnum::Them => Side::B,
+        })
+}
+
 /// The side of the net the touch of the side leaves the ball on, while
 /// the rally goes on (see `EventTypeEnum::ball_side_after`).
 fn ball_after(side: Side, entry: &EventEntry) -> Option<Side> {
@@ -384,15 +409,9 @@ pub fn admits(
         Side::A => a,
         Side::B => b,
     };
-    // the last touch of the ball, and where it left it: as its side sees
-    // it while the rally goes on, with the serving team before the serve
+    // the last touch of the ball, and where it left it
     let last = touches.iter().rev().find(|(_, e)| touches_ball(e));
-    let ball = last
-        .and_then(|(s, e)| ball_after(*s, e))
-        .unwrap_or(match a.get_ball_side() {
-            TeamSideEnum::Us => Side::A,
-            TeamSideEnum::Them => Side::B,
-        });
+    let ball = ball_side(touches, a);
     let last = last.filter(|(s, _)| *s != side);
     let after = ball_after(side, entry);
     // a serve still in play: the reception of the other side comes next

@@ -20,7 +20,7 @@ use crate::{
             summary::refresh,
         },
     },
-    rally::replay,
+    rally::{Touches, replay},
     shapes::{
         enums::{ScoutingRulesEnum, TeamSideEnum},
         r#match::MatchEntry,
@@ -78,6 +78,22 @@ impl SetReader for SqliteSetReader {
 }
 
 impl SqliteSetReader {
+    /// The set scouted on both sides as saved, to scout it again; `None`
+    /// for a set scouted on A alone or not saved.
+    pub fn read_touches(
+        &self,
+        m: &MatchEntry,
+        set_number: u8,
+    ) -> Result<Option<Touches>, AppError> {
+        let id = match_uuid(&m.id)?;
+        self.db.read(|tx| {
+            Ok(set_rows(tx, id)?
+                .iter()
+                .find(|s| s.row.number == set_number)
+                .and_then(SetRows::both))
+        })
+    }
+
     /// The snapshots of both sides of each set, in order: B's only for a
     /// match scouted on both sides (see `SetRows::sides`).
     pub fn read_sides(&self, m: &MatchEntry) -> Result<Vec<Sides>, AppError> {
@@ -128,6 +144,17 @@ fn append(
     set_number: u8,
     entries: &[EventEntry],
 ) -> Result<(), AppError> {
+    append_of(tx, match_id, set_number, Side::A, entries)
+}
+
+/// The events of `side`, appended after the last place of the set.
+fn append_of(
+    tx: &Transaction,
+    match_id: Uuid,
+    set_number: u8,
+    side: Side,
+    entries: &[EventEntry],
+) -> Result<(), AppError> {
     let first = next_seq(tx, match_id, set_number)?;
     entries.iter().zip(first..).try_for_each(|(entry, seq)| {
         insert_event(
@@ -137,7 +164,7 @@ fn append(
                 match_id,
                 set_number,
                 seq,
-                side: Side::A,
+                side,
                 entry: entry.clone(),
                 deleted: false,
             },
@@ -192,6 +219,16 @@ fn on_both_sides(tx: &Transaction, match_id: Uuid, set_number: u8) -> Result<boo
         |row| row.get(0),
     )
     .map_err(sqlite)
+}
+
+/// An error for a set scouted on A alone.
+fn on_both(tx: &Transaction, match_id: Uuid, set_number: u8) -> Result<(), AppError> {
+    match on_both_sides(tx, match_id, set_number)? {
+        true => Ok(()),
+        false => Err(AppError::IO(IOError::Msg(format!(
+            "set {set_number} of match {match_id} is scouted on A alone: it has no touches of B"
+        )))),
+    }
 }
 
 /// An error for a set scouted on both sides: the events of A alone would
@@ -311,6 +348,41 @@ impl SetWriter for SqliteSetWriter {
             upgrade(tx, id, set_number)?;
             append(tx, id, set_number, std::slice::from_ref(event))?;
             refresh(tx, id)
+        })
+    }
+
+    async fn append_touch(
+        &self,
+        m: &MatchEntry,
+        set_number: u8,
+        side: Side,
+        event: &EventEntry,
+    ) -> Result<(), AppError> {
+        let id = match_uuid(&m.id)?;
+        self.db.write(|tx| {
+            played(tx, id, set_number)?;
+            on_both(tx, id, set_number)?;
+            append_of(tx, id, set_number, side, std::slice::from_ref(event))?;
+            refresh(tx, id)
+        })
+    }
+
+    /// The last touch, marked removed: it keeps its place.
+    async fn remove_last_touch(
+        &self,
+        m: &MatchEntry,
+        set_number: u8,
+    ) -> Result<Option<(Side, EventEntry)>, AppError> {
+        let id = match_uuid(&m.id)?;
+        self.db.write(|tx| {
+            played(tx, id, set_number)?;
+            on_both(tx, id, set_number)?;
+            let removed = events(tx, id, set_number)?
+                .pop()
+                .map(|last| remove_event(tx, last.id).map(|()| (last.side, last.entry)))
+                .transpose()?;
+            refresh(tx, id)?;
+            Ok(removed)
         })
     }
 

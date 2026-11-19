@@ -709,7 +709,7 @@ mod tests {
     #[tokio::test]
     async fn starting_with_the_start_of_b_saves_both_sides() {
         let p = Sqlite::new();
-        let (_, _, m, start_a, start_b) = on_both_sides(&p).await;
+        let (_, team_b, m, start_a, start_b) = on_both_sides(&p).await;
         let side = |s: &SetEntry| crate::set_start::SideInput {
             positions: s.initial_positions,
             setter: s.setter,
@@ -730,9 +730,10 @@ mod tests {
                 p.db.clone(),
                 crate::localization::Language::default(),
             ));
-        crate::set_start::start(m.clone(), input, writer)
+        let session = crate::set_start::start(m.clone(), input, writer, Some(team_b))
             .await
             .unwrap();
+        assert!(session.is_both());
         let sides = reader(&p).read_sides(&m).unwrap();
         assert!(sides[0].b.is_some());
         let serving =
@@ -742,6 +743,91 @@ mod tests {
             })
             .unwrap();
         assert_eq!(serving, "b");
+    }
+
+    /// A session on both sides: the ball decides the side to choose for,
+    /// the evaluation of the answer is the one the serve admits, F5 swaps
+    /// the side, undo removes the last touch of whichever side, and the
+    /// set scouted again from the database is where it was left.
+    #[tokio::test]
+    async fn a_session_on_both_sides_follows_the_ball() {
+        let p = Sqlite::new();
+        let (_, team_b, m, start_a, start_b) = on_both_sides(&p).await;
+        let side = |s: &SetEntry| crate::set_start::SideInput {
+            positions: s.initial_positions,
+            setter: s.setter,
+            libero: s.libero,
+            fallback_libero: None,
+        };
+        let input = crate::set_start::SetStartInput {
+            set_number: 1,
+            serving_team: TeamSideEnum::Us,
+            positions: start_a.initial_positions,
+            setter: start_a.setter,
+            libero: start_a.libero,
+            fallback_libero: None,
+            opponent: Some(side(&start_b)),
+        };
+        let writer: std::sync::Arc<dyn SetWriter + Send + Sync> =
+            std::sync::Arc::new(crate::providers::sqlite::sets::SqliteSetWriter::new(
+                p.db.clone(),
+                crate::localization::Language::default(),
+            ));
+        let mut session = crate::set_start::start(
+            m.clone(),
+            input,
+            std::sync::Arc::clone(&writer),
+            Some(team_b.clone()),
+        )
+        .await
+        .unwrap();
+        // A serves: the serve, and the changes of both sides while the ball is still
+        assert_eq!(session.side(), Side::A);
+        let choices = session.event_choices();
+        assert!(choices.contains(&(Side::A, S)));
+        assert!(!choices.contains(&(Side::B, S)));
+        assert!(choices.contains(&(Side::B, R)), "{choices:?}");
+        session.choose_event_of(Side::A, S).await.unwrap();
+        session.choose_eval(Positive).await.unwrap();
+        // the ball is on B's side: its reception, the only evaluation the serve admits
+        assert_eq!(session.side(), Side::B);
+        assert_eq!(session.snapshot().score_us, 0);
+        let choices = session.event_choices();
+        assert!(choices.contains(&(Side::B, P)));
+        assert!(!choices.contains(&(Side::A, P)));
+        session.choose_event_of(Side::B, P).await.unwrap();
+        assert_eq!(session.available_evals(), vec![Negative]);
+        assert!(session.choose_eval(Perfect).await.is_err());
+        // F5 swaps the side before anything is chosen
+        session.undo().await.unwrap();
+        assert_eq!(session.step(), crate::scouting::ScoutingStep::Event);
+        assert_eq!(session.swap_side().unwrap(), Side::A);
+        assert_eq!(session.swap_side().unwrap(), Side::B);
+        session.choose_event_of(Side::B, P).await.unwrap();
+        let player = session.player_choices()[0].id;
+        session.choose_player(player).await.unwrap();
+        session.choose_eval(Negative).await.unwrap();
+        assert_eq!(session.touches().len(), 2);
+        // undo removes B's touch and goes back to its evaluation
+        session.undo().await.unwrap();
+        assert_eq!(session.touches().len(), 1);
+        assert_eq!(session.side(), Side::B);
+        assert_eq!(session.step(), crate::scouting::ScoutingStep::Eval);
+        session.choose_eval(Negative).await.unwrap();
+        // scouted again from the database
+        let touches = reader(&p).read_touches(&m, 1).unwrap().unwrap();
+        assert_eq!(touches.touches.len(), 2);
+        let again = crate::set_start::resume_both(
+            m.clone(),
+            session.set().clone(),
+            touches,
+            team_b,
+            writer,
+        )
+        .unwrap();
+        assert_eq!(again.touches().len(), 2);
+        assert_eq!(again.side(), session.side());
+        assert_eq!(again.event_choices(), session.event_choices());
     }
 
     /// Saved on both sides: B with its side, A read as its stream (what

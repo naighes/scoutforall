@@ -33,6 +33,24 @@ pub trait SetWriter {
         event: &EventEntry,
     ) -> Result<(), AppError>;
 
+    /// Appends a touch of `side` to a set scouted on both sides. A set
+    /// scouted on A alone: an error.
+    async fn append_touch(
+        &self,
+        m: &MatchEntry,
+        set_number: u8,
+        side: Side,
+        event: &EventEntry,
+    ) -> Result<(), AppError>;
+
+    /// Removes the last touch of the set scouted on both sides, of
+    /// whichever side, and tells it.
+    async fn remove_last_touch(
+        &self,
+        m: &MatchEntry,
+        set_number: u8,
+    ) -> Result<Option<(Side, EventEntry)>, AppError>;
+
     async fn remove_last_event(
         &self,
         m: &MatchEntry,

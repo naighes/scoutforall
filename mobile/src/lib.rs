@@ -3991,7 +3991,7 @@ impl Scout4All {
         };
         let input = set_start.form().clone().validate(&m.team).map_err(failed)?;
         self.runtime
-            .block_on(set_start::start(m, input, self.set_writer.clone()))
+            .block_on(set_start::start(m, input, self.set_writer.clone(), None))
             .map(|_| ())
             .map_err(failed)
     }

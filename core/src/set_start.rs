@@ -6,6 +6,7 @@
 use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
+    rally::Touches,
     scouting::ScoutingSession,
     shapes::{
         enums::TeamSideEnum,
@@ -307,27 +308,33 @@ impl SetStartForm {
 }
 
 /// Saves the set that `input` starts, and scouts it. With the start of B
-/// the set is scouted on both sides: B's serving team is the other one.
+/// the set is scouted on both sides, `opponent` the team of B: B's serving
+/// team is the other one. The start of B without its team, nothing saved.
 pub async fn start(
     current_match: MatchEntry,
     input: SetStartInput,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
+    opponent: Option<TeamEntry>,
 ) -> Result<ScoutingSession, SetStartError> {
-    let set = match &input.opponent {
-        None => set_writer
-            .create(
-                &current_match,
-                input.set_number,
-                input.serving_team,
-                input.positions,
-                input.libero,
-                input.fallback_libero,
-                input.setter,
-                vec![], // no events at the start of the set
-            )
-            .await
-            .map_err(|_| SetStartError::CouldNotStartSet)?,
-        Some(b) => {
+    let (set, theirs) = match (&input.opponent, opponent) {
+        (Some(_), None) => return Err(SetStartError::CouldNotStartSet),
+        (None, _) => (
+            set_writer
+                .create(
+                    &current_match,
+                    input.set_number,
+                    input.serving_team,
+                    input.positions,
+                    input.libero,
+                    input.fallback_libero,
+                    input.setter,
+                    vec![], // no events at the start of the set
+                )
+                .await
+                .map_err(|_| SetStartError::CouldNotStartSet)?,
+            None,
+        ),
+        (Some(b), Some(team_b)) => {
             let a = SetEntry::new(
                 input.set_number,
                 input.serving_team,
@@ -337,7 +344,7 @@ pub async fn start(
                 input.setter,
             )
             .map_err(|_| SetStartError::CouldNotStartSet)?;
-            let b = SetEntry::new(
+            let b_start = SetEntry::new(
                 input.set_number,
                 match input.serving_team {
                     TeamSideEnum::Us => TeamSideEnum::Them,
@@ -350,13 +357,37 @@ pub async fn start(
             )
             .map_err(|_| SetStartError::CouldNotStartSet)?;
             set_writer
-                .create_both(&current_match, &a, &b)
+                .create_both(&current_match, &a, &b_start)
                 .await
                 .map_err(|_| SetStartError::CouldNotStartSet)?;
-            a
+            let touches = Touches {
+                a: a.clone(),
+                b: b_start,
+                touches: vec![],
+            };
+            (a, Some((team_b, touches)))
         }
     };
-    resume(current_match, set, set_writer)
+    match theirs {
+        None => resume(current_match, set, set_writer),
+        Some((team_b, touches)) => resume_both(current_match, set, touches, team_b, set_writer),
+    }
+}
+
+/// Scouts the set again, from its saved touches: `set` from A's side,
+/// `touches` both sides as saved, `team_b` the team of B.
+pub fn resume_both(
+    current_match: MatchEntry,
+    set: SetEntry,
+    touches: Touches,
+    team_b: TeamEntry,
+    set_writer: Arc<dyn SetWriter + Send + Sync>,
+) -> Result<ScoutingSession, SetStartError> {
+    resume(current_match, set, set_writer).and_then(|session| {
+        session
+            .with_theirs(team_b, touches)
+            .map_err(|_| SetStartError::CouldNotComputeSnapshot)
+    })
 }
 
 /// Scouts `set` again, from its saved events.

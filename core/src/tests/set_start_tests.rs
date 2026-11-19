@@ -365,7 +365,7 @@ mod tests {
             .unwrap();
         let set_writer: Arc<dyn SetWriter + Send + Sync> = Arc::new(p.set_writer);
         let input = complete(&team).validate(&team).unwrap();
-        let session = set_start::start(m.clone(), input, Arc::clone(&set_writer))
+        let session = set_start::start(m.clone(), input, Arc::clone(&set_writer), None)
             .await
             .unwrap();
         assert_eq!(session.set().set_number, 1);

@@ -29,7 +29,7 @@ use crate::{
     },
     errors::{AppError, IOError, MatchError},
     player_form::removed,
-    rally::{Incoherence, project, replay},
+    rally::{Incoherence, Touches, project, replay},
     shapes::{
         enums::{ScoutingRulesEnum, TeamSideEnum},
         r#match::MatchEntry,
@@ -622,6 +622,15 @@ impl SetRows {
                 lineup_rules: self.row.lineup_rules,
                 events: vec![],
             })
+    }
+
+    /// The set as scouted on both sides, when B has its lineup.
+    pub fn both(&self) -> Option<Touches> {
+        Some(Touches {
+            a: self.start(Side::A)?,
+            b: self.start(Side::B)?,
+            touches: self.touches(),
+        })
     }
 
     /// The snapshots of the set, A's and B's when B has its lineup (scouted

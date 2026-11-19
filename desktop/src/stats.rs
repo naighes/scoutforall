@@ -1740,17 +1740,22 @@ impl StatsScreen {
                 s.competition,
                 [all(self.competition.is_none(), Message::Competition(None))]
                     .into_iter()
-                    .chain(self.analysis.iter().flat_map(|a| a.competitions.iter()).map(|c| {
-                        let label = match &c.season {
-                            Some(season) => format!("{} {season}", c.name),
-                            None => c.name.clone(),
-                        };
-                        pill(
-                            label,
-                            self.competition == Some(c.id),
-                            Message::Competition(Some(c.id)),
-                        )
-                    }))
+                    .chain(
+                        self.analysis
+                            .iter()
+                            .flat_map(|a| a.competitions.iter())
+                            .map(|c| {
+                                let label = match &c.season {
+                                    Some(season) => format!("{} {season}", c.name),
+                                    None => c.name.clone(),
+                                };
+                                pill(
+                                    label,
+                                    self.competition == Some(c.id),
+                                    Message::Competition(Some(c.id)),
+                                )
+                            }),
+                    )
                     .collect(),
             ),
             Filter::Scope => (
