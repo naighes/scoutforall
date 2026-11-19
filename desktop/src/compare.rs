@@ -100,7 +100,7 @@ pub fn comparison<'a, M: 'a>(
     let fundamental = |f: &scout4all_mobile::FundamentalStats| {
         column![
             graded(f.efficiency, f.grade, c),
-            counts(format!("{} · #{} · ={}", f.total, f.perfect, f.errors), c),
+            counts(format!("{}·#{}·={}", f.total, f.perfect, f.errors), c),
         ]
         .align_x(Alignment::Center)
         .into()
