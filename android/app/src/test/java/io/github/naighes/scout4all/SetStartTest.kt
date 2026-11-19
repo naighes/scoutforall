@@ -63,6 +63,44 @@ class SetStartTest {
         assertEquals(court.toSet(), state.court.map { it.name }.toSet())
     }
 
+    /** A match on both sides: the lineup of A, then the one of B (back
+     * goes to A's), and the set starts on both. */
+    @Test
+    fun aMatchOnBothSidesChoosesTheLineupOfBAfterTheOneOfA() {
+        val b = saveTeam("Arezzo")
+        nationalTeam.forEach { (name, role, number) ->
+            core { it.savePlayer(b, null, PlayerForm(name, role, number.toString())) }
+        }
+        val both = core {
+            it.saveMatch(team, null, MatchForm("Arezzo", "2026-10-25T18:00:00+02:00", true, "6", opponentTeam = b, both = true))
+        }
+        core { it.saveRosterOfB(team, both, MatchForm("", null, false, "")) }
+        show(both, string(R.string.go_on))
+        val next = { rule.onNode(hasText(string(R.string.go_on)) and hasClickAction()) }
+        val titleOfB = string(R.string.start_set_n, 1) + " · Arezzo"
+        fun lineup() {
+            rule.onNode(hasText(string(R.string.position_spoken, 1)) and hasClickAction()).performClick()
+            nationalTeam.take(6).forEach { (name, _, _) -> pick(name) }
+            pick("Alessia Orro")
+            pick("Monica De Gennaro")
+        }
+        rule.onNode(hasText("Italia") and hasClickAction()).performClick()
+        next().assertIsNotEnabled()
+        lineup()
+        rule.waitFor { runCatching { next().assertIsEnabled() }.isSuccess }
+        next().performClick()
+        // B's: its team in the title, nobody chosen yet, the set can't start
+        rule.waitForText(titleOfB)
+        rule.onNode(hasText(string(R.string.serving_team))).assertDoesNotExist()
+        start().assertIsNotEnabled()
+        lineup()
+        rule.waitFor { runCatching { start().assertIsEnabled() }.isSuccess }
+        assertEquals(0, started)
+        start().performClick()
+        rule.waitFor { started == 1 }
+        core { it.scouting(team, both) }.use { assertEquals(TeamSideEnum.US, it.state().servingTeam) }
+    }
+
     @Test
     fun noSetStartsWithoutTheLineup() {
         show()
