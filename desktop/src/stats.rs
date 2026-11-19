@@ -60,6 +60,8 @@ const PAGES: [Page; 3] = [Page::Summary, Page::Trend, Page::Detail];
 enum Filter {
     /// the team of a match scouted on both sides
     Side,
+    /// the competition the matches of a team are narrowed to
+    Competition,
     Scope,
     Period,
     Series,
@@ -121,6 +123,7 @@ pub enum Message {
     /// the statistics of the other team of a match scouted on both sides
     Side(MatchSide),
     Scope(StatsScope),
+    Competition(Option<uuid::Uuid>),
     Series(usize),
     Recent(bool),
     /// a set of the trend of a match shown or hidden
@@ -291,6 +294,8 @@ pub struct StatsScreen {
     // the team
     analysis: Option<TeamAnalysis>,
     period: AnalysisPeriod,
+    /// of the team, the competition the matches are narrowed to
+    competition: Option<uuid::Uuid>,
     kind: Kind,
     last: u32,
     days: Days,
@@ -754,6 +759,7 @@ impl StatsScreen {
             choices,
             analysis: None,
             period: AnalysisPeriod::LastMonth,
+            competition: None,
             kind: Kind::LastMonth,
             last: LAST_MATCHES,
             days: Days {
@@ -852,7 +858,7 @@ impl StatsScreen {
                 let analysis = self.core.team_analysis(
                     team,
                     self.period.clone(),
-                    None,
+                    self.competition,
                     self.event,
                     self.filter.clone(),
                 );
@@ -899,7 +905,7 @@ impl StatsScreen {
             Source::Team => {
                 self.tour = self
                     .core
-                    .team_clips(&self.team_id, &self.period, None, &self.pick())
+                    .team_clips(&self.team_id, &self.period, self.competition, &self.pick())
                     .unwrap_or_default();
                 self.has_video = self.tour.iter().any(|m| m.has_video);
                 Some(self.watched().map(|m| m.events.len()).sum())
@@ -1096,6 +1102,14 @@ impl StatsScreen {
             .unwrap_or_default()
     }
 
+    /// Whether the team has competitions to choose from: more than one, or
+    /// one chosen, to go back from.
+    fn has_competitions(&self) -> bool {
+        self.analysis
+            .as_ref()
+            .is_some_and(|a| a.competitions.len() > 1 || self.competition.is_some())
+    }
+
     fn current(&self) -> Page {
         PAGES.get(self.page).copied().unwrap_or(Page::Summary)
     }
@@ -1113,6 +1127,7 @@ impl StatsScreen {
             .and_then(|d| d.fundamental.as_ref())
             .is_some_and(|f| !f.targets.is_empty());
         let narrow = [Filter::Player, Filter::Rotation, Filter::Phase];
+        let competition = self.has_competitions().then_some(Filter::Competition);
         let first: Vec<Filter> = match (self.is_team(), self.current()) {
             (false, Page::Summary) => return vec![Filter::Scope],
             (false, Page::Trend) => return vec![Filter::Series, Filter::Mode],
@@ -1121,6 +1136,7 @@ impl StatsScreen {
             (true, Page::Trend) => vec![Filter::Period, Filter::Series],
             (true, Page::Detail) => vec![Filter::Period, Filter::Event],
         };
+        let first: Vec<Filter> = competition.into_iter().chain(first).collect();
         let detail = self.current() == Page::Detail;
         let digs = (detail && self.event == EventTypeEnum::D).then_some(Filter::Digs);
         let zones = (detail && zones).then_some(Filter::Zones);
@@ -1173,6 +1189,17 @@ impl StatsScreen {
             }
             Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
             Filter::Period => ui::cycle(&KINDS, &self.kind, forward).map(Message::Kind),
+            Filter::Competition => {
+                let ids: Vec<Option<uuid::Uuid>> = [None]
+                    .into_iter()
+                    .chain(
+                        self.analysis
+                            .iter()
+                            .flat_map(|a| a.competitions.iter().map(|c| Some(c.id))),
+                    )
+                    .collect();
+                ui::cycle(&ids, &self.competition, forward).map(Message::Competition)
+            }
             Filter::Series => {
                 let series: Vec<usize> = (0..self.series_count()).collect();
                 ui::cycle(&series, &self.series, forward).map(Message::Series)
@@ -1294,6 +1321,10 @@ impl StatsScreen {
             Message::Side(side) => self.sided(side),
             Message::Scope(scope) => {
                 self.scope = scope;
+                self.load();
+            }
+            Message::Competition(competition) => {
+                self.competition = competition;
                 self.load();
             }
             Message::Series(series) => {
@@ -1703,6 +1734,23 @@ impl StatsScreen {
                     .iter()
                     .flat_map(|(a, b)| [(a, MatchSide::A), (b, MatchSide::B)])
                     .map(|(name, side)| pill(name.clone(), side == self.side, Message::Side(side)))
+                    .collect(),
+            ),
+            Filter::Competition => (
+                s.competition,
+                [all(self.competition.is_none(), Message::Competition(None))]
+                    .into_iter()
+                    .chain(self.analysis.iter().flat_map(|a| a.competitions.iter()).map(|c| {
+                        let label = match &c.season {
+                            Some(season) => format!("{} {season}", c.name),
+                            None => c.name.clone(),
+                        };
+                        pill(
+                            label,
+                            self.competition == Some(c.id),
+                            Message::Competition(Some(c.id)),
+                        )
+                    }))
                     .collect(),
             ),
             Filter::Scope => (
@@ -3319,6 +3367,11 @@ pub(crate) mod tests {
     /// A team of seven and two matches played, a set each with our serves:
     /// three aces on 24/10, an ace and an error on 31/10.
     pub(crate) fn team_with_two_matches(core: &Scout4All) -> String {
+        team_with_matches(core, ["", ""])
+    }
+
+    /// As `team_with_two_matches`, each match of its competition (a cup).
+    fn team_with_matches(core: &Scout4All, competitions: [&str; 2]) -> String {
         let team = core
             .save_team(
                 None,
@@ -3355,7 +3408,7 @@ pub(crate) mod tests {
             .into_iter()
             .map(|p| p.id)
             .collect();
-        for (opponent, date, serves) in [
+        for ((opponent, date, serves), competition) in [
             (
                 "Arezzo",
                 "2026-10-24T18:00:00+02:00",
@@ -3366,7 +3419,10 @@ pub(crate) mod tests {
                 "2026-10-31T18:00:00+01:00",
                 vec![EvalEnum::Perfect, EvalEnum::Error],
             ),
-        ] {
+        ]
+        .into_iter()
+        .zip(competitions)
+        {
             let m = core
                 .save_match(
                     team.clone(),
@@ -3376,6 +3432,9 @@ pub(crate) mod tests {
                         date: chrono::DateTime::parse_from_rfc3339(date).ok(),
                         home: true,
                         max_substitutions: "6".into(),
+                        competition: competition.into(),
+                        competition_format: (!competition.is_empty())
+                            .then_some(scout4all_core::domain::CompetitionFormat::Cup),
                         ..MatchForm::default()
                     },
                 )
@@ -3654,6 +3713,44 @@ pub(crate) mod tests {
 
     fn aces(screen: &StatsScreen) -> u32 {
         screen.live.as_ref().map_or(0, |l| l.aces)
+    }
+
+    /// The competition of a team narrows the analysis and the clips: the
+    /// row is there only with more than one, by keys and by pill, and
+    /// `all` goes back to the whole.
+    #[test]
+    fn the_competition_of_a_team() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let none = team_with_two_matches(&core);
+        let screen = StatsScreen::team(core.clone(), none, s).unwrap();
+        assert_eq!(screen.filters().first(), Some(&Filter::Period));
+        let team = team_with_matches(&core, ["Coppa", "Lega"]);
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        assert_eq!(screen.filters().first(), Some(&Filter::Competition));
+        assert_eq!(screen.competition, None);
+        screen.update(Message::Kind(Kind::LastMatches));
+        assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
+        // right: the first competition, by name (Coppa)
+        screen.key(key!(right));
+        let coppa = screen.competition;
+        assert!(coppa.is_some());
+        assert_eq!(opponents(&screen), ["Arezzo"]);
+        assert_eq!(screen.tour.len(), 1);
+        screen.key(key!(right));
+        assert_eq!(opponents(&screen), ["Siena"]);
+        assert_ne!(screen.competition, coppa);
+        // one past the last: all of them again
+        screen.key(key!(right));
+        assert_eq!(screen.competition, None);
+        assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
+        assert_eq!(screen.tour.len(), 2);
+        // and back by the pill
+        screen.update(Message::Competition(coppa));
+        assert_eq!(opponents(&screen), ["Arezzo"]);
+        screen.update(Message::Competition(None));
+        assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
     }
 
     fn opponents(screen: &StatsScreen) -> Vec<String> {
