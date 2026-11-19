@@ -403,8 +403,8 @@ fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
         time("matches(team)", READS, || {
             app.matches(team.clone()).map(|_| ())
         })?,
-        time("opponents(team)", READS, || {
-            app.opponents(team.clone()).map(|_| ())
+        time("opponent_choices(team)", READS, || {
+            app.opponent_choices(team.clone()).map(|_| ())
         })?,
         time("team_analysis(last 10)", READS, || {
             analysis(AnalysisPeriod::LastMatches { count: 10 })

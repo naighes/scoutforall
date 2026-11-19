@@ -735,13 +735,23 @@ private fun ServeChoices(model: ScoutingViewModel, compact: Boolean = false) =
         }
     }
 
+/** The names of the two teams when both sides are scouted, else nothing. */
+private fun teamsOfBoth(state: ScoutingState): Pair<String, String>? =
+    (state.team to state.opponent).takeIf { state.both }
+        ?.let { (onScreen, other) -> if (state.sideB) other to onScreen else onScreen to other }
+
 /** The serves and the events of the rally side by side, half the row
  * each. */
 @Composable
-private fun ServesAndRally(serves: List<TechniqueChoice>, events: List<EventChoice>, model: ScoutingViewModel) =
+private fun ServesAndRally(
+    serves: List<TechniqueChoice>,
+    events: List<EventChoice>,
+    model: ScoutingViewModel,
+    teams: Pair<String, String>? = null,
+) =
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Techniques(serves, model, Modifier.weight(1f).fillMaxHeight())
-        RallyEvents(events, model, Modifier.weight(1f))
+        RallyEvents(events, model, Modifier.weight(1f), teams)
     }
 
 /** `content` as high as `reference`, which is measured but never shown. */
@@ -1073,7 +1083,9 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
                 }
                 // our serve telling where it starts from: the serves and
                 // the events of the rally in one row, the court the higher
-                if (view.starts.isNotEmpty()) ServesAndRally(view.techniques, view.otherEvents, model)
+                if (view.starts.isNotEmpty()) {
+                    ServesAndRally(view.techniques, view.otherEvents, model, teamsOfBoth(view.state))
+                }
                 else if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
                 if (startsHere && view.starts.isNotEmpty()) {
                     ServeStarts(view.starts, model::start, Modifier.heightIn(min = 48.dp).height(IntrinsicSize.Min))
@@ -1263,7 +1275,12 @@ private fun SidesEvents(view: ScoutingView, model: ScoutingViewModel) {
 /** The other events of the rally in a row, never to scroll for: an icon
  * and a short name, the whole name for TalkBack. */
 @Composable
-private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel, modifier: Modifier = Modifier) = Row(
+private fun RallyEvents(
+    events: List<EventChoice>,
+    model: ScoutingViewModel,
+    modifier: Modifier = Modifier,
+    teams: Pair<String, String>? = null,
+) = Row(
     modifier.fillMaxWidth().height(IntrinsicSize.Min),
     horizontalArrangement = Arrangement.spacedBy(8.dp),
 ) {
@@ -1276,19 +1293,28 @@ private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel, mod
         FilledTonalButton(
             onClick = { model.event(event) },
             modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 56.dp).tutorial("event:${event.value}")
-                .semantics { contentDescription = event.name },
+                .semantics { contentDescription = teams?.let { (a, b) -> "${event.name}, ${if (event.sideB) b else a}" } ?: event.name },
             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
             shape = MaterialTheme.shapes.medium,
+            // the events of both sides in one row: each in the color of its team
+            border = teams?.let { BorderStroke(2.dp, if (event.sideB) TeamThem else TeamUs) },
         ) {
+            // never a word broken (ricezione, in two): smaller until it fits
+            val base = MaterialTheme.typography.labelSmall.fontSize
+            var size by remember(event.value) { mutableStateOf(base) }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 looks?.let { (icon, _) -> Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp)) }
+                val label = looks?.let { (_, name) -> stringResource(name) } ?: event.name
                 Text(
-                    looks?.let { (_, name) -> stringResource(name) } ?: event.name,
-                    style = MaterialTheme.typography.labelSmall,
+                    label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = size),
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                     minLines = lines,
-                    onTextLayout = { if (it.lineCount > lines) lines = it.lineCount },
+                    onTextLayout = {
+                        if (it.breaksAWord(label) && size.value > 8f) size = (size.value * 0.9f).sp
+                        else if (it.lineCount > lines) lines = it.lineCount
+                    },
                 )
             }
         }
@@ -1304,8 +1330,10 @@ private fun NoCausePoints(view: ScoutingView, model: ScoutingViewModel) {
     val state = view.state
     val ours = view.noCausePoints.firstOrNull { it.value == EventTypeEnum.PW }
     val theirs = view.noCausePoints.firstOrNull { it.value == EventTypeEnum.PL }
-    val us = Triple(ours, state.team, TeamUs)
-    val them = Triple(theirs, state.opponent, TeamThem)
+    // the colors of the teams, not of who's on screen: B is pink, on screen too
+    val (usColor, themColor) = if (state.sideB) TeamThem to TeamUs else TeamUs to TeamThem
+    val us = Triple(ours, state.team, usColor)
+    val them = Triple(theirs, state.opponent, themColor)
     val sides = if (state.home) listOf(us, them) else listOf(them, us)
     Row(Modifier.fillMaxWidth().tutorial("no-cause"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         sides.forEach { (event, team, color) ->

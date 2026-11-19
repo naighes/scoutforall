@@ -58,6 +58,17 @@ class BothSidesScoutingTest {
     }
 
     @Test
+    fun theEventsOfTheServeRowSayWhoseTheyAre() {
+        show()
+        // our serve waits for its evaluation: the events of the rally in a
+        // row with the serves, those of either side told apart by team
+        val ofB = rule.onAllNodes(hasContentDescription(", Arezzo", substring = true) and hasClickAction())
+        val ofA = rule.onAllNodes(hasContentDescription(", Italia", substring = true) and hasClickAction())
+        assertTrue(ofB.fetchSemanticsNodes().isNotEmpty())
+        assertTrue(ofA.fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test
     fun theEventsOfBothSidesAreOfferedWithTheirTeam() {
         show()
         // the ball is still: a change of the lineup of either side, the
