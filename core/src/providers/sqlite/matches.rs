@@ -33,7 +33,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDate};
-use rusqlite::{Transaction, params};
+use rusqlite::{OptionalExtension, Transaction, params};
 use std::cmp::Ordering;
 use std::collections::HashSet;
 use uuid::Uuid;
@@ -120,6 +120,56 @@ impl SqliteMatchReader {
                 }
                 _ => Ok(None),
             }
+        })
+    }
+
+    /// The roster of B in the last match of team A `team` against the same
+    /// team B before the match `match_id` (by date) that has one, with the
+    /// numbers and roles of that match: matches scouting only A write none
+    /// and are skipped. `None` when there is no such match, or B is a name.
+    pub fn previous_roster_of_b(
+        &self,
+        team: &TeamEntry,
+        match_id: &str,
+    ) -> Result<Option<Vec<RosterNumber>>, AppError> {
+        let id = match_uuid(match_id)?;
+        self.db.read(|tx| {
+            let Some(rows) = match_rows(tx, id)?.filter(|rows| rows.row.team_a == team.id) else {
+                return Err(not_found(&format!("match {match_id} of team {}", team.id)));
+            };
+            let TeamRef::Team(b) = rows.row.team_b else {
+                return Ok(None);
+            };
+            let previous: Option<Uuid> = tx
+                .query_row(
+                    "SELECT m.id FROM matches m
+                     WHERE m.team_a = ?1 AND m.team_b = ?2 AND m.deleted = 0 AND m.id != ?3
+                       AND julianday(m.start) < julianday(?4)
+                       AND EXISTS (SELECT 1 FROM match_roster r
+                                   WHERE r.match_id = m.id AND r.team_id = ?2)
+                     ORDER BY julianday(m.start) DESC, m.id DESC LIMIT 1",
+                    params![Sql(team.id), Sql(b), Sql(id), Sql(rows.row.start)],
+                    |r| r.get::<_, Sql<Uuid>>(0).map(|s| s.0),
+                )
+                .optional()
+                .map_err(sqlite)?;
+            previous
+                .map(|previous| {
+                    Ok(match_rows(tx, previous)?
+                        .map(|rows| {
+                            rows.roster
+                                .iter()
+                                .filter(|r| r.team_id == b)
+                                .map(|r| RosterNumber {
+                                    player: r.person_id,
+                                    number: r.number,
+                                    role: r.role,
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default())
+                })
+                .transpose()
         })
     }
 

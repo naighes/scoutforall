@@ -5390,7 +5390,15 @@ impl Scout4All {
         change: impl FnOnce(&mut MatchForm, &TeamEntry, Option<&MatchEntry>) -> Result<(), MobileError>,
     ) -> Result<MatchRoster, MobileError> {
         let m = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
-        self.roster_with(m.team.clone(), Some(m), form, change)
+        let previous = self
+            .match_reader
+            .previous_roster_of_b(&self.read_team(&team_id)?, &match_id)
+            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?
+            .unwrap_or_default();
+        self.roster_with(m.team.clone(), Some(m), form, |form, team, existing| {
+            form.start_from(&previous, team, existing);
+            change(form, team, existing)
+        })
     }
 
     /// The members of the new season as the form shows them.

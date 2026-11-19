@@ -998,4 +998,109 @@ mod tests {
             Ok(7)
         );
     }
+
+    /// The roster of B starts from the last match against it that has one
+    /// (by date), skipping those scouting only A; with none, nothing.
+    #[tokio::test]
+    async fn the_roster_of_b_starts_from_the_last_one_written() {
+        use crate::match_form::{MatchForm, RosterNumber};
+        let p = Sqlite::new();
+        let (a, b) = (team(&p, "Cortona").await, team(&p, "Cascina").await);
+        let day = |d: i64| date() + chrono::Duration::days(d);
+        let create = |d: i64| {
+            let (a, b, p) = (a.clone(), b.clone(), &p);
+            async move {
+                p.match_writer
+                    .create(
+                        &a,
+                        MatchInput {
+                            opponent: Opponent::Team(b.id),
+                            ..MatchInput::against(
+                                "",
+                                day(d),
+                                true,
+                                DEFAULT_MAX_SUBSTITUTIONS,
+                                "",
+                                vec![],
+                            )
+                        },
+                    )
+                    .await
+                    .unwrap()
+            }
+        };
+        // the matches, not in the order of their dates
+        let (third, first, second) = (create(3).await, create(1).await, create(2).await);
+        let previous = |m: &MatchEntry| {
+            p.match_reader
+                .previous_roster_of_b(&a, &m.id)
+                .unwrap()
+                .map(|mut n| {
+                    n.sort_by_key(|n| n.player);
+                    n
+                })
+        };
+        let sorted = |mut n: Vec<RosterNumber>| {
+            n.sort_by_key(|n| n.player);
+            Some(n)
+        };
+        assert_eq!(previous(&first), None);
+        assert_eq!(previous(&third), None, "none has a roster of B yet");
+        // the first has one, with a number changed; the second scouts only A
+        p.match_writer
+            .save_scouting(&first, ScoutingMode::Both)
+            .await
+            .unwrap();
+        let mut written = numbers(&b, &[0, 6]);
+        written[0].number = 40;
+        p.match_writer
+            .save_roster_of_b(&first, &written)
+            .await
+            .unwrap();
+        assert_eq!(previous(&first), None, "before itself");
+        assert_eq!(previous(&second), sorted(written.clone()));
+        assert_eq!(previous(&third), sorted(written.clone()), "skips the second");
+        // a closer one with another roster wins
+        p.match_writer
+            .save_scouting(&second, ScoutingMode::Both)
+            .await
+            .unwrap();
+        let closer = numbers(&b, &[1, 2, 3]);
+        p.match_writer
+            .save_roster_of_b(&second, &closer)
+            .await
+            .unwrap();
+        assert_eq!(previous(&third), sorted(closer.clone()));
+        // the form starts from it: only those chosen, with its numbers
+        let of_b = {
+            p.match_writer
+                .save_scouting(&third, ScoutingMode::Both)
+                .await
+                .unwrap();
+            p.match_reader.read_of_b(&a, &third.id).unwrap().unwrap()
+        };
+        let mut form = MatchForm::default();
+        form.start_from(&written, &of_b.team, Some(&of_b));
+        let chosen: Vec<RosterNumber> = form
+            .roster_choices(&of_b.team, Some(&of_b))
+            .iter()
+            .filter(|c| c.chosen)
+            .map(|c| RosterNumber {
+                player: c.player.id,
+                number: c.player.number,
+                role: c.player.role,
+            })
+            .collect();
+        let mut expected = written.clone();
+        expected.sort_by_key(|n| n.number);
+        assert_eq!(chosen, expected);
+        // written once: a roster already in the form stays as it is
+        let before = form.clone();
+        form.start_from(&closer, &of_b.team, Some(&of_b));
+        assert_eq!(form, before);
+        // nobody known: the active players stay
+        let mut none = MatchForm::default();
+        none.start_from(&[], &of_b.team, Some(&of_b));
+        assert_eq!(none, MatchForm::default());
+    }
 }

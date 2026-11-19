@@ -397,6 +397,42 @@ impl MatchForm {
         }
     }
 
+    /// Starts the roster of team B from `previous`, the one of the last
+    /// match against it that had one: only those players are chosen, with
+    /// the numbers and roles of that match, and whoever played in
+    /// `existing`. Nothing changes when the form has a roster already, or
+    /// none of `previous` is a known player of B: the active players stay.
+    pub fn start_from(
+        &mut self,
+        previous: &[RosterNumber],
+        team: &TeamEntry,
+        existing: Option<&MatchEntry>,
+    ) {
+        if self.roster.is_some() {
+            return;
+        }
+        let known: HashSet<Uuid> = self
+            .roster_choices(team, existing)
+            .iter()
+            .map(|c| c.player.id)
+            .collect();
+        let numbers: Vec<RosterNumber> = previous
+            .iter()
+            .filter(|n| known.contains(&n.player))
+            .copied()
+            .collect();
+        if numbers.is_empty() {
+            return;
+        }
+        let played = existing.map(MatchEntry::played).unwrap_or_default();
+        let mut roster: Vec<Uuid> = numbers.iter().map(|n| n.player).collect();
+        let others: Vec<Uuid> = played.into_iter().filter(|p| !roster.contains(p)).collect();
+        roster.extend(others);
+        self.roster = Some(roster);
+        self.numbers.retain(|n| !numbers.iter().any(|p| p.player == n.player));
+        self.numbers.extend(numbers);
+    }
+
     /// The numbers of the roster of team B, as chosen: every player with a
     /// roster the form hasn't one for yet, and the same rules as for A.
     pub fn roster_of_b_numbers(
