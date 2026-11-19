@@ -288,13 +288,15 @@ class ScoutingViewModel(
         Progress.CHOOSING
     }
 
-    /** The statistics of a set or of the match, off the main thread. */
+    /** The statistics of a set or of the match, off the main thread: of B
+     * when the match is scouted on both sides and it was chosen. */
     fun stats(scope: StatsScope) {
         val s = scouting ?: return
+        val ofB = statsOfB
         viewModelScope.launch {
             mutableStats.value = app.onCore {
                 try {
-                    s.stats(scope)
+                    if (ofB) s.statsOfB(scope) else s.stats(scope)
                 } catch (e: MobileException) {
                     null
                 }
@@ -302,12 +304,21 @@ class ScoutingViewModel(
         }
     }
 
+    /** Which side the statistics are of: A's at first. */
+    var statsOfB by mutableStateOf(false)
+        private set
+
+    fun statsSide(ofB: Boolean, scope: StatsScope) {
+        statsOfB = ofB
+        stats(scope)
+    }
+
     /** A fundamental in detail, off the main thread. */
     suspend fun detail(scope: StatsScope, event: EventTypeEnum, filter: DetailFilter): DetailStats? {
         val s = scouting ?: return null
         return app.onCore {
             try {
-                s.detail(scope, event, filter)
+                if (statsOfB) s.detailOfB(scope, event, filter) else s.detail(scope, event, filter)
             } catch (e: MobileException) {
                 null
             }
@@ -527,6 +538,10 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     currentSet = view.state.setNumber.toInt(),
                     onScope = model::stats,
                     loadDetail = model::detail,
+                    sides = (view.state.team to view.state.opponent).takeIf { view.state.both }
+                        ?.let { if (view.state.sideB) it.second to it.first else it },
+                    sideB = model.statsOfB,
+                    onSide = model::statsSide,
                     onDismiss = { statsOpen = false },
                 )
             }

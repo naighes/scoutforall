@@ -175,6 +175,10 @@ fun StatsSheet(
     onScope: (StatsScope) -> Unit,
     loadDetail: LoadDetail,
     onDismiss: () -> Unit,
+    // a match scouted on both sides: the names of A and B, which are shown
+    sides: Pair<String, String>? = null,
+    sideB: Boolean = false,
+    onSide: (Boolean, StatsScope) -> Unit = { _, _ -> },
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(Unit) { onScope(StatsScope.Set(currentSet.toUByte())) }
@@ -191,7 +195,24 @@ fun StatsSheet(
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
             when (stats) {
                 null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                else -> StatsPages(stats, onScope, loadDetail)
+                else -> {
+                    sides?.let { (a, b) ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf(false to a, true to b).forEach { (ofB, name) ->
+                                FilterChip(
+                                    selected = sideB == ofB,
+                                    onClick = { onSide(ofB, stats.scope) },
+                                    label = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                        }
+                    }
+                    StatsPages(stats, onScope, loadDetail, side = sideB)
+                }
             }
         }
     }
@@ -227,6 +248,8 @@ fun StatsPages(
     loadDetail: LoadDetail,
     // the actions of the detail in the video: not while scouting
     watch: ((StatsScope) -> Watch)? = null,
+    // the side the pages are of: what is read again when it changes
+    side: Boolean = false,
 ) {
     val pages = StatsPage.entries
     val pager = rememberPagerState(pageCount = { pages.size })
@@ -234,7 +257,7 @@ fun StatsPages(
     // the detail asked for stays while swiping, and the last one read while
     // the next is
     var query by remember { mutableStateOf(DetailQuery()) }
-    val detail by produceState<DetailStats?>(null, stats.scope, query) {
+    val detail by produceState<DetailStats?>(null, stats.scope, query, side) {
         value = loadDetail(stats.scope, query.event, query.filter) ?: value
     }
     // the choices of the filters on the situation of the game

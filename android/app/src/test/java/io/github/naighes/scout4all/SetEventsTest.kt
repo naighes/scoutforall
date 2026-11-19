@@ -66,4 +66,16 @@ class SetEventsTest {
         assertEquals(2 to 0, score())
         rule.waitForText(string(R.string.event_n, 1))
     }
+
+    @Test
+    fun theEventsOfASetOnBothSidesSayWhoseTheyAre() {
+        val both = startFirstSetBoth(team)
+        serve(team, both, EvalEnum.PERFECT)
+        rule.setContent { Scout4AllTheme { SetScreen(team, both, 1, onBack = {}, onStats = {}) } }
+        // the serve of A: the team and the player, on its row
+        rule.waitFor { rule.onAllNodes(hasText("Italia", substring = true) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
+        rule.onAllNodes(hasText("Italia", substring = true) and hasClickAction())[0].performClick()
+        rule.waitForText(string(R.string.event_n, 1))
+        rule.waitFor { rule.onAllNodes(hasText("Italia", substring = true)).fetchSemanticsNodes().size >= 2 }
+    }
 }

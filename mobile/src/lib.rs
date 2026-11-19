@@ -1535,6 +1535,8 @@ pub struct SetEvents {
     pub set_number: u8,
     pub team: String,
     pub opponent: String,
+    /// scouted on both sides: each event says whose it is
+    pub both: bool,
     pub events: Vec<SetEvent>,
 }
 
@@ -2593,6 +2595,33 @@ impl Scouting {
             event,
             filter,
         )
+    }
+
+    /// The same for B of a match scouted on both sides.
+    pub fn detail_of_b(
+        &self,
+        scope: StatsScope,
+        event: EventTypeEnum,
+        filter: DetailFilter,
+    ) -> Result<Option<DetailStats>, MobileError> {
+        let session = self.session();
+        let Some(sets) = session.sets_of_b() else {
+            return Ok(None);
+        };
+        let Some(team) = session.team_of(ScoutSide::B) else {
+            return Ok(None);
+        };
+        let sets: Vec<&SetEntry> = sets.iter().collect();
+        detail_stats(
+            &sets,
+            session.current_match().max_substitutions,
+            team,
+            self.labels,
+            scope,
+            event,
+            filter,
+        )
+        .map(Some)
     }
 }
 
@@ -4101,17 +4130,21 @@ impl Scout4All {
     ) -> Result<SetEvents, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let set = find_set(&m, set_number)?;
-        let events = match self.set_reader.read_touches(&m, set_number)? {
-            None => set_event_rows(&m, set, self.language.labels())?,
+        let (both, events) = match self.set_reader.read_touches(&m, set_number)? {
+            None => (false, set_event_rows(&m, set, self.language.labels())?),
             Some(touches) => {
                 let b = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
-                touch_rows(&m, &b.team, &touches, self.language.labels())?
+                (
+                    true,
+                    touch_rows(&m, &b.team, &touches, self.language.labels())?,
+                )
             }
         };
         Ok(SetEvents {
             set_number,
             team: m.team.name.clone(),
             opponent: m.opponent.clone(),
+            both,
             events,
         })
     }

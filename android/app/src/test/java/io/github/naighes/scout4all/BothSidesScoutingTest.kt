@@ -4,12 +4,15 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.EventTypeEnum
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -68,5 +71,19 @@ class BothSidesScoutingTest {
         assertEquals(true, core { it.scouting(team, match) }.use { s -> s.state().events.first().sideB })
         // the serve of A is still there to be evaluated
         assertTrue(rule.onAllNodes(hasText("#") and hasClickAction()).fetchSemanticsNodes().isNotEmpty())
+    }
+
+    @Test
+    fun theStatisticsAreOfEitherSideOnItsChip() {
+        serve(team, match, EvalEnum.PERFECT)
+        show()
+        rule.onNode(hasText(string(R.string.stats_swipe)) and hasClickAction()).performClick()
+        // the chips of the two teams, A's chosen at first
+        val chip = { name: String -> rule.onNode(hasText(name) and hasClickAction()) }
+        rule.waitFor { rule.onAllNodes(hasText("Arezzo") and hasClickAction()).fetchSemanticsNodes().size == 1 }
+        chip("Italia").assertIsSelected()
+        chip("Arezzo").assertIsNotSelected().performClick()
+        rule.waitFor { runCatching { chip("Arezzo").assertIsSelected() }.isSuccess }
+        chip("Italia").assertIsNotSelected()
     }
 }

@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -111,6 +112,7 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
     correction?.let { c ->
         CorrectionSheet(
             c,
+            teams = (state as? SetState.Loaded)?.set?.takeIf { it.both }?.let { it.team to it.opponent },
             onSave = {
                 app.core { it.saveCorrection(c) }
                 // a finished match is queued again
@@ -132,7 +134,11 @@ private fun SetEventsList(set: SetEvents, modifier: Modifier, onEvent: (SetEvent
     // the last events first in sight: the ones just scouted
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (set.events.size - 1).coerceAtLeast(0))
     LazyColumn(modifier, state = list, contentPadding = PaddingValues(vertical = 8.dp)) {
-        items(set.events, key = { it.index.toInt() }) { EventRow(it) { onEvent(it) } }
+        items(set.events, key = { it.index.toInt() }) { e ->
+            // on both sides: whose touch it is, by name and color
+            val team = if (set.both) (if (e.event.sideB) set.opponent else set.team) else null
+            EventRow(e, team) { onEvent(e) }
+        }
     }
 }
 
@@ -140,8 +146,10 @@ private fun SetEventsList(set: SetEvents, modifier: Modifier, onEvent: (SetEvent
  * player, the set or serve; the score after it. The changes of the lineup
  * can't be corrected: dimmed. */
 @Composable
-private fun EventRow(e: SetEvent, onClick: () -> Unit) = Row(
-    Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+private fun EventRow(e: SetEvent, team: String?, onClick: () -> Unit) = Row(
+    Modifier.fillMaxWidth().clickable(onClick = onClick)
+        .let { m -> if (team == null) m else m.drawBehind { drawRect(if (e.event.sideB) TeamThem else TeamUs, size = size.copy(width = 4.dp.toPx())) } }
+        .padding(horizontal = 16.dp, vertical = 10.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(12.dp),
 ) {
@@ -169,9 +177,10 @@ private fun EventRow(e: SetEvent, onClick: () -> Unit) = Row(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        e.event.player?.let {
+        val who = listOfNotNull(team, e.event.player?.let { "${it.number} ${it.name}" })
+        if (who.isNotEmpty()) {
             Text(
-                "${it.number} ${it.name}",
+                who.joinToString(" · "),
                 style = MaterialTheme.typography.labelMedium,
                 color = dim,
                 maxLines = 1,
@@ -193,7 +202,7 @@ private fun EventRow(e: SetEvent, onClick: () -> Unit) = Row(
  * after it still fit and the set ends as it did, else why not. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CorrectionSheet(correction: Correction, onSave: suspend () -> Unit, onDismiss: () -> Unit) {
+private fun CorrectionSheet(correction: Correction, teams: Pair<String, String>?, onSave: suspend () -> Unit, onDismiss: () -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<CorrectionState?>(null) }
@@ -225,7 +234,11 @@ private fun CorrectionSheet(correction: Correction, onSave: suspend () -> Unit, 
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            s.event.player?.let { Text("${it.number} ${it.name}", style = MaterialTheme.typography.bodyLarge) }
+            // on both sides: whose touch it is
+            val team = teams?.let { if (s.event.sideB) it.second else it.first }
+            listOfNotNull(team, s.event.player?.let { "${it.number} ${it.name}" }).takeIf { it.isNotEmpty() }?.let {
+                Text(it.joinToString(" · "), style = MaterialTheme.typography.bodyLarge)
+            }
             Row(
                 Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
