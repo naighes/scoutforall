@@ -308,6 +308,7 @@
     <string name="tutorial_attack_kept">Eles defendem com dificuldade, sem contra-atacar: toque em +.</string>
     <string name="tutorial_attack_dug">Eles defendem e atacam: toque em −.</string>
     <string name="tutorial_their_freeball">Eles devolvem fácil, uma bola de graça: toque em Bola de graça deles.</string>
+    <string name="tutorial_no_cause">Os botões +1 dão um ponto sem causa à equipe na sua cor: para os que o scout deixou para trás, uma jogada longa que termina sem um toque claro. Use só se nenhum evento servir.</string>
     <string name="tutorial_opposite_again">Egonu ataca de novo: toque no seu nome.</string>
     <string name="tutorial_attack_event">Toque em Ataque.</string>
     <string name="tutorial_their_error">O ataque deles sai: toque em Erro deles. 2–0.</string>

@@ -103,6 +103,8 @@ private val rallies = listOf(
     touch("player:18", R.string.tutorial_opposite),
     touch("eval:POSITIVE", R.string.tutorial_attack_kept),
     touch("event:OF", R.string.tutorial_their_freeball),
+    // back at the first step: the points without a cause are in view
+    TutorialStep.Read("no-cause", R.string.tutorial_no_cause),
     // in the front row after their freeball she may attack or block
     touch("player:18", R.string.tutorial_opposite_again),
     touch("event:A", R.string.tutorial_attack_event),

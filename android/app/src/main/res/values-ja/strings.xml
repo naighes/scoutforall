@@ -307,6 +307,7 @@
     <string name="tutorial_attack_kept">相手はなんとか拾うが反撃できない:+ をタップ。</string>
     <string name="tutorial_attack_dug">相手が拾って攻撃:− をタップ。</string>
     <string name="tutorial_their_freeball">相手がフリーボールで返球:「相手のフリー」をタップ。</string>
+    <string name="tutorial_no_cause">「+1」ボタンは、チームの色で理由のない得点を与えます。スカウトが取り逃した得点や、はっきりした接触なしに終わった長いラリー用です。合うイベントがないときだけ使います。</string>
     <string name="tutorial_opposite_again">再びエゴヌがアタック:名前をタップ。</string>
     <string name="tutorial_attack_event">「アタック」をタップ。</string>
     <string name="tutorial_their_error">相手のアタックがアウト:「相手のミス」をタップ。2–0。</string>

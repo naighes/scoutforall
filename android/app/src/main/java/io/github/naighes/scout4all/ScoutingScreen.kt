@@ -1129,7 +1129,7 @@ private fun NoCausePoints(view: ScoutingView, model: ScoutingViewModel) {
     val us = Triple(ours, state.team, TeamUs)
     val them = Triple(theirs, state.opponent, TeamThem)
     val sides = if (state.home) listOf(us, them) else listOf(them, us)
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(Modifier.fillMaxWidth().tutorial("no-cause"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         sides.forEach { (event, team, color) ->
             event?.let {
                 Button(
