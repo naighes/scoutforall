@@ -179,6 +179,10 @@ fun StatsSheet(
     sides: Pair<String, String>? = null,
     sideB: Boolean = false,
     onSide: (Boolean, StatsScope) -> Unit = { _, _ -> },
+    // A | B side by side: the statistics of B, those of A being `stats`
+    compare: Boolean = false,
+    statsOfB: LiveStats? = null,
+    onCompare: (StatsScope) -> Unit = {},
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(Unit) { onScope(StatsScope.Set(currentSet.toUByte())) }
@@ -203,18 +207,39 @@ fun StatsSheet(
                         ) {
                             listOf(false to a, true to b).forEach { (ofB, name) ->
                                 FilterChip(
-                                    selected = sideB == ofB,
+                                    selected = !compare && sideB == ofB,
                                     onClick = { onSide(ofB, stats.scope) },
                                     label = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                     modifier = Modifier.weight(1f),
                                 )
                             }
+                            FilterChip(
+                                selected = compare,
+                                onClick = { onCompare(stats.scope) },
+                                label = { Text(stringResource(R.string.compare), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                modifier = Modifier.weight(1f),
+                            )
                         }
                     }
-                    StatsPages(stats, onScope, loadDetail, side = sideB)
+                    when {
+                        compare -> Compared(stats, statsOfB, onScope)
+                        else -> StatsPages(stats, onScope, loadDetail, side = sideB)
+                    }
                 }
             }
         }
+    }
+}
+
+/** The two sides side by side, the scope on top: B's figures are read
+ * after A's. */
+@Composable
+private fun Compared(a: LiveStats, b: LiveStats?, onScope: (StatsScope) -> Unit) {
+    Scopes(a, onScope)
+    // B's of another scope are the previous ones: not shown
+    when (val shown = b?.takeIf { it.scope == a.scope }) {
+        null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        else -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp)) { Comparison(a, shown) }
     }
 }
 

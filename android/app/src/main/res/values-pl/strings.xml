@@ -489,6 +489,7 @@
     <string name="competition">Rozgrywki</string>
     <string name="all_competitions">Wszystkie rozgrywki</string>
     <string name="seen_from">Z perspektywy</string>
+    <string name="compare">Porównanie</string>
     <string name="competition_format">Format</string>
     <string name="stage">Faza</string>
     <string name="round">Runda</string>

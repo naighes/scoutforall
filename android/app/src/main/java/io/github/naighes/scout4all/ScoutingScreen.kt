@@ -293,15 +293,40 @@ class ScoutingViewModel(
     fun stats(scope: StatsScope) {
         val s = scouting ?: return
         val ofB = statsOfB
+        val compare = statsCompare
         viewModelScope.launch {
             mutableStats.value = app.onCore {
                 try {
-                    if (ofB) s.statsOfB(scope) else s.stats(scope)
+                    if (ofB && !compare) s.statsOfB(scope) else s.stats(scope)
                 } catch (e: MobileException) {
                     null
                 }
             }
+            // the comparison: B's figures of the same scope beside A's
+            mutableStatsOfB.value = when {
+                compare -> app.onCore {
+                    try {
+                        s.statsOfB(scope)
+                    } catch (e: MobileException) {
+                        null
+                    }
+                }
+                else -> null
+            }
         }
+    }
+
+    /** The statistics of B, only while the comparison is shown. */
+    val statsOfBCompared: StateFlow<LiveStats?> get() = mutableStatsOfB
+    private val mutableStatsOfB = MutableStateFlow<LiveStats?>(null)
+
+    /** Whether the statistics of A and B are shown side by side. */
+    var statsCompare by mutableStateOf(false)
+        private set
+
+    fun statsComparison(scope: StatsScope) {
+        statsCompare = true
+        stats(scope)
     }
 
     /** Which side the statistics are of: A's at first. */
@@ -310,6 +335,7 @@ class ScoutingViewModel(
 
     fun statsSide(ofB: Boolean, scope: StatsScope) {
         statsOfB = ofB
+        statsCompare = false
         stats(scope)
     }
 
@@ -542,6 +568,9 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                         ?.let { if (view.state.sideB) it.second to it.first else it },
                     sideB = model.statsOfB,
                     onSide = model::statsSide,
+                    compare = model.statsCompare,
+                    statsOfB = model.statsOfBCompared.collectAsState().value,
+                    onCompare = model::statsComparison,
                     onDismiss = { statsOpen = false },
                 )
             }

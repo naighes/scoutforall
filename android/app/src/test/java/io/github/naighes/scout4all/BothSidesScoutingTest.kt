@@ -97,4 +97,22 @@ class BothSidesScoutingTest {
         rule.waitFor { runCatching { chip("Arezzo").assertIsSelected() }.isSuccess }
         chip("Italia").assertIsNotSelected()
     }
+
+    @Test
+    fun theTwoSidesAreComparedOnTheirChip() {
+        serve(team, match, EvalEnum.PERFECT)
+        show()
+        rule.onNode(hasText(string(R.string.stats_swipe)) and hasClickAction()).performClick()
+        val compare = { rule.onNode(hasText(string(R.string.compare)) and hasClickAction()) }
+        rule.waitFor { runCatching { compare().assertIsNotSelected() }.isSuccess }
+        compare().performClick()
+        // the names of both teams over their columns, the rows between
+        rule.waitFor { runCatching { compare().assertIsSelected() }.isSuccess }
+        rule.waitFor { rule.onAllNodes(hasText(string(R.string.side_out))).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(rule.onAllNodes(hasText("Arezzo") and !hasClickAction()).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(rule.onAllNodes(hasText("Italia") and !hasClickAction()).fetchSemanticsNodes().isNotEmpty())
+        // a team's chip leaves the comparison
+        rule.onNode(hasText("Italia") and hasClickAction()).performClick()
+        rule.waitFor { runCatching { compare().assertIsNotSelected() }.isSuccess }
+    }
 }

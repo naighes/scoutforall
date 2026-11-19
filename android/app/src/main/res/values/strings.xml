@@ -489,6 +489,7 @@
     <string name="competition">Competition</string>
     <string name="all_competitions">All competitions</string>
     <string name="seen_from">Seen from</string>
+    <string name="compare">Compare</string>
     <string name="competition_format">Format</string>
     <string name="stage">Stage</string>
     <string name="round">Round</string>
