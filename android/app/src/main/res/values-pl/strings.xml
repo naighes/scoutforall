@@ -310,7 +310,7 @@
     <string name="tutorial_attack_kept">Rywal broni z trudem, bez kontrataku: dotknij +.</string>
     <string name="tutorial_attack_dug">Rywal broni i atakuje: dotknij −.</string>
     <string name="tutorial_their_freeball">Odbijają łatwo, wolna piłka: dotknij Wolna rywala.</string>
-    <string name="tutorial_no_cause">Przyciski +1 dają punkt bez przyczyny drużynie w jej kolorze: dla tych, które scout przeoczył, długiej akcji bez wyraźnego kontaktu. Użyj tylko, gdy żadne zdarzenie nie pasuje.</string>
+    <string name="tutorial_no_cause">Przyciski +1 dają punkt bez przyczyny: za akcję, którą scout przeoczył. Użyj tylko, gdy żadne zdarzenie nie pasuje.</string>
     <string name="tutorial_opposite_again">Znowu atakuje Egonu: dotknij nazwiska.</string>
     <string name="tutorial_attack_event">Dotknij Atak.</string>
     <string name="tutorial_their_error">Ich atak w aut: dotknij Błąd rywala. 2–0.</string>

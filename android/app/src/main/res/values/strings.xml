@@ -309,7 +309,7 @@
     <string name="tutorial_attack_kept">They dig it with difficulty, they can\'t counterattack: tap +.</string>
     <string name="tutorial_attack_dug">They dig it and attack: tap −.</string>
     <string name="tutorial_their_freeball">They send it back easy, a freeball: tap Their free.</string>
-    <string name="tutorial_no_cause">The +1 buttons give a point with no cause to the team in its color: for the ones the scout left behind, a long rally ending without a clear touch. Use it only when no event fits.</string>
+    <string name="tutorial_no_cause">The +1 buttons give a point with no cause: for a rally the scout missed. Use them only when no event fits.</string>
     <string name="tutorial_opposite_again">Egonu attacks again: tap her name.</string>
     <string name="tutorial_attack_event">Tap Attack.</string>
     <string name="tutorial_their_error">Their attack goes out: tap Their error. 2–0.</string>
