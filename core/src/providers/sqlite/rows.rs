@@ -270,6 +270,27 @@ pub(crate) fn matches_as_b(
     .map_err(sqlite)
 }
 
+/// The matches not removed of `team` scouted on both sides: id, team B and
+/// court.
+pub(crate) fn matches_both(
+    tx: &Transaction,
+    team: Uuid,
+) -> Result<Vec<(String, Uuid, Home)>, AppError> {
+    tx.prepare(
+        "SELECT id, team_b, home FROM matches
+         WHERE team_a = ?1 AND scouting = 'both' AND team_b IS NOT NULL AND deleted = 0
+         ORDER BY start, id",
+    )
+    .and_then(|mut statement| {
+        statement
+            .query_map([Sql(team)], |row| {
+                Ok((row.get(0)?, id(row, 1)?, row.get::<_, Home>(2)?))
+            })?
+            .collect::<Result<_, _>>()
+    })
+    .map_err(sqlite)
+}
+
 /// The match not removed, with its roster and its sets not removed.
 pub(crate) fn match_rows(tx: &Transaction, match_id: Uuid) -> Result<Option<MatchRows>, AppError> {
     let row = tx

@@ -10027,6 +10027,54 @@ mod tests {
         assert!(both.len() > one.len());
     }
 
+    /// The analysis of the opponent over the matches scouted on both
+    /// sides: its choices, its figures those of B in the match, a match on
+    /// one side left out.
+    #[test]
+    fn the_analysis_of_an_opponent_over_matches_on_both_sides() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(
+                THREE_SETS.to_vec(),
+                DvwChoice {
+                    opponent: DvwOpponent::NewTeam,
+                    ..dvw_choice(DvwSide::Home, None)
+                },
+            )
+            .unwrap();
+        let team = imported.team_id.clone();
+        // a match against a name only: no side B to analyse
+        app.import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Visiting, None))
+            .unwrap();
+        let opponents = app.analysis_opponents(team.clone()).unwrap();
+        assert_eq!(opponents.len(), 1);
+        assert_eq!(opponents[0].matches, 1);
+        let period = AnalysisPeriod::Between {
+            from: "2015-01-01".into(),
+            to: "2015-12-31".into(),
+        };
+        let of_b = app
+            .opponent_analysis(
+                team.clone(),
+                opponents[0].id,
+                period,
+                None,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        assert_eq!(of_b.matches.len(), 1);
+        assert_eq!(of_b.matches[0].id, imported.match_id);
+        let b = app
+            .match_stats(team, imported.match_id, MatchSide::B, StatsScope::Match)
+            .unwrap();
+        assert_eq!(of_b.summary.aces, b.aces);
+        assert_eq!(of_b.summary.aces_against, b.aces_against);
+        // the score as B sees it: the sets A won are B's lost
+        assert_eq!((of_b.matches[0].won, of_b.matches[0].lost), (0, 3));
+    }
+
     /// B of a match scouted on A's side only: said so, no panic.
     #[test]
     fn no_statistics_of_b_of_a_match_on_one_side() {

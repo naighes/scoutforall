@@ -133,6 +133,15 @@ pub struct TeamAnalysis {
     pub situation: SituationChoices,
 }
 
+/// An opponent scouted on both sides, to analyse from its side.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ScoutedOpponent {
+    pub id: Uuid,
+    pub name: String,
+    /// the matches against it scouted on both sides
+    pub matches: u32,
+}
+
 const DAY: &str = "%Y-%m-%d";
 
 fn parse_day(text: &str) -> Result<NaiveDate, MobileError> {
@@ -176,6 +185,58 @@ impl Scout4All {
         let competitions = self.competitions_played(&all, today)?;
         team_analysis(
             &team,
+            &all,
+            &chosen,
+            period,
+            competition,
+            competitions,
+            today,
+            event,
+            filter,
+            self.language.labels(),
+        )
+    }
+
+    /// The teams the team has played scouted on both sides, to analyse
+    /// from their side (`opponent_analysis`): by name, then by id.
+    pub fn analysis_opponents(&self, team_id: String) -> Result<Vec<ScoutedOpponent>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let mut found: Vec<ScoutedOpponent> = vec![];
+        for m in self.match_reader.both_matches(&team)? {
+            match found.iter_mut().find(|o| o.id == m.team_b) {
+                Some(o) => o.matches += 1,
+                None => found.push(ScoutedOpponent {
+                    id: m.team_b,
+                    name: m.name_b,
+                    matches: 1,
+                }),
+            }
+        }
+        found.sort_by(|a, b| a.name.cmp(&b.name).then(a.id.cmp(&b.id)));
+        Ok(found)
+    }
+
+    /// The statistics of team B `opponent` in the matches of the team
+    /// scouted on both sides, as `team_analysis` tells those of the team:
+    /// the matches seen from B (its opponent is the team, the sets won the
+    /// other way).
+    pub fn opponent_analysis(
+        &self,
+        team_id: String,
+        opponent: Uuid,
+        period: AnalysisPeriod,
+        competition: Option<Uuid>,
+        event: EventTypeEnum,
+        filter: DetailFilter,
+    ) -> Result<TeamAnalysis, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let team_b = self.read_team(&opponent.to_string())?;
+        let today = Local::now().date_naive();
+        let (all, chosen) =
+            self.chosen_matches_of_b(&team, &opponent, &period, competition, today)?;
+        let competitions = self.competitions_played(&all, today)?;
+        team_analysis(
+            &team_b,
             &all,
             &chosen,
             period,
@@ -259,6 +320,48 @@ impl Scout4All {
             .into_iter()
             .filter(|c| played.contains(&c.id))
             .collect())
+    }
+
+    /// As `chosen_matches`, for team B `opponent` in the matches of `team`
+    /// scouted on both sides: the summaries as B sees them, the matches
+    /// read from B's side.
+    fn chosen_matches_of_b(
+        &self,
+        team: &TeamEntry,
+        opponent: &Uuid,
+        period: &AnalysisPeriod,
+        competition: Option<Uuid>,
+        today: NaiveDate,
+    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
+        let against: HashMap<String, bool> = self
+            .match_reader
+            .both_matches(team)?
+            .into_iter()
+            .filter(|m| m.team_b == *opponent)
+            .map(|m| (m.id, m.home_b))
+            .collect();
+        let all: Vec<MatchSummary> = self
+            .runtime
+            .block_on(self.match_reader.read_summaries(team))?
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter_map(|m| {
+                against
+                    .get(&m.id)
+                    .map(|home_b| m.seen_by_b(team.name.clone(), *home_b))
+            })
+            .collect();
+        let chosen = period
+            .period()?
+            .select_in(&all, today, competition)
+            .into_iter()
+            .filter_map(|m| self.match_reader.read_of_b(team, &m.id).ok().flatten())
+            .map(|mut m: MatchEntry| {
+                name_the_removed(&mut m.team, self.language.labels());
+                m
+            })
+            .collect();
+        Ok((all, chosen))
     }
 
     /// The matches of the team as the index lists them (the readable

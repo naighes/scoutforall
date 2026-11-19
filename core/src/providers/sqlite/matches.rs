@@ -15,8 +15,8 @@ use crate::{
             competitions::{competition_row, competition_rows, insert_competition},
             not_found,
             rows::{
-                insert_match, insert_roster_entry, match_ids, match_rows, matches_as_b, team_row,
-                write_team,
+                insert_match, insert_roster_entry, match_ids, match_rows, matches_as_b,
+                matches_both, team_row, write_team,
             },
             sets::numbered,
             sqlite,
@@ -68,6 +68,15 @@ pub(crate) fn replayed(
     };
     let status = replay_status(&entry, language)?;
     Ok((entry, status))
+}
+
+/// A match scouted on both sides, as the analysis of its team B picks it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BothMatch {
+    pub id: String,
+    pub team_b: Uuid,
+    pub name_b: String,
+    pub home_b: bool,
 }
 
 pub struct SqliteMatchReader {
@@ -300,6 +309,25 @@ impl SqliteMatchReader {
         let mut played: Vec<_> = as_a.chain(as_b).chain(unreadable).collect();
         played.sort_by(|a, b| recent_first(a, b, |m| m.summary.date));
         Ok(played)
+    }
+
+    /// The matches of team A `team` scouted on both sides, with the team B
+    /// of each and whether B plays at home, in order of date: B's side of
+    /// each is `read_of_b`. A team B that can't be read is left out.
+    pub fn both_matches(&self, team: &TeamEntry) -> Result<Vec<BothMatch>, AppError> {
+        self.db.read(|tx| {
+            Ok(matches_both(tx, team.id)?
+                .into_iter()
+                .filter_map(|(id, b, home)| {
+                    read_team(tx, &b).ok().map(|b| BothMatch {
+                        id,
+                        team_b: b.id,
+                        name_b: b.name,
+                        home_b: home.is_b(),
+                    })
+                })
+                .collect())
+        })
     }
 
     /// The match in which `team` is B, as B sees it: team A, and whether
