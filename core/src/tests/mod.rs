@@ -14,6 +14,7 @@ use std::{
 };
 
 mod analysis_tests;
+mod competition_filter_tests;
 mod archive_tests;
 mod ball_tests;
 mod benchmark_tests;

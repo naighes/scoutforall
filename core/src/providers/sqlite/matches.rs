@@ -20,7 +20,7 @@ use crate::{
             },
             sets::numbered,
             sqlite,
-            summary::{cached, forget, refresh, save},
+            summary::{cached, competition_of, forget, refresh, save},
             teams::read_team,
             video::forget_video,
         },
@@ -244,7 +244,10 @@ impl SqliteMatchReader {
                     .iter()
                     .map(|(team, id)| match self.listed(tx, team, id) {
                         Ok((m, status)) => {
-                            let summary = MatchSummary::of(&m, &status);
+                            let summary = MatchSummary {
+                                competition_id: competition_of(tx, match_uuid(id)?)?,
+                                ..MatchSummary::of(&m, &status)
+                            };
                             save(tx, match_uuid(id)?, &summary).map(|()| Ok(summary))
                         }
                         Err(unreadable) => Ok(Err(unreadable)),
