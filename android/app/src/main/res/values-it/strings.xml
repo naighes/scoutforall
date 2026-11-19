@@ -481,7 +481,7 @@
     <string name="video_more">Più</string>
     <string name="team_a">Squadra</string>
     <string name="create_opponent">Crea come squadra</string>
-    <string name="neutral_game">Campo neutro</string>
+    <string name="neutral_game">Neutro</string>
     <string name="friendly">Amichevole</string>
     <string name="competition">Competizione</string>
     <string name="all_competitions">Tutte le competizioni</string>
@@ -519,4 +519,6 @@
         <item quantity="one">%d partita</item>
         <item quantity="other">%d partite</item>
     </plurals>
+    <string name="scout_both">Rileva entrambe le squadre</string>
+    <string name="roster_of_b">Lista di %1$s</string>
 </resources>

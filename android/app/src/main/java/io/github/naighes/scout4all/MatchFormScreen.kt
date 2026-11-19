@@ -30,6 +30,7 @@ import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
@@ -64,6 +65,7 @@ import io.github.naighes.scout4all.core.FormatChoice
 import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.MatchRoster
 import io.github.naighes.scout4all.core.OpponentChoice
+import io.github.naighes.scout4all.core.PlayerForm
 import io.github.naighes.scout4all.core.RoleChoice
 import io.github.naighes.scout4all.core.RoleEnum
 import io.github.naighes.scout4all.core.Stage
@@ -119,6 +121,10 @@ sealed interface MatchFormState {
         /** the number and the role of a player on the score sheet being
          * corrected */
         val correcting: RosterCorrection? = null,
+        /** the match saved on both sides: the third step, the players of B */
+        val b: RosterOfB? = null,
+        /** a player of B written, not on its team yet */
+        val adding: NewPlayer? = null,
     ) : MatchFormState {
         val changed: Boolean get() = form != loaded
 
@@ -134,7 +140,10 @@ sealed interface MatchFormState {
                 ?.takeIf { id -> competitions.any { it.id == id && sameName(it.name, edited.competition) } }
                 ?: competitions.firstOrNull { sameName(it.name, edited.competition) }?.id
             val chosen = competitions.firstOrNull { it.id == competition }?.takeIf { competition != form.competitionId }
+            // both teams need a team B, unless the match was saved so
+            val both = edited.both && (team != null || edited.createOpponent || loaded.both)
             return edited.copy(
+                both = both,
                 opponentTeam = team,
                 competitionId = competition,
                 friendly = chosen?.friendly ?: edited.friendly,
@@ -149,6 +158,25 @@ sealed interface MatchFormState {
  * being corrected, as written; why not, when the core says so. */
 data class RosterCorrection(
     val player: RosterPlayer,
+    val number: String,
+    val role: RoleEnum?,
+    val error: String? = null,
+)
+
+/** The players of team B of a match just saved on both sides, as written on
+ * its score sheet: its team, the form of the roster only (as the core gives
+ * it), who can be on it and the roles of its gender. */
+data class RosterOfB(
+    val matchId: String,
+    val teamId: String,
+    val form: MatchForm,
+    val players: List<RosterPlayer>,
+    val roles: List<RoleChoice>,
+)
+
+/** A player of team B being written, as it is. */
+data class NewPlayer(
+    val name: String,
     val number: String,
     val role: RoleEnum?,
     val error: String? = null,
@@ -171,6 +199,9 @@ class MatchFormViewModel(
 ) : ViewModel() {
     private val mutableState = MutableStateFlow<MatchFormState>(MatchFormState.Loading)
     val state: StateFlow<MatchFormState> = mutableState
+
+    /** a match being created: only then scouting both teams is chosen */
+    val isNew: Boolean = matchId == null
 
     init {
         viewModelScope.launch {
@@ -270,13 +301,29 @@ class MatchFormViewModel(
 
     private suspend fun toggleNow(player: String) {
         val editing = mutableState.value as? MatchFormState.Editing ?: return
+        val b = editing.b
         val roster = try {
-            app.core { it.matchRoster(editing.teamId, matchId, editing.form, player) }
+            app.core {
+                when (b) {
+                    null -> it.matchRoster(editing.teamId, matchId, editing.form, player)
+                    else -> it.rosterOfB(editing.teamId, b.matchId, b.form, player)
+                }
+            }
         } catch (e: MobileException) {
             update { it.copy(error = e.reason) }
             return
         }
-        update { s -> s.onRoster(roster) }
+        update { s -> s.withRoster(roster) }
+    }
+
+    /** The roster as the core gave it: of A in the form, of B in its step. */
+    private fun MatchFormState.Editing.withRoster(roster: MatchRoster) = when (b) {
+        null -> onRoster(roster)
+        else -> copy(
+            b = b.copy(form = roster.form, players = roster.players),
+            invalid = invalid?.takeIf { it.first != MatchField.ROSTER },
+            error = null,
+        )
     }
 
     /** The form as changed meanwhile, the roster as the core gave it. */
@@ -305,10 +352,14 @@ class MatchFormViewModel(
                 val editing = mutableState.value as? MatchFormState.Editing ?: return@withLock
                 val c = editing.correcting ?: return@withLock
                 try {
+                    val b = editing.b
                     val roster = app.core {
-                        it.correctRosterNumber(editing.teamId, matchId, editing.form, c.player.id, c.number.trim(), c.role)
+                        when (b) {
+                            null -> it.correctRosterNumber(editing.teamId, matchId, editing.form, c.player.id, c.number.trim(), c.role)
+                            else -> it.correctRosterOfBNumber(editing.teamId, b.matchId, b.form, c.player.id, c.number.trim(), c.role)
+                        }
                     }
-                    update { s -> s.onRoster(roster).copy(correcting = null) }
+                    update { s -> s.withRoster(roster).copy(correcting = null) }
                 } catch (e: MobileException) {
                     update { s -> s.copy(correcting = s.correcting?.copy(error = e.reason)) }
                 }
@@ -343,12 +394,111 @@ class MatchFormViewModel(
         mutableState.value = editing.copy(busy = true)
         viewModelScope.launch {
             mutableState.value = try {
-                MatchFormState.Saved(editing.teamId, app.core { it.saveMatch(editing.teamId, matchId, editing.form) })
+                val id = app.core { it.saveMatch(editing.teamId, matchId, editing.form) }
+                when (editing.form.both) {
+                    true -> startB(editing, id)
+                    false -> MatchFormState.Saved(editing.teamId, id)
+                }
             } catch (e: MobileException.InvalidMatch) {
                 // on the step of the field
                 editing.copy(invalid = e.field to e.reason, error = null, onRoster = e.field == MatchField.ROSTER)
             } catch (e: MobileException) {
                 editing.copy(error = e.reason, invalid = null)
+            }
+        }
+    }
+    /** The match is saved on both sides: now the players of team B, to
+     * choose and to write. Saved all the same when they can't be read: they
+     * can be written later, editing the match. */
+    private suspend fun startB(editing: MatchFormState.Editing, id: String): MatchFormState = try {
+        val (b, roster, roles) = app.core { core ->
+            val b = core.matchForm(editing.teamId, id).opponentTeam.orEmpty()
+            // only the roster of B is left in the form
+            val form = MatchForm(opponent = "", date = null, home = false, maxSubstitutions = "", both = true)
+            Triple(b, core.rosterOfB(editing.teamId, id, form, null), core.roles(b))
+        }
+        editing.copy(
+            busy = false,
+            invalid = null,
+            error = null,
+            correcting = null,
+            b = RosterOfB(id, b, roster.form, roster.players, roles),
+        )
+    } catch (e: MobileException) {
+        MatchFormState.Saved(editing.teamId, id)
+    }
+
+    /** The roster of B saved: the match is done. */
+    fun saveB() {
+        val editing = mutableState.value as? MatchFormState.Editing ?: return
+        val b = editing.b ?: return
+        if (editing.busy) return
+        mutableState.value = editing.copy(busy = true)
+        viewModelScope.launch {
+            mutableState.value = try {
+                app.core { it.saveRosterOfB(editing.teamId, b.matchId, b.form) }
+                MatchFormState.Saved(editing.teamId, b.matchId)
+            } catch (e: MobileException.InvalidMatch) {
+                editing.copy(invalid = e.field to e.reason, error = null)
+            } catch (e: MobileException) {
+                editing.copy(error = e.reason, invalid = null)
+            }
+        }
+    }
+
+    /** Leaves the roster of B for later: the match is saved already. */
+    fun leaveB() {
+        val editing = mutableState.value as? MatchFormState.Editing ?: return
+        val b = editing.b ?: return
+        mutableState.value = MatchFormState.Saved(editing.teamId, b.matchId)
+    }
+
+    /** A new player of B to write, or none (cancelled). */
+    fun adding(open: Boolean) {
+        val editing = mutableState.value as? MatchFormState.Editing ?: return
+        val b = editing.b ?: return
+        if (!open) {
+            update { it.copy(adding = null) }
+            return
+        }
+        viewModelScope.launch {
+            val free = try {
+                app.core { it.newPlayerForm(b.teamId).number }
+            } catch (e: MobileException) {
+                ""
+            }
+            update { it.copy(adding = NewPlayer("", free, null)) }
+        }
+    }
+
+    fun editAdding(edit: (NewPlayer) -> NewPlayer) = update { s ->
+        s.copy(adding = s.adding?.let { edit(it).copy(error = null) })
+    }
+
+    /** The player written is on the team of B and on its roster: the core
+     * checks the name and the number. */
+    fun addPlayer() {
+        viewModelScope.launch {
+            toggling.withLock {
+                val editing = mutableState.value as? MatchFormState.Editing ?: return@withLock
+                val b = editing.b ?: return@withLock
+                val new = editing.adding ?: return@withLock
+                try {
+                    val roster = app.core { core ->
+                        val player = core.savePlayer(
+                            b.teamId,
+                            null,
+                            PlayerForm(name = new.name.trim(), role = new.role, number = new.number.trim()),
+                            true,
+                        )
+                        // the ones chosen, and the new one
+                        val chosen = b.players.filter { it.chosen }.map { it.id } + player
+                        core.rosterOfB(editing.teamId, b.matchId, b.form.copy(roster = chosen), null)
+                    }
+                    update { s -> s.withRoster(roster).copy(adding = null) }
+                } catch (e: MobileException) {
+                    update { s -> s.copy(adding = s.adding?.copy(error = e.reason)) }
+                }
             }
         }
     }
@@ -368,8 +518,10 @@ fun MatchFormScreen(
     val state by model.state.collectAsState()
     val back = rememberFormBack((state as? MatchFormState.Editing)?.changed == true, onBack)
     val onRoster = (state as? MatchFormState.Editing)?.onRoster == true
-    // from the roster, back to the fields
-    BackHandler(enabled = onRoster) { model.toFields() }
+    val onB = (state as? MatchFormState.Editing)?.b != null
+    // from the roster, back to the fields; from the one of B, out: the
+    // match is saved
+    BackHandler(enabled = onRoster || onB) { if (onB) model.leaveB() else model.toFields() }
     LaunchedEffect(state) {
         (state as? MatchFormState.Saved)?.let { onSaved(it.teamId, it.matchId) }
     }
@@ -377,14 +529,16 @@ fun MatchFormScreen(
         topBar = {
             TopAppBar(
                 title = {
+                    val opponent = (state as? MatchFormState.Editing)?.form?.opponent.orEmpty()
                     val title = when {
-                        onRoster -> R.string.roster_title
-                        matchId == null -> R.string.new_match
-                        else -> R.string.edit_match
+                        onB -> stringResource(R.string.roster_of_b, opponent)
+                        onRoster -> stringResource(R.string.roster_title)
+                        matchId == null -> stringResource(R.string.new_match)
+                        else -> stringResource(R.string.edit_match)
                     }
-                    Text(stringResource(title), Modifier.title())
+                    Text(title, Modifier.title())
                 },
-                navigationIcon = { BackButton(if (onRoster) model::toFields else back) },
+                navigationIcon = { BackButton(if (onB) model::leaveB else if (onRoster) model::toFields else back) },
             )
         },
     ) { padding ->
@@ -393,11 +547,12 @@ fun MatchFormScreen(
             MatchFormState.Loading, is MatchFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
             is MatchFormState.Failed -> Centered(modifier) { Text(s.message) }
             is MatchFormState.Editing -> {
-                when (s.onRoster) {
-                    true -> RosterContent(s, model, modifier)
-                    false -> MatchFormContent(s, model, modifier)
+                when {
+                    s.b != null || s.onRoster -> RosterContent(s, model, modifier)
+                    else -> MatchFormContent(s, model, modifier)
                 }
-                s.correcting?.let { CorrectionDialog(it, s.roles, model) }
+                s.correcting?.let { CorrectionDialog(it, s.b?.roles ?: s.roles, model) }
+                s.adding?.let { AddingDialog(it, s.b?.roles.orEmpty(), model) }
             }
         }
     }
@@ -445,6 +600,12 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
             if (form.opponent.isNotBlank() && form.opponentTeam == null) {
                 CheckRow(stringResource(R.string.create_opponent), form.createOpponent, onChecked = { create ->
                     model.change(null) { it.copy(createOpponent = create) }
+                })
+            }
+            // a team: scouted too, chosen when the match is created
+            if (model.isNew && (form.opponentTeam != null || form.createOpponent)) {
+                CheckRow(stringResource(R.string.scout_both), form.both, onChecked = { both ->
+                    model.change(null) { it.copy(both = both) }
                 })
             }
             // the day of the match: the time of day stays
@@ -555,7 +716,9 @@ private fun CourtChoice(form: MatchForm, onChoose: (home: Boolean, neutral: Bool
 @Composable
 private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewModel, modifier: Modifier) =
     Column(modifier) {
-        val chosen = state.players.count { it.chosen }
+        val b = state.b
+        val players = b?.players ?: state.players
+        val chosen = players.count { it.chosen }
         val error = state.invalid?.takeIf { it.first == MatchField.ROSTER }?.second
         Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(
@@ -583,7 +746,7 @@ private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewMod
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            items(state.players, key = { it.id }) { player ->
+            items(players, key = { it.id }) { player ->
                 PlayerTile(
                     player.number.toInt(),
                     player.name,
@@ -597,12 +760,36 @@ private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewMod
         state.error?.let {
             Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
         }
+        // the players of B may not be on its team yet
+        if (b != null) {
+            OutlinedButton(
+                onClick = { model.adding(true) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 48.dp),
+            ) { Text(stringResource(R.string.new_player)) }
+        }
         Button(
-            onClick = model::save,
+            onClick = if (b != null) model::saveB else model::save,
             enabled = !state.busy,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp).tutorial("save-match"),
         ) { Text(stringResource(R.string.save)) }
     }
+
+/** A player of team B written on the spot: its name, number and role. */
+@Composable
+private fun AddingDialog(new: NewPlayer, roles: List<RoleChoice>, model: MatchFormViewModel) =
+    NumberRoleDialog(
+        stringResource(R.string.new_player),
+        new.number,
+        new.role,
+        roles,
+        new.error,
+        onNumber = { number -> model.editAdding { it.copy(number = number) } },
+        onRole = { role -> model.editAdding { it.copy(role = role) } },
+        onOk = model::addPlayer,
+        onCancel = { model.adding(false) },
+        name = new.name,
+        onName = { name -> model.editAdding { it.copy(name = name) } },
+    )
 
 /** The number and the role of a player in this match, checked by the
  * core. */

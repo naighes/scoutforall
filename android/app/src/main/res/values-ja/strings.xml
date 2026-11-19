@@ -517,4 +517,6 @@
     <plurals name="matches_count">
         <item quantity="other">%d 試合</item>
     </plurals>
+    <string name="scout_both">両チームを記録</string>
+    <string name="roster_of_b">%1$sのメンバー表</string>
 </resources>

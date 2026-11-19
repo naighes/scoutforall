@@ -523,4 +523,6 @@
         <item quantity="many">%d meczów</item>
         <item quantity="other">%d meczu</item>
     </plurals>
+    <string name="scout_both">Rejestruj obie drużyny</string>
+    <string name="roster_of_b">Skład %1$s</string>
 </resources>

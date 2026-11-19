@@ -519,4 +519,6 @@
         <item quantity="one">%d partida</item>
         <item quantity="other">%d partidas</item>
     </plurals>
+    <string name="scout_both">Registrar as duas equipes</string>
+    <string name="roster_of_b">Súmula de %1$s</string>
 </resources>
