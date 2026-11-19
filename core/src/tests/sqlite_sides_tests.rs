@@ -884,7 +884,7 @@ mod tests {
                 p.db.clone(),
                 crate::localization::Language::default(),
             ));
-        let session = crate::set_start::start(m.clone(), input, writer, Some(b.clone()))
+        let mut session = crate::set_start::start(m.clone(), input, writer, Some(b.clone()))
             .await
             .unwrap()
             .with_order(crate::scouting::ChoiceOrder::PlayerFirst);
@@ -896,6 +896,12 @@ mod tests {
         // the ones of a player stay with their player: no serve, no attack of B
         assert!(!others.iter().any(|(_, e)| *e == S));
         assert!(!others.contains(&(Side::A, A)));
+        // the serve of A waits for its evaluation (player first): the
+        // change of B gives way to it, as any event does
+        session.choose_event_of(Side::B, LR).await.unwrap();
+        assert_eq!(session.step(), crate::scouting::ScoutingStep::Eval);
+        session.choose_event_of(Side::B, LR).await.unwrap();
+        assert_eq!(session.touches().len(), 2);
     }
 
     /// The changes of the lineup of both sides while the ball is still:

@@ -1617,6 +1617,10 @@ pub struct ScoutingState {
     pub both: bool,
     #[uniffi(default)]
     pub side_b: bool,
+    /// scouting both sides: the rotation of the side not on screen, as
+    /// `rotation` is the one on screen's (empty scouting one side)
+    #[uniffi(default)]
+    pub other_rotation: String,
 }
 
 /// The sets the statistics are of: one of the match, or all of them so
@@ -2188,7 +2192,8 @@ impl Scouting {
             opponent: session
                 .team_of(side.other())
                 .map_or_else(|| current_match.opponent.clone(), |t| t.name.clone()),
-            home: current_match.home,
+            // the home side of the match is A's: B is on screen away
+            home: current_match.home == (side == ScoutSide::A),
             score_us: snapshot.score_us,
             score_them: snapshot.score_them,
             won,
@@ -2223,6 +2228,10 @@ impl Scouting {
             team_choice: session.team_choice(),
             both: session.is_both(),
             side_b: side == ScoutSide::B,
+            other_rotation: session
+                .snapshot_of(side.other())
+                .and_then(|s| s.current_lineup.get_current_rotation().ok())
+                .map_or_else(String::new, |r| rotation_name(r, self.labels)),
         }
     }
 

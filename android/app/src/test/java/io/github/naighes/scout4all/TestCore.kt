@@ -66,6 +66,30 @@ fun startFirstSet(
     match
 }
 
+/** A match on both sides with its first set started: Arezzo, with the
+ * players of `nationalTeam` too, A serving; the match id. */
+fun startFirstSetBoth(team: String, opponent: String = "Arezzo"): String = core { c ->
+    val b = saveTeam(opponent)
+    nationalTeam.forEach { (name, role, number) ->
+        c.savePlayer(b, null, PlayerForm(name, role, number.toString()))
+    }
+    val match = c.saveMatch(team, null, MatchForm(opponent, "2026-10-25T18:00:00+02:00", true, "6", opponentTeam = b, both = true))
+    c.saveRosterOfB(team, match, MatchForm("", null, false, ""))
+    val lineup = { start: io.github.naighes.scout4all.core.SetStart, id: String ->
+        val players = c.team(id).players.associateBy { it.name }
+        nationalTeam.take(6).forEachIndexed { i, (name, _, _) -> start.place((i + 1).toUByte(), players.getValue(name).id) }
+        start.chooseSetter(players.getValue("Alessia Orro").id)
+        start.chooseLibero(players.getValue("Monica De Gennaro").id)
+    }
+    val a = c.setStart(team, match)
+    a.chooseServingTeam(TeamSideEnum.US)
+    lineup(a, team)
+    val ofB = checkNotNull(c.setStartOfB(team, match))
+    lineup(ofB, b)
+    c.startSetBoth(a, ofB)
+    match
+}
+
 /** A match of the team won 3–0 with aces; its id. */
 fun winMatch(team: String, opponent: String, competition: String = ""): String {
     val match = startFirstSet(team, opponent, competition = competition)

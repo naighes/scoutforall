@@ -86,6 +86,7 @@
     <string name="close">閉じる</string>
     <string name="undo">取り消し</string>
     <string name="touch_the_player">コート上の選手をタップ</string>
+    <string name="swap_side">相手チーム</string>
     <string name="the_team">チーム</string>
     <string name="who_comes_in">誰が入りますか？</string>
     <string name="their_point">相手の得点</string>

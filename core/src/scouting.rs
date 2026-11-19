@@ -755,8 +755,10 @@ impl ScoutingSession {
         side: Side,
         event: EventTypeEnum,
     ) -> Result<Progress, ScoutingError> {
-        match (self.step, self.event_choices().contains(&(side, event))) {
-            (ScoutingStep::Event, true) => {
+        // the serve chosen by itself gives way, as for `choose_event`
+        let open = self.step == ScoutingStep::Event || self.serve_pending();
+        match (open, self.event_choices().contains(&(side, event))) {
+            (true, true) => {
                 let before = self.side;
                 self.side = side;
                 let chosen = self.choose_event(event).await;
@@ -765,7 +767,7 @@ impl ScoutingSession {
                 }
                 chosen
             }
-            (ScoutingStep::Event, false) => Err(ScoutingError::EventNotAvailable(event)),
+            (true, false) => Err(ScoutingError::EventNotAvailable(event)),
             _ => Err(ScoutingError::InvalidSelection),
         }
     }
