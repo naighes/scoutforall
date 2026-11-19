@@ -151,7 +151,13 @@ enum Go {
     /// the video of the match
     Video(String, String),
     /// the actions of the match picked in its statistics, in the video
-    Clips(String, String, scout4all_mobile::MatchSide, scout4all_mobile::ClipPick, String),
+    Clips(
+        String,
+        String,
+        scout4all_mobile::MatchSide,
+        scout4all_mobile::ClipPick,
+        String,
+    ),
     /// the actions of the team picked in its statistics, match after match
     TeamClips(String, Vec<scout4all_mobile::MatchClips>, String),
     /// back to the statistics the actions were picked in
@@ -461,10 +467,14 @@ impl App {
             }
             Go::Events(team, m, set) => events::EventsScreen::new(core, team, m, set)
                 .map(|screen| Screen::Events(Box::new(screen))),
-            Go::Video(team, m) => {
-                video::VideoScreen::new(core, self.dir.clone(), team, m, scout4all_mobile::MatchSide::A)
-                    .map(|screen| Screen::Video(Box::new(screen)))
-            }
+            Go::Video(team, m) => video::VideoScreen::new(
+                core,
+                self.dir.clone(),
+                team,
+                m,
+                scout4all_mobile::MatchSide::A,
+            )
+            .map(|screen| Screen::Video(Box::new(screen))),
             Go::Clips(team, m, side, pick, title) => {
                 let opened = core
                     .match_clips_of(&team, &m, side, &pick)

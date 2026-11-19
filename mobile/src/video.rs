@@ -5,7 +5,8 @@
 //! player) and ask the review the rest: the logic is the same on both.
 
 use crate::{
-    AnalysisPeriod, ClipPick, MatchSide, MobileError, Origins, Scout4All, SetEvent, VideoEvent, clips_of, count_of,
+    AnalysisPeriod, ClipPick, MatchSide, MobileError, Origins, Scout4All, SetEvent, VideoEvent,
+    clips_of, count_of,
     strip::{ClipSpan, clip_spans},
 };
 use chrono::{FixedOffset, Local, Offset};
@@ -642,14 +643,12 @@ impl VideoReview {
 
     /// The events placed again, as the profile and the durations say.
     fn reload(&self, st: &mut Review) -> Result<(), MobileError> {
-        st.all = self
-            .core
-            .video_events(
-                &st.the_match,
-                &st.current_profile(),
-                &st.durations,
-                st.of_b.as_ref(),
-            )?;
+        st.all = self.core.video_events(
+            &st.the_match,
+            &st.current_profile(),
+            &st.durations,
+            st.of_b.as_ref(),
+        )?;
         Ok(())
     }
 
@@ -1112,7 +1111,10 @@ mod tests {
             }],
             side: MatchSide::B,
         };
-        assert_eq!(restore_clips(&save_clips(clips.clone())), Some(clips.clone()));
+        assert_eq!(
+            restore_clips(&save_clips(clips.clone())),
+            Some(clips.clone())
+        );
         // saved before the side: A
         assert_eq!(
             restore_clips(&save_clips(clips.clone()).replace(r#","side":"B""#, "")).map(|c| c.side),
@@ -1233,7 +1235,10 @@ mod tests {
     fn the_events_lined_up_with_the_video() {
         let dir = tempfile::tempdir().unwrap();
         let (app, team, m) = imported(&dir);
-        let review = app.clone().video_review(team, m, MatchSide::A, None).unwrap();
+        let review = app
+            .clone()
+            .video_review(team, m, MatchSide::A, None)
+            .unwrap();
         review.add_files(vec![file("partita.mp4")], 0).unwrap();
         review.set_durations(vec![3 * 3600 * 1000]).unwrap();
         assert_eq!(review.alignment(), VideoAlignment::Missing);
@@ -1285,7 +1290,10 @@ mod tests {
     fn an_event_put_at_its_own_time() {
         let dir = tempfile::tempdir().unwrap();
         let (app, team, m) = imported(&dir);
-        let review = app.clone().video_review(team, m, MatchSide::A, None).unwrap();
+        let review = app
+            .clone()
+            .video_review(team, m, MatchSide::A, None)
+            .unwrap();
         review.add_files(vec![file("partita.mp4")], 0).unwrap();
         review.set_durations(vec![3 * 3600 * 1000]).unwrap();
         let at = |i: usize| review.events()[i].offset_ms;
@@ -1374,8 +1382,7 @@ mod tests {
         assert!(b_events.iter().all(|e| e.offset_ms.is_some()));
         // the same touch, the same instant: A's correction
         assert_eq!(
-            b_events[b_index].offset_ms,
-            a_events[a_index].offset_ms,
+            b_events[b_index].offset_ms, a_events[a_index].offset_ms,
             "B's event {b_index} comes from A's {a_index}"
         );
         assert_eq!(a_events[a_index].offset_ms, Some(200_000));
@@ -1441,7 +1448,10 @@ mod tests {
             .unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!((matches[0].actions, matches[0].has_video), (count, true));
-        let review = app.clone().video_review(team, m, MatchSide::A, Some(pick)).unwrap();
+        let review = app
+            .clone()
+            .video_review(team, m, MatchSide::A, Some(pick))
+            .unwrap();
         review.set_durations(vec![1_800_000, 9_000_000]).unwrap();
         assert!(review.is_clips());
         let events = review.events();

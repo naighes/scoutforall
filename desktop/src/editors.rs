@@ -263,6 +263,19 @@ const COURT_HOME: usize = 0;
 const COURT_AWAY: usize = 1;
 const COURT_NEUTRAL: usize = 2;
 
+/// What is said of a new player of B before saving.
+#[derive(Clone, Copy, PartialEq)]
+enum Answer {
+    /// nothing yet: the registry is looked at
+    Ask,
+    /// the person of the registry
+    Same(uuid::Uuid),
+    /// a new person, though the registry has the name
+    Another,
+    /// a new person, whatever the namesakes
+    Anyway,
+}
+
 /// The option of the court of the form.
 fn court_of(form: &MatchForm) -> usize {
     match (form.neutral, form.home) {
@@ -339,6 +352,9 @@ pub struct Editor {
     /// another player of the team with the name of the one being saved,
     /// as the core tells: saved only once confirmed
     namesake: Option<String>,
+    /// the person of the registry the question of a new player of B is
+    /// about: Enter takes them, `n` makes another person
+    same_person: Option<uuid::Uuid>,
 }
 
 /// The option of `value` among `values`, after the empty one.
@@ -453,6 +469,7 @@ impl Editor {
         Editor {
             form: Form::new(title, fields),
             namesake: None,
+            same_person: None,
             kind: Kind::Team(TeamEditor {
                 id,
                 classifications,
@@ -496,6 +513,7 @@ impl Editor {
         Ok(Editor {
             form: Form::new(s.edit_competition, fields),
             namesake: None,
+            same_person: None,
             kind: Kind::Competition(CompetitionEditor {
                 id,
                 formats,
@@ -552,6 +570,7 @@ impl Editor {
         Editor {
             form: Form::new(title, fields),
             namesake: None,
+            same_person: None,
             kind: Kind::Player(Box::new(PlayerEditor {
                 team_id,
                 id,
@@ -576,6 +595,7 @@ impl Editor {
         let mut editor = Editor {
             form,
             namesake: None,
+            same_person: None,
             kind: Kind::Season(Box::new(SeasonEditor {
                 team_id,
                 classifications,
@@ -820,6 +840,7 @@ impl Editor {
         let mut editor = Editor {
             form,
             namesake: None,
+            same_person: None,
             kind: Kind::Match(Box::new(MatchEditor {
                 team_id,
                 teams,
@@ -1074,7 +1095,7 @@ impl Editor {
     }
 
     /// The new player of team B saved and put on the score sheet.
-    fn added(&mut self, core: &Scout4All) {
+    fn added(&mut self, core: &Scout4All, s: &Strings, answer: Answer) {
         let (Kind::Match(m), Some(c)) = (&self.kind, self.correcting()) else {
             return;
         };
@@ -1088,9 +1109,39 @@ impl Editor {
             role: c.roles.get(c.form.index(ADDING_ROLE)).map(|r| r.value),
             ..PlayerForm::default()
         };
-        // a player of the registry with the same name isn't asked about yet
+        // a person of the registry with the name: the same one or another
+        if answer == Answer::Ask {
+            let namesake = core
+                .registry_namesake(b.clone(), form.name.clone())
+                .ok()
+                .flatten();
+            if let Some(person) = namesake {
+                self.namesake = Some(ui::fill(s.same_person_text, &[person.label]));
+                self.same_person = Some(person.id);
+                return;
+            }
+        }
+        // the same person keeps the name the registry has, as written there
+        let registry_name = match answer {
+            Answer::Same(_) => core
+                .registry_namesake(b.clone(), form.name.clone())
+                .ok()
+                .flatten()
+                .map(|p| p.name),
+            _ => None,
+        };
+        let form = PlayerForm {
+            name: registry_name.unwrap_or(form.name),
+            person: match answer {
+                Answer::Same(person) => Some(person),
+                _ => None,
+            },
+            ..form
+        };
+        // another player of the team with the name is asked about too
+        let confirmed = matches!(answer, Answer::Same(_) | Answer::Anyway);
         let added = core
-            .save_player(b, None, form, true)
+            .save_player(b, None, form, confirmed)
             .and_then(|player| {
                 uuid::Uuid::parse_str(&player).map_err(|e| MobileError::Failed {
                     reason: e.to_string(),
@@ -1132,12 +1183,35 @@ impl Editor {
                     self.form.focused = field;
                 }
             }
+            Err(MobileError::Namesake { reason }) => self.namesake = Some(reason),
             Err(e) => {
                 if let Some(Some(c)) = self.correcting_slot() {
                     c.form.error = Some(e.to_string());
                 }
             }
         }
+    }
+
+    /// The answer to the question being asked about a new player of B:
+    /// saved as the person of the registry, or (`same` false) as a new one.
+    fn answered(&mut self, core: &Scout4All, s: &Strings, same: bool) -> Edited {
+        let answer = match (self.same_person.take(), same) {
+            (Some(person), true) => Answer::Same(person),
+            (Some(_), false) => Answer::Another,
+            (None, _) => Answer::Anyway,
+        };
+        self.namesake = None;
+        match self.adding_b() {
+            true => self.added(core, s, answer),
+            false => return self.saved(core, s, true),
+        }
+        Edited::Stay
+    }
+
+    /// Whether the small form open is a new player of B.
+    fn adding_b(&mut self) -> bool {
+        self.correcting_slot()
+            .is_some_and(|c| c.as_ref().is_some_and(|c| c.adding))
     }
 
     /// The match form as it is, for the roster.
@@ -1190,7 +1264,7 @@ impl Editor {
     /// The correction saved in the form of the match (or among the
     /// players of the new season), the keys on the player (wherever its
     /// number puts it now); or its error shown.
-    fn corrected(&mut self, core: &Scout4All) {
+    fn corrected(&mut self, core: &Scout4All, s: &Strings) {
         enum Corrected {
             Roster(Box<MatchRoster>),
             Season(Vec<SeasonPlayer>),
@@ -1199,7 +1273,7 @@ impl Editor {
             return;
         };
         if c.adding {
-            return self.added(core);
+            return self.added(core, s, Answer::Ask);
         }
         let role = c
             .form
@@ -1260,9 +1334,9 @@ impl Editor {
     }
 
     /// What the small form of a correction did: confirmed, closed.
-    fn correction_outcome(&mut self, core: &Scout4All, outcome: Outcome) -> Edited {
+    fn correction_outcome(&mut self, core: &Scout4All, s: &Strings, outcome: Outcome) -> Edited {
         match outcome {
-            Outcome::Save => self.corrected(core),
+            Outcome::Save => self.corrected(core, s),
             Outcome::Cancel => {
                 if let Some(slot) = self.correcting_slot() {
                     *slot = None;
@@ -1592,16 +1666,18 @@ impl Editor {
 
     pub fn update(&mut self, core: &Scout4All, s: &Strings, message: form::Message) -> Edited {
         match (&self.namesake, message) {
-            (Some(_), form::Message::Save) => self.saved(core, s, true),
+            (Some(_), form::Message::Save) => self.answered(core, s, true),
+            (Some(_), form::Message::Another) => self.answered(core, s, false),
             (Some(_), form::Message::Cancel) => {
                 self.namesake = None;
+                self.same_person = None;
                 Edited::Stay
             }
             (Some(_), _) => Edited::Stay,
             (None, message) => match (self.correction(), message) {
                 (Some(form), message) => {
                     let outcome = form.update(message);
-                    self.correction_outcome(core, outcome)
+                    self.correction_outcome(core, s, outcome)
                 }
                 (None, form::Message::Details(field)) => {
                     // past the last tile: a new player of B
@@ -1633,9 +1709,13 @@ impl Editor {
         // to the form
         match (&self.namesake, ck) {
             (None, _) => self.form_key(core, s, ck),
-            (Some(_), k) if k == key!(enter) => self.saved(core, s, true),
+            (Some(_), k) if k == key!(enter) => self.answered(core, s, true),
+            (Some(_), k) if k == key!(n) && self.same_person.is_some() => {
+                self.answered(core, s, false)
+            }
             (Some(_), k) if k == BACK_KEY => {
                 self.namesake = None;
+                self.same_person = None;
                 Edited::Stay
             }
             (Some(_), _) => Edited::Stay,
@@ -1645,7 +1725,7 @@ impl Editor {
     fn form_key(&mut self, core: &Scout4All, s: &Strings, ck: KeyCombination) -> Edited {
         if let Some(form) = self.correction() {
             let outcome = form.key(ck);
-            return self.correction_outcome(core, outcome);
+            return self.correction_outcome(core, s, outcome);
         }
         if self.on_roster() && ck == key!(e) {
             self.open_correction(core, s, self.form.focused);
@@ -1711,6 +1791,11 @@ impl Editor {
                     _ => (k, what),
                 })
                 .collect(),
+            (true, _) if self.same_person.is_some() => vec![
+                ("Enter".to_string(), s.same_person.to_string()),
+                ("n".to_string(), s.another_person.to_string()),
+                ("Esc".to_string(), s.back.to_string()),
+            ],
             (true, _) => vec![
                 ("Enter".to_string(), s.save_anyway.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
@@ -1773,6 +1858,20 @@ impl Editor {
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
         match (&self.namesake, &self.kind) {
+            (Some(namesake), _) if self.same_person.is_some() => ui::confirm_with(
+                s,
+                s.same_name,
+                namesake,
+                vec![(
+                    theme::icons::ADD,
+                    s.another_person,
+                    on(form::Message::Another),
+                )],
+                (theme::icons::CHECK, s.same_person),
+                on(form::Message::Save),
+                on(form::Message::Cancel),
+                c,
+            ),
             (Some(namesake), _) => ui::confirm(
                 s,
                 s.same_name,
@@ -2246,6 +2345,49 @@ mod tests {
             .iter()
             .filter(|p| p.chosen)
             .count()
+    }
+
+    /// A new player of B with the name of a person of the registry asks
+    /// first: Enter is the same person, `n` another one, Esc goes back.
+    #[test]
+    fn a_new_player_of_b_with_the_name_of_the_registry_asks_first() {
+        for (answer, people) in [(Some(true), 1), (Some(false), 2), (None, 1)] {
+            let dir = tempfile::tempdir().unwrap();
+            let core = app(&dir);
+            let cortona = team(&core, "Cortona", 7);
+            team(&core, "Arezzo", 2);
+            team(&core, "Cascina 2", 0);
+            let free = team(&core, "Free", 0);
+            let mut e = new_match(&core, &cortona);
+            send(&mut e, &core, Input(MATCH_OPPONENT, "Cascina 2".into()));
+            send(&mut e, &core, Choose(MATCH_SCOUTING, SCOUTING_BOTH));
+            for _ in 0..3 {
+                press(&mut e, &core, key!(enter));
+            }
+            assert_eq!(step(&e), MatchStep::RosterB);
+            press(&mut e, &core, key!(n));
+            send(&mut e, &core, Input(ADDING_NAME, " arezzo  p1 ".into()));
+            send(&mut e, &core, Input(ADDING_NUMBER, "5".into()));
+            send(&mut e, &core, form::Message::Save);
+            // asked, the small form still open
+            assert!(e.namesake.is_some() && e.same_person.is_some());
+            assert!(e.correcting().is_some());
+            match answer {
+                Some(true) => press(&mut e, &core, key!(enter)),
+                Some(false) => press(&mut e, &core, key!(n)),
+                None => press(&mut e, &core, BACK_KEY),
+            };
+            assert!(e.namesake.is_none() && e.same_person.is_none());
+            assert_eq!(e.correcting().is_some(), answer.is_none());
+            assert_eq!(
+                core.existing_players(free.clone())
+                    .unwrap()
+                    .iter()
+                    .filter(|p| p.name.to_lowercase().replace("  ", " ").trim() == "arezzo p1")
+                    .count(),
+                people
+            );
+        }
     }
 
     /// A match left without the players of B (Esc on their score sheet)

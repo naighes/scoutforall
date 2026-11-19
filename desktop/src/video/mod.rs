@@ -466,8 +466,7 @@ impl VideoScreen {
             .ok_or_else(|| MobileError::Failed {
                 reason: "no match with actions to watch".to_string(),
             })?;
-        let mut screen =
-            VideoScreen::with_clips(
+        let mut screen = VideoScreen::with_clips(
             core,
             dir,
             team_id,
@@ -537,9 +536,9 @@ impl VideoScreen {
     fn load_events(&mut self) -> Result<(), MobileError> {
         let profile = self.profile.clone().unwrap_or_default();
         let durations = self.durations();
-        self.events = self
-            .core
-            .video_events(&self.the_match, &profile, &durations, self.of_b.as_ref())?;
+        self.events =
+            self.core
+                .video_events(&self.the_match, &profile, &durations, self.of_b.as_ref())?;
         self.first_ms = self.events.iter().filter_map(|e| e.offset_ms).min();
         self.all_events = self.events.clone();
         if let Some(clips) = &self.clips {
@@ -2522,9 +2521,7 @@ pub(crate) mod screen_tests {
             zone: None,
             target: None,
         };
-        let refs = core
-            .match_clips_of(&team, &m, MatchSide::B, &pick)
-            .unwrap();
+        let refs = core.match_clips_of(&team, &m, MatchSide::B, &pick).unwrap();
         assert!(!refs.is_empty());
         let screen = VideoScreen::with_clips(
             core.clone(),
@@ -2729,7 +2726,8 @@ pub(crate) mod screen_tests {
             screen.team_id.clone(),
             screen.match_id.clone(),
         );
-        let mut again = VideoScreen::new(core, dir.path().to_path_buf(), team, m, MatchSide::A).unwrap();
+        let mut again =
+            VideoScreen::new(core, dir.path().to_path_buf(), team, m, MatchSide::A).unwrap();
         assert_eq!(again.events[2].offset_ms, Some(60_000));
         again.key(key!(r));
         let back: Vec<Option<i64>> = again.events.iter().map(|e| e.offset_ms).collect();
@@ -2768,7 +2766,8 @@ pub(crate) mod screen_tests {
             screen.team_id.clone(),
             screen.match_id.clone(),
         );
-        let again = VideoScreen::new(core, dir.path().to_path_buf(), team, m, MatchSide::A).unwrap();
+        let again =
+            VideoScreen::new(core, dir.path().to_path_buf(), team, m, MatchSide::A).unwrap();
         assert_eq!(names(&again), saved);
         // the first file starts the video: the events from it
         let first = video::anchor(again.profile.as_ref().unwrap(), &again.the_match).unwrap();
@@ -3239,17 +3238,16 @@ pub(crate) mod screen_tests {
             .unwrap();
         println!("from 4: {} by {}", best.0, best.1);
         let refs = core.match_clips(&team, &m, &best.2).unwrap();
-        let screen =
-            VideoScreen::with_clips(
-                core,
-                dir.to_path_buf(),
-                team,
-                m,
-                MatchSide::A,
-                refs,
-                best.1.clone(),
-            )
-                .unwrap();
+        let screen = VideoScreen::with_clips(
+            core,
+            dir.to_path_buf(),
+            team,
+            m,
+            MatchSide::A,
+            refs,
+            best.1.clone(),
+        )
+        .unwrap();
         for e in &screen.events {
             println!(
                 "set {} #{} {} {:?} {}-{} at {:?} ms",

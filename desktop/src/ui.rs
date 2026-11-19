@@ -743,6 +743,21 @@ pub fn confirm<'a, M: Clone + 'a>(
     s: &Strings,
     title: &str,
     what: &str,
+    yes: (&'static [u8], &str),
+    on_yes: M,
+    on_no: M,
+    c: Colors,
+) -> Element<'a, M> {
+    confirm_with(s, title, what, vec![], yes, on_yes, on_no, c)
+}
+
+/// As `confirm`, with other answers between the no and the yes.
+#[allow(clippy::too_many_arguments)]
+pub fn confirm_with<'a, M: Clone + 'a>(
+    s: &Strings,
+    title: &str,
+    what: &str,
+    others: Vec<(&'static [u8], &str, M)>,
     (yes_icon, yes): (&'static [u8], &str),
     on_yes: M,
     on_no: M,
@@ -756,8 +771,9 @@ pub fn confirm<'a, M: Clone + 'a>(
                 .font(theme::fonts().bold)
                 .color(c.text),
             body(what.to_string()),
-            answers(
+            answers_with(
                 Some((theme::icons::CLOSE, s.cancel, on_no)),
+                others,
                 yes_icon,
                 yes,
                 Some(on_yes),

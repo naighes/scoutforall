@@ -4132,12 +4132,12 @@ impl Scout4All {
         form: MatchForm,
     ) -> Result<(), MobileError> {
         let m = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
-        let numbers = form
-            .roster_of_b_numbers(&m.team, Some(&m))
-            .map_err(|e| MobileError::InvalidMatch {
-                field: e.into(),
-                reason: e.message(self.language.labels()),
-            })?;
+        let numbers =
+            form.roster_of_b_numbers(&m.team, Some(&m))
+                .map_err(|e| MobileError::InvalidMatch {
+                    field: e.into(),
+                    reason: e.message(self.language.labels()),
+                })?;
         let a = self.read_match(&team_id, &match_id)?;
         self.runtime
             .block_on(self.match_writer.save_roster_of_b(&a, &numbers))?;
@@ -4309,6 +4309,24 @@ impl Scout4All {
         Ok(PlayerForm {
             number: free.map(|n| n.to_string()).unwrap_or_default(),
             ..PlayerForm::default()
+        })
+    }
+
+    /// The person of the registry with the name written (case, accents and
+    /// spaces aside) that can be added to the team: the one to ask about
+    /// before a new person with the same name is made.
+    pub fn registry_namesake(
+        &self,
+        team_id: String,
+        name: String,
+    ) -> Result<Option<ExistingPlayer>, MobileError> {
+        let written = scout4all_core::dvw::import::normalized(&name);
+        Ok(match written.trim().is_empty() {
+            true => None,
+            false => self
+                .existing_players(team_id)?
+                .into_iter()
+                .find(|p| scout4all_core::dvw::import::normalized(&p.name) == written),
         })
     }
 

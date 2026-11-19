@@ -412,7 +412,8 @@ impl MatchForm {
                 .map(|c| c.player.id)
                 .collect()
         });
-        form.valid_roster(team, existing).map(|(_, numbers)| numbers)
+        form.valid_roster(team, existing)
+            .map(|(_, numbers)| numbers)
     }
 
     /// The players chosen, by `roster_choices`.
