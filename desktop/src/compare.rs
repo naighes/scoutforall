@@ -1,6 +1,7 @@
 //! The statistics of the two sides of a match scouted on both sides side by
 //! side, A | B: the same figures as each side has, no new calculation. In
-//! the summary of a match and on the scouting screen (F3).
+//! the summary of a match and on the scouting screen (F3): fundamentals,
+//! phases, errors, distribution and rotations.
 
 use {
     crate::{
@@ -112,6 +113,49 @@ pub fn comparison<'a, M: 'a>(
             c,
         )
     });
+    let number = |n: u32| -> Element<'a, M> {
+        text(n.to_string())
+            .size(SIZE_BODY)
+            .font(theme::fonts().bold)
+            .into()
+    };
+    let errors = [
+        (s.unforced_errors, a.unforced_errors, b.unforced_errors),
+        (s.forced_errors, a.forced_errors, b.forced_errors),
+        (s.aces, a.aces, b.aces),
+        (s.opponent_errors, a.opponent_errors, b.opponent_errors),
+    ]
+    .into_iter()
+    .map(|(name, x, y)| line(name.to_string(), number(x), number(y), c));
+    // the zones of the setter, as the two sides have them
+    let share = |z: Option<&scout4all_mobile::ZoneStats>| -> Element<'a, M> {
+        text(z.map_or_else(|| "–".to_string(), |z| format!("{:.0}%", z.share)))
+            .size(SIZE_BODY)
+            .font(theme::fonts().bold)
+            .into()
+    };
+    let zones = a.distribution.iter().map(|za| {
+        line(
+            za.zone.to_string(),
+            share(Some(za)),
+            share(b.distribution.iter().find(|zb| zb.zone == za.zone)),
+            c,
+        )
+    });
+    let rotations = a.rotations.iter().map(|ra| {
+        line(
+            ra.name.clone(),
+            phase(&ra.total, c),
+            phase(
+                &b.rotations
+                    .iter()
+                    .find(|rb| rb.rotation == ra.rotation)
+                    .and_then(|rb| rb.total.clone()),
+                c,
+            ),
+            c,
+        )
+    });
     let content = column![
         head,
         Column::with_children(fundamentals).spacing(8),
@@ -127,6 +171,12 @@ pub fn comparison<'a, M: 'a>(
             phase(&b.break_points, c),
             c
         ),
+        ui::section(s.errors, c),
+        Column::with_children(errors).spacing(8),
+        ui::section(s.distribution, c),
+        Column::with_children(zones).spacing(8),
+        ui::section(s.rotations, c),
+        Column::with_children(rotations).spacing(8),
     ]
     .spacing(12);
     ui::panel(Some(s.compare), content, c)
