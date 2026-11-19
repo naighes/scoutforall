@@ -836,6 +836,68 @@ mod tests {
         assert_eq!(again.event_choices(), session.event_choices());
     }
 
+    /// With the player first (the phone), the events before their player
+    /// are of both sides: B's changes of the lineup come with A's.
+    #[tokio::test]
+    async fn the_phone_offers_the_events_of_both_sides_before_their_player() {
+        let p = Sqlite::new();
+        let (a, b) = (
+            team_of(&p, "Cortona", 9).await,
+            team_of(&p, "Cascina", 9).await,
+        );
+        let m = p
+            .match_writer
+            .create(
+                &a,
+                MatchInput {
+                    opponent: Opponent::Team(b.id),
+                    ..MatchInput::against("", date(), true, 1, "", vec![])
+                },
+            )
+            .await
+            .unwrap();
+        p.match_writer
+            .save_scouting(&m, ScoutingMode::Both)
+            .await
+            .unwrap();
+        let start = |t: &TeamEntry, serving| {
+            SetEntry::new(1, serving, positions(t), libero(t), None, t.players[0].id).unwrap()
+        };
+        let (start_a, start_b) = (start(&a, TeamSideEnum::Us), start(&b, TeamSideEnum::Them));
+        let side = |s: &SetEntry| crate::set_start::SideInput {
+            positions: s.initial_positions,
+            setter: s.setter,
+            libero: s.libero,
+            fallback_libero: None,
+        };
+        let input = crate::set_start::SetStartInput {
+            set_number: 1,
+            serving_team: TeamSideEnum::Us,
+            positions: start_a.initial_positions,
+            setter: start_a.setter,
+            libero: start_a.libero,
+            fallback_libero: None,
+            opponent: Some(side(&start_b)),
+        };
+        let writer: std::sync::Arc<dyn SetWriter + Send + Sync> =
+            std::sync::Arc::new(crate::providers::sqlite::sets::SqliteSetWriter::new(
+                p.db.clone(),
+                crate::localization::Language::default(),
+            ));
+        let session = crate::set_start::start(m.clone(), input, writer, Some(b.clone()))
+            .await
+            .unwrap()
+            .with_order(crate::scouting::ChoiceOrder::PlayerFirst);
+        let others = session.other_events();
+        for side in [Side::A, Side::B] {
+            assert!(others.contains(&(side, R)), "{side:?} {others:?}");
+            assert!(others.contains(&(side, LR)), "{side:?} {others:?}");
+        }
+        // the ones of a player stay with their player: no serve, no attack of B
+        assert!(!others.iter().any(|(_, e)| *e == S));
+        assert!(!others.contains(&(Side::A, A)));
+    }
+
     /// The changes of the lineup of both sides while the ball is still:
     /// the substitutions (counted for the side they are of), the libero
     /// and the setter of B as well as A's.

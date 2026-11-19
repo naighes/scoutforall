@@ -322,7 +322,8 @@ class ScoutingViewModel(
 
     private fun view(s: Scouting): ScoutingView {
         val state = s.state()
-        val others = s.otherEvents()
+        // the events of B come with the two-sides screen (TODO/001, phase 4)
+        val others = s.otherEvents().filter { !it.sideB }
         return ScoutingView(
             state = state,
             // the point without a cause has its own row (`NoCausePoints`)

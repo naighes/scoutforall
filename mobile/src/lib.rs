@@ -2282,13 +2282,17 @@ impl Scouting {
     }
 
     /// The events that come before their player: the opponent's, the
-    /// faults, the changes of the lineup.
+    /// faults, the changes of the lineup; scouting both sides, the other
+    /// side's too, with their side.
     pub fn other_events(&self) -> Vec<EventChoice> {
         let session = self.session();
         session
             .other_events()
             .into_iter()
-            .map(|e| self.event_choice(&session, e))
+            .map(|(of, e)| EventChoice {
+                side_b: of == ScoutSide::B,
+                ..self.event_choice(&session, e)
+            })
             .collect()
     }
 

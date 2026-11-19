@@ -820,7 +820,14 @@ mod tests {
     #[tokio::test]
     async fn with_the_player_first_the_fault_can_be_the_teams() {
         let mut s = player_first().await;
-        assert!(s.session.other_events().contains(&F));
+        assert!(
+            s.session
+                .other_events()
+                .into_iter()
+                .map(|(_, e)| e)
+                .collect::<Vec<_>>()
+                .contains(&F)
+        );
         s.session.choose_event(F).await.unwrap();
         assert!(s.session.team_choice());
         assert_eq!(s.session.choose_team().await, Ok(Progress::Saved));
@@ -1062,7 +1069,14 @@ mod tests {
             (s.session.step(), s.session.event(), s.session.player()),
             (ScoutingStep::Eval, Some(S), Some(s.players[0]))
         );
-        assert_eq!(s.session.other_events(), vec![OE, F, PW, PL, R, LR, CS, LF]);
+        assert_eq!(
+            s.session
+                .other_events()
+                .into_iter()
+                .map(|(_, e)| e)
+                .collect::<Vec<_>>(),
+            vec![OE, F, PW, PL, R, LR, CS, LF]
+        );
         assert_eq!(s.session.player_events(&s.players[0]), vec![]);
         assert_eq!(
             s.session.choose_eval(EvalEnum::Perfect).await,
@@ -1197,7 +1211,14 @@ mod tests {
         assert_eq!(s.session.player_events(&setter), vec![A, D]);
         assert_eq!(s.session.player_events(&blocker), vec![A, D, B]);
         assert_eq!(s.session.player_events(&libero), vec![D]);
-        assert_eq!(s.session.other_events(), vec![OS, OE, F, FB, OF, PW, PL]);
+        assert_eq!(
+            s.session
+                .other_events()
+                .into_iter()
+                .map(|(_, e)| e)
+                .collect::<Vec<_>>(),
+            vec![OS, OE, F, FB, OF, PW, PL]
+        );
 
         assert_eq!(
             s.session.choose_player_first(blocker).await,
@@ -1207,7 +1228,14 @@ mod tests {
             (s.session.step(), s.session.player()),
             (ScoutingStep::Event, Some(blocker))
         );
-        assert_eq!(s.session.other_events(), vec![]);
+        assert_eq!(
+            s.session
+                .other_events()
+                .into_iter()
+                .map(|(_, e)| e)
+                .collect::<Vec<_>>(),
+            vec![]
+        );
         s.session.choose_event(B).await.unwrap();
         assert_eq!(
             (s.session.step(), s.session.event()),
@@ -1247,7 +1275,14 @@ mod tests {
         // the setter can attack; our freeball is a team event, among the
         // other events, saved at once with no player
         assert_eq!(s.session.player_events(&setter), vec![A]);
-        assert_eq!(s.session.other_events(), vec![OE, F, FB, PW, PL]);
+        assert_eq!(
+            s.session
+                .other_events()
+                .into_iter()
+                .map(|(_, e)| e)
+                .collect::<Vec<_>>(),
+            vec![OE, F, FB, PW, PL]
+        );
         assert_eq!(s.session.choose_event(FB).await, Ok(Progress::Saved));
         let saved = saved_events(&s).await;
         assert_eq!(event_types(&saved), vec![S, D, FB]);

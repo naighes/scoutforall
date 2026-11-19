@@ -827,14 +827,23 @@ impl ScoutingSession {
     /// With the player first, the events that come before their player,
     /// if any: the ones of the opponent, the faults, the changes of the
     /// lineup. Available before a player is chosen, and while our serve
-    /// waits for its evaluation.
-    pub fn other_events(&self) -> Vec<EventTypeEnum> {
+    /// waits for its evaluation. Each with its side: the active one's, and
+    /// scouting both sides the other side's as well, when `event_choices`
+    /// offers them (the changes of the lineup while the ball is still, the
+    /// touches where the ball could be on either side, even the ones of a
+    /// player, as the screen shows the players of the active side only).
+    pub fn other_events(&self) -> Vec<(Side, EventTypeEnum)> {
         match (self.step, self.player, self.serve_pending()) {
             (ScoutingStep::Event, None, _) | (_, _, true) => self
                 .available_events()
-                .iter()
-                .copied()
+                .into_iter()
                 .filter(|e| *e != EventTypeEnum::S && !played_by_the_player(*e))
+                .map(|e| (self.side, e))
+                .chain(
+                    self.event_choices()
+                        .into_iter()
+                        .filter(|(side, e)| *side != self.side && *e != EventTypeEnum::S),
+                )
                 .collect(),
             _ => vec![],
         }
