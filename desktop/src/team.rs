@@ -599,7 +599,12 @@ impl TeamScreen {
                     .width(Length::Fill),
                 ]
                 .spacing(12)
-                .width(Length::Fill),
+                .width(Length::Fill)
+                // room for the scroll bar: it does not cover the name
+                .padding(iced::Padding {
+                    right: 14.0,
+                    ..iced::Padding::ZERO
+                }),
             )
             .height(Length::Fill),
             c,

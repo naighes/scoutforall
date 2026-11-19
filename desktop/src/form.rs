@@ -1134,16 +1134,17 @@ impl Form {
             }
             Value::Check { .. } => iced::widget::space::vertical().height(0).into(),
             Value::Choice { options, index } => {
-                let all = options.clone();
+                // the field is one line high: a long label is cut with an
+                // ellipsis (the items are told apart by their index)
+                let items: Vec<ChoiceItem> = options
+                    .iter()
+                    .enumerate()
+                    .map(|(n, o)| ChoiceItem::new(n, o))
+                    .collect();
                 pick_list(
-                    options.as_slice(),
-                    options.get(*index),
-                    move |chosen: String| {
-                        on(Message::Choose(
-                            i,
-                            all.iter().position(|o| *o == chosen).unwrap_or(0),
-                        ))
-                    },
+                    items.clone(),
+                    items.get(*index).cloned(),
+                    move |chosen: ChoiceItem| on(Message::Choose(i, chosen.index)),
                 )
                 .width(Length::Fill)
                 .text_size(SIZE_BODY)
@@ -1526,5 +1527,43 @@ mod tests {
         assert_eq!(f.index(0), 1);
         f.update(Message::Choose(0, 0));
         assert_eq!(f.index(0), 0);
+    }
+}
+
+/// Longest label shown in a drop-down, in characters.
+const CHOICE_LABEL_MAX: usize = 48;
+
+/// An option of a drop-down: compared by position, shown cut when long.
+#[derive(Clone)]
+struct ChoiceItem {
+    index: usize,
+    label: String,
+}
+
+impl ChoiceItem {
+    fn new(index: usize, option: &str) -> Self {
+        let label = match option.chars().count() > CHOICE_LABEL_MAX {
+            true => option
+                .chars()
+                .take(CHOICE_LABEL_MAX - 1)
+                .chain(std::iter::once('…'))
+                .collect(),
+            false => option.to_string(),
+        };
+        Self { index, label }
+    }
+}
+
+impl PartialEq for ChoiceItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
+}
+
+impl Eq for ChoiceItem {}
+
+impl std::fmt::Display for ChoiceItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
     }
 }

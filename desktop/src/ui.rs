@@ -553,11 +553,12 @@ pub fn top_bar<'a, M: Clone + 'a>(
     column![
         bar(
             row![
-                container(logo).width(Length::Fill),
-                title,
-                container(row(right).spacing(10))
+                logo,
+                container(title)
                     .width(Length::Fill)
-                    .align_x(Alignment::End),
+                    .padding(Padding::from([0, 16]))
+                    .align_x(Alignment::Center),
+                row(right).spacing(10),
             ]
             .align_y(Alignment::Center),
             58.0,
