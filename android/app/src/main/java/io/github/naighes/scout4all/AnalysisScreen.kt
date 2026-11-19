@@ -69,6 +69,7 @@ import io.github.naighes.scout4all.core.AnalysisPeriod
 import io.github.naighes.scout4all.core.CompetitionChoice
 import io.github.naighes.scout4all.core.MatchTrend
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.ScoutedOpponent
 import io.github.naighes.scout4all.core.TeamAnalysis
 import java.time.DateTimeException
 import java.time.Instant
@@ -108,6 +109,17 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     // the competition the matches are narrowed to, none for every one
     var competition by rememberSaveable { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf(DetailQuery()) }
+    // the opponent the analysis is seen from, none for the team itself
+    var opponent by rememberSaveable { mutableStateOf<String?>(null) }
+    var ours by remember { mutableStateOf("") }
+    var opponents by remember { mutableStateOf<List<ScoutedOpponent>>(emptyList()) }
+    LaunchedEffect(teamId) {
+        try {
+            ours = app.core { it.team(teamId).name }
+            opponents = app.core { it.analysisOpponents(teamId) }
+        } catch (_: MobileException) {
+        }
+    }
     // the period read: two days only once both are
     var period by remember { mutableStateOf<AnalysisPeriod>(AnalysisPeriod.LastMonth) }
     LaunchedEffect(kind, count, from, to) {
@@ -123,9 +135,12 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     // the last one read stays while the next is
     var analysis by remember { mutableStateOf<TeamAnalysis?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(period, competition, query) {
+    LaunchedEffect(period, competition, query, opponent) {
         try {
-            analysis = app.core { it.teamAnalysis(teamId, period, competition, query.event, query.filter) }
+            analysis = app.core {
+                opponent?.let { o -> it.opponentAnalysis(teamId, o, period, competition, query.event, query.filter) }
+                    ?: it.teamAnalysis(teamId, period, competition, query.event, query.filter)
+            }
             failed = null
         } catch (e: MobileException) {
             failed = e.reason
@@ -155,6 +170,9 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    if (opponents.isNotEmpty()) {
+                        SeenFromChooser(ours, opponents, opponent) { opponent = it }
+                    }
                     // offered with more than one, or while one is chosen
                     if (a.competitions.size > 1 || competition != null) {
                         CompetitionChooser(a.competitions, competition) { competition = it }
@@ -199,7 +217,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                                 TrendLegend(a.matches.size)
                                 a.trend.forEach { MatchTrendChart(it, a.matches) }
                             }
-                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = teamWatch(teamId, period, competition, onWatch)) { query = it }
+                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = if (opponent == null) teamWatch(teamId, period, competition, onWatch) else null) { query = it }
                         }
                     }
                 }
@@ -231,6 +249,24 @@ internal object DayMask : VisualTransformation {
                     (offset - listOf(5, 8).count { offset >= it }).coerceIn(0, digits.length)
             },
         )
+    }
+}
+
+/** The team itself or an opponent scouted on both sides, to see the analysis from. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SeenFromChooser(
+    ours: String,
+    opponents: List<ScoutedOpponent>,
+    chosen: String?,
+    onChoose: (String?) -> Unit,
+) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(stringResource(R.string.seen_from), style = MaterialTheme.typography.labelLarge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = chosen == null, onClick = { onChoose(null) }, label = { Text(ours) })
+        opponents.forEach {
+            FilterChip(selected = chosen == it.id, onClick = { onChoose(it.id) }, label = { Text(it.name) })
+        }
     }
 }
 

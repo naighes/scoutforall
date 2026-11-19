@@ -3,13 +3,17 @@ package io.github.naighes.scout4all
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.AnnotatedString
 import java.time.LocalDate
+import io.github.naighes.scout4all.core.EvalEnum
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -98,6 +102,29 @@ class AnalysisTest {
         days("20261131", "20261130")
         rule.waitForText(string(R.string.not_a_day))
         rule.waitForText("2026-11-01 → 2026-11-30", substring = true)
+    }
+
+    /** An opponent scouted on both sides: the analysis can be seen from its
+     * side; with none, no such choice. */
+    @Test
+    fun theAnalysisSeenFromAnOpponentScoutedOnBothSides() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona")
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        rule.waitForText(string(R.string.matches_count, 1), substring = true)
+        rule.onAllNodesWithText(string(R.string.seen_from)).assertCountEquals(0)
+    }
+
+    @Test
+    fun theAnalysisSeenFromTheOpponent() {
+        val both = saveNationalTeam()
+        serve(both, startFirstSetBoth(both), EvalEnum.PERFECT)
+        rule.setContent { Scout4AllTheme { AnalysisScreen(both, onBack = {}) } }
+        rule.waitForText(string(R.string.seen_from))
+        val chip = { name: String -> rule.onNode(hasText(name) and hasClickAction()) }
+        chip("Arezzo").performClick()
+        rule.waitFor { runCatching { chip("Arezzo").assertIsSelected() }.isSuccess }
+        rule.waitForText(string(R.string.matches_count, 1), substring = true)
     }
 
     /** One competition alone: nothing to choose. */
