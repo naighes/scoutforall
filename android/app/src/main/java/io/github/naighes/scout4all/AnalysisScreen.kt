@@ -66,6 +66,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.AnalysedMatch
 import io.github.naighes.scout4all.core.AnalysisPeriod
+import io.github.naighes.scout4all.core.CompetitionChoice
 import io.github.naighes.scout4all.core.MatchTrend
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.TeamAnalysis
@@ -104,6 +105,8 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     var from by rememberSaveable { mutableStateOf("") }
     var to by rememberSaveable { mutableStateOf("") }
     var page by rememberSaveable { mutableIntStateOf(0) }
+    // the competition the matches are narrowed to, none for every one
+    var competition by rememberSaveable { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf(DetailQuery()) }
     // the period read: two days only once both are
     var period by remember { mutableStateOf<AnalysisPeriod>(AnalysisPeriod.LastMonth) }
@@ -120,9 +123,9 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     // the last one read stays while the next is
     var analysis by remember { mutableStateOf<TeamAnalysis?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(period, query) {
+    LaunchedEffect(period, competition, query) {
         try {
-            analysis = app.core { it.teamAnalysis(teamId, period, null, query.event, query.filter) }
+            analysis = app.core { it.teamAnalysis(teamId, period, competition, query.event, query.filter) }
             failed = null
         } catch (e: MobileException) {
             failed = e.reason
@@ -152,6 +155,10 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    // offered with more than one, or while one is chosen
+                    if (a.competitions.size > 1 || competition != null) {
+                        CompetitionChooser(a.competitions, competition) { competition = it }
+                    }
                     PeriodChooser(
                         kind,
                         count,
@@ -192,7 +199,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                                 TrendLegend(a.matches.size)
                                 a.trend.forEach { MatchTrendChart(it, a.matches) }
                             }
-                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = teamWatch(teamId, period, onWatch)) { query = it }
+                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = teamWatch(teamId, period, competition, onWatch)) { query = it }
                         }
                     }
                 }
@@ -224,6 +231,27 @@ internal object DayMask : VisualTransformation {
                     (offset - listOf(5, 8).count { offset >= it }).coerceIn(0, digits.length)
             },
         )
+    }
+}
+
+/** The competitions of the matches scouted, one to narrow them to. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CompetitionChooser(
+    competitions: List<CompetitionChoice>,
+    chosen: String?,
+    onChoose: (String?) -> Unit,
+) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(stringResource(R.string.competition), style = MaterialTheme.typography.labelLarge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = chosen == null,
+            onClick = { onChoose(null) },
+            label = { Text(stringResource(R.string.all_competitions)) },
+        )
+        competitions.forEach {
+            FilterChip(selected = chosen == it.id, onClick = { onChoose(it.id) }, label = { Text(it.name) })
+        }
     }
 }
 

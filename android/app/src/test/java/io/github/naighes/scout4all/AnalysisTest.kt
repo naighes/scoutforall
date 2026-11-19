@@ -100,6 +100,32 @@ class AnalysisTest {
         rule.waitForText("2026-11-01 → 2026-11-30", substring = true)
     }
 
+    /** One competition alone: nothing to choose. */
+    @Test
+    fun oneCompetitionIsNotOffered() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona", "Coppa")
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        rule.waitForText(string(R.string.matches_count, 1), substring = true)
+        assertEquals(0, rule.onAllNodesWithText(string(R.string.all_competitions)).fetchSemanticsNodes().size)
+    }
+
+    /** Two competitions: the row offers them, the one chosen narrows the
+     * matches, all of them bring the others back. */
+    @Test
+    fun theCompetitionOfTheMatches() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona", "Coppa")
+        winMatch(team, "Arezzo", "Serie A")
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        rule.waitForText(string(R.string.all_competitions))
+        rule.waitForText(string(R.string.matches_count, 2), substring = true)
+        rule.onNode(hasText("Coppa") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.matches_count, 1), substring = true)
+        rule.onNode(hasText(string(R.string.all_competitions)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.matches_count, 2), substring = true)
+    }
+
     /** The reception of the rally chosen by its group: the chip says it. */
     @Test
     fun aFilterOfTheSituation() {

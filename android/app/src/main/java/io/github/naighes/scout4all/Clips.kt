@@ -62,12 +62,12 @@ fun matchWatch(teamId: String, matchId: String, side: MatchSide, scope: StatsSco
 
 /** The actions of a statistic of the team over a period, match after match
  * (the ones with a video). */
-fun teamWatch(teamId: String, period: AnalysisPeriod, onWatch: (VideoRequest.Clips) -> Unit) = Watch { detail, query, choice, clear ->
+fun teamWatch(teamId: String, period: AnalysisPeriod, competition: String?, onWatch: (VideoRequest.Clips) -> Unit) = Watch { detail, query, choice, clear ->
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val pick = pickOf(StatsScope.Match, query, choice)
-    val matches by produceState<List<TeamClipMatch>?>(null, pick, period) {
+    val matches by produceState<List<TeamClipMatch>?>(null, pick, period, competition) {
         value = try {
-            app.core { it.teamClipMatches(teamId, period, null, pick) }
+            app.core { it.teamClipMatches(teamId, period, competition, pick) }
         } catch (_: MobileException) {
             null
         }

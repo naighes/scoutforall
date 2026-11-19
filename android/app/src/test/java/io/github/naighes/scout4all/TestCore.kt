@@ -59,15 +59,16 @@ fun startFirstSet(
     opponent: String = "Cortona",
     serving: TeamSideEnum = TeamSideEnum.US,
     setterAt: Int = 1,
+    competition: String = "",
 ): String = core { c ->
-    val match = c.saveMatch(team, null, MatchForm(opponent, "2026-10-25T18:00:00+02:00", true, "6"))
+    val match = c.saveMatch(team, null, MatchForm(opponent, "2026-10-25T18:00:00+02:00", true, "6", competition = competition))
     startSet(c, team, match, serving, setterAt)
     match
 }
 
 /** A match of the team won 3–0 with aces; its id. */
-fun winMatch(team: String, opponent: String): String {
-    val match = startFirstSet(team, opponent)
+fun winMatch(team: String, opponent: String, competition: String = ""): String {
+    val match = startFirstSet(team, opponent, competition = competition)
     repeat(3) { set ->
         if (set > 0) startNextSet(team, match)
         core { c -> c.scouting(team, match).use { s -> repeat(25) { s.chooseEval(EvalEnum.PERFECT) } } }

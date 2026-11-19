@@ -484,6 +484,7 @@
     <string name="neutral_game">Neutro</string>
     <string name="friendly">Amistoso</string>
     <string name="competition">Competição</string>
+    <string name="all_competitions">Todas as competições</string>
     <string name="competition_format">Formato</string>
     <string name="stage">Fase</string>
     <string name="round">Rodada</string>

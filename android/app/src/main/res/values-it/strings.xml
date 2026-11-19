@@ -484,6 +484,7 @@
     <string name="neutral_game">Campo neutro</string>
     <string name="friendly">Amichevole</string>
     <string name="competition">Competizione</string>
+    <string name="all_competitions">Tutte le competizioni</string>
     <string name="competition_format">Formato</string>
     <string name="stage">Fase</string>
     <string name="round">Turno</string>
