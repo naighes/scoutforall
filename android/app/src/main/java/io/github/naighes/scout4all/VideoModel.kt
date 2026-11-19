@@ -17,6 +17,7 @@ import io.github.naighes.scout4all.core.ClipMargins
 import io.github.naighes.scout4all.core.ClipSpan
 import io.github.naighes.scout4all.core.StripClick
 import io.github.naighes.scout4all.core.VideoSeconds
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.NewVideoFile
@@ -53,6 +54,9 @@ sealed interface VideoRequest {
         val matches: List<TeamClipMatch>,
         /** the ones without a video: left out of the video made, said */
         val leftOut: List<TeamClipMatch> = emptyList(),
+        /** the team of the matches: B's actions are seen in the video of
+         * A, only to see */
+        val side: MatchSide = MatchSide.A,
     ) : VideoRequest
 }
 
@@ -62,12 +66,12 @@ sealed interface VideoRequest {
 const val CLIPS_KEY = "clips"
 
 /** The actions to watch as the screen saves them. */
-fun VideoRequest.Clips.saved(): String = saveClips(SavedClips(teamId, pick, title, matches, leftOut))
+fun VideoRequest.Clips.saved(): String = saveClips(SavedClips(teamId, pick, title, matches, leftOut, side))
 
 /** The actions to watch as the screen saved them; none when they can't be
  * read. */
 fun savedClips(saved: String?): VideoRequest.Clips? =
-    saved?.let(::restoreClips)?.let { VideoRequest.Clips(it.teamId, it.pick, it.title, it.matches, it.leftOut) }
+    saved?.let(::restoreClips)?.let { VideoRequest.Clips(it.teamId, it.pick, it.title, it.matches, it.leftOut, it.side) }
 
 /** How far a touch shifts the sync. */
 const val SHIFT_MS = 500L
@@ -179,7 +183,7 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         at = index
         val pick = clips?.pick
         review = try {
-            app.core { it.videoReview(request.teamId, matchId, pick) }
+            app.core { it.videoReview(request.teamId, matchId, clips?.side ?: MatchSide.A, pick) }
         } catch (e: MobileException) {
             error = e.reason
             null

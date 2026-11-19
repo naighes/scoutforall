@@ -280,6 +280,19 @@ impl MatchRows {
         }
     }
 
+    /// The sets played, with, for each event of B's stream, the event of
+    /// A's it comes from (`SetRows::origins_in_a`). Nothing scouting only A.
+    pub fn origins_of_b(&self) -> Vec<(u8, Vec<Option<usize>>)> {
+        match self.row.scouting {
+            ScoutingMode::A => vec![],
+            ScoutingMode::Both => self
+                .played()
+                .into_iter()
+                .map(|s| (s.row.number, s.origins_in_a()))
+                .collect(),
+        }
+    }
+
     /// The sets not removed, in order.
     fn played(&self) -> Vec<&SetRows> {
         let mut sets: Vec<&SetRows> = self.sets.iter().filter(|s| !s.row.deleted).collect();
@@ -498,6 +511,19 @@ impl SetRows {
                 .collect(),
             ..start
         })
+    }
+
+    /// For each event of B's stream (`entry_of_b`), the index of the event
+    /// of A's stream coming from the same touch, if A's has one: the
+    /// touch of A an event of B is born from, for what is saved by the
+    /// events of A (the corrections of the video).
+    pub fn origins_in_a(&self) -> Vec<Option<usize>> {
+        let streams = project(&self.touches());
+        streams
+            .b
+            .iter()
+            .map(|b| streams.a.iter().position(|a| a.source == b.source))
+            .collect()
     }
 
     /// Whether the set is scouted on both sides: B has its lineup.

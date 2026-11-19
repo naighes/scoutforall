@@ -535,6 +535,36 @@ mod tests {
         assert_ne!(of_sides, Some(Stats::new()));
     }
 
+    /// The event of B born from a touch of A is told with the event of A
+    /// of the same touch (the video corrections are saved by A's).
+    #[tokio::test]
+    async fn b_events_know_the_event_of_a_they_come_from() {
+        let p = Sqlite::new();
+        let (a, b, m) = set_one(&p, true).await;
+        add(
+            &p,
+            &m,
+            &[
+                (Side::A, S, a.players[0].id, Positive),
+                (Side::B, P, libero(&b), Negative),
+                (Side::B, A, b.players[1].id, Perfect),
+                (Side::B, S, b.players[1].id, Positive),
+                (Side::A, P, libero(&a), Negative),
+                (Side::A, A, a.players[1].id, Error),
+            ],
+        );
+        let origins = p.match_reader.origins_of_b(&a, &m.id).unwrap();
+        let of_a = p.match_reader.read_single(&a, &m.id).await.unwrap();
+        let of_b = p.match_reader.read_of_b(&a, &m.id).unwrap().unwrap();
+        // B's own touches before the point it is told: only its attack
+        // (the same instant as the point A is told) and the point told by
+        // A's attack have an event of A
+        assert_eq!(origins, vec![(1, vec![None, Some(1), None, Some(3)])]);
+        let (events_a, events_b) = (&of_a.sets[0].events, &of_b.sets[0].events);
+        assert_eq!(events_b[1].timestamp, events_a[1].timestamp);
+        assert_eq!(events_b[3].timestamp, events_a[3].timestamp);
+    }
+
     /// Scouting only A: no side of B.
     #[tokio::test]
     async fn scouting_a_has_no_b_side() {

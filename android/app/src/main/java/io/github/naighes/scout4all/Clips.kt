@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.AnalysisPeriod
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.DetailStats
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.TeamClipMatch
@@ -35,12 +36,12 @@ private fun pickOf(scope: StatsScope, query: DetailQuery, choice: ClipChoice) =
     ClipPick(scope, query.event, query.filter, choice.evals, choice.zone, choice.target)
 
 /** The actions of a statistic of the match in its video. */
-fun matchWatch(teamId: String, matchId: String, scope: StatsScope, onWatch: (VideoRequest.Clips) -> Unit) = Watch { detail, query, choice, clear ->
+fun matchWatch(teamId: String, matchId: String, side: MatchSide, scope: StatsScope, onWatch: (VideoRequest.Clips) -> Unit) = Watch { detail, query, choice, clear ->
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val pick = pickOf(scope, query, choice)
     val count by produceState<Int?>(null, pick) {
         value = try {
-            app.core { it.matchClipCount(teamId, matchId, pick) }.toInt()
+            app.core { it.matchClipCount(teamId, matchId, side, pick) }.toInt()
         } catch (_: MobileException) {
             null
         }
@@ -55,7 +56,7 @@ fun matchWatch(teamId: String, matchId: String, scope: StatsScope, onWatch: (Vid
         lines = listOf(stringResource(if (hasVideo) R.string.clips_pick_hint else R.string.clips_no_video)),
     ) {
         val match = TeamClipMatch(matchId, "", "", (count ?: 0).toUInt(), true)
-        onWatch(VideoRequest.Clips(teamId, pick, title, listOf(match)))
+        onWatch(VideoRequest.Clips(teamId, pick, title, listOf(match), side = side))
     }
 }
 

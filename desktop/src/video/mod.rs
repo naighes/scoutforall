@@ -48,7 +48,7 @@ use {
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        MatchClips, MobileError, Scout4All, VideoEvent,
+        MatchClips, MatchSide, MobileError, Origins, Scout4All, VideoEvent,
         strip::{ClipSpan, StripClick, clip_spans},
         video::{
             Piece, VideoStanding as Standing, current, event_ref, inside, parse_time, pieces,
@@ -250,6 +250,9 @@ pub struct VideoScreen {
     pub team_id: String,
     pub match_id: String,
     the_match: MatchEntry,
+    /// the match of B: its events placed by the touches (`Scout4All::
+    /// origins_of_b`), the video only to see
+    of_b: Option<Origins>,
     /// none: written by a newer version, left as it is
     profile: Option<VideoProfile>,
     player: Option<Player>,
@@ -365,8 +368,12 @@ impl VideoScreen {
         dir: PathBuf,
         team_id: String,
         match_id: String,
+        side: MatchSide,
     ) -> Result<VideoScreen, MobileError> {
-        let (the_match, stored) = core.video(&team_id, &match_id)?;
+        let (the_match, stored) = core.video_of(&team_id, &match_id, side)?;
+        let of_b = (side == MatchSide::B)
+            .then(|| core.origins_of_b(&team_id, &match_id))
+            .transpose()?;
         let profile = match stored {
             StoredProfile::Missing => Some(VideoProfile::default()),
             StoredProfile::Profile(p) => Some(p),
@@ -379,6 +386,7 @@ impl VideoScreen {
             team_id,
             match_id,
             the_match,
+            of_b,
             profile,
             player: None,
             status: None,
@@ -426,10 +434,11 @@ impl VideoScreen {
         dir: PathBuf,
         team_id: String,
         match_id: String,
+        side: MatchSide,
         events: Vec<EventRef>,
         title: String,
     ) -> Result<VideoScreen, MobileError> {
-        let mut screen = VideoScreen::new(core, dir, team_id, match_id)?;
+        let mut screen = VideoScreen::new(core, dir, team_id, match_id, side)?;
         screen.clips = Some(Clips { title, events });
         screen.clip = true;
         screen.load_events()?;
@@ -458,7 +467,15 @@ impl VideoScreen {
                 reason: "no match with actions to watch".to_string(),
             })?;
         let mut screen =
-            VideoScreen::with_clips(core, dir, team_id, first.match_id, first.events, title)?;
+            VideoScreen::with_clips(
+            core,
+            dir,
+            team_id,
+            first.match_id,
+            MatchSide::A,
+            first.events,
+            title,
+        )?;
         screen.tour = Some(Tour {
             matches,
             at: 0,
@@ -482,6 +499,7 @@ impl VideoScreen {
             self.dir.clone(),
             self.team_id.clone(),
             m.match_id,
+            MatchSide::A,
             m.events,
             clips.title.clone(),
         );
@@ -521,7 +539,7 @@ impl VideoScreen {
         let durations = self.durations();
         self.events = self
             .core
-            .video_events(&self.the_match, &profile, &durations)?;
+            .video_events(&self.the_match, &profile, &durations, self.of_b.as_ref())?;
         self.first_ms = self.events.iter().filter_map(|e| e.offset_ms).min();
         self.all_events = self.events.clone();
         if let Some(clips) = &self.clips {
@@ -677,7 +695,7 @@ impl VideoScreen {
             .map_err(|_| LeftOut::Unreadable)?;
         let all = self
             .core
-            .video_events(&the_match, &profile, &durations)
+            .video_events(&the_match, &profile, &durations, None)
             .map_err(|_| LeftOut::Unreadable)?;
         let picked = all
             .iter()
@@ -867,7 +885,7 @@ impl VideoScreen {
 
     /// The profile changed saved: the events lined up again.
     fn save_profile(&mut self, change: impl FnOnce(&VideoProfile) -> VideoProfile) {
-        let Some(profile) = &self.profile else {
+        let (Some(profile), None) = (&self.profile, &self.of_b) else {
             return;
         };
         let profile = change(profile);
@@ -1271,7 +1289,7 @@ impl VideoScreen {
     /// The files saved in place of the ones there: played, the events
     /// lined up with them.
     fn save_files(&mut self, files: Vec<VideoFile>) {
-        let Some(profile) = &self.profile else {
+        let (Some(profile), None) = (&self.profile, &self.of_b) else {
             return;
         };
         let profile = VideoProfile {
@@ -2467,6 +2485,61 @@ pub(crate) mod screen_tests {
         (core, imported.team_id, imported.match_id)
     }
 
+    /// The actions of B in the video of the match (imported on both
+    /// sides): B's own events, with the video of A.
+    #[test]
+    fn the_actions_of_b_open_in_the_video() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            side: DvwSide::Home,
+            day: "2015-01-25".into(),
+            max_substitutions: 6,
+            team_id: None,
+            classification: core.classifications().first().map(|c| c.value),
+            gender: core.genders().first().map(|g| g.value),
+            country: core.countries("Ital".into()).first().map(|c| c.value),
+        };
+        let done = core.import_dvw(bytes, choice).unwrap();
+        let (team, m) = (done.team_id, done.match_id);
+        let (the_match, _) = core.video(&team, &m).unwrap();
+        let path = dir.path().join("a.mp4");
+        let profile = VideoProfile {
+            files: vec![VideoFile {
+                path: video::stored_path(dir.path(), &path),
+                start: start_from_name(&path, *the_match.date.offset()),
+            }],
+            ..Default::default()
+        };
+        core.save_video(&the_match, &profile).unwrap();
+        let pick = scout4all_mobile::ClipPick {
+            scope: scout4all_mobile::StatsScope::Match,
+            event: scout4all_core::shapes::enums::EventTypeEnum::S,
+            filter: scout4all_mobile::DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let refs = core
+            .match_clips_of(&team, &m, MatchSide::B, &pick)
+            .unwrap();
+        assert!(!refs.is_empty());
+        let screen = VideoScreen::with_clips(
+            core.clone(),
+            dir.path().to_path_buf(),
+            team.clone(),
+            m.clone(),
+            MatchSide::B,
+            refs.clone(),
+            "Serve".into(),
+        )
+        .unwrap();
+        assert!(screen.is_clips());
+        assert_eq!(screen.events.len(), refs.len());
+    }
+
     fn with_file(dir: &tempfile::TempDir, name: &str) -> VideoScreen {
         let (core, team, m) = imported(dir);
         let (the_match, _) = core.video(&team, &m).unwrap();
@@ -2479,7 +2552,7 @@ pub(crate) mod screen_tests {
             ..Default::default()
         };
         core.save_video(&the_match, &profile).unwrap();
-        VideoScreen::new(core, dir.path().to_path_buf(), team, m).unwrap()
+        VideoScreen::new(core, dir.path().to_path_buf(), team, m, MatchSide::A).unwrap()
     }
 
     /// The time written for the event chosen, as with the field.
@@ -2656,7 +2729,7 @@ pub(crate) mod screen_tests {
             screen.team_id.clone(),
             screen.match_id.clone(),
         );
-        let mut again = VideoScreen::new(core, dir.path().to_path_buf(), team, m).unwrap();
+        let mut again = VideoScreen::new(core, dir.path().to_path_buf(), team, m, MatchSide::A).unwrap();
         assert_eq!(again.events[2].offset_ms, Some(60_000));
         again.key(key!(r));
         let back: Vec<Option<i64>> = again.events.iter().map(|e| e.offset_ms).collect();
@@ -2695,7 +2768,7 @@ pub(crate) mod screen_tests {
             screen.team_id.clone(),
             screen.match_id.clone(),
         );
-        let again = VideoScreen::new(core, dir.path().to_path_buf(), team, m).unwrap();
+        let again = VideoScreen::new(core, dir.path().to_path_buf(), team, m, MatchSide::A).unwrap();
         assert_eq!(names(&again), saved);
         // the first file starts the video: the events from it
         let first = video::anchor(again.profile.as_ref().unwrap(), &again.the_match).unwrap();
@@ -2847,6 +2920,7 @@ pub(crate) mod screen_tests {
             dir.path().to_path_buf(),
             team,
             m,
+            MatchSide::A,
             refs,
             "Serve".into(),
         )
@@ -2916,6 +2990,7 @@ pub(crate) mod screen_tests {
             dir.path().to_path_buf(),
             team,
             m,
+            MatchSide::A,
             refs,
             "Serve".into(),
         )
@@ -3011,6 +3086,7 @@ pub(crate) mod screen_tests {
             dir.path().to_path_buf(),
             team,
             m,
+            MatchSide::A,
             refs.clone(),
             "Serve".into(),
         )
@@ -3164,7 +3240,15 @@ pub(crate) mod screen_tests {
         println!("from 4: {} by {}", best.0, best.1);
         let refs = core.match_clips(&team, &m, &best.2).unwrap();
         let screen =
-            VideoScreen::with_clips(core, dir.to_path_buf(), team, m, refs, best.1.clone())
+            VideoScreen::with_clips(
+                core,
+                dir.to_path_buf(),
+                team,
+                m,
+                MatchSide::A,
+                refs,
+                best.1.clone(),
+            )
                 .unwrap();
         for e in &screen.events {
             println!(
@@ -3495,6 +3579,7 @@ pub(crate) mod screen_tests {
             dir.path().to_path_buf(),
             whole.team_id.clone(),
             whole.match_id.clone(),
+            MatchSide::A,
             serves.clone(),
             "Battute".into(),
         )
@@ -3554,6 +3639,7 @@ pub(crate) mod screen_tests {
             dir.path().to_path_buf(),
             whole.team_id.clone(),
             whole.match_id.clone(),
+            MatchSide::A,
             later,
             "Set 2–3".into(),
         )

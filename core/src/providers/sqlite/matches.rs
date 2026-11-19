@@ -122,6 +122,24 @@ impl SqliteMatchReader {
         })
     }
 
+    /// For each set of the match scouted on both sides, and each event of
+    /// B's side (`read_of_b`), the index of the event of A's side coming
+    /// from the same touch, if any (`MatchRows::origins_of_b`). Empty
+    /// scouting only A.
+    pub fn origins_of_b(
+        &self,
+        team: &TeamEntry,
+        match_id: &str,
+    ) -> Result<Vec<(u8, Vec<Option<usize>>)>, AppError> {
+        let id = match_uuid(match_id)?;
+        self.db.read(|tx| {
+            Ok(match_rows(tx, id)?
+                .filter(|rows| rows.row.team_a == team.id)
+                .ok_or_else(|| not_found(&format!("match {match_id} of team {}", team.id)))?
+                .origins_of_b())
+        })
+    }
+
     /// The row of the match of team A `team`, for its form, with the
     /// competition it's played in.
     pub fn details(

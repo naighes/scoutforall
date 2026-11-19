@@ -100,7 +100,7 @@ private suspend fun readMatch(
     val review = when (shown?.first) {
         m.matchId -> shown.second
         else -> try {
-            app.core { it.videoReview(request.teamId, m.matchId, request.pick) }
+            app.core { it.videoReview(request.teamId, m.matchId, request.side, request.pick) }
         } catch (_: MobileException) {
             return Read.Out(LeftOut.UNREADABLE)
         }

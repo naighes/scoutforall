@@ -7,6 +7,7 @@ import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.NewVideoFile
 import org.junit.Rule
@@ -61,7 +62,7 @@ class ProcessDeathTest {
         core { it.acceptTerms() }
         serve(team, match, EvalEnum.PERFECT, EvalEnum.PERFECT, EvalEnum.ERROR)
         core { c ->
-            c.videoReview(team, match, null).addFiles(listOf(NewVideoFile("content://nowhere/20261025 175500.mp4", "20261025 175500.mp4")), 7200)
+            c.videoReview(team, match, MatchSide.A, null).addFiles(listOf(NewVideoFile("content://nowhere/20261025 175500.mp4", "20261025 175500.mp4")), 7200)
         }
         val closed = Robolectric.buildActivity(MainActivity::class.java).setup()
         touch("Italia")

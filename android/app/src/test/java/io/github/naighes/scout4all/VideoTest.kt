@@ -17,6 +17,7 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.viewmodel.compose.viewModel
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.AnalysisPeriod
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.EvalEnum
@@ -47,7 +48,7 @@ private fun servedMatch(): Pair<String, String> {
 /** A file of the video linked to the match, not there: the phone can't
  * read it. */
 private fun linkVideo(team: String, match: String) = core { c ->
-    c.videoReview(team, match, null).addFiles(listOf(NewVideoFile("content://nowhere/20261025 175500.mp4", "20261025 175500.mp4")), 7200)
+    c.videoReview(team, match, MatchSide.A, null).addFiles(listOf(NewVideoFile("content://nowhere/20261025 175500.mp4", "20261025 175500.mp4")), 7200)
 }
 
 /** The video of the match read as ten minutes long (the shadow of the
@@ -62,7 +63,7 @@ private fun aceClips(team: String, match: String): VideoRequest.Clips {
     )
     val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, listOf(EvalEnum.PERFECT), null, null)
     core { c ->
-        val review = c.videoReview(team, match, pick)
+        val review = c.videoReview(team, match, MatchSide.A, pick)
         review.anchorHere(0u, 60_000u)
         review.correctHere(1u, 120_000u)
         review.correctHere(2u, 180_000u)
@@ -75,7 +76,7 @@ private fun aceClips(team: String, match: String): VideoRequest.Clips {
  * or not), read as ten minutes long by the phone when `readable`. */
 private fun videoOf(team: String, match: String, name: String, readable: Boolean) {
     val path = "content://nowhere/$match/$name"
-    core { c -> c.videoReview(team, match, null).addFiles(listOf(NewVideoFile(path, name)), 7200) }
+    core { c -> c.videoReview(team, match, MatchSide.A, null).addFiles(listOf(NewVideoFile(path, name)), 7200) }
     if (readable) {
         ShadowMediaMetadataRetriever.addMetadata(
             DataSource.toDataSource(app, Uri.parse(path)),
@@ -98,7 +99,7 @@ private fun acesOfFiveMatches(): VideoRequest.Clips {
             "Siena", "Arezzo" -> {
                 videoOf(team, match, "20261025 175500.mp4", readable = true)
                 core { c ->
-                    val review = c.videoReview(team, match, pick)
+                    val review = c.videoReview(team, match, MatchSide.A, pick)
                     review.anchorHere(0u, 60_000u)
                     (1 until aces).forEach { review.correctHere(it.toUInt(), (60_000 * (it + 1)).toULong()) }
                 }

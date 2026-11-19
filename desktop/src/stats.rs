@@ -796,6 +796,11 @@ impl StatsScreen {
         self.load();
     }
 
+    /// The team of the match the statistics are of.
+    pub fn side(&self) -> MatchSide {
+        self.side
+    }
+
     pub fn match_id(&self) -> Option<String> {
         match &self.source {
             Source::Match(m) => Some(m.clone()),
@@ -885,11 +890,9 @@ impl StatsScreen {
     /// Of a team, the ones in the matches with a video: the ones to watch.
     fn recount(&mut self) {
         self.clips = match &self.source {
-            // the video is told by A's events
-            Source::Match(_) if self.side == MatchSide::B => None,
             Source::Match(m) => self
                 .core
-                .match_clips(&self.team_id, m, &self.pick())
+                .match_clips_of(&self.team_id, m, self.side, &self.pick())
                 .ok()
                 .map(|clips| clips.len()),
             Source::Team => {
@@ -4096,7 +4099,8 @@ pub(crate) mod tests {
         assert!(screen.filter.players.is_empty(), "A's players left");
         let of_b = players(&screen);
         assert!(!of_b.is_empty() && of_b.iter().all(|p| !of_a.contains(p)));
-        assert_eq!(screen.clips, None);
+        // the actions of B too, to watch
+        assert!(screen.clips.is_some_and(|n| n > 0), "{:?}", screen.clips);
         screen.key(key!(left));
         assert_eq!(
             (screen.side, screen.title().as_str()),

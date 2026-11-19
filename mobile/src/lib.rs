@@ -1126,7 +1126,7 @@ pub struct MatchDetails {
 
 /// The team of a match whose statistics are read: A, the team that
 /// scouted it, or B, only of a match scouted on both sides.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, uniffi::Enum)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, uniffi::Enum)]
 pub enum MatchSide {
     #[default]
     A,
@@ -3195,10 +3195,22 @@ impl Scout4All {
         team_id: &str,
         match_id: &str,
     ) -> Result<(MatchEntry, StoredProfile), MobileError> {
-        let m = self.read_match(team_id, match_id)?;
+        self.video_of(team_id, match_id, MatchSide::A)
+    }
+
+    /// The match of team A `team_id` as the side sees it, with the profile
+    /// of its video: it's A's, B's events are placed by their touches
+    /// (`origins_of_b`).
+    pub fn video_of(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        side: MatchSide,
+    ) -> Result<(MatchEntry, StoredProfile), MobileError> {
+        let m = self.read_match_of(team_id, match_id, side)?;
         let profile = self
             .runtime
-            .block_on(self.videos.read(&m.team.id, &m.id))
+            .block_on(self.videos.read(&self.read_team(team_id)?.id, &m.id))
             .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?;
         Ok((m, profile))
     }
@@ -3206,11 +3218,16 @@ impl Scout4All {
     /// The events of the match, set by set, and where each is in its
     /// video, the files `durations_ms` long (none: the video and the events
     /// not lined up).
+    ///
+    /// The profile corrects the events of A: of B's (`origins`, from
+    /// `origins_of_b`) each takes the correction of the event of A born
+    /// from the same touch, if there is one.
     pub fn video_events(
         &self,
         m: &MatchEntry,
         profile: &VideoProfile,
         durations_ms: &[u64],
+        origins: Option<&Origins>,
     ) -> Result<Vec<VideoEvent>, MobileError> {
         let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
         sets.sort_by_key(|s| s.set_number);
@@ -3225,10 +3242,14 @@ impl Scout4All {
                     .zip(rows)
                     .zip(states)
                     .map(|((e, row), state)| {
-                        let corrected_ms = profile.correction(EventRef {
-                            set_number: set.set_number,
-                            index: row.index as usize,
-                        });
+                        let corrected_ms = corrected_ref(
+                            origins,
+                            EventRef {
+                                set_number: set.set_number,
+                                index: row.index as usize,
+                            },
+                        )
+                        .and_then(|r| profile.correction(r));
                         VideoEvent {
                             set_number: set.set_number,
                             event: row,
@@ -3255,8 +3276,29 @@ impl Scout4All {
         match_id: &str,
         pick: &ClipPick,
     ) -> Result<Vec<EventRef>, MobileError> {
-        let m = self.read_match(team_id, match_id)?;
+        self.match_clips_of(team_id, match_id, MatchSide::A, pick)
+    }
+
+    /// The same for the side: B's events, by their own indexes.
+    pub fn match_clips_of(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        side: MatchSide,
+        pick: &ClipPick,
+    ) -> Result<Vec<EventRef>, MobileError> {
+        let m = self.read_match_of(team_id, match_id, side)?;
         clips_of(&m, pick)
+    }
+
+    /// For each event of B's side, set by set, the event of A's born from
+    /// the same touch (`SqliteMatchReader::origins_of_b`): what the
+    /// corrections of the video, saved by A's events, are read by.
+    pub fn origins_of_b(&self, team_id: &str, match_id: &str) -> Result<Origins, MobileError> {
+        let team = self.read_team(team_id)?;
+        self.match_reader
+            .origins_of_b(&team, match_id)
+            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))
     }
 
     /// Saves the profile of the video of the match.
@@ -5373,6 +5415,26 @@ fn set_event_rows(
             ),
         })
         .collect())
+}
+
+/// For each event of B's side, set by set, the index of the event of A's
+/// born from the same touch (`origins_of_b`).
+pub type Origins = Vec<(u8, Vec<Option<usize>>)>;
+
+/// The event of A the correction of `event` is read from: itself, or, of B
+/// (`origins`), the one of the same touch, none without it.
+fn corrected_ref(origins: Option<&Origins>, event: EventRef) -> Option<EventRef> {
+    match origins {
+        None => Some(event),
+        Some(origins) => origins
+            .iter()
+            .find(|(set, _)| *set == event.set_number)
+            .and_then(|(_, of_a)| of_a.get(event.index).copied().flatten())
+            .map(|index| EventRef {
+                set_number: event.set_number,
+                index,
+            }),
+    }
 }
 
 /// The events of the match the statistics counted for the pick, set by

@@ -123,4 +123,16 @@ class SeenByBTest {
             .map { it.config[SemanticsProperties.Text].joinToString() }
         assertEquals(listOf("■ Visiting", "■ Home"), legend)
     }
+
+    /** The actions of B to watch, like A's (there's no video here: said). */
+    @Test
+    fun theActionsOfBCanBeWatched() {
+        val (home, m, _) = bothSides()
+        var watched: VideoRequest.Clips? = null
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(home, m, null, MatchSide.B, onBack = {}) { watched = it } } }
+        rule.waitForText(string(R.string.stats_summary))
+        rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.clips_no_video))
+        assertEquals(null, watched)
+    }
 }

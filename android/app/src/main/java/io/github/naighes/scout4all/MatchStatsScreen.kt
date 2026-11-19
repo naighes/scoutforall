@@ -80,8 +80,7 @@ fun MatchStatsScreen(
                             null
                         }
                     },
-                    // the clips are of A only, for now
-                    watch = { scope: StatsScope -> matchWatch(teamId, matchId, scope, onWatch) }.takeIf { side == MatchSide.A },
+                    watch = { scope: StatsScope -> matchWatch(teamId, matchId, side, scope, onWatch) },
                 )
             }
         }
