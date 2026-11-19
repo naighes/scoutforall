@@ -3218,6 +3218,7 @@ impl Scout4All {
                     .read_match_of(team_id, match_id, MatchSide::B)
                     .map_err(|_| set_start::SetStartError::CouldNotComputeSnapshot)?;
                 set_start::resume_both(m, set, touches, b.team, self.set_writer.clone())
+                    .map(|session| session.with_earlier_of_b(&b.sets))
             }
         }
     }

@@ -830,6 +830,57 @@ mod tests {
         assert_eq!(again.event_choices(), session.event_choices());
     }
 
+    /// Each side has its inverted P1, and B's statistics start from its
+    /// earlier sets: the inverted P1 of B goes on from its last set.
+    #[tokio::test]
+    async fn each_side_has_its_inverted_p1_and_its_earlier_stats() {
+        let p = Sqlite::new();
+        let (_, team_b, m, start_a, start_b) = on_both_sides(&p).await;
+        let input = crate::set_start::SetStartInput {
+            set_number: 1,
+            serving_team: TeamSideEnum::Us,
+            positions: start_a.initial_positions,
+            setter: start_a.setter,
+            libero: start_a.libero,
+            fallback_libero: None,
+            opponent: Some(crate::set_start::SideInput {
+                positions: start_b.initial_positions,
+                setter: start_b.setter,
+                libero: start_b.libero,
+                fallback_libero: None,
+            }),
+        };
+        let writer: std::sync::Arc<dyn SetWriter + Send + Sync> =
+            std::sync::Arc::new(crate::providers::sqlite::sets::SqliteSetWriter::new(
+                p.db.clone(),
+                crate::localization::Language::default(),
+            ));
+        let session = crate::set_start::start(m.clone(), input, writer, Some(team_b.clone()))
+            .await
+            .unwrap();
+        assert!(!session.inverted_p1_of(Side::B));
+        // B's last set (numbered before this one) was inverted and had a reception
+        let mut earlier = start_b.clone();
+        earlier.set_number = 0;
+        let (_, mut reception) = touch(Side::B, P, libero(&team_b), Negative);
+        reception.flags = reception.flags.with_inverted_p1(true);
+        earlier.events = vec![reception];
+        let mut session = session.with_earlier_of_b(&[earlier]);
+        assert!(session.inverted_p1_of(Side::B));
+        assert!(!session.inverted_p1_of(Side::A));
+        // changing the active side's flag leaves the other one
+        session.set_inverted_p1(true);
+        assert!(session.inverted_p1_of(Side::A));
+        assert!(session.inverted_p1_of(Side::B));
+        session.set_inverted_p1(false);
+        assert!(!session.inverted_p1_of(Side::A));
+        assert!(session.inverted_p1_of(Side::B));
+        // the earlier reception counts in B's statistics, not in A's
+        let b_stats = session.match_stats_of(Side::B).unwrap();
+        let a_stats = session.match_stats_of(Side::A).unwrap();
+        assert_ne!(format!("{b_stats:?}"), format!("{a_stats:?}"));
+    }
+
     /// Saved on both sides: B with its side, A read as its stream (what
     /// B's touches tell it), each event of A by the row it comes from;
     /// saved again, each touch keeps its row.

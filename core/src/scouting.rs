@@ -128,6 +128,10 @@ struct Theirs {
     /// the touches of both sides, in order
     touches: Vec<(Side, EventEntry)>,
     snapshot: Snapshot,
+    /// the statistics of B in the sets before this one
+    earlier_stats: Stats,
+    /// the inverted P1 of B, written on every touch of B saved
+    inverted_p1: bool,
 }
 
 pub struct ScoutingSession {
@@ -235,15 +239,45 @@ impl ScoutingSession {
             .map(|p| p.entry)
             .collect();
         self.snapshot = snapshot_a;
+        let inverted_p1 = touches
+            .iter()
+            .rev()
+            .find(|(side, _)| *side == Side::B)
+            .is_some_and(|(_, e)| e.flags.inverted_p1());
         self.theirs = Some(Theirs {
             team,
             start_a: a,
             start_b: b,
             touches,
             snapshot: snapshot_b,
+            earlier_stats: Stats::new(),
+            inverted_p1,
         });
         self.start_next();
         Ok(self)
+    }
+
+    /// The sets of B before this one, from B's side: their statistics, and
+    /// the inverted P1 a new set goes on with, as for A. Nothing scouting
+    /// A alone.
+    pub fn with_earlier_of_b(mut self, earlier: &[SetEntry]) -> Self {
+        let max_substitutions = self.current_match.max_substitutions;
+        if let Some(theirs) = &mut self.theirs {
+            theirs.earlier_stats = earlier
+                .iter()
+                .filter(|s| s.set_number < self.set.set_number)
+                .filter_map(|s| s.compute_snapshot(max_substitutions).ok())
+                .fold(Stats::new(), |mut stats, s| {
+                    stats.merge(&s.stats);
+                    stats
+                });
+            let started = theirs.touches.iter().any(|(side, _)| *side == Side::B);
+            if !started {
+                let b_set = theirs.start_b.clone();
+                theirs.inverted_p1 = earlier_inverted_p1(earlier, &b_set);
+            }
+        }
+        self
     }
 
     /// Whether both sides are scouted.
@@ -329,6 +363,19 @@ impl ScoutingSession {
         stats
     }
 
+    /// The same for `side`: B's only when both sides are scouted.
+    pub fn match_stats_of(&self, side: Side) -> Option<Stats> {
+        match (side, &self.theirs) {
+            (Side::A, _) => Some(self.match_stats()),
+            (Side::B, Some(theirs)) => {
+                let mut stats = theirs.earlier_stats.clone();
+                stats.merge(&theirs.snapshot.stats);
+                Some(stats)
+            }
+            (Side::B, None) => None,
+        }
+    }
+
     /// The sets of the match up to this one, in order: the ones before, and
     /// this one as scouted so far.
     pub fn sets(&self) -> Vec<&SetEntry> {
@@ -361,7 +408,15 @@ impl ScoutingSession {
     /// from 4 and the opposite from 2. As the last event of the match says
     /// until the scout changes it.
     pub fn inverted_p1(&self) -> bool {
-        self.inverted_p1
+        self.inverted_p1_of(self.side)
+    }
+
+    /// The inverted P1 of `side` (A's when scouting one side).
+    pub fn inverted_p1_of(&self, side: Side) -> bool {
+        match (side, &self.theirs) {
+            (Side::B, Some(theirs)) => theirs.inverted_p1,
+            _ => self.inverted_p1,
+        }
     }
 
     /// Whether the inverted P1 makes a difference now: in P1 (the setter in
@@ -375,7 +430,10 @@ impl ScoutingSession {
     /// The scout inverts the P1, or makes it canonical again: the events
     /// saved from now on say so.
     pub fn set_inverted_p1(&mut self, inverted: bool) {
-        self.inverted_p1 = inverted;
+        match (self.side, &mut self.theirs) {
+            (Side::B, Some(theirs)) => theirs.inverted_p1 = inverted,
+            _ => self.inverted_p1 = inverted,
+        }
     }
 
     /// How many receive their next serve: three unless told otherwise.
@@ -1366,7 +1424,7 @@ impl ScoutingSession {
             (EventTypeEnum::P, _) | (EventTypeEnum::OS, true) => Some(self.reception),
             _ => None,
         };
-        let flags = event.flags.with_inverted_p1(self.inverted_p1);
+        let flags = event.flags.with_inverted_p1(self.inverted_p1());
         let event = EventEntry {
             flags: received.map_or(flags, |scheme| flags.with_reception(scheme)),
             ..event
@@ -1443,8 +1501,12 @@ fn is_neutral(event: EventTypeEnum) -> bool {
 /// The inverted P1 of the last event of the match, in this set or in the
 /// sets before: a new set goes on as the last one ended.
 fn last_inverted_p1(current_match: &MatchEntry, set: &SetEntry) -> bool {
-    let mut earlier: Vec<&SetEntry> = current_match
-        .sets
+    earlier_inverted_p1(&current_match.sets, set)
+}
+
+/// The same from the sets `sets`, those before `set` counting.
+fn earlier_inverted_p1(sets: &[SetEntry], set: &SetEntry) -> bool {
+    let mut earlier: Vec<&SetEntry> = sets
         .iter()
         .filter(|s| s.set_number < set.set_number)
         .collect();
