@@ -22,6 +22,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.abbreviatedName
 import org.robolectric.ParameterizedRobolectricTestRunner
 
 /** The side of B receiving, with long names, on every screen. */
@@ -46,7 +48,7 @@ class LongNamesBothSidesTest(private val screen: Size) {
         )
     }
 
-    private fun scout(): String {
+    private fun scout(rotation: Int = 0): String {
         val team = saveNationalTeam()
         val match = core { c ->
             val b = saveTeam("Arezzo")
@@ -63,7 +65,7 @@ class LongNamesBothSidesTest(private val screen: Size) {
             a.chooseServingTeam(TeamSideEnum.US)
             lineup(a, team, nationalTeam.map { it.first }, "Alessia Orro", "Monica De Gennaro")
             val ofB = checkNotNull(c.setStartOfB(team, match))
-            lineup(ofB, b, long.map { it.first }, "Alessandro Magrini", "Riccardo Bartolozzi")
+            lineup(ofB, b, (0..5).map { long[(it + rotation) % 6].first }, "Alessandro Magrini", "Riccardo Bartolozzi")
             c.startSetBoth(a, ofB)
             match
         }
@@ -98,6 +100,35 @@ class LongNamesBothSidesTest(private val screen: Size) {
                 val light = pixels.count { Color.luminance(it) > 0.5f }
                 assertTrue("light on the name: $light of ${pixels.size}", light < pixels.size / 2)
             }
+        }
+    }
+
+    /** Three receivers in a column, 62dp apart: the name of one is not
+     * covered by the jersey of the next, it goes in one line. */
+    @Test
+    fun noNameIsCoveredByAJersey() {
+        scout(rotation = 2)
+        val plus = hasText("+") and hasClickAction() and isEnabled()
+        rule.waitUntil(5_000) { rule.onAllNodes(plus).fetchSemanticsNodes().size == 1 }
+        rule.onNode(plus).performClick()
+        rule.waitFor { runCatching { rule.onNode(hasContentDescription(string(R.string.swap_side)) and hasClickAction()).assertIsEnabled() }.isSuccess }
+        val texts = { match: (String) -> Boolean ->
+            rule.onAllNodes(SemanticsMatcher("text") { n -> n.config.getOrNull(SemanticsProperties.Text)?.joinToString()?.let(match) == true }, useUnmergedTree = true)
+                .fetchSemanticsNodes()
+        }
+        val labels = long.map { it.first }.flatMap { name -> texts { it == name || it == abbreviatedName(name) } }
+            // not drawn where no line is free
+            .filter { it.config.getOrNull(SemanticsProperties.TestTag) != HIDDEN_NAME }
+        assertTrue("no names on the court", labels.size >= 3)
+        // the middle of a jersey and a radius inside it
+        val radius = with(rule.density) { 16.dp.toPx() }
+        val jerseys = long.map { it.third.toString() }.flatMap { number -> texts { it == number } }.map { it.bounds() }
+        labels.forEach { label ->
+            val covered = jerseys.filter { j ->
+                val c = j.center
+                c.x in label.bounds().left - radius..label.bounds().right + radius && c.y in label.bounds().top - radius..label.bounds().bottom + radius
+            }
+            assertTrue("a jersey on the name at ${label.bounds()}: $covered", covered.isEmpty())
         }
     }
 }

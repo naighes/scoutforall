@@ -39,6 +39,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.StrokeCap
@@ -256,6 +257,24 @@ private fun CourtColumn(
                 }
                 Freeball(from, ballX to ballY, MaterialTheme.colorScheme.primary)
             }
+            // a name another jersey would cover goes in one line, abbreviated;
+            // where not even one line is free, it isn't drawn (the number
+            // tells the player, TalkBack still reads the name)
+            val line = with(LocalDensity.current) { ceil(nameStyle().lineHeight.toPx()).toDp() }
+            val cover = { position: Int ->
+                val (x, y) = corner(position)
+                val below = (1..6).filter { other ->
+                    other != position && abs((corner(other).first - x).value) < ((width + token) / 2).value && corner(other).second > y &&
+                        corner(other).second < y + height
+                }.minOfOrNull { corner(it).second - y }
+                when {
+                    below == null -> NameCover.None
+                    below >= token + 2.dp + line -> NameCover.OneLine
+                    // the receiver above the player hiding behind keeps its name
+                    slot(position).above -> NameCover.OneLine
+                    else -> NameCover.Hidden
+                }
+            }
             (1..6).forEach { position ->
                 val s = slot(position)
                 // the server left the court for the serve
@@ -264,7 +283,7 @@ private fun CourtColumn(
                     val (cx, cy) = corner(position)
                     val x by animateDpAsState(cx, tween(450), label = "x")
                     val y by animateDpAsState(cy, tween(450), label = "y")
-                    Spot(position, s, showPositions, scale, Modifier.zIndex(if (s.above) 1f else 0f).offset(x, y).size(width, height)) {
+                    Spot(position, s, showPositions, scale, Modifier.zIndex(if (s.above) 1f else 0f).offset(x, y).size(width, height), cover = cover(position)) {
                         onPosition(position)
                     }
                 }
@@ -417,7 +436,7 @@ private fun TargetZones(rows: List<List<CourtCellChoice>>, name: Int, onTarget: 
  * the name under it. TalkBack reads the number, the name, then what the
  * badges say. */
 @Composable
-private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: Float, modifier: Modifier, onClick: () -> Unit) =
+private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: Float, modifier: Modifier, cover: NameCover = NameCover.None, onClick: () -> Unit) =
     Box(modifier.tutorial("player:${slot.number}").clickable(enabled = slot.enabled, role = Role.Button, onClick = onClick)) {
         if (showPosition) {
             Text(
@@ -436,7 +455,7 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: F
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Token(slot, scale, dim)
-            CourtName(slot.name.orEmpty(), slot.above, Modifier.alpha(dim))
+            CourtName(slot.name.orEmpty(), slot.above, cover != NameCover.None, Modifier.alpha(if (cover == NameCover.Hidden) 0f else dim).let { if (cover == NameCover.Hidden) it.testTag(HIDDEN_NAME) else it })
             badges(slot).takeIf { it.isNotEmpty() }?.let { Box(Modifier.readAs(it)) }
         }
     }
@@ -455,12 +474,15 @@ private fun badges(slot: CourtSlot): String = listOfNotNull(
     },
 ).joinToString(", ")
 
+/** What another jersey does to the name of a player. */
+private enum class NameCover { None, OneLine, Hidden }
+
 /** The name under the jersey in two lines, or abbreviated if it doesn't
  * fit ("Ale. Mag.", by the core: no guess about which word is the surname),
  * never a word broken: the jersey tells the rest. */
 @Composable
-private fun CourtName(name: String, over: Boolean, modifier: Modifier = Modifier) {
-    var abbreviated by remember(name) { mutableStateOf(false) }
+private fun CourtName(name: String, over: Boolean, oneLine: Boolean, modifier: Modifier = Modifier) {
+    var abbreviated by remember(name, oneLine) { mutableStateOf(oneLine) }
     val text = if (abbreviated) abbreviatedName(name) else name
     Text(
         text,
@@ -473,7 +495,7 @@ private fun CourtName(name: String, over: Boolean, modifier: Modifier = Modifier
             hyphens = if (abbreviated) Hyphens.Auto else Hyphens.None,
             lineBreak = LineBreak.Paragraph,
         ),
-        maxLines = 2,
+        maxLines = if (oneLine) 1 else 2,
         overflow = TextOverflow.Ellipsis,
         textAlign = TextAlign.Center,
         onTextLayout = { layout ->
@@ -593,6 +615,8 @@ private val BADGE = 18.dp
 
 /** The badge of the setter, for the tests. */
 const val SETTER_BADGE = "setter badge"
+/** the name of a player a jersey covers, not drawn */
+const val HIDDEN_NAME = "hidden name"
 
 /** On the jersey: the setter, the evaluation of the last touch. */
 @Composable
