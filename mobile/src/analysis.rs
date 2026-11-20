@@ -263,36 +263,10 @@ impl Scout4All {
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
         let today = Local::now().date_naive();
-        let against: Vec<String> = self
-            .match_reader
-            .both_matches(&team)?
-            .into_iter()
-            .filter(|m| m.team_b == opponent)
-            .map(|m| m.id)
-            .collect();
-        let all: Vec<MatchSummary> = self
-            .runtime
-            .block_on(self.match_reader.read_summaries(&team))?
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|m| against.contains(&m.id))
-            .collect();
-        let ids: Vec<String> = period
-            .period()?
-            .select_in(&all, today, competition)
-            .into_iter()
-            .map(|m| m.id.clone())
-            .collect();
-        let chosen: Vec<MatchEntry> = self
-            .runtime
-            .block_on(self.match_reader.read_some(&team, &ids))
-            .into_iter()
-            .filter_map(Result::ok)
-            .map(|mut m: MatchEntry| {
-                name_the_removed(&mut m.team, self.language.labels());
-                m
-            })
-            .collect();
+        let against = self.both_against(&team, &opponent)?;
+        let (all, chosen) = self.chosen_matches_among(&team, &period, competition, today, |m| {
+            against.contains_key(&m.id)
+        })?;
         let competitions = self.competitions_played(&all, today)?;
         team_analysis(
             &team,
@@ -381,6 +355,22 @@ impl Scout4All {
             .collect())
     }
 
+    /// The matches of `team` scouted on both sides against `opponent`: by
+    /// id, whether B played them at home.
+    fn both_against(
+        &self,
+        team: &TeamEntry,
+        opponent: &Uuid,
+    ) -> Result<HashMap<String, bool>, MobileError> {
+        Ok(self
+            .match_reader
+            .both_matches(team)?
+            .into_iter()
+            .filter(|m| m.team_b == *opponent)
+            .map(|m| (m.id, m.home_b))
+            .collect())
+    }
+
     /// As `chosen_matches`, for team B `opponent` in the matches of `team`
     /// scouted on both sides: the summaries as B sees them, the matches
     /// read from B's side.
@@ -392,13 +382,7 @@ impl Scout4All {
         competition: Option<Uuid>,
         today: NaiveDate,
     ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
-        let against: HashMap<String, bool> = self
-            .match_reader
-            .both_matches(team)?
-            .into_iter()
-            .filter(|m| m.team_b == *opponent)
-            .map(|m| (m.id, m.home_b))
-            .collect();
+        let against = self.both_against(team, opponent)?;
         let all: Vec<MatchSummary> = self
             .runtime
             .block_on(self.match_reader.read_summaries(team))?
@@ -434,11 +418,24 @@ impl Scout4All {
         competition: Option<Uuid>,
         today: NaiveDate,
     ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
+        self.chosen_matches_among(team, period, competition, today, |_| true)
+    }
+
+    /// As `chosen_matches`, among the matches `keep` keeps only.
+    fn chosen_matches_among(
+        &self,
+        team: &TeamEntry,
+        period: &AnalysisPeriod,
+        competition: Option<Uuid>,
+        today: NaiveDate,
+        keep: impl Fn(&MatchSummary) -> bool,
+    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
         let all: Vec<MatchSummary> = self
             .runtime
             .block_on(self.match_reader.read_summaries(team))?
             .into_iter()
             .filter_map(Result::ok)
+            .filter(|m| keep(m))
             .collect();
         let ids: Vec<String> = period
             .period()?
