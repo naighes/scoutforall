@@ -178,10 +178,15 @@ impl Side {
     }
 
     /// The side of a team as A sees it: we are A.
-    pub fn from_a(side: TeamSideEnum) -> Self {
-        match side {
-            TeamSideEnum::Us => Side::A,
-            TeamSideEnum::Them => Side::B,
+    pub fn from_a(team: TeamSideEnum) -> Self {
+        Side::of(Side::A, team)
+    }
+
+    /// The side of a team as `side` sees it: we are `side`.
+    pub fn of(side: Side, team: TeamSideEnum) -> Self {
+        match team {
+            TeamSideEnum::Us => side,
+            TeamSideEnum::Them => side.other(),
         }
     }
 

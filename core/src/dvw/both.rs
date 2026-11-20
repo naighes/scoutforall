@@ -13,9 +13,9 @@ use crate::{
         model::DvwFile,
         translate::{At, Issue, Mappings, TranslateError, Us, translate_lined},
     },
-    rally::{Incoherence, answer_evals, answers, replay},
+    rally::{Incoherence, answer_evals, answers, ball_after, replay},
     shapes::{
-        enums::{EvalEnum, EventTypeEnum, TeamSideEnum},
+        enums::{EvalEnum, EventTypeEnum},
         set::SetEntry,
         snapshot::EventEntry,
     },
@@ -46,23 +46,6 @@ pub(crate) type Lined = (Side, EventEntry, At);
 /// A touch of the ball by the side, not what it's told.
 fn played_by(touch: &Lined, side: Side) -> bool {
     touch.0 == side && !touch.1.event_type.changes_lineup() && !told(&touch.1)
-}
-
-/// The team as the side sees it, as a side.
-fn absolute(side: Side, team: TeamSideEnum) -> Side {
-    match team {
-        TeamSideEnum::Us => side,
-        TeamSideEnum::Them => side.other(),
-    }
-}
-
-/// The side of the net the touch of the side leaves the ball on, while the
-/// rally goes on.
-fn ball_after(side: Side, entry: &EventEntry) -> Option<Side> {
-    entry
-        .event_type
-        .ball_side_after(entry.eval)
-        .map(|t| absolute(side, t))
 }
 
 /// The events of the two sides, each with where it comes from, in the

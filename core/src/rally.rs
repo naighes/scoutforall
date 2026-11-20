@@ -90,10 +90,7 @@ fn winner(side: Side, entry: &EventEntry) -> Option<Side> {
     entry
         .event_type
         .rally_winner(entry.eval)
-        .map(|team| match team {
-            TeamSideEnum::Us => side,
-            TeamSideEnum::Them => side.other(),
-        })
+        .map(|team| Side::of(side, team))
 }
 
 /// An event telling the side what the other did: a team event, no player,
@@ -259,10 +256,7 @@ pub fn replay(
         snapshot
             .points
             .iter()
-            .map(|team| match team {
-                TeamSideEnum::Us => side,
-                TeamSideEnum::Them => side.other(),
-            })
+            .map(|team| Side::of(side, *team))
             .collect()
     };
     match points_of(&a, Side::A) == points_of(&b, Side::B) {
@@ -289,14 +283,11 @@ pub fn ball_side(touches: &[(Side, EventEntry)], a: &Snapshot) -> Side {
 
 /// The side of the net the touch of the side leaves the ball on, while
 /// the rally goes on (see `EventTypeEnum::ball_side_after`).
-fn ball_after(side: Side, entry: &EventEntry) -> Option<Side> {
+pub(crate) fn ball_after(side: Side, entry: &EventEntry) -> Option<Side> {
     entry
         .event_type
         .ball_side_after(entry.eval)
-        .map(|team| match team {
-            TeamSideEnum::Us => side,
-            TeamSideEnum::Them => side.other(),
-        })
+        .map(|team| Side::of(side, team))
 }
 
 /// Whether the touch answers the other side's touch, telling the same
