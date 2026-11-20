@@ -129,6 +129,8 @@ pub enum Message {
     Competition(Option<uuid::Uuid>),
     /// the analysis of the team, or of an opponent scouted on both sides
     Opponent(Option<uuid::Uuid>),
+    /// the opponent chosen and the team side by side, in their matches
+    Versus,
     Series(usize),
     Recent(bool),
     /// a set of the trend of a match shown or hidden
@@ -907,6 +909,21 @@ impl StatsScreen {
                         self.filter.clone(),
                     ),
                 };
+                self.versus = match (self.compare, self.opponent) {
+                    (true, Some(opponent)) => self
+                        .core
+                        .analysis_against(
+                            self.team_id.clone(),
+                            opponent,
+                            self.period.clone(),
+                            self.competition,
+                            self.event,
+                            self.filter.clone(),
+                        )
+                        .ok()
+                        .map(|a| a.summary),
+                    _ => None,
+                };
                 match analysis {
                     Ok(a) => {
                         self.live = Some(a.summary.clone());
@@ -1260,11 +1277,22 @@ impl StatsScreen {
             Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
             Filter::Period => ui::cycle(&KINDS, &self.kind, forward).map(Message::Kind),
             Filter::Opponent => {
-                let ids: Vec<Option<uuid::Uuid>> = [None]
+                // each opponent, then the comparison with it (the summary)
+                let comparable = self.current() == Page::Summary;
+                let ids: Vec<(Option<uuid::Uuid>, bool)> = [(None, false)]
                     .into_iter()
-                    .chain(self.opponents.iter().map(|o| Some(o.id)))
+                    .chain(self.opponents.iter().flat_map(|o| {
+                        [(Some(o.id), false), (Some(o.id), true)]
+                            .into_iter()
+                            .filter(move |(_, versus)| comparable || !versus)
+                    }))
                     .collect();
-                ui::cycle(&ids, &self.opponent, forward).map(Message::Opponent)
+                ui::cycle(&ids, &(self.opponent, self.compare), forward).map(|(o, versus)| {
+                    match versus {
+                        true => Message::Versus,
+                        false => Message::Opponent(o),
+                    }
+                })
             }
             Filter::Competition => {
                 let ids: Vec<Option<uuid::Uuid>> = [None]
@@ -1393,8 +1421,14 @@ impl StatsScreen {
         match message {
             Message::Page(page) => {
                 // the detail is of one team
-                if self.compare && PAGES.get(page) == Some(&Page::Detail) {
-                    self.sided(MatchSide::A, false);
+                match (self.is_team(), PAGES.get(page)) {
+                    (false, Some(Page::Detail)) if self.compare => self.sided(MatchSide::A, false),
+                    // only the summary compares the matches of two teams
+                    (true, Some(p)) if self.compare && *p != Page::Summary => {
+                        self.compare = false;
+                        self.load();
+                    }
+                    _ => (),
                 }
                 self.page = page.min(PAGES.len() - 1);
                 self.row = 0;
@@ -1413,11 +1447,16 @@ impl StatsScreen {
                 // the players, the competitions and the actions picked are
                 // of the other team
                 self.opponent = opponent;
+                self.compare = false;
                 self.competition = None;
                 self.filter.players.clear();
                 self.clip_evals.clear();
                 self.clip_zone = None;
                 self.clip_target = None;
+                self.load();
+            }
+            Message::Versus => {
+                self.compare = self.opponent.is_some();
                 self.load();
             }
             Message::Series(series) => {
@@ -1874,10 +1913,14 @@ impl StatsScreen {
                 .chain(self.opponents.iter().map(|o| {
                     pill(
                         o.name.clone(),
-                        self.opponent == Some(o.id),
+                        self.opponent == Some(o.id) && !self.compare,
                         Message::Opponent(Some(o.id)),
                     )
                 }))
+                .chain(
+                    (self.opponent.is_some() && self.current() == Page::Summary)
+                        .then(|| pill(s.compare.to_string(), self.compare, Message::Versus)),
+                )
                 .collect(),
             ),
             Filter::Competition => (
@@ -3909,6 +3952,14 @@ pub(crate) mod tests {
                 },
             )
             .unwrap();
+        let a = core
+            .match_stats(
+                imported.team_id.clone(),
+                imported.match_id.clone(),
+                MatchSide::A,
+                StatsScope::Match,
+            )
+            .unwrap();
         let b = core
             .match_stats(
                 imported.team_id.clone(),
@@ -3934,6 +3985,23 @@ pub(crate) mod tests {
         assert_eq!(aces(&screen), b.aces);
         screen.update(Message::Opponent(None));
         assert_eq!(aces(&screen), ours);
+        // the comparison with the opponent: its matches, side by side, only
+        // in the summary; → goes from the opponent to it
+        screen.update(Message::Opponent(opponent));
+        assert!(matches!(
+            screen.changed(Filter::Opponent, true),
+            Some(Message::Versus)
+        ));
+        screen.update(Message::Versus);
+        assert!(screen.compare);
+        assert_eq!(aces(&screen), b.aces);
+        assert_eq!(screen.versus.as_ref().map(|v| v.aces), Some(a.aces));
+        screen.update(Message::Page(1));
+        assert!(!screen.compare && screen.versus.is_none());
+        assert_eq!(aces(&screen), b.aces);
+        screen.update(Message::Page(0));
+        screen.update(Message::Opponent(None));
+        assert!(screen.versus.is_none());
     }
 
     fn aces(screen: &StatsScreen) -> u32 {

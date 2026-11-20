@@ -10054,6 +10054,28 @@ mod tests {
             from: "2015-01-01".into(),
             to: "2015-12-31".into(),
         };
+        // the team over the same matches, to compare: the one on both sides
+        let ours = app
+            .analysis_against(
+                team.clone(),
+                opponents[0].id,
+                period.clone(),
+                None,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        assert_eq!(ours.matches.len(), 1);
+        assert_eq!(ours.matches[0].id, imported.match_id);
+        let a = app
+            .match_stats(
+                team.clone(),
+                imported.match_id.clone(),
+                MatchSide::A,
+                StatsScope::Match,
+            )
+            .unwrap();
+        assert_eq!(ours.summary.aces, a.aces);
         let of_b = app
             .opponent_analysis(
                 team.clone(),

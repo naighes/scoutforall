@@ -249,6 +249,65 @@ impl Scout4All {
         )
     }
 
+    /// The statistics of the team in the matches scouted on both sides
+    /// against `opponent` (the same ones `opponent_analysis` takes, seen
+    /// from the team), to compare with those of the opponent.
+    pub fn analysis_against(
+        &self,
+        team_id: String,
+        opponent: Uuid,
+        period: AnalysisPeriod,
+        competition: Option<Uuid>,
+        event: EventTypeEnum,
+        filter: DetailFilter,
+    ) -> Result<TeamAnalysis, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let today = Local::now().date_naive();
+        let against: Vec<String> = self
+            .match_reader
+            .both_matches(&team)?
+            .into_iter()
+            .filter(|m| m.team_b == opponent)
+            .map(|m| m.id)
+            .collect();
+        let all: Vec<MatchSummary> = self
+            .runtime
+            .block_on(self.match_reader.read_summaries(&team))?
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|m| against.contains(&m.id))
+            .collect();
+        let ids: Vec<String> = period
+            .period()?
+            .select_in(&all, today, competition)
+            .into_iter()
+            .map(|m| m.id.clone())
+            .collect();
+        let chosen: Vec<MatchEntry> = self
+            .runtime
+            .block_on(self.match_reader.read_some(&team, &ids))
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|mut m: MatchEntry| {
+                name_the_removed(&mut m.team, self.language.labels());
+                m
+            })
+            .collect();
+        let competitions = self.competitions_played(&all, today)?;
+        team_analysis(
+            &team,
+            &all,
+            &chosen,
+            period,
+            competition,
+            competitions,
+            today,
+            event,
+            filter,
+            self.language.labels(),
+        )
+    }
+
     /// What the filters on the situation offer, also for a match.
     pub fn situation_choices(&self) -> SituationChoices {
         situation_choices(self.language.labels(), None)
