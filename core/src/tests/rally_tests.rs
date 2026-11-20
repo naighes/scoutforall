@@ -133,6 +133,36 @@ mod tests {
     }
 
     #[test]
+    fn the_events_of_a_side_are_its_stream_without_the_sources() {
+        let touches = [
+            touch(Side::A, S, Some(Positive), 0),
+            touch(Side::B, P, Some(Negative), 1),
+            touch(Side::B, A, Some(Perfect), 2),
+        ];
+        let streams = project(&touches);
+        let kinds = |side| -> Vec<_> {
+            streams
+                .clone()
+                .entries(side)
+                .iter()
+                .map(|e| (e.event_type, e.eval, e.timestamp))
+                .collect()
+        };
+        assert_eq!(
+            kinds(Side::A),
+            vec![(S, Some(Positive), at(0)), (OS, None, at(2))]
+        );
+        assert_eq!(
+            kinds(Side::B),
+            vec![(P, Some(Negative), at(1)), (A, Some(Perfect), at(2))]
+        );
+        assert_eq!(
+            streams.clone().entries(Side::B).first(),
+            touches.get(1).map(|(_, e)| e)
+        );
+    }
+
+    #[test]
     fn a_freeball_told_without_a_touch_is_the_other_side_s_freeball() {
         let streams = project(&[touch(Side::A, OF, None, 0)]);
         assert_eq!(stream(&streams, Side::B), vec![(FB, None, 0)]);

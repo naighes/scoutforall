@@ -235,11 +235,7 @@ impl ScoutingSession {
         let (snapshot_a, snapshot_b) =
             rally::replay(&a, &b, &touches, self.current_match.max_substitutions)
                 .map_err(|_| ScoutingError::CouldNotComputeSnapshot)?;
-        self.set.events = rally::project(&touches)
-            .a
-            .into_iter()
-            .map(|p| p.entry)
-            .collect();
+        self.set.events = rally::project(&touches).entries(Side::A);
         self.snapshot = snapshot_a;
         let inverted_p1 = touches
             .iter()
@@ -405,11 +401,7 @@ impl ScoutingSession {
             let mut sets = theirs.earlier.clone();
             sets.sort_by_key(|s| s.set_number);
             sets.push(SetEntry {
-                events: rally::project(&theirs.touches)
-                    .b
-                    .into_iter()
-                    .map(|p| p.entry)
-                    .collect(),
+                events: rally::project(&theirs.touches).entries(Side::B),
                 ..theirs.start_b.clone()
             });
             sets
@@ -1425,11 +1417,7 @@ impl ScoutingSession {
             self.current_match.max_substitutions,
         )
         .map_err(|_| ScoutingError::CouldNotComputeSnapshot)?;
-        self.set.events = rally::project(&touches)
-            .a
-            .into_iter()
-            .map(|p| p.entry)
-            .collect();
+        self.set.events = rally::project(&touches).entries(Side::A);
         self.snapshot = a;
         theirs.snapshot = b;
         theirs.touches = touches;

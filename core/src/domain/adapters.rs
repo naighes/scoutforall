@@ -504,11 +504,7 @@ impl SetRows {
     /// touches projected on B's side. `None` without B's lineup.
     pub fn entry_of_b(&self) -> Option<SetEntry> {
         self.start(Side::B).map(|start| SetEntry {
-            events: project(&self.touches())
-                .b
-                .into_iter()
-                .map(|p| p.entry)
-                .collect(),
+            events: project(&self.touches()).entries(Side::B),
             ..start
         })
     }

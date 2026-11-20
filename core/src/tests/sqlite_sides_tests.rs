@@ -1254,7 +1254,7 @@ mod tests {
             .collect();
         assert_eq!(scores, vec![((1, 1), Some((1, 1)))]);
         let read = p.match_reader.read_single(&a, &m.id).await.unwrap();
-        let stream: Vec<EventEntry> = project(&touches).a.into_iter().map(|p| p.entry).collect();
+        let stream: Vec<EventEntry> = project(&touches).entries(Side::A);
         let types: Vec<_> = stream.iter().map(|e| e.event_type).collect();
         assert_eq!(types, vec![S, OS, OE]);
         assert_eq!(read.sets[0].events, stream);

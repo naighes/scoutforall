@@ -795,11 +795,7 @@ fn both_sides(
 /// The set from A's side: its start and the touches projected on it.
 fn stream_of_a(both: &BothSet) -> SetEntry {
     SetEntry {
-        events: project(&both.touches)
-            .a
-            .into_iter()
-            .map(|p| p.entry)
-            .collect(),
+        events: project(&both.touches).entries(crate::domain::Side::A),
         ..both.a.clone()
     }
 }

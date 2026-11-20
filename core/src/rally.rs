@@ -58,6 +58,15 @@ impl Streams {
         }
     }
 
+    /// The events of the side, without where each comes from.
+    pub fn entries(self, side: Side) -> Vec<EventEntry> {
+        let stream = match side {
+            Side::A => self.a,
+            Side::B => self.b,
+        };
+        stream.into_iter().map(|p| p.entry).collect()
+    }
+
     fn push(mut self, side: Side, entry: EventEntry, source: usize) -> Self {
         let projected = Projected { entry, source };
         match side {
