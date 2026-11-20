@@ -248,7 +248,13 @@ impl<M> canvas::Program<M> for CanvasTrend {
         match &t.versus {
             Some(v) => {
                 across(t.overall, Color { a: 0.8, ..TEAM_US });
-                across(v.overall, Color { a: 0.8, ..TEAM_THEM });
+                across(
+                    v.overall,
+                    Color {
+                        a: 0.8,
+                        ..TEAM_THEM
+                    },
+                );
             }
             None => across(t.overall, Color { a: 0.6, ..c.text }),
         }
@@ -266,8 +272,8 @@ impl<M> canvas::Program<M> for CanvasTrend {
         }
         // the sets of the first team solid, the other's dashed, each set in
         // its colour
-        let teams = std::iter::once((&t.sets, false))
-            .chain(t.versus.iter().map(|v| (&v.sets, true)));
+        let teams =
+            std::iter::once((&t.sets, false)).chain(t.versus.iter().map(|v| (&v.sets, true)));
         for (sets, dashed) in teams {
             for (set, runs) in sets {
                 let color = set_color(*set);
