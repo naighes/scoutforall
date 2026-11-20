@@ -4,7 +4,9 @@
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::domain::Side;
-    use crate::rally::{Incoherence, Streams, admits, answer_evals, answers, project, replay};
+    use crate::rally::{
+        Incoherence, Streams, admits, answer_evals, answers, paired, project, replay,
+    };
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum},
         flags::EventFlags,
@@ -734,6 +736,22 @@ mod tests {
     /// The block answers the other side's attack, as in DataVolley
     /// (TODO/001, §4.2): after its freeball, its reception or its dig
     /// straight over, only the invasion (`/`), a fault.
+    /// The touches a touch is paired with: the one before it of the other
+    /// side that it answers, the one after it of the other side answering
+    /// it; a block both, a touch of the same side or not answering none.
+    #[test]
+    fn a_touch_is_paired_with_the_other_side_s_touches_it_answers_or_answering_it() {
+        let (a, b) = (Side::A, Side::B);
+        // the reception of a serve, seen from either
+        assert_eq!(paired(None, (a, S), Some((b, P))), (false, true));
+        assert_eq!(paired(Some((a, S)), (b, P), Some((b, A))), (true, false));
+        // a block: the attack before it, the dig after it
+        assert_eq!(paired(Some((a, A)), (b, B), Some((a, D))), (true, true));
+        // the same side, or touches not answering each other: none
+        assert_eq!(paired(Some((b, S)), (b, P), None), (false, false));
+        assert_eq!(paired(Some((a, FB)), (b, D), Some((a, P))), (false, false));
+    }
+
     #[test]
     fn the_block_answers_only_the_other_side_s_attack() {
         let (a, b) = (Team::new(), Team::new());

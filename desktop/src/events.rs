@@ -305,26 +305,24 @@ impl EventsScreen {
     /// the one it answers before it, the one answering it after it (a
     /// block has both), as `touch_edit` moves them with it.
     fn paired(&self) -> Vec<usize> {
-        let events = &self.set.events;
-        let at = |i: usize| events.get(i).filter(|_| self.set.both);
-        let Some(chosen) = at(self.selected) else {
+        let kind = |i: usize| {
+            self.set
+                .events
+                .get(i)
+                .filter(|_| self.set.both)
+                .map(|e| (e.event.side_b, e.event.event))
+        };
+        let Some(chosen) = kind(self.selected) else {
             return vec![];
         };
-        let before = self
-            .selected
-            .checked_sub(1)
-            .and_then(|i| Some((i, at(i)?)))
-            .filter(|(_, e)| {
-                e.event.side_b != chosen.event.side_b
-                    && scout4all_core::rally::answers(chosen.event.event, e.event.event)
-            });
-        let after = Some(self.selected + 1)
-            .and_then(|i| Some((i, at(i)?)))
-            .filter(|(_, e)| {
-                e.event.side_b != chosen.event.side_b
-                    && scout4all_core::rally::answers(e.event.event, chosen.event.event)
-            });
-        before.into_iter().chain(after).map(|(i, _)| i).collect()
+        let before = self.selected.checked_sub(1);
+        let after = self.selected + 1;
+        let (answers, answered_by) =
+            scout4all_core::rally::paired(before.and_then(kind), chosen, kind(after));
+        [before.filter(|_| answers), answered_by.then_some(after)]
+            .into_iter()
+            .flatten()
+            .collect()
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {

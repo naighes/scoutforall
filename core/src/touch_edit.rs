@@ -88,22 +88,24 @@ impl TouchEdit {
     /// admits none.
     fn resolved(&self, event: &EventEntry) -> Option<Vec<Touch>> {
         let i = self.index;
-        // the touch answers the one before it
-        let answered = i
+        let before = i
             .checked_sub(1)
-            .and_then(|p| Some((p, self.touches.get(p)?)))
-            .filter(|(_, (side, e))| {
-                *side != self.side && rally::answers(event.event_type, e.event_type)
-            })
+            .and_then(|p| Some((p, self.touches.get(p)?)));
+        let after = self.touches.get(i + 1).map(|t| (i + 1, t));
+        let kind = |t: Option<&(usize, &Touch)>| t.map(|(_, (side, e))| (*side, e.event_type));
+        let (answers, answered_by) = rally::paired(
+            kind(before.as_ref()),
+            (self.side, event.event_type),
+            kind(after.as_ref()),
+        );
+        // the touch answers the one before it
+        let answered = before
+            .filter(|_| answers)
             .map(|(p, (_, answered))| answered_eval(answered, event).map(|eval| (p, eval)));
         // and the one after it answers the touch
-        let answer = self
-            .touches
-            .get(i + 1)
-            .filter(|(side, e)| {
-                *side != self.side && rally::answers(e.event_type, event.event_type)
-            })
-            .map(|(_, answer)| answer_eval(event, answer).map(|eval| (i + 1, Some(eval))));
+        let answer = after
+            .filter(|_| answered_by)
+            .map(|(k, (_, answer))| answer_eval(event, answer).map(|eval| (k, Some(eval))));
         let paired: Option<Vec<(usize, Option<EvalEnum>)>> =
             [answered, answer].into_iter().flatten().collect();
         let mut touches = self.touches.clone();

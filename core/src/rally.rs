@@ -317,6 +317,19 @@ pub fn answers(touch: EventTypeEnum, answered: EventTypeEnum) -> bool {
     )
 }
 
+/// Whether a touch, of a set of both sides, is paired with the touch
+/// before it (it answers it) and with the one after it (answering it): a
+/// block has both. The touches are given by their side and their kind.
+pub fn paired<S: PartialEq>(
+    before: Option<(S, EventTypeEnum)>,
+    (side, touch): (S, EventTypeEnum),
+    after: Option<(S, EventTypeEnum)>,
+) -> (bool, bool) {
+    let answered = before.is_some_and(|(s, e)| s != side && answers(touch, e));
+    let answering = after.is_some_and(|(s, e)| s != side && answers(e, touch));
+    (answered, answering)
+}
+
 /// The evaluations of the answer to the other side's touch (see
 /// `answers`): the two touches tell the same transition, so the answered
 /// one decides the answer (TODO/001, §4.2). One value is no choice for the
