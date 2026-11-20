@@ -7614,7 +7614,6 @@ mod tests {
         );
     }
 
-    /// A team of seven, a match and its first set started, the team serving.
     /// The analysis and the clips of a team narrowed to a competition: the
     /// last matches are the last of the competition, the competitions
     /// offered are named, and none changes nothing.
@@ -7687,6 +7686,7 @@ mod tests {
         assert_eq!((clips(None), clips(Some(coppa.id))), (2, 1));
     }
 
+    /// A team of seven, a match and its first set started, the team serving.
     fn match_with_a_set(app: &Scout4All) -> (String, String) {
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=7 {
