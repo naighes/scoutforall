@@ -111,13 +111,12 @@ impl EventEdit {
     /// played by the same player (or by none, as the event), but the
     /// substitutions and the libero and setter changes.
     pub fn event_types(&self) -> Vec<EventTypeEnum> {
-        use EventTypeEnum::*;
         let event = &self.event;
         self.before
             .get_available_options()
             .iter()
             .copied()
-            .filter(|t| !matches!(t, R | CL | LR | LF | CS))
+            .filter(|t| !t.changes_lineup())
             .filter(|t| t.asks_player() == event.event_type.asks_player())
             .filter(|t| match event.player {
                 Some(p) => self.before.can_play(*t, &p),

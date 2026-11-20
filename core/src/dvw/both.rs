@@ -40,25 +40,12 @@ fn told(entry: &EventEntry) -> bool {
     )
 }
 
-/// Whether the event touches the ball: a substitution, a libero or setter
-/// change comes before the touch at the same line.
-fn off_the_ball(entry: &EventEntry) -> bool {
-    matches!(
-        entry.event_type,
-        EventTypeEnum::R
-            | EventTypeEnum::CL
-            | EventTypeEnum::LR
-            | EventTypeEnum::LF
-            | EventTypeEnum::CS
-    )
-}
-
 /// An event of a side with where it comes from in the file.
 pub(crate) type Lined = (Side, EventEntry, At);
 
 /// A touch of the ball by the side, not what it's told.
 fn played_by(touch: &Lined, side: Side) -> bool {
-    touch.0 == side && !off_the_ball(&touch.1) && !told(&touch.1)
+    touch.0 == side && !touch.1.event_type.changes_lineup() && !told(&touch.1)
 }
 
 /// The team as the side sees it, as a side.
@@ -90,7 +77,13 @@ fn sorted(a: &[EventEntry], lines_a: &[At], b: &[EventEntry], lines_b: &[At]) ->
             .enumerate()
             .map(|(index, (entry, line))| {
                 (
-                    (line.0, line.1, !off_the_ball(entry), side == Side::B, index),
+                    (
+                        line.0,
+                        line.1,
+                        !entry.event_type.changes_lineup(),
+                        side == Side::B,
+                        index,
+                    ),
                     (side, entry.clone(), *line),
                 )
             })
@@ -219,7 +212,7 @@ pub(crate) fn fused(
 pub(crate) fn disagreeing(touches: &[Lined]) -> Option<(usize, Issue)> {
     let played: Vec<&Lined> = touches
         .iter()
-        .filter(|(_, e, _)| !off_the_ball(e) && !told(e))
+        .filter(|(_, e, _)| !e.event_type.changes_lineup() && !told(e))
         .collect();
     played.windows(2).find_map(|pair| match pair {
         [
@@ -311,7 +304,7 @@ fn points(events: Vec<Lined>) -> Vec<Lined> {
                         (EventTypeEnum::S, false) => true,
                         _ => rally.open,
                     };
-                    rally.ball = match off_the_ball(&entry) {
+                    rally.ball = match entry.event_type.changes_lineup() {
                         true => rally.ball,
                         false => ball_after(side, &entry),
                     };

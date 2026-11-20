@@ -314,6 +314,13 @@ impl EventTypeEnum {
         EventTypeEnum::PL, // their point, no cause
     ];
 
+    /// Whether the event changes the lineup (a substitution, a libero or
+    /// setter change) instead of touching the ball.
+    pub fn changes_lineup(&self) -> bool {
+        use EventTypeEnum::*;
+        matches!(self, R | CL | LR | LF | CS)
+    }
+
     pub fn requires_evaluation(&self) -> bool {
         use EventTypeEnum::*;
         matches!(self, S | P | A | D | B)

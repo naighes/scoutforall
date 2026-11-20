@@ -58,19 +58,13 @@ pub fn translate_rows(
     }
 }
 
-/// Whether the event is a change of the lineup, not a touch of the ball.
-fn lineup_change(entry: &EventEntry) -> bool {
-    use EventTypeEnum::*;
-    matches!(entry.event_type, R | CL | LR | LF | CS)
-}
-
 /// The next touch of the side after the `i`-th, the changes of the lineup
 /// aside.
 fn next_of(touches: &[(Side, EventEntry)], i: usize, side: Side) -> Option<&EventEntry> {
     touches
         .iter()
         .skip(i.saturating_add(1))
-        .filter(|(s, e)| *s == side && !lineup_change(e))
+        .filter(|(s, e)| *s == side && !e.event_type.changes_lineup())
         .map(|(_, e)| e)
         .next()
 }
@@ -83,7 +77,7 @@ fn previous(touches: &[(Side, EventEntry)], i: usize) -> Option<(usize, &(Side, 
         .enumerate()
         .take(i)
         .rev()
-        .find(|(_, (_, e))| !lineup_change(e))
+        .find(|(_, (_, e))| !e.event_type.changes_lineup())
 }
 
 /// Whether the `i`-th touch is a block (not an invasion) of a ball coming

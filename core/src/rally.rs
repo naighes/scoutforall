@@ -279,7 +279,7 @@ pub fn ball_side(touches: &[(Side, EventEntry)], a: &Snapshot) -> Side {
     touches
         .iter()
         .rev()
-        .find(|(_, e)| touches_ball(e))
+        .find(|(_, e)| !e.event_type.changes_lineup())
         .and_then(|(s, e)| ball_after(*s, e))
         .unwrap_or(match a.get_ball_side() {
             TeamSideEnum::Us => Side::A,
@@ -297,19 +297,6 @@ fn ball_after(side: Side, entry: &EventEntry) -> Option<Side> {
             TeamSideEnum::Us => side,
             TeamSideEnum::Them => side.other(),
         })
-}
-
-/// Whether the event touches the ball: not a substitution, nor a libero
-/// or setter change.
-fn touches_ball(entry: &EventEntry) -> bool {
-    !matches!(
-        entry.event_type,
-        EventTypeEnum::R
-            | EventTypeEnum::CL
-            | EventTypeEnum::LR
-            | EventTypeEnum::LF
-            | EventTypeEnum::CS
-    )
 }
 
 /// Whether the touch answers the other side's touch, telling the same
@@ -410,13 +397,16 @@ pub fn admits(
         Side::B => b,
     };
     // the last touch of the ball, and where it left it
-    let last = touches.iter().rev().find(|(_, e)| touches_ball(e));
+    let last = touches
+        .iter()
+        .rev()
+        .find(|(_, e)| !e.event_type.changes_lineup());
     let ball = ball_side(touches, a);
     let last = last.filter(|(s, _)| *s != side);
     let after = ball_after(side, entry);
     // a serve still in play: the reception of the other side comes next
     let serve_in_play = matches!(
-        touches.iter().rev().find(|(_, e)| touches_ball(e)),
+        touches.iter().rev().find(|(_, e)| !e.event_type.changes_lineup()),
         Some((_, e)) if e.event_type == S && ball_after(side, e).is_some()
     );
     // on the side's half, or answering in play where the last touch left
@@ -426,7 +416,7 @@ pub fn admits(
     let open_roads = touches
         .iter()
         .rev()
-        .find(|(_, e)| touches_ball(e))
+        .find(|(_, e)| !e.event_type.changes_lineup())
         .is_some_and(|(s, e)| {
             *s == side && e.event_type == A && e.eval == Some(EvalEnum::Positive)
         });

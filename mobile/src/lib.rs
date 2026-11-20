@@ -5869,14 +5869,7 @@ fn set_event_rows(
             event: scouted_event(&m.team, e, labels),
             score_us,
             score_them,
-            editable: !matches!(
-                e.event_type,
-                EventTypeEnum::R
-                    | EventTypeEnum::CL
-                    | EventTypeEnum::LR
-                    | EventTypeEnum::LF
-                    | EventTypeEnum::CS
-            ),
+            editable: !e.event_type.changes_lineup(),
         })
         .collect())
 }
@@ -5915,14 +5908,7 @@ fn touch_rows(
                 },
                 score_us: a.score_us,
                 score_them: a.score_them,
-                editable: !matches!(
-                    e.event_type,
-                    EventTypeEnum::R
-                        | EventTypeEnum::CL
-                        | EventTypeEnum::LR
-                        | EventTypeEnum::LF
-                        | EventTypeEnum::CS
-                ),
+                editable: !e.event_type.changes_lineup(),
             })
         })
         .collect()

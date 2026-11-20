@@ -31,11 +31,6 @@ pub struct TouchEdit {
     event: EventEntry,
 }
 
-fn not_editable(event_type: EventTypeEnum) -> bool {
-    use EventTypeEnum::*;
-    matches!(event_type, R | CL | LR | LF | CS)
-}
-
 /// The sides after the first `n` touches.
 fn sides_at(
     a: &SetEntry,
@@ -59,7 +54,7 @@ impl TouchEdit {
         max_substitutions: u8,
     ) -> Result<Self, EventEditError> {
         let (side, event) = touches.get(index).ok_or(EventEditError::Unreadable)?;
-        if not_editable(event.event_type) {
+        if event.event_type.changes_lineup() {
             return Err(EventEditError::NotEditable);
         }
         let (before_a, before_b) = sides_at(a, b, touches, index, max_substitutions)?;
@@ -232,7 +227,7 @@ impl TouchEdit {
             .get_available_options()
             .iter()
             .copied()
-            .filter(|t| !not_editable(*t))
+            .filter(|t| !t.changes_lineup())
             .filter(|t| t.asks_player() == event.event_type.asks_player())
             .filter(|t| match event.player {
                 Some(p) => self.before.can_play(*t, &p),

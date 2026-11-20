@@ -619,7 +619,7 @@ impl Snapshot {
         // be scored, and the substitutions and libero and setter changes
         // aren't part of the rally; the player only of the events asking
         // one (our freeball named it once)
-        let skip = matches!(event.event_type, R | CL | LR | LF | CS)
+        let skip = event.event_type.changes_lineup()
             || (event.event_type.requires_evaluation() && event.eval.is_none());
         let situation = match skip {
             true => self.rally,
