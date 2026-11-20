@@ -314,10 +314,25 @@ impl Court {
             });
             // the name, abbreviated if long, and the efficiency below it:
             // three players side by side on 9 meters
-            let size = (meter * 0.3).clamp(11.0, 15.0);
+            let size = (meter * 0.3).clamp(9.0, 15.0);
             // the letters that fit in 3 meters, a monospaced font
             let room = (3.0 * meter / (size * 0.62)) as usize;
+            // the setter's triangle takes two of them
+            let room = match p.setter {
+                true => room.saturating_sub(2),
+                false => room,
+            };
             let short = scout4all_core::names::fitted(&p.name, room);
+            // still too long, as on a small window: cut, never over the
+            // name beside it
+            let short = match short.chars().count() > room {
+                true => short
+                    .chars()
+                    .take(room.saturating_sub(1))
+                    .chain(std::iter::once('.'))
+                    .collect(),
+                false => short,
+            };
             let name = match p.setter {
                 true => format!("▲ {short}"),
                 false => short,

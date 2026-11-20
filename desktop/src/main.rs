@@ -1848,7 +1848,7 @@ impl Main {
             },
             None => window::Settings {
                 size: Size::new(1400.0, 860.0),
-                min_size: Some(Size::new(1000.0, 640.0)),
+                min_size: Some(Size::new(1000.0, 800.0)),
                 ..window::Settings::default()
             },
         };

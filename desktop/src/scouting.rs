@@ -809,27 +809,40 @@ impl ScoutingScreen {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let left = column![self.header(s, c), self.choices(s, c)]
+        let body = iced::widget::responsive(move |size| {
+            let stats = self.show_stats && size.width >= STATS_MIN_WIDTH;
+            // the room the statistics leave goes to the choices: their
+            // names on one line, all the choices seen
+            let compact = size.height < COMPACT_HEIGHT;
+            let left = column![self.header(s, c, compact), self.choices(s, c, compact)]
+                .spacing(14)
+                .width(Length::Fixed(match stats {
+                    true => LEFT_WIDTH,
+                    false => LEFT_WIDTH_WIDE,
+                }));
+            // the last events once there are some: before the first, the court
+            let last = (!self.snapshot.state.events.is_empty())
+                .then(|| container(self.last_events(s, c)).height(Length::FillPortion(1)));
+            let middle = column![]
+                .push(self.action(s, c))
+                .push(container(self.court(c)).height(Length::FillPortion(3)))
+                .push(last)
+                .spacing(14)
+                .width(Length::Fill);
+            // on a narrow window the statistics would leave the court a
+            // sliver: they wait for room
+            match stats {
+                true => row![
+                    left,
+                    middle,
+                    container(self.stats(s, c)).width(Length::Fixed(STATS_WIDTH))
+                ],
+                false => row![left, middle],
+            }
             .spacing(14)
-            .width(Length::Fixed(LEFT_WIDTH));
-        // the last events once there are some: before the first, the court
-        let last = (!self.snapshot.state.events.is_empty())
-            .then(|| container(self.last_events(s, c)).height(Length::FillPortion(1)));
-        let middle = column![]
-            .push(self.action(s, c))
-            .push(container(self.court(c)).height(Length::FillPortion(3)))
-            .push(last)
-            .spacing(14)
-            .width(Length::Fill);
-        let body = match self.show_stats {
-            true => row![
-                left,
-                middle,
-                container(self.stats(s, c)).width(Length::Fixed(STATS_WIDTH))
-            ],
-            false => row![left, middle],
-        }
-        .spacing(14)
+            .height(Length::Fill)
+            .into()
+        })
         .height(Length::Fill);
         match &self.notice {
             None => body.into(),
@@ -855,7 +868,9 @@ impl ScoutingScreen {
         }
     }
 
-    fn header<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+    /// `compact`: a short window, the scores and the banner smaller so that
+    /// the choices below all fit.
+    fn header<'a>(&'a self, s: &'static Strings, c: Colors, compact: bool) -> Element<'a, Message> {
         let st = &self.snapshot.state;
         let bold = theme::fonts().bold;
         let side = |name: String, score: u8, serving: bool, ours: bool, tint: Option<Color>| {
@@ -874,7 +889,10 @@ impl ScoutingScreen {
                     }))
                     .width(Length::Fill),
                 text(score.to_string())
-                    .size(SIZE_SCORE)
+                    .size(match compact {
+                        true => SIZE_SCORE * 0.7,
+                        false => SIZE_SCORE,
+                    })
                     .font(bold)
                     .color(match ours {
                         true => c.accent,
@@ -926,7 +944,7 @@ impl ScoutingScreen {
             .spacing(10)
             .align_y(Alignment::Center),
         )
-        .padding(Padding::from([10, 14]))
+        .padding(Padding::from([if compact { 5 } else { 10 }, 14]))
         .width(Length::Fill)
         .style(move |_| container::Style {
             background: Some(color.into()),
@@ -961,7 +979,12 @@ impl ScoutingScreen {
         )
     }
 
-    fn choices<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+    fn choices<'a>(
+        &'a self,
+        s: &'static Strings,
+        c: Colors,
+        compact: bool,
+    ) -> Element<'a, Message> {
         let snap = &self.snapshot;
         let st = &snap.state;
         let mut list = Column::new().spacing(2);
@@ -1073,10 +1096,6 @@ impl ScoutingScreen {
                         ));
                     }
                 }
-                // the title only over options there are
-                if st.inverted_p1_applies || st.reception_open {
-                    list = group(list, s.options);
-                }
                 let option_key = |o| {
                     self.keys
                         .option_keybindings
@@ -1084,21 +1103,49 @@ impl ScoutingScreen {
                         .as_ref()
                         .map(|k| keymap::label(k, s))
                 };
-                if st.inverted_p1_applies {
-                    list = list.push(choice(
-                        option_key(ScoutingOptionEnum::InvertedP1),
-                        s.inverted_p1.to_string(),
-                        st.inverted_p1,
-                        Message::Option(ScoutingOptionEnum::InvertedP1),
-                    ));
-                }
-                if st.reception_open {
-                    list = list.push(choice(
-                        option_key(ScoutingOptionEnum::Reception),
-                        format!("{}: {}", s.reception, st.reception),
-                        false,
-                        Message::Option(ScoutingOptionEnum::Reception),
-                    ));
+                // (key, label, chosen, option) of the options there are
+                let options = [
+                    st.inverted_p1_applies.then(|| {
+                        (
+                            ScoutingOptionEnum::InvertedP1,
+                            s.inverted_p1.to_string(),
+                            st.inverted_p1,
+                        )
+                    }),
+                    st.reception_open.then(|| {
+                        (
+                            ScoutingOptionEnum::Reception,
+                            format!("{}: {}", s.reception, st.reception),
+                            false,
+                        )
+                    }),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>();
+                match (st.both, options.is_empty()) {
+                    (_, true) => {}
+                    // the two sides fill the panel: the options side by
+                    // side under them, with no title, so that none is
+                    // cut off
+                    (true, false) => {
+                        list = list.push(space::vertical().height(4)).push(two_by_two(
+                            options
+                                .into_iter()
+                                .map(|(o, label, chosen)| {
+                                    half(option_key(o), label, chosen, Message::Option(o))
+                                })
+                                .collect(),
+                        ));
+                    }
+                    // the title only over options there are
+                    (false, false) => {
+                        list = group(list, s.options);
+                        for (o, label, chosen) in options {
+                            list =
+                                list.push(choice(option_key(o), label, chosen, Message::Option(o)));
+                        }
+                    }
                 }
             }
             ScoutingStep::Player => {
@@ -1204,7 +1251,7 @@ impl ScoutingScreen {
         }
         // the points without a cause apart, big, as in the app, and never
         // scrolled away
-        let points = (st.step == ScoutingStep::Event).then(|| self.no_cause_points(s, c));
+        let points = (st.step == ScoutingStep::Event).then(|| self.no_cause_points(s, c, compact));
         ui::lit_panel(
             Some(step_title),
             column![]
@@ -1231,7 +1278,12 @@ impl ScoutingScreen {
 
     /// The points without a cause as in the app: two big buttons, "+1", in
     /// the color of their team (A blue, B pink), the host on the left.
-    fn no_cause_points<'a>(&'a self, s: &Strings, c: Colors) -> Element<'a, Message> {
+    fn no_cause_points<'a>(
+        &'a self,
+        s: &Strings,
+        c: Colors,
+        compact: bool,
+    ) -> Element<'a, Message> {
         let st = &self.snapshot.state;
         let find = |event: EventTypeEnum| {
             self.snapshot
@@ -1248,7 +1300,10 @@ impl ScoutingScreen {
                     };
                     column![
                         text("+1")
-                            .size(SIZE_SCORE - 6.0)
+                            .size(match compact {
+                                true => SIZE_SCORE * 0.5,
+                                false => SIZE_SCORE - 6.0,
+                            })
                             .font(theme::fonts().bold)
                             .color(color),
                         row![key, text(team).size(SIZE_SMALL).color(color)]
@@ -1762,6 +1817,12 @@ const EVENT_NAME_ROOM: usize = 14;
 
 /// How wide the column of the score and the choices is.
 const LEFT_WIDTH: f32 = 380.0;
+/// The same, with no statistics beside the court.
+const LEFT_WIDTH_WIDE: f32 = 480.0;
+/// The width of the window from which the statistics sit beside the court.
+const STATS_MIN_WIDTH: f32 = 1200.0;
+/// Under this height of the window the left column is made smaller.
+const COMPACT_HEIGHT: f32 = 860.0;
 
 /// How wide the key of a choice in half the panel is.
 const HALF_KEY: f32 = 44.0;
