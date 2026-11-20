@@ -29,7 +29,7 @@ import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.PhaseStats
 
 /** How wide the name of a row stands between the two sides. */
-private val LABEL_WIDTH = 72.dp
+private val LABEL_WIDTH = 84.dp
 
 /** How thick a bar is. */
 private val BAR_HEIGHT = 8.dp
@@ -117,7 +117,7 @@ private fun Line(name: String, a: @Composable () -> Unit, b: @Composable () -> U
     Text(
         name,
         Modifier.width(LABEL_WIDTH),
-        style = MaterialTheme.typography.labelMedium,
+        style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         textAlign = TextAlign.Center,
     )
