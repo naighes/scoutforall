@@ -329,7 +329,6 @@ impl ScoutingScreen {
             }
             Message::StatsView(v) => {
                 self.stats_view = v;
-                self.refresh();
                 Outcome::Stay
             }
             Message::Recent(r) => {

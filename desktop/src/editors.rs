@@ -264,12 +264,11 @@ const COURT_AWAY: usize = 1;
 const COURT_NEUTRAL: usize = 2;
 
 /// What is said of a new player of B before saving.
-#[derive(Clone, Copy, PartialEq)]
 enum Answer {
     /// nothing yet: the registry is looked at
     Ask,
     /// the person of the registry
-    Same(uuid::Uuid),
+    Same(Box<ExistingPlayer>),
     /// a new person, though the registry has the name
     Another,
     /// a new person, whatever the namesakes
@@ -354,7 +353,7 @@ pub struct Editor {
     namesake: Option<String>,
     /// the person of the registry the question of a new player of B is
     /// about: Enter takes them, `n` makes another person
-    same_person: Option<uuid::Uuid>,
+    same_person: Option<ExistingPlayer>,
 }
 
 /// The option of `value` among `values`, after the empty one.
@@ -1110,36 +1109,32 @@ impl Editor {
             ..PlayerForm::default()
         };
         // a person of the registry with the name: the same one or another
-        if answer == Answer::Ask {
-            let namesake = core
+        let namesake = match answer {
+            Answer::Ask => core
                 .registry_namesake(b.clone(), form.name.clone())
                 .ok()
-                .flatten();
-            if let Some(person) = namesake {
-                self.namesake = Some(ui::fill(s.same_person_text, &[person.label]));
-                self.same_person = Some(person.id);
-                return;
-            }
-        }
-        // the same person keeps the name the registry has, as written there
-        let registry_name = match answer {
-            Answer::Same(_) => core
-                .registry_namesake(b.clone(), form.name.clone())
-                .ok()
-                .flatten()
-                .map(|p| p.name),
+                .flatten(),
             _ => None,
         };
-        let form = PlayerForm {
-            name: registry_name.unwrap_or(form.name),
-            person: match answer {
-                Answer::Same(person) => Some(person),
-                _ => None,
-            },
-            ..form
-        };
+        if let Some(person) = namesake {
+            self.namesake = Some(ui::fill(
+                s.same_person_text,
+                std::slice::from_ref(&person.label),
+            ));
+            self.same_person = Some(person);
+            return;
+        }
         // another player of the team with the name is asked about too
         let confirmed = matches!(answer, Answer::Same(_) | Answer::Anyway);
+        // the same person keeps the name the registry has, as written there
+        let form = match answer {
+            Answer::Same(person) => PlayerForm {
+                name: person.name,
+                person: Some(person.id),
+                ..form
+            },
+            _ => form,
+        };
         let added = core
             .save_player(b, None, form, confirmed)
             .and_then(|player| {
@@ -1196,22 +1191,23 @@ impl Editor {
     /// saved as the person of the registry, or (`same` false) as a new one.
     fn answered(&mut self, core: &Scout4All, s: &Strings, same: bool) -> Edited {
         let answer = match (self.same_person.take(), same) {
-            (Some(person), true) => Answer::Same(person),
+            (Some(person), true) => Answer::Same(Box::new(person)),
             (Some(_), false) => Answer::Another,
             (None, _) => Answer::Anyway,
         };
         self.namesake = None;
         match self.adding_b() {
-            true => self.added(core, s, answer),
-            false => return self.saved(core, s, true),
+            true => {
+                self.added(core, s, answer);
+                Edited::Stay
+            }
+            false => self.saved(core, s, true),
         }
-        Edited::Stay
     }
 
     /// Whether the small form open is a new player of B.
-    fn adding_b(&mut self) -> bool {
-        self.correcting_slot()
-            .is_some_and(|c| c.as_ref().is_some_and(|c| c.adding))
+    fn adding_b(&self) -> bool {
+        self.correcting().is_some_and(|c| c.adding)
     }
 
     /// The match form as it is, for the roster.
