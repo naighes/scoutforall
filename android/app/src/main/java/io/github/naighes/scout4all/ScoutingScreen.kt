@@ -585,8 +585,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     currentSet = view.state.setNumber.toInt(),
                     onScope = model::stats,
                     loadDetail = model::detail,
-                    sides = (view.state.team to view.state.opponent).takeIf { view.state.both }
-                        ?.let { if (view.state.sideB) it.second to it.first else it },
+                    sides = teamsOfBoth(view.state),
                     sideB = model.statsOfB,
                     onSide = model::statsSide,
                     compare = model.statsCompare,
@@ -711,8 +710,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                         view.otherEvents.filter { it.value in lineupChanges },
                         model,
                         Modifier,
-                        teams = (view.state.team to view.state.opponent).takeIf { view.state.both },
-                        sideBOnScreen = view.state.sideB,
+                        teams = teamsOfBoth(view.state),
                     )
                 }
             }
@@ -788,7 +786,8 @@ private fun ServeChoices(model: ScoutingViewModel, compact: Boolean = false) =
         }
     }
 
-/** The names of the two teams when both sides are scouted, else nothing. */
+/** The names of A and B when both sides are scouted (whichever is on
+ * screen), else nothing. */
 private fun teamsOfBoth(state: ScoutingState): Pair<String, String>? =
     (state.team to state.opponent).takeIf { state.both }
         ?.let { (onScreen, other) -> if (state.sideB) other to onScreen else onScreen to other }
@@ -829,13 +828,7 @@ private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean 
     val us = Side(state.team, state.scoreUs.toInt(), weServe, Won)
     val them = Side(state.opponent, state.scoreThem.toInt(), !weServe, Lost)
     val (left, right) = if (state.home) us to them else them to us
-    val haptic = LocalHapticFeedback.current
-    val points = state.scoreUs.toInt() + state.scoreThem.toInt()
-    var previous by remember { mutableIntStateOf(points) }
-    LaunchedEffect(points) {
-        if (points > previous) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        previous = points
-    }
+    VibrateOnPoint(state)
     // read as one: the teams with their points, who serves; TalkBack says
     // it again at each point, when it's done saying what it was saying
     val spoken = "${left.name} ${left.points}, ${right.name} ${right.points}, " +
@@ -860,6 +853,18 @@ private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean 
     }
 }
 
+/** The phone vibrates at each point scored, not at one undone. */
+@Composable
+private fun VibrateOnPoint(state: ScoutingState) {
+    val haptic = LocalHapticFeedback.current
+    val points = state.scoreUs.toInt() + state.scoreThem.toInt()
+    var previous by remember { mutableIntStateOf(points) }
+    LaunchedEffect(points) {
+        if (points > previous) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        previous = points
+    }
+}
+
 /** Scouting both sides: the two teams in a line, the home one on the left,
  * each with its points and its rotation, the ball by the one serving; the
  * side the choices are for stands out in its color (A's blue, B's pink, as
@@ -871,19 +876,13 @@ private fun BothScore(state: ScoutingState, server: Boolean, told: String?, onSw
     val onScreen = Triple(state.team, state.scoreUs.toInt(), state.rotation)
     val other = Triple(state.opponent, state.scoreThem.toInt(), state.otherRotation)
     // B is on screen: the colors and the places of the sides don't move
-    val colors = if (state.sideB) TeamThem to TeamUs else TeamUs to TeamThem
+    val colors = sideColor(state.sideB) to sideColor(!state.sideB)
     val chip = @Composable { (name, points, rotation): Triple<String, Int, String>, serving: Boolean, turn: Boolean, color: Color ->
         // choosing where the serve went, or in landscape, the court
         // needs the room
         SideChip(Side(name, points, serving, Won), rotation, turn, color, compact)
     }
-    val haptic = LocalHapticFeedback.current
-    val total = state.scoreUs.toInt() + state.scoreThem.toInt()
-    var previous by remember { mutableIntStateOf(total) }
-    LaunchedEffect(total) {
-        if (total > previous) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        previous = total
-    }
+    VibrateOnPoint(state)
     val swappable = state.step == ScoutingStep.EVENT && state.event == null && state.player == null
     Column(Modifier.fillMaxWidth().tutorial("score").padding(horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
         val screenFirst = state.home
@@ -1204,11 +1203,12 @@ private fun Title(text: String) = Text(
 @Composable
 private fun Hint(text: String) = Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+/** The points without a cause, ours and theirs: a row of their own. */
+private val noCause = setOf(EventTypeEnum.PW, EventTypeEnum.PL)
+
 /** The changes of the lineup, rare and at stopped play, each with its icon
  * and a short name; the libero out or in by its own, saying which; the
  * libero for a player of the back row, touched on court. */
-private val noCause = setOf(EventTypeEnum.PW, EventTypeEnum.PL)
-
 private val lineupChanges = mapOf(
     EventTypeEnum.R to (R.drawable.ic_substitution to R.string.substitution_short),
     EventTypeEnum.CL to (R.drawable.ic_libero to R.string.libero),
@@ -1235,10 +1235,8 @@ private fun LineupChanges(
     events: List<EventChoice>,
     model: ScoutingViewModel,
     modifier: Modifier,
-    /** both sides: the names of the side on screen and of the other, and
-     * whether B is on screen; none for one side */
+    /** both sides: the names of A and B; none for one side */
     teams: Pair<String, String>? = null,
-    sideBOnScreen: Boolean = false,
 ) {
     var open by remember { mutableStateOf(false) }
     val expanded = open && events.isNotEmpty()
@@ -1260,7 +1258,7 @@ private fun LineupChanges(
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 12.dp)) {
                     events.forEach { event ->
                         val looks = lineupChanges[event.value]
-                        val team = teams?.let { (onScreen, other) -> if (event.sideB == sideBOnScreen) onScreen else other }
+                        val team = teams?.let { (a, b) -> if (event.sideB) b else a }
                         Column(
                             Modifier
                                 .tutorial("event:${event.value}")
@@ -1283,7 +1281,7 @@ private fun LineupChanges(
                                 Text(
                                     name,
                                     modifier = Modifier.widthIn(max = 64.dp)
-                                        .drawBehind { drawRect(if (event.sideB) TeamThem else TeamUs, size = size.copy(height = 3.dp.toPx()), topLeft = Offset(0f, size.height - 3.dp.toPx())) }
+                                        .drawBehind { drawRect(sideColor(event.sideB), size = size.copy(height = 3.dp.toPx()), topLeft = Offset(0f, size.height - 3.dp.toPx())) }
                                         .padding(bottom = 4.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     maxLines = 1,
@@ -1354,7 +1352,7 @@ private fun RallyEvents(
             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
             shape = MaterialTheme.shapes.medium,
             // the events of both sides in one row: each in the color of its team
-            border = teams?.let { BorderStroke(2.dp, if (event.sideB) TeamThem else TeamUs) },
+            border = teams?.let { BorderStroke(2.dp, sideColor(event.sideB)) },
         ) {
             // never a word broken (ricezione, in two): smaller until it fits
             val base = MaterialTheme.typography.labelSmall.fontSize
@@ -1388,7 +1386,7 @@ private fun NoCausePoints(view: ScoutingView, model: ScoutingViewModel) {
     val ours = view.noCausePoints.firstOrNull { it.value == EventTypeEnum.PW }
     val theirs = view.noCausePoints.firstOrNull { it.value == EventTypeEnum.PL }
     // the colors of the teams, not of who's on screen: B is pink, on screen too
-    val (usColor, themColor) = if (state.sideB) TeamThem to TeamUs else TeamUs to TeamThem
+    val (usColor, themColor) = sideColor(state.sideB) to sideColor(!state.sideB)
     val us = Triple(ours, state.team, usColor)
     val them = Triple(theirs, state.opponent, themColor)
     val sides = if (state.home) listOf(us, them) else listOf(them, us)

@@ -24,6 +24,10 @@ val Lost = Color(0xFFF87171)
  * events of the video), as on the desktop: ours soft blue, theirs soft rose. */
 val TeamUs = Color(0xFF7FB0E0)
 val TeamThem = Color(0xFFE394B4)
+
+/** The color of team A or B of a match scouted on both sides: B's pink,
+ * on screen too. */
+fun sideColor(sideB: Boolean): Color = if (sideB) TeamThem else TeamUs
 val Fair = Color(0xFFFACC15)
 /** The phase of the rally, as on the desktop: receiving (side out),
  * serving (break). */
