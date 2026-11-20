@@ -100,7 +100,7 @@ class BothSidesScoutingTest {
 
     @Test
     fun theTwoSidesAreComparedOnTheirChip() {
-        serve(team, match, EvalEnum.PERFECT)
+        serve(team, match, EvalEnum.ERROR)
         show()
         rule.onNode(hasText(string(R.string.stats_swipe)) and hasClickAction()).performClick()
         val compare = { rule.onNode(hasText(string(R.string.compare)) and hasClickAction()) }
@@ -111,6 +111,12 @@ class BothSidesScoutingTest {
         rule.waitFor { rule.onAllNodes(hasText(string(R.string.side_out))).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(rule.onAllNodes(hasText("Arezzo") and !hasClickAction()).fetchSemanticsNodes().isNotEmpty())
         assertTrue(rule.onAllNodes(hasText("Italia") and !hasClickAction()).fetchSemanticsNodes().isNotEmpty())
+        // the trend of both teams on one chart: their names in the legend,
+        // the direct errors left out
+        rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performClick()
+        rule.waitFor { rule.onAllNodes(hasText("╌╌ Arezzo"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(rule.onAllNodes(hasText("── Italia"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(rule.onAllNodes(hasText("│ " + string(R.string.trend_direct)), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
         // a team's chip leaves the comparison
         rule.onNode(hasText("Italia") and hasClickAction()).performClick()
         rule.waitFor { runCatching { compare().assertIsNotSelected() }.isSuccess }
