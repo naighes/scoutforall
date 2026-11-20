@@ -32,9 +32,12 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
+import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.navArgument
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.NextSetKind
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -300,6 +303,7 @@ private fun Navigation(
                 onVideo = { nav.navigate("$match/video") },
                 onDeleted = { nav.back(entry) },
                 // the same match, from A: in place of this one
+                onStatsOfB = { a -> nav.navigate("team/$a/match/${Uri.encode(m)}/stats?set=0&side=b") },
                 onOpenAs = { a ->
                     nav.navigate("team/$a/match/${Uri.encode(m)}") {
                         popUpTo("team/{id}/match/{match}") { inclusive = true }
@@ -319,11 +323,16 @@ private fun Navigation(
                 onStats = { nav.navigate("team/$id/match/${Uri.encode(m)}/stats?set=$set") },
             )
         }
-        composable("team/{id}/match/{match}/stats?set={set}") { entry ->
+        // side b: the statistics of team B, opened from its page
+        composable(
+            "team/{id}/match/{match}/stats?set={set}&side={side}",
+            arguments = listOf(navArgument("side") { type = NavType.StringType; defaultValue = "a" }),
+        ) { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val m = entry.arguments?.getString("match").orEmpty()
             val set = entry.arguments?.getString("set")?.toIntOrNull()?.takeIf { it > 0 }
-            MatchStatsScreen(id, m, set, onBack = { nav.back(entry) }, onWatch = { nav.watch(it) })
+            val side = if (entry.arguments?.getString("side") == "b") MatchSide.B else MatchSide.A
+            MatchStatsScreen(id, m, set, side, onBack = { nav.back(entry) }, onWatch = { nav.watch(it) })
         }
         composable("team/{id}/match/{match}/video") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()

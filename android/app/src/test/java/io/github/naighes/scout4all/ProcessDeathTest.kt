@@ -7,6 +7,7 @@ import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.NewVideoFile
 import org.junit.Rule
@@ -41,7 +42,7 @@ class ProcessDeathTest {
         touch(string(R.string.resume_set_n, 1))
         // a serve saved, then a player touched for the next event
         touch("+")
-        rule.waitForText(string(R.string.touch_the_player))
+        rule.waitForTheRally()
         touch("Paola Egonu")
         rule.waitForText("18 · Paola Egonu")
         // the activity saves its state and goes, with its view models: as
@@ -51,7 +52,7 @@ class ProcessDeathTest {
         Robolectric.buildActivity(MainActivity::class.java).setup(saved)
         // the scouting again, with the serve; the player touched is lost
         rule.waitForText("serve +", substring = true)
-        rule.waitForText(string(R.string.touch_the_player))
+        rule.waitForTheRally()
     }
 
     /** The actions picked in the statistics, in their video, when the
@@ -61,7 +62,7 @@ class ProcessDeathTest {
         core { it.acceptTerms() }
         serve(team, match, EvalEnum.PERFECT, EvalEnum.PERFECT, EvalEnum.ERROR)
         core { c ->
-            c.videoReview(team, match, null).addFiles(listOf(NewVideoFile("content://nowhere/20261025 175500.mp4", "20261025 175500.mp4")), 7200)
+            c.videoReview(team, match, MatchSide.A, null).addFiles(listOf(NewVideoFile("content://nowhere/20261025 175500.mp4", "20261025 175500.mp4")), 7200)
         }
         val closed = Robolectric.buildActivity(MainActivity::class.java).setup()
         touch("Italia")

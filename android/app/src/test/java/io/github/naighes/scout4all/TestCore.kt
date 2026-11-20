@@ -59,15 +59,40 @@ fun startFirstSet(
     opponent: String = "Cortona",
     serving: TeamSideEnum = TeamSideEnum.US,
     setterAt: Int = 1,
+    competition: String = "",
 ): String = core { c ->
-    val match = c.saveMatch(team, null, MatchForm(opponent, "2026-10-25T18:00:00+02:00", true, "6"))
+    val match = c.saveMatch(team, null, MatchForm(opponent, "2026-10-25T18:00:00+02:00", true, "6", competition = competition))
     startSet(c, team, match, serving, setterAt)
     match
 }
 
+/** A match on both sides with its first set started: Arezzo, with the
+ * players of `nationalTeam` too, A serving; the match id. */
+fun startFirstSetBoth(team: String, opponent: String = "Arezzo"): String = core { c ->
+    val b = saveTeam(opponent)
+    nationalTeam.forEach { (name, role, number) ->
+        c.savePlayer(b, null, PlayerForm(name, role, number.toString()))
+    }
+    val match = c.saveMatch(team, null, MatchForm(opponent, "2026-10-25T18:00:00+02:00", true, "6", opponentTeam = b, both = true))
+    c.saveRosterOfB(team, match, MatchForm("", null, false, ""))
+    val lineup = { start: io.github.naighes.scout4all.core.SetStart, id: String ->
+        val players = c.team(id).players.associateBy { it.name }
+        nationalTeam.take(6).forEachIndexed { i, (name, _, _) -> start.place((i + 1).toUByte(), players.getValue(name).id) }
+        start.chooseSetter(players.getValue("Alessia Orro").id)
+        start.chooseLibero(players.getValue("Monica De Gennaro").id)
+    }
+    val a = c.setStart(team, match)
+    a.chooseServingTeam(TeamSideEnum.US)
+    lineup(a, team)
+    val ofB = checkNotNull(c.setStartOfB(team, match))
+    lineup(ofB, b)
+    c.startSetBoth(a, ofB)
+    match
+}
+
 /** A match of the team won 3–0 with aces; its id. */
-fun winMatch(team: String, opponent: String): String {
-    val match = startFirstSet(team, opponent)
+fun winMatch(team: String, opponent: String, competition: String = ""): String {
+    val match = startFirstSet(team, opponent, competition = competition)
     repeat(3) { set ->
         if (set > 0) startNextSet(team, match)
         core { c -> c.scouting(team, match).use { s -> repeat(25) { s.chooseEval(EvalEnum.PERFECT) } } }
@@ -97,6 +122,12 @@ fun ComposeTestRule.waitForText(text: String, substring: Boolean = false) =
     waitFor({ "no \"$text\" in ${texts()}" }) {
         onAllNodesWithText(text, substring = substring).fetchSemanticsNodes().isNotEmpty()
     }
+
+/** Until the scouting waits for a player on the court, or an event of the
+ * rally: the points without a cause are there (`+1`, the team in its description). */
+fun ComposeTestRule.waitForTheRally() = waitFor({ "no \"+1\" in ${texts()}" }) {
+    onAllNodesWithText("+1").fetchSemanticsNodes().isNotEmpty()
+}
 
 /** The texts on the screen, to tell what's there instead. */
 fun ComposeTestRule.texts(): List<String> =

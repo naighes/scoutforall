@@ -164,6 +164,9 @@ private enum class StatsPage(val title: Int) {
  * when it can't. */
 typealias LoadDetail = suspend (StatsScope, EventTypeEnum, DetailFilter) -> DetailStats?
 
+/** The same of A and B. */
+typealias LoadDetails = suspend (StatsScope, EventTypeEnum, DetailFilter) -> Pair<DetailStats, DetailStats>?
+
 /** The statistics while scouting, from below: the set being played at
  * first, any other set or the whole match on a chip; the essentials first,
  * the details a swipe aside. */
@@ -175,6 +178,18 @@ fun StatsSheet(
     onScope: (StatsScope) -> Unit,
     loadDetail: LoadDetail,
     onDismiss: () -> Unit,
+    // a match scouted on both sides: the names of A and B, which are shown
+    sides: Pair<String, String>? = null,
+    sideB: Boolean = false,
+    onSide: (Boolean, StatsScope) -> Unit = { _, _ -> },
+    // A | B side by side: the statistics of B, those of A being `stats`
+    compare: Boolean = false,
+    statsOfB: LiveStats? = null,
+    onCompare: (StatsScope) -> Unit = {},
+    // the rotation and the phase the figures are narrowed to
+    onFilter: (StatsScope, DetailFilter) -> Unit = { _, _ -> },
+    // a fundamental in detail of both sides
+    loadDetails: LoadDetails = { _, _, _ -> null },
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(Unit) { onScope(StatsScope.Set(currentSet.toUByte())) }
@@ -191,8 +206,115 @@ fun StatsSheet(
         Column(Modifier.fillMaxWidth().fillMaxHeight(0.9f)) {
             when (stats) {
                 null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-                else -> StatsPages(stats, onScope, loadDetail)
+                else -> {
+                    sides?.let { (a, b) ->
+                        Row(
+                            Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            listOf(false to a, true to b).forEach { (ofB, name) ->
+                                FilterChip(
+                                    selected = !compare && sideB == ofB,
+                                    onClick = { onSide(ofB, stats.scope) },
+                                    label = { Text(name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                    modifier = Modifier.weight(1f),
+                                )
+                            }
+                            FilterChip(
+                                selected = compare,
+                                onClick = { onCompare(stats.scope) },
+                                label = { Text(stringResource(R.string.compare), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                    }
+                    when {
+                        compare -> Compared(stats, statsOfB, onScope, onFilter, loadDetails)
+                        else -> StatsPages(stats, onScope, loadDetail, side = sideB, onFilter = onFilter)
+                    }
+                }
             }
+        }
+    }
+}
+
+/** The two sides side by side, the scope on top: B's figures are read
+ * after A's. */
+@Composable
+private fun Compared(
+    a: LiveStats,
+    b: LiveStats?,
+    onScope: (StatsScope) -> Unit,
+    onFilter: (StatsScope, DetailFilter) -> Unit,
+    loadDetails: LoadDetails,
+) {
+    // the figures side by side, the trend of both on one chart, or a
+    // fundamental in detail
+    var page by remember { mutableStateOf(ComparedPage.Summary) }
+    Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ComparedPage.entries.forEach { p ->
+            FilterChip(
+                selected = page == p,
+                onClick = { page = p },
+                label = { Text(stringResource(p.title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+            )
+        }
+    }
+    // the trend shows every set
+    if (page != ComparedPage.Trend) Scopes(a, onScope)
+    if (page == ComparedPage.Summary) Box(Modifier.padding(horizontal = 16.dp)) { Narrowing(a) { onFilter(a.scope, it) } }
+    // B's of another scope are the previous ones: not shown
+    when (val shown = b?.takeIf { it.scope == a.scope }) {
+        null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        else -> when (page) {
+            ComparedPage.Detail -> ComparedDetail(a.teamName to shown.teamName, a.scope, narrowedTo(a), loadDetails)
+            else -> Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) { if (page == ComparedPage.Trend) Trend(a, shown) else Comparison(a, shown) }
+        }
+    }
+}
+
+/** The rotation and the phase the figures are narrowed to, for the
+ * detail. */
+private fun narrowedTo(stats: LiveStats) = DetailFilter(phase = stats.filter.phase, rotations = stats.filter.rotations)
+
+private enum class ComparedPage(val title: Int) {
+    Summary(R.string.stats_summary),
+    Trend(R.string.stats_trend),
+    Detail(R.string.stats_detail),
+}
+
+/** A fundamental on a chip, as it went for each side. */
+@Composable
+private fun ComparedDetail(names: Pair<String, String>, scope: StatsScope, filter: DetailFilter, loadDetails: LoadDetails) {
+    var event by remember { mutableStateOf(EventTypeEnum.S) }
+    val both by produceState<Pair<DetailStats, DetailStats>?>(null, scope, event, filter) {
+        value = loadDetails(scope, event, filter)
+    }
+    val shown = both
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (shown == null) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            return@Column
+        }
+        val (da, db) = shown
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            da.fundamentals.forEach { f ->
+                FilterChip(
+                    selected = f.value == event,
+                    onClick = { event = f.value },
+                    label = { Text(f.name.replaceFirstChar { it.uppercase() }) },
+                )
+            }
+        }
+        val fa = da.fundamental
+        val fb = db.fundamental
+        when {
+            fa == null || fb == null -> Unit
+            fa.total == 0u && fb.total == 0u -> Text(stringResource(R.string.no_events), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> ComparisonDetail(fa, fb, names)
         }
     }
 }
@@ -227,19 +349,29 @@ fun StatsPages(
     loadDetail: LoadDetail,
     // the actions of the detail in the video: not while scouting
     watch: ((StatsScope) -> Watch)? = null,
+    // the side the pages are of: what is read again when it changes
+    side: Boolean = false,
+    // the rotation and the phase the figures are narrowed to: the detail
+    // has the same
+    onFilter: (StatsScope, DetailFilter) -> Unit = { _, _ -> },
 ) {
     val pages = StatsPage.entries
     val pager = rememberPagerState(pageCount = { pages.size })
     val scope = rememberCoroutineScope()
     // the detail asked for stays while swiping, and the last one read while
     // the next is
-    var query by remember { mutableStateOf(DetailQuery()) }
-    val detail by produceState<DetailStats?>(null, stats.scope, query) {
+    // with the rotation and the phase the figures are narrowed to already
+    var query by remember { mutableStateOf(DetailQuery(filter = narrowedTo(stats))) }
+    val detail by produceState<DetailStats?>(null, stats.scope, query, side) {
         value = loadDetail(stats.scope, query.event, query.filter) ?: value
     }
     // the choices of the filters on the situation of the game
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val situation by produceState<SituationChoices?>(null) { value = app.core { it.situationChoices() } }
+    val narrow = { f: DetailFilter ->
+        query = query.copy(filter = query.filter.copy(phase = f.phase, rotations = f.rotations))
+        onFilter(stats.scope, f)
+    }
     if (pages[pager.currentPage] != StatsPage.Trend) Scopes(stats, onScope)
     PrimaryScrollableTabRow(selectedTabIndex = pager.currentPage, edgePadding = 0.dp) {
         pages.forEachIndexed { i, page ->
@@ -256,11 +388,27 @@ fun StatsPages(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             when (pages[i]) {
-                StatsPage.Summary -> Summary(stats)
-                StatsPage.Distribution -> Distribution(stats)
-                StatsPage.Errors -> Errors(stats)
+                StatsPage.Summary -> {
+                    Narrowing(stats, narrow)
+                    Summary(stats)
+                }
+                StatsPage.Distribution -> {
+                    Narrowing(stats, narrow)
+                    Distribution(stats)
+                }
+                StatsPage.Errors -> {
+                    Narrowing(stats, narrow)
+                    Errors(stats)
+                }
                 StatsPage.Trend -> Trend(stats)
-                StatsPage.Detail -> Detail(detail, query, situation, watch = watch?.invoke(stats.scope)) { query = it }
+                StatsPage.Detail -> Detail(detail, query, situation, watch = watch?.invoke(stats.scope)) { asked ->
+                    val f = asked.filter
+                    // the same rotation and phase on every page
+                    if (f.phase != query.filter.phase || !f.rotations.contentEquals(query.filter.rotations)) {
+                        onFilter(stats.scope, DetailFilter(phase = f.phase, rotations = f.rotations))
+                    }
+                    query = asked
+                }
             }
         }
     }
@@ -696,7 +844,7 @@ private fun ErrorGroup(
  * score: past the screen they all scroll across together. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun Trend(stats: LiveStats) {
+private fun Trend(stats: LiveStats, versus: LiveStats? = null) {
     var recent by remember { mutableStateOf(false) }
     // the sets whose lines are left out
     var hidden by remember { mutableStateOf(setOf<Int>()) }
@@ -719,11 +867,11 @@ private fun Trend(stats: LiveStats) {
             )
         }
     }
-    TrendLegend(stats)
+    TrendLegend(stats, versus)
     // the rallies of the longest set, at least 25: a column each
     val columns = maxOf(
         25,
-        stats.trend.flatMap { line -> line.sets.map { it.values.size } }.maxOrNull() ?: 0,
+        (stats.trend + versus?.trend.orEmpty()).flatMap { line -> line.sets.map { it.values.size } }.maxOrNull() ?: 0,
         stats.points.maxOfOrNull { it.points.size } ?: 0,
     )
     // a score whole in its column, whatever the font of the phone
@@ -736,7 +884,11 @@ private fun Trend(stats: LiveStats) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val column = maxOf(narrowest, maxWidth / columns)
         Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            stats.trend.forEach { TrendChart(it, recent, hidden, columns, column, across) }
+            stats.trend.forEach { line ->
+                // the same figure of the other team, if compared
+                val other = versus?.trend?.firstOrNull { it.series == line.series }
+                TrendChart(line, other, recent, hidden, columns, column, across)
+            }
             // the sets hidden left out of the points too
             val points = stats.points.filter { it.points.isNotEmpty() && it.setNumber.toInt() !in hidden }
             if (points.isNotEmpty()) PointSequence(points, column * columns, column, across)
@@ -799,7 +951,7 @@ private fun PointSequence(points: List<SetPoints>, width: Dp, column: Dp, across
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun TrendLegend(stats: LiveStats) = FlowRow(
+private fun TrendLegend(stats: LiveStats, versus: LiveStats?) = FlowRow(
     // each chart says its sets
     Modifier.notRead(),
     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -810,7 +962,14 @@ private fun TrendLegend(stats: LiveStats) = FlowRow(
         style = MaterialTheme.typography.labelSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    Text("│ " + stringResource(R.string.trend_direct), style = MaterialTheme.typography.labelSmall, color = Lost)
+    // two teams: the solid lines are the first's, the dashed the other's
+    when (versus) {
+        null -> Text("│ " + stringResource(R.string.trend_direct), style = MaterialTheme.typography.labelSmall, color = Lost)
+        else -> {
+            Text("── ${stats.teamName}", style = MaterialTheme.typography.labelSmall, color = TeamUs)
+            Text("╌╌ ${versus.teamName}", style = MaterialTheme.typography.labelSmall, color = TeamThem)
+        }
+    }
     // the colors of the two teams in the points
     listOf(stats.teamName to TeamUs, stats.opponent to TeamThem).forEach { (name, color) ->
         Text("■ $name", style = MaterialTheme.typography.labelSmall, color = color)
@@ -820,6 +979,7 @@ private fun TrendLegend(stats: LiveStats) = FlowRow(
 @Composable
 private fun TrendChart(
     line: TrendLine,
+    other: TrendLine?,
     recent: Boolean,
     hidden: Set<Int>,
     columns: Int,
@@ -842,7 +1002,11 @@ private fun TrendChart(
     // the hidden ones left out, the axis as with all of them
     val sets = all.filter { it.first !in hidden }
     val axis = MaterialTheme.colorScheme.outline
-    val known = all.flatMap { it.second }.filterNotNull() + listOfNotNull(overall)
+    // the other team's, dashed, on the same axes
+    val otherOverall = other?.let { if (recent) it.overallRecent else it.overall }
+    val otherSets = other?.sets.orEmpty().map { set -> set.setNumber.toInt() to if (recent) set.recent else set.values }
+        .filter { it.first !in hidden }
+    val known = (all + otherSets).flatMap { it.second }.filterNotNull() + listOfNotNull(overall, otherOverall)
     // always 0 in sight
     val low = minOf(0.0, known.minOrNull() ?: 0.0)
     val high = maxOf(low + 10.0, known.maxOrNull() ?: 0.0)
@@ -867,15 +1031,21 @@ private fun TrendChart(
             drawLine(axis.copy(alpha = 0.3f), Offset(x(p.toDouble()), 0f), Offset(x(p.toDouble()), size.height), 1.dp.toPx())
         }
         // the direct errors, a red line across in the column of their rally
+        // (left out while comparing)
         bins.forEachIndexed { i, n ->
-            if (n > 0) {
+            if (n > 0 && other == null) {
                 drawLine(Lost.copy(alpha = 0.8f), Offset(x(i + 1.0), 0f), Offset(x(i + 1.0), size.height), 1.5f.dp.toPx())
             }
         }
+        // the match across: white, or in the colors of the two teams
         overall?.let {
-            drawLine(Color.White.copy(alpha = 0.6f), Offset(0f, y(it)), Offset(size.width, y(it)), 1.5f.dp.toPx(), pathEffect = dashed)
+            val color = if (other != null) TeamUs else Color.White
+            drawLine(color.copy(alpha = 0.6f), Offset(0f, y(it)), Offset(size.width, y(it)), 1.5f.dp.toPx(), pathEffect = dashed)
         }
-        sets.forEach { (setNumber, values) ->
+        otherOverall?.let {
+            drawLine(TeamThem.copy(alpha = 0.6f), Offset(0f, y(it)), Offset(size.width, y(it)), 1.5f.dp.toPx(), pathEffect = dashed)
+        }
+        (sets.map { Triple(it.first, it.second, false) } + otherSets.map { Triple(it.first, it.second, true) }).forEach { (setNumber, values, dashedLine) ->
             val path = Path()
             var drawing = false
             values.forEachIndexed { i, v ->
@@ -890,7 +1060,10 @@ private fun TrendChart(
                 }
             }
             val color = setColor(setNumber)
-            drawPath(path, color, style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(
+                path, color,
+                style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, pathEffect = if (dashedLine) dashed else null),
+            )
             values.withIndex().lastOrNull { it.value != null }?.let { (i, v) ->
                 drawCircle(color, 3.dp.toPx(), Offset(x(i + 1.0), y(v ?: 0.0)))
             }

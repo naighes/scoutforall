@@ -7,6 +7,7 @@ import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isSelectable
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -107,6 +108,51 @@ class MatchFormTest {
         rule.save()
         rule.waitFor { saved.size == 1 }
         assertEquals("windy gym", core { it.matchForm(team, saved.single()) }.notes)
+    }
+
+    /** Against a team, both sides can be scouted: after the players of A,
+     * those of B, one of them written on the spot; the match opens once
+     * they are saved, and B keeps them. */
+    @Test
+    fun aMatchOnBothSidesAsksForThePlayersOfB() {
+        val b = saveTeam("Cascina 2")
+        (1..6).forEach { core { c -> c.savePlayer(b, null, PlayerForm("Rival $it", RoleEnum.OUTSIDE_HITTER, "$it")) } }
+        show()
+        rule.type(string(R.string.opponent), "Cascina 2")
+        rule.onNode(hasText(string(R.string.scout_both)) and isToggleable()).performScrollTo().performClick()
+        rule.goOn()
+        rule.save()
+        // the players of B, not the match yet
+        rule.waitForText(string(R.string.roster_of_b, "Cascina 2"))
+        assertEquals(emptyList<String>(), saved)
+        assertEquals(1, matches().size)
+        // six players: one too few
+        rule.save()
+        rule.waitFor { runCatching { rule.onNode(hasText(string(R.string.roster, 6, 14))).assertExists() }.isSuccess }
+        assertEquals(emptyList<String>(), saved)
+        rule.onNode(hasText(string(R.string.new_player)) and hasClickAction()).performClick()
+        rule.type(string(R.string.name), "Rival 7")
+        rule.type(string(R.string.number), "7")
+        // a role is needed: the core says so, the dialog stays
+        rule.onNode(hasText(string(R.string.ok)) and hasClickAction()).performClick()
+        rule.waitForText("Role is required")
+        rule.onNode(hasText("outside hitter") and isSelectable()).performClick()
+        rule.onNode(hasText(string(R.string.ok)) and hasClickAction()).performClick()
+        rule.waitForText(string(R.string.roster, 7, 14))
+        rule.save()
+        rule.waitFor { saved.size == 1 }
+        assertEquals(7, core { c -> c.rosterOfB(team, saved.single(), MatchForm("", null, false, ""), null) }.players.count { it.chosen })
+    }
+
+    /** One team only: no players of B, the match opens as before. */
+    @Test
+    fun aMatchOnOneSideDoesNotAskForThePlayersOfB() {
+        saveTeam("Cascina 2")
+        show()
+        rule.type(string(R.string.opponent), "Cascina 2")
+        rule.goOn()
+        rule.save()
+        rule.waitFor { saved.size == 1 }
     }
 
     /** The row of the player in the roster. */

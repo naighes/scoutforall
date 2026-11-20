@@ -39,7 +39,12 @@ import androidx.compose.foundation.text.TextAutoSize
 import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.TeamSideEnum
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.semantics.selected
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -59,6 +64,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -137,6 +143,8 @@ data class ScoutingView(
     val state: ScoutingState,
     /** the events of the opponent, the faults, the changes of the lineup */
     val otherEvents: List<EventChoice>,
+    /** the points without a cause, ours and theirs (`PW`, `PL`) */
+    val noCausePoints: List<EventChoice> = emptyList(),
     /** the events of the player chosen first, if more than one */
     val playerEvents: List<EventChoice>,
     val evals: List<EvalChoice>,
@@ -207,7 +215,30 @@ class ScoutingViewModel(
         }
     }
 
-    fun event(event: EventChoice) = choose("event ${event.value}") { it.chooseEvent(event.value) }
+    /** An event of the side on screen, or, scouting both sides, of the other
+     * one: the side comes with the choice. */
+    fun event(event: EventChoice) {
+        val onScreen = currentView()?.state?.sideB == true
+        choose("event ${event.value}") {
+            when (event.sideB == onScreen) {
+                true -> it.chooseEvent(event.value)
+                false -> it.chooseEventOf(event.sideB, event.value)
+            }
+        }
+    }
+
+    /** Scouting both sides: the choices go to the other side, before an
+     * event is chosen. */
+    fun swapSide() = choose("swap side") {
+        it.swapSide()
+        Progress.CHOOSING
+    }
+
+    private fun currentView(): ScoutingView? = when (val current = mutableState.value) {
+        is ScoutingUi.Choosing -> current.view
+        is ScoutingUi.SetOver -> current.view
+        else -> null
+    }
 
     /** The team makes the fault, no player (e.g. a rotation fault). */
     fun team() = choose("team") { it.chooseTeam() }
@@ -257,18 +288,64 @@ class ScoutingViewModel(
         Progress.CHOOSING
     }
 
-    /** The statistics of a set or of the match, off the main thread. */
+    /** The statistics of a set or of the match, off the main thread: of B
+     * when the match is scouted on both sides and it was chosen. */
     fun stats(scope: StatsScope) {
         val s = scouting ?: return
+        val ofB = statsOfB
+        val compare = statsCompare
+        val filter = statsFilter
         viewModelScope.launch {
             mutableStats.value = app.onCore {
                 try {
-                    s.stats(scope)
+                    if (ofB && !compare) s.statsOfB(scope, filter) else s.stats(scope, filter)
                 } catch (e: MobileException) {
                     null
                 }
             }
+            // the comparison: B's figures of the same scope beside A's
+            mutableStatsOfB.value = when {
+                compare -> app.onCore {
+                    try {
+                        s.statsOfB(scope, filter)
+                    } catch (e: MobileException) {
+                        null
+                    }
+                }
+                else -> null
+            }
         }
+    }
+
+    /** The rotation and the phase the figures are narrowed to. */
+    private var statsFilter = DetailFilter(null)
+
+    fun statsNarrowed(scope: StatsScope, filter: DetailFilter) {
+        statsFilter = filter
+        stats(scope)
+    }
+
+    /** The statistics of B, only while the comparison is shown. */
+    val statsOfBCompared: StateFlow<LiveStats?> get() = mutableStatsOfB
+    private val mutableStatsOfB = MutableStateFlow<LiveStats?>(null)
+
+    /** Whether the statistics of A and B are shown side by side. */
+    var statsCompare by mutableStateOf(false)
+        private set
+
+    fun statsComparison(scope: StatsScope) {
+        statsCompare = true
+        stats(scope)
+    }
+
+    /** Which side the statistics are of: A's at first. */
+    var statsOfB by mutableStateOf(false)
+        private set
+
+    fun statsSide(ofB: Boolean, scope: StatsScope) {
+        statsOfB = ofB
+        statsCompare = false
+        stats(scope)
     }
 
     /** A fundamental in detail, off the main thread. */
@@ -276,7 +353,19 @@ class ScoutingViewModel(
         val s = scouting ?: return null
         return app.onCore {
             try {
-                s.detail(scope, event, filter)
+                if (statsOfB) s.detailOfB(scope, event, filter) else s.detail(scope, event, filter)
+            } catch (e: MobileException) {
+                null
+            }
+        }
+    }
+
+    /** A fundamental in detail of each side, for the comparison: A's and B's. */
+    suspend fun detailsCompared(scope: StatsScope, event: EventTypeEnum, filter: DetailFilter): Pair<DetailStats, DetailStats>? {
+        val s = scouting ?: return null
+        return app.onCore {
+            try {
+                s.detailOfB(scope, event, filter)?.let { s.detail(scope, event, filter) to it }
             } catch (e: MobileException) {
                 null
             }
@@ -319,9 +408,16 @@ class ScoutingViewModel(
 
     private fun view(s: Scouting): ScoutingView {
         val state = s.state()
+        // scouting both sides, the events of the other side come with their
+        // side
+        val others = s.otherEvents()
         return ScoutingView(
             state = state,
-            otherEvents = s.otherEvents(),
+            // the point without a cause has its own row (`NoCausePoints`)
+            otherEvents = others.filter { it.value !in noCause },
+            // the point of a side is the point without a cause the other
+            // side gives: the ones of the side on screen are enough
+            noCausePoints = others.filter { it.value in noCause && it.sideB == state.sideB },
             playerEvents = state.player
                 ?.takeIf { state.step == ScoutingStep.EVENT }
                 ?.let { s.playerEvents(it.id) }
@@ -489,6 +585,14 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     currentSet = view.state.setNumber.toInt(),
                     onScope = model::stats,
                     loadDetail = model::detail,
+                    sides = teamsOfBoth(view.state),
+                    sideB = model.statsOfB,
+                    onSide = model::statsSide,
+                    compare = model.statsCompare,
+                    statsOfB = model.statsOfBCompared.collectAsState().value,
+                    onCompare = model::statsComparison,
+                    onFilter = model::statsNarrowed,
+                    loadDetails = model::detailsCompared,
                     onDismiss = { statsOpen = false },
                 )
             }
@@ -505,8 +609,11 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
         // where there's room: under the court they'd make it too low
         val landscape = maxWidth > maxHeight
         val court = @Composable { m: Modifier ->
-            Column(m.padding(vertical = if (aiming) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (aiming) 4.dp else 16.dp)) {
-                if (!low) Score(view.state, server = aiming, phase = !aiming, told = view.targetTold)
+            Column(m.padding(vertical = if (aiming) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (aiming) (if (view.state.both) 0.dp else 4.dp) else 16.dp)) {
+                if (!low) when (view.state.both) {
+                    true -> BothScore(view.state, server = aiming, told = view.targetTold, onSwap = model::swapSide, compact = aiming || landscape)
+                    false -> Score(view.state, server = aiming, phase = !aiming, told = view.targetTold)
+                }
                 // where they stand: spread to receive, then where they
                 // play once our serve is made or theirs received
                 val players = view.state.court
@@ -557,6 +664,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     onTarget = model::target,
                     starts = view.starts.takeIf { !landscape }.orEmpty(),
                     onStart = model::start,
+                    grow = true,
                     ball = CourtBall(
                         ours = view.state.ball == TeamSideEnum.US,
                         position = players.indexOfFirst { it.id == touched }.takeIf { it >= 0 }?.plus(1),
@@ -598,7 +706,12 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
                         StatsHandle(onOpen = { statsOpen = true }, Modifier.tutorial("stats"))
                     }
-                    LineupChanges(view.otherEvents.filter { it.value in lineupChanges }, model, Modifier)
+                    LineupChanges(
+                        view.otherEvents.filter { it.value in lineupChanges },
+                        model,
+                        Modifier,
+                        teams = teamsOfBoth(view.state),
+                    )
                 }
             }
         }
@@ -673,13 +786,24 @@ private fun ServeChoices(model: ScoutingViewModel, compact: Boolean = false) =
         }
     }
 
+/** The names of A and B when both sides are scouted (whichever is on
+ * screen), else nothing. */
+private fun teamsOfBoth(state: ScoutingState): Pair<String, String>? =
+    (state.team to state.opponent).takeIf { state.both }
+        ?.let { (onScreen, other) -> if (state.sideB) other to onScreen else onScreen to other }
+
 /** The serves and the events of the rally side by side, half the row
  * each. */
 @Composable
-private fun ServesAndRally(serves: List<TechniqueChoice>, events: List<EventChoice>, model: ScoutingViewModel) =
+private fun ServesAndRally(
+    serves: List<TechniqueChoice>,
+    events: List<EventChoice>,
+    model: ScoutingViewModel,
+    teams: Pair<String, String>? = null,
+) =
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Techniques(serves, model, Modifier.weight(1f).fillMaxHeight())
-        RallyEvents(events, model, Modifier.weight(1f))
+        RallyEvents(events, model, Modifier.weight(1f), teams)
     }
 
 /** `content` as high as `reference`, which is measured but never shown. */
@@ -704,13 +828,7 @@ private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean 
     val us = Side(state.team, state.scoreUs.toInt(), weServe, Won)
     val them = Side(state.opponent, state.scoreThem.toInt(), !weServe, Lost)
     val (left, right) = if (state.home) us to them else them to us
-    val haptic = LocalHapticFeedback.current
-    val points = state.scoreUs.toInt() + state.scoreThem.toInt()
-    var previous by remember { mutableIntStateOf(points) }
-    LaunchedEffect(points) {
-        if (points > previous) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        previous = points
-    }
+    VibrateOnPoint(state)
     // read as one: the teams with their points, who serves; TalkBack says
     // it again at each point, when it's done saying what it was saying
     val spoken = "${left.name} ${left.points}, ${right.name} ${right.points}, " +
@@ -732,6 +850,94 @@ private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean 
         }
         LastEvent(state.events.firstOrNull())
         if (server) Serving(state, told)
+    }
+}
+
+/** The phone vibrates at each point scored, not at one undone. */
+@Composable
+private fun VibrateOnPoint(state: ScoutingState) {
+    val haptic = LocalHapticFeedback.current
+    val points = state.scoreUs.toInt() + state.scoreThem.toInt()
+    var previous by remember { mutableIntStateOf(points) }
+    LaunchedEffect(points) {
+        if (points > previous) haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        previous = points
+    }
+}
+
+/** Scouting both sides: the two teams in a line, the home one on the left,
+ * each with its points and its rotation, the ball by the one serving; the
+ * side the choices are for stands out in its color (A's blue, B's pink, as
+ * on the desktop), and the swap between them gives the choices to the
+ * other, while an event isn't chosen. */
+@Composable
+private fun BothScore(state: ScoutingState, server: Boolean, told: String?, onSwap: () -> Unit, compact: Boolean) {
+    val weServe = state.servingTeam == TeamSideEnum.US
+    val onScreen = Triple(state.team, state.scoreUs.toInt(), state.rotation)
+    val other = Triple(state.opponent, state.scoreThem.toInt(), state.otherRotation)
+    // B is on screen: the colors and the places of the sides don't move
+    val colors = sideColor(state.sideB) to sideColor(!state.sideB)
+    val chip = @Composable { (name, points, rotation): Triple<String, Int, String>, serving: Boolean, turn: Boolean, color: Color ->
+        // choosing where the serve went, or in landscape, the court
+        // needs the room
+        SideChip(Side(name, points, serving, Won), rotation, turn, color, compact)
+    }
+    VibrateOnPoint(state)
+    val swappable = state.step == ScoutingStep.EVENT && state.event == null && state.player == null
+    Column(Modifier.fillMaxWidth().tutorial("score").padding(horizontal = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        val screenFirst = state.home
+        Row(
+            Modifier.height(IntrinsicSize.Min),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            val screen = @Composable { Box(Modifier.weight(1f)) { chip(onScreen, weServe, true, colors.first) } }
+            val rest = @Composable { Box(Modifier.weight(1f)) { chip(other, !weServe, false, colors.second) } }
+            if (screenFirst) screen() else rest()
+            IconButton(onClick = onSwap, enabled = swappable, modifier = Modifier.size(48.dp).tutorial("swap-side")) {
+                Icon(painterResource(R.drawable.ic_swap), contentDescription = stringResource(R.string.swap_side))
+            }
+            if (screenFirst) rest() else screen()
+        }
+        LastEvent(state.events.firstOrNull())
+        if (server) Serving(state, told)
+    }
+}
+
+/** A side in the line of the two: its name, its points big and its rotation,
+ * the ball when it serves; the side the choices are for in its color. */
+@Composable
+private fun SideChip(side: Side, rotation: String, turn: Boolean, color: Color, compact: Boolean) {
+    val serving = stringResource(R.string.serving)
+    Surface(
+        // each side read as one: its name, points and rotation, whether the
+        // choices are for it; the swap between them stays apart
+        modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+            selected = turn
+            // told on the row, not by the ball in it: a description inside
+            // would hide the name and the points
+            if (side.serving) stateDescription = serving
+            liveRegion = LiveRegionMode.Polite
+        },
+        shape = MaterialTheme.shapes.medium,
+        color = if (turn) color.copy(alpha = 0.22f) else Color.Transparent,
+        border = BorderStroke(if (turn) 2.dp else 1.dp, if (turn) color else MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 0.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(side.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (side.serving) {
+                    Icon(
+                        painterResource(R.drawable.ic_ball),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Points(side, compact, snug = true)
+                Text(rotation, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+            }
+        }
     }
 }
 
@@ -840,7 +1046,7 @@ private data class Side(val name: String, val points: Int, val serving: Boolean,
 /** The points of a team: a new one comes in from below and flashes in the
  * color of who scored; an undone one goes back. */
 @Composable
-private fun Points(side: Side) {
+private fun Points(side: Side, compact: Boolean = false, snug: Boolean = false) {
     val base = MaterialTheme.colorScheme.onSurface
     val color = remember { Animatable(base) }
     val scale = remember { Animatable(1f) }
@@ -868,7 +1074,11 @@ private fun Points(side: Side) {
         Text(
             points.toString(),
             modifier = Modifier.scale(scale.value),
-            style = MaterialTheme.typography.displaySmall,
+            style = when {
+                compact -> MaterialTheme.typography.titleLarge
+                snug -> MaterialTheme.typography.headlineMedium
+                else -> MaterialTheme.typography.displaySmall
+            },
             fontWeight = FontWeight.Bold,
             color = color.value,
         )
@@ -917,8 +1127,10 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
     when (state.step) {
         ScoutingStep.EVENT -> when (player) {
             null -> {
-                Hint(stringResource(R.string.touch_the_player))
-                RallyEvents(view.otherEvents, model)
+                // the court above tells to touch a player: in the room of
+                // the hint, the way out of the scout left behind
+                NoCausePoints(view, model)
+                SidesEvents(view, model)
             }
             else -> {
                 Title(player)
@@ -935,7 +1147,9 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
                 }
                 // our serve telling where it starts from: the serves and
                 // the events of the rally in one row, the court the higher
-                if (view.starts.isNotEmpty()) ServesAndRally(view.techniques, view.otherEvents, model)
+                if (view.starts.isNotEmpty()) {
+                    ServesAndRally(view.techniques, view.otherEvents, model, teamsOfBoth(view.state))
+                }
                 else if (view.techniques.isNotEmpty()) Techniques(view.techniques, model)
                 if (startsHere && view.starts.isNotEmpty()) {
                     ServeStarts(view.starts, model::start, Modifier.heightIn(min = 48.dp).height(IntrinsicSize.Min))
@@ -944,7 +1158,7 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
             }
             Evals(view.evals, model)
             // the serve waits for its evaluation, or gives way
-            if (view.starts.isEmpty()) RallyEvents(view.otherEvents, model)
+            if (view.starts.isEmpty()) SidesEvents(view, model)
         }
         ScoutingStep.PLAYER -> {
             Title(state.event?.name.orEmpty())
@@ -989,6 +1203,9 @@ private fun Title(text: String) = Text(
 @Composable
 private fun Hint(text: String) = Text(text, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
+/** The points without a cause, ours and theirs: a row of their own. */
+private val noCause = setOf(EventTypeEnum.PW, EventTypeEnum.PL)
+
 /** The changes of the lineup, rare and at stopped play, each with its icon
  * and a short name; the libero out or in by its own, saying which; the
  * libero for a player of the back row, touched on court. */
@@ -1014,7 +1231,13 @@ private val rallyEvents = mapOf(
  * of the actions, opens them from right to left. Dimmed when there are none
  * to make now. */
 @Composable
-private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, modifier: Modifier) {
+private fun LineupChanges(
+    events: List<EventChoice>,
+    model: ScoutingViewModel,
+    modifier: Modifier,
+    /** both sides: the names of A and B; none for one side */
+    teams: Pair<String, String>? = null,
+) {
     var open by remember { mutableStateOf(false) }
     val expanded = open && events.isNotEmpty()
     BackHandler(enabled = expanded) { open = false }
@@ -1035,6 +1258,7 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
                 Row(Modifier.horizontalScroll(rememberScrollState()).padding(start = 12.dp)) {
                     events.forEach { event ->
                         val looks = lineupChanges[event.value]
+                        val team = teams?.let { (a, b) -> if (event.sideB) b else a }
                         Column(
                             Modifier
                                 .tutorial("event:${event.value}")
@@ -1042,7 +1266,7 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
                                     open = false
                                     model.event(event)
                                 }
-                                .semantics(mergeDescendants = true) { contentDescription = event.name }
+                                .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(event.name, team).joinToString(" · ") }
                                 .padding(horizontal = 10.dp, vertical = 4.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                         ) {
@@ -1052,6 +1276,18 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
                             )
+                            // both sides: whose change it is
+                            team?.let { name ->
+                                Text(
+                                    name,
+                                    modifier = Modifier.widthIn(max = 64.dp)
+                                        .drawBehind { drawRect(sideColor(event.sideB), size = size.copy(height = 3.dp.toPx()), topLeft = Offset(0f, size.height - 3.dp.toPx())) }
+                                        .padding(bottom = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     }
                 }
@@ -1072,10 +1308,34 @@ private fun LineupChanges(events: List<EventChoice>, model: ScoutingViewModel, m
     }
 }
 
+/** The other events of the rally: scouting both sides, a row for each side
+ * that has some, the team of the row named in its color above it (the side
+ * on screen first); one side, just the row. */
+@Composable
+private fun SidesEvents(view: ScoutingView, model: ScoutingViewModel) {
+    val state = view.state
+    when (state.both) {
+        false -> RallyEvents(view.otherEvents, model)
+        // no name above each row (it cost two lines, and the choices scrolled):
+        // the border of each button is the color of its team, as under the score
+        true -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(state.sideB, !state.sideB).forEach { sideB ->
+                val events = view.otherEvents.filter { it.sideB == sideB && it.value !in lineupChanges }
+                if (events.isNotEmpty()) RallyEvents(events, model, teams = teamsOfBoth(state))
+            }
+        }
+    }
+}
+
 /** The other events of the rally in a row, never to scroll for: an icon
  * and a short name, the whole name for TalkBack. */
 @Composable
-private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel, modifier: Modifier = Modifier) = Row(
+private fun RallyEvents(
+    events: List<EventChoice>,
+    model: ScoutingViewModel,
+    modifier: Modifier = Modifier,
+    teams: Pair<String, String>? = null,
+) = Row(
     modifier.fillMaxWidth().height(IntrinsicSize.Min),
     horizontalArrangement = Arrangement.spacedBy(8.dp),
 ) {
@@ -1088,21 +1348,64 @@ private fun RallyEvents(events: List<EventChoice>, model: ScoutingViewModel, mod
         FilledTonalButton(
             onClick = { model.event(event) },
             modifier = Modifier.weight(1f).fillMaxHeight().heightIn(min = 56.dp).tutorial("event:${event.value}")
-                .semantics { contentDescription = event.name },
+                .semantics { contentDescription = teams?.let { (a, b) -> "${event.name}, ${if (event.sideB) b else a}" } ?: event.name },
             contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp),
             shape = MaterialTheme.shapes.medium,
+            // the events of both sides in one row: each in the color of its team
+            border = teams?.let { BorderStroke(2.dp, sideColor(event.sideB)) },
         ) {
+            // never a word broken (ricezione, in two): smaller until it fits
+            val base = MaterialTheme.typography.labelSmall.fontSize
+            var size by remember(event.value) { mutableStateOf(base) }
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 looks?.let { (icon, _) -> Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp)) }
+                val label = looks?.let { (_, name) -> stringResource(name) } ?: event.name
                 Text(
-                    looks?.let { (_, name) -> stringResource(name) } ?: event.name,
-                    style = MaterialTheme.typography.labelSmall,
+                    label,
+                    style = MaterialTheme.typography.labelSmall.copy(fontSize = size),
                     textAlign = TextAlign.Center,
                     maxLines = 2,
                     minLines = lines,
-                    onTextLayout = { if (it.lineCount > lines) lines = it.lineCount },
+                    onTextLayout = {
+                        if (it.breaksAWord(label) && size.value > 8f) size = (size.value * 0.9f).sp
+                        else if (it.lineCount > lines) lines = it.lineCount
+                    },
                 )
             }
+        }
+    }
+}
+
+/** The points without a cause, as the end of the rally of DataVolley
+ * (its buttons by the score, in the colors of the teams): what the scout
+ * left behind falls back on. Each on the side of its team in the score, in
+ * its color, "+1" and the name; the whole name for TalkBack. */
+@Composable
+private fun NoCausePoints(view: ScoutingView, model: ScoutingViewModel) {
+    val state = view.state
+    val ours = view.noCausePoints.firstOrNull { it.value == EventTypeEnum.PW }
+    val theirs = view.noCausePoints.firstOrNull { it.value == EventTypeEnum.PL }
+    // the colors of the teams, not of who's on screen: B is pink, on screen too
+    val (usColor, themColor) = sideColor(state.sideB) to sideColor(!state.sideB)
+    val us = Triple(ours, state.team, usColor)
+    val them = Triple(theirs, state.opponent, themColor)
+    val sides = if (state.home) listOf(us, them) else listOf(them, us)
+    // no name: the score above has the two teams, each over its own button
+    Row(Modifier.fillMaxWidth().tutorial("no-cause"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        sides.forEach { (event, team, color) ->
+            event?.let {
+                OutlinedButton(
+                    onClick = { model.event(it) },
+                    modifier = Modifier.weight(1f).height(52.dp).tutorial("event:${it.value}")
+                        .semantics { contentDescription = "+1 $team" },
+                    colors = ButtonDefaults.outlinedButtonColors(containerColor = color.copy(alpha = 0.18f), contentColor = color),
+                    border = BorderStroke(2.dp, color),
+                    contentPadding = PaddingValues(0.dp),
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Text("+1", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.ExtraBold)
+                }
+            } ?: Spacer(Modifier.weight(1f))
         }
     }
 }

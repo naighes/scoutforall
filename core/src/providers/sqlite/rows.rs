@@ -2,8 +2,8 @@
 
 use crate::{
     domain::{
-        Event, Home, LegacyId, Match, MatchSet, Membership, Person, RosterEntry, SetLineup, Team,
-        TeamRef,
+        Event, Home, LegacyId, Match, MatchSet, Membership, Person, RosterEntry, SetLineup, Side,
+        Team, TeamRef,
         adapters::{MatchRows, SetRows, TeamRows},
         sql::{Sql, technique_from_db},
     },
@@ -270,6 +270,27 @@ pub(crate) fn matches_as_b(
     .map_err(sqlite)
 }
 
+/// The matches not removed of `team` scouted on both sides: id, team B and
+/// court.
+pub(crate) fn matches_both(
+    tx: &Transaction,
+    team: Uuid,
+) -> Result<Vec<(String, Uuid, Home)>, AppError> {
+    tx.prepare(
+        "SELECT id, team_b, home FROM matches
+         WHERE team_a = ?1 AND scouting = 'both' AND team_b IS NOT NULL AND deleted = 0
+         ORDER BY start, id",
+    )
+    .and_then(|mut statement| {
+        statement
+            .query_map([Sql(team)], |row| {
+                Ok((row.get(0)?, id(row, 1)?, row.get::<_, Home>(2)?))
+            })?
+            .collect::<Result<_, _>>()
+    })
+    .map_err(sqlite)
+}
+
 /// The match not removed, with its roster and its sets not removed.
 pub(crate) fn match_rows(tx: &Transaction, match_id: Uuid) -> Result<Option<MatchRows>, AppError> {
     let row = tx
@@ -346,7 +367,7 @@ pub(crate) fn match_rows(tx: &Transaction, match_id: Uuid) -> Result<Option<Matc
 pub(crate) fn set_rows(tx: &Transaction, match_id: Uuid) -> Result<Vec<SetRows>, AppError> {
     let sets: Vec<MatchSet> = tx
         .prepare(
-            "SELECT number, serving, lineup_rules, deleted FROM sets
+            "SELECT number, serving, lineup_rules, scouting_rules, deleted FROM sets
              WHERE match_id = ?1 AND deleted = 0 ORDER BY number",
         )
         .and_then(|mut statement| {
@@ -357,7 +378,8 @@ pub(crate) fn set_rows(tx: &Transaction, match_id: Uuid) -> Result<Vec<SetRows>,
                         number: r.get(0)?,
                         serving: r.get(1)?,
                         lineup_rules: r.get(2)?,
-                        deleted: r.get(3)?,
+                        scouting_rules: r.get(3)?,
+                        deleted: r.get(4)?,
                     })
                 })?
                 .collect::<Result<_, _>>()
@@ -524,15 +546,17 @@ pub(crate) fn insert_roster_entry(tx: &Transaction, entry: &RosterEntry) -> Resu
 pub(crate) fn write_set(tx: &Transaction, set: &SetRows) -> Result<(), AppError> {
     let row = &set.row;
     tx.execute(
-        "INSERT INTO sets (match_id, number, serving, lineup_rules, deleted)
-         VALUES (?1, ?2, ?3, ?4, ?5)
+        "INSERT INTO sets (match_id, number, serving, lineup_rules, scouting_rules, deleted)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT (match_id, number) DO UPDATE SET serving = excluded.serving,
-             lineup_rules = excluded.lineup_rules, deleted = excluded.deleted",
+             lineup_rules = excluded.lineup_rules,
+             scouting_rules = excluded.scouting_rules, deleted = excluded.deleted",
         params![
             Sql(row.match_id),
             row.number,
             row.serving,
             row.lineup_rules,
+            row.scouting_rules,
             row.deleted
         ],
     )
@@ -605,12 +629,17 @@ pub(crate) fn insert_event(tx: &Transaction, event: &Event) -> Result<(), AppErr
     .map_err(sqlite)
 }
 
-/// The event as `e` has it now: a correction updates its row (TODO/001,
-/// default choices; append-only comes back with the sync, 030).
-pub(crate) fn update_event(tx: &Transaction, id: Uuid, e: &EventEntry) -> Result<(), AppError> {
+/// The event as `e` has it now, of `side`: a correction updates its row
+/// (TODO/001, default choices; append-only comes back with the sync, 030).
+pub(crate) fn update_event(
+    tx: &Transaction,
+    id: Uuid,
+    side: Side,
+    e: &EventEntry,
+) -> Result<(), AppError> {
     tx.execute(
         "UPDATE events SET timestamp = ?2, event_type = ?3, player = ?4, eval = ?5,
-             target_player = ?6, technique = ?7, flags = ?8
+             target_player = ?6, technique = ?7, flags = ?8, side = ?9
          WHERE id = ?1",
         params![
             Sql(id),
@@ -620,7 +649,8 @@ pub(crate) fn update_event(tx: &Transaction, id: Uuid, e: &EventEntry) -> Result
             e.eval,
             e.target_player.map(Sql),
             e.technique,
-            e.flags
+            e.flags,
+            side
         ],
     )
     .map(|_| ())

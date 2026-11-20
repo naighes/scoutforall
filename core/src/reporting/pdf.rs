@@ -1,6 +1,6 @@
 use crate::errors::{AppError, IOError};
 use crate::localization::Labels;
-use crate::reporting::model::{Report, build_report};
+use crate::reporting::model::{Report, build_report, build_report_of_both};
 use crate::reporting::typst_world::ReportWorld;
 use crate::shapes::r#match::MatchEntry;
 use serde::Deserialize;
@@ -15,6 +15,16 @@ const TEMPLATE: &str = include_str!("report.typ");
 
 pub fn render_match_pdf(m: &MatchEntry, labels: &Labels) -> Result<Vec<u8>, AppError> {
     render_report_pdf(&build_report(m, labels)?)
+}
+
+/// The report of a match scouted on both sides: `b` is the match as its
+/// team sees it.
+pub fn render_both_pdf(
+    a: &MatchEntry,
+    b: &MatchEntry,
+    labels: &Labels,
+) -> Result<Vec<u8>, AppError> {
+    render_report_pdf(&build_report_of_both(a, b, labels)?)
 }
 
 pub fn render_report_pdf(report: &Report) -> Result<Vec<u8>, AppError> {

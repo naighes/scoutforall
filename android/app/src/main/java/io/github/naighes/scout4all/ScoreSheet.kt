@@ -40,6 +40,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -125,6 +126,9 @@ fun NumberRoleDialog(
     onRole: (RoleEnum?) -> Unit,
     onOk: () -> Unit,
     onCancel: () -> Unit,
+    /** a player not on the team yet: its name is written too */
+    name: String? = null,
+    onName: (String) -> Unit = {},
 ) = Dialog(onDismissRequest = onCancel, properties = DialogProperties(usePlatformDefaultWidth = false)) {
     Surface(
         Modifier.padding(24.dp).widthIn(max = 560.dp),
@@ -136,6 +140,16 @@ fun NumberRoleDialog(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(title, Modifier.title(), style = MaterialTheme.typography.headlineSmall)
+            name?.let {
+                OutlinedTextField(
+                    value = it,
+                    onValueChange = onName,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.name)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+                )
+            }
             OutlinedTextField(
                 value = number,
                 onValueChange = onNumber,

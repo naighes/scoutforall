@@ -8,7 +8,10 @@
 //!   (a removed player has none left), of the first team by id among
 //!   them; copies that differ are told (`SharedTeams::differing`).
 //! - A match is scouted on the side of the team of its folder (A), against
-//!   its opponent by name; it keeps where it was (`LegacyId`).
+//!   its opponent by name; it keeps where it was (`LegacyId`). Its events,
+//!   scouted with the rules of those versions (v1), are translated when
+//!   the files are read (`format::read_events`): the sets follow the
+//!   current rules.
 //! - Its roster copies number and role from the team of today (the best
 //!   one can rebuild), the active team when it has none (up to v0.10.1).
 //!   Numbers are unique in a roster: of two players with the same number
@@ -18,14 +21,16 @@
 //!   number of the team, as for a player out of the roster.
 //! - Every player the match tells of (lineups, events) must be of the
 //!   team: the rows of the events refer to the persons.
-//! - The video of a match refers to its events by set and index: one not
-//!   among the events of the match (undone after the profile was saved)
-//!   didn't count there and isn't moved; the anchor keeps its time.
+//! - The video of a match refers to its events by set and index, read
+//!   as places among the translated events (`folder::read_video`): one
+//!   not among the events of the match (undone after the profile was
+//!   saved, or left out by the current rules) isn't moved; the anchor
+//!   keeps its time.
 
 use crate::{
     domain::{
         LegacyId, Person, TeamRef,
-        adapters::{EventsOfA, MatchRows, TeamRows, VideoRows},
+        adapters::{EventRefs, MatchRows, TeamRows, VideoRows},
     },
     errors::{AppError, IOError},
     legacy::folder::{LegacyTeam, NotRead},
@@ -168,7 +173,7 @@ fn roster(team: &TeamEntry, m: &MatchEntry) -> Vec<Uuid> {
 /// The rows of the video of match `m`, its profile `profile` (see the
 /// module).
 pub fn video_rows(profile: &VideoProfile, m: &MatchRows) -> Result<VideoRows, AppError> {
-    let events = EventsOfA::of(&m.sets);
+    let events = EventRefs::of(&m.sets);
     let anchor = profile.anchor.as_ref().map(|a| Anchor {
         event: a.event.filter(|e| events.id(*e).is_some()),
         ..a.clone()

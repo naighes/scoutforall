@@ -8,6 +8,8 @@ use crate::shapes::set::SetEntry;
 use crate::shapes::stats::{Stats, StatsFilter};
 use crate::trend::Series;
 use chrono::{DateTime, FixedOffset, Months, NaiveDate};
+use std::collections::BTreeSet;
+use uuid::Uuid;
 
 /// The matches the moving average looks at: the match and the two before.
 pub const MOVING_WINDOW: usize = 3;
@@ -44,9 +46,22 @@ impl Period {
 
     /// The matches of the period, from the first played.
     pub fn select<'a, M: Played>(&self, matches: &'a [M], today: NaiveDate) -> Vec<&'a M> {
+        self.select_in(matches, today, None)
+    }
+
+    /// The matches of the period played in the competition (every one
+    /// with `None`): the competition narrows the matches before the period
+    /// does, so the last matches are the last of the competition.
+    pub fn select_in<'a, M: Played>(
+        &self,
+        matches: &'a [M],
+        today: NaiveDate,
+        competition: Option<Uuid>,
+    ) -> Vec<&'a M> {
         let mut played: Vec<&M> = matches
             .iter()
             .filter(|m| m.scouted() && day(*m) <= today)
+            .filter(|m| competition.is_none() || m.competition() == competition)
             .collect();
         played.sort_by_key(|m| m.date());
         match self {
@@ -73,6 +88,18 @@ pub trait Played {
     fn date(&self) -> DateTime<FixedOffset>;
     /// with a set scouted
     fn scouted(&self) -> bool;
+    /// the competition it's played in
+    fn competition(&self) -> Option<Uuid>;
+}
+
+/// The competitions of the matches scouted up to today, without repeats
+/// (the ones the filter by competition offers).
+pub fn competitions_of<M: Played>(matches: &[M], today: NaiveDate) -> BTreeSet<Uuid> {
+    matches
+        .iter()
+        .filter(|m| m.scouted() && day(*m) <= today)
+        .filter_map(Played::competition)
+        .collect()
 }
 
 impl Played for MatchEntry {
@@ -82,6 +109,12 @@ impl Played for MatchEntry {
 
     fn scouted(&self) -> bool {
         !self.sets.is_empty()
+    }
+
+    /// The entry doesn't carry it (it's in the row of the match): filter
+    /// the summaries, which do.
+    fn competition(&self) -> Option<Uuid> {
+        None
     }
 }
 
@@ -93,6 +126,10 @@ impl Played for MatchSummary {
     fn scouted(&self) -> bool {
         self.sets > 0
     }
+
+    fn competition(&self) -> Option<Uuid> {
+        self.competition_id
+    }
 }
 
 impl<M: Played> Played for &M {
@@ -102,6 +139,10 @@ impl<M: Played> Played for &M {
 
     fn scouted(&self) -> bool {
         (*self).scouted()
+    }
+
+    fn competition(&self) -> Option<Uuid> {
+        (*self).competition()
     }
 }
 

@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -56,6 +57,7 @@ import io.github.naighes.scout4all.core.EditField
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.SetEvent
+import io.github.naighes.scout4all.core.ScoutedEvent
 import io.github.naighes.scout4all.core.SetEvents
 import kotlinx.coroutines.launch
 
@@ -111,6 +113,7 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
     correction?.let { c ->
         CorrectionSheet(
             c,
+            teams = (state as? SetState.Loaded)?.set?.teams(),
             onSave = {
                 app.core { it.saveCorrection(c) }
                 // a finished match is queued again
@@ -132,16 +135,30 @@ private fun SetEventsList(set: SetEvents, modifier: Modifier, onEvent: (SetEvent
     // the last events first in sight: the ones just scouted
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (set.events.size - 1).coerceAtLeast(0))
     LazyColumn(modifier, state = list, contentPadding = PaddingValues(vertical = 8.dp)) {
-        items(set.events, key = { it.index.toInt() }) { EventRow(it) { onEvent(it) } }
+        // on both sides: whose touch it is, by name and color
+        val teams = set.teams()
+        items(set.events, key = { it.index.toInt() }) { e -> EventRow(e, teams) { onEvent(e) } }
     }
 }
+
+/** The names of A and B of a set scouted on both sides, else none. */
+private fun SetEvents.teams(): Pair<String, String>? = (team to opponent).takeIf { both }
+
+/** Who made an event: on both sides its team (of `teams`, A and B), then
+ * its player; none for neither. */
+private fun whose(event: ScoutedEvent, teams: Pair<String, String>?): String? =
+    listOfNotNull(teams?.let { (a, b) -> if (event.sideB) b else a }, event.player?.let { "${it.number} ${it.name}" })
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString(" · ")
 
 /** An event: its place, the symbol of the evaluation, the event and the
  * player, the set or serve; the score after it. The changes of the lineup
  * can't be corrected: dimmed. */
 @Composable
-private fun EventRow(e: SetEvent, onClick: () -> Unit) = Row(
-    Modifier.fillMaxWidth().clickable(onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp),
+private fun EventRow(e: SetEvent, teams: Pair<String, String>?, onClick: () -> Unit) = Row(
+    Modifier.fillMaxWidth().clickable(onClick = onClick)
+        .let { m -> if (teams == null) m else m.drawBehind { drawRect(sideColor(e.event.sideB), size = size.copy(width = 4.dp.toPx())) } }
+        .padding(horizontal = 16.dp, vertical = 10.dp),
     verticalAlignment = Alignment.CenterVertically,
     horizontalArrangement = Arrangement.spacedBy(12.dp),
 ) {
@@ -169,9 +186,9 @@ private fun EventRow(e: SetEvent, onClick: () -> Unit) = Row(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        e.event.player?.let {
+        whose(e.event, teams)?.let { who ->
             Text(
-                "${it.number} ${it.name}",
+                who,
                 style = MaterialTheme.typography.labelMedium,
                 color = dim,
                 maxLines = 1,
@@ -193,7 +210,7 @@ private fun EventRow(e: SetEvent, onClick: () -> Unit) = Row(
  * after it still fit and the set ends as it did, else why not. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun CorrectionSheet(correction: Correction, onSave: suspend () -> Unit, onDismiss: () -> Unit) {
+private fun CorrectionSheet(correction: Correction, teams: Pair<String, String>?, onSave: suspend () -> Unit, onDismiss: () -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
     var state by remember { mutableStateOf<CorrectionState?>(null) }
@@ -225,7 +242,8 @@ private fun CorrectionSheet(correction: Correction, onSave: suspend () -> Unit, 
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            s.event.player?.let { Text("${it.number} ${it.name}", style = MaterialTheme.typography.bodyLarge) }
+            // on both sides: whose touch it is
+            whose(s.event, teams)?.let { Text(it, style = MaterialTheme.typography.bodyLarge) }
             Row(
                 Modifier.horizontalScroll(rememberScrollState()),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),

@@ -86,6 +86,7 @@
     <string name="close">閉じる</string>
     <string name="undo">取り消し</string>
     <string name="touch_the_player">コート上の選手をタップ</string>
+    <string name="swap_side">相手チーム</string>
     <string name="the_team">チーム</string>
     <string name="who_comes_in">誰が入りますか？</string>
     <string name="their_point">相手の得点</string>
@@ -299,14 +300,15 @@
     <string name="tutorial_serve">サーブを評価します:ネガティブ、− をタップ。</string>
     <string name="tutorial_block">相手のアタックをダネージがブロック:名前をタップ。</string>
     <string name="tutorial_block_event">「ブロック」をタップ。</string>
-    <string name="tutorial_block_eval">ブロックは触れたがボールは相手コートに:− をタップ。</string>
+    <string name="tutorial_block_eval">ブロックは触れたがボールは相手コートに:! をタップ。</string>
     <string name="tutorial_dig">再び相手のアタック、ファールがディグ:名前をタップ。</string>
     <string name="tutorial_dig_event">「ディグ」をタップ。</string>
     <string name="tutorial_dig_eval">良いディグ:+ をタップ。</string>
     <string name="tutorial_opposite">エゴヌがアタック:名前をタップ。</string>
-    <string name="tutorial_attack_kept">相手は拾ったが攻撃できない:ボールはこちらに戻る。+ をタップ。</string>
+    <string name="tutorial_attack_kept">相手はなんとか拾うが反撃できない:+ をタップ。</string>
     <string name="tutorial_attack_dug">相手が拾って攻撃:− をタップ。</string>
     <string name="tutorial_their_freeball">相手がフリーボールで返球:「相手のフリー」をタップ。</string>
+    <string name="tutorial_no_cause">「+1」ボタンは理由のない得点を与えます。スカウトが取り逃したラリー用で、合うイベントがないときだけ使います。</string>
     <string name="tutorial_opposite_again">再びエゴヌがアタック:名前をタップ。</string>
     <string name="tutorial_attack_event">「アタック」をタップ。</string>
     <string name="tutorial_their_error">相手のアタックがアウト:「相手のミス」をタップ。2–0。</string>
@@ -328,7 +330,6 @@
     <string name="import_dvw">DataVolleyからインポート</string>
     <string name="dvw_home">%1$s (ホーム)</string>
     <string name="dvw_visiting">%1$s (アウェイ)</string>
-    <string name="dvw_both">両方</string>
     <string name="dvw_which_team">どちらのチームをインポートしますか?</string>
     <string name="dvw_which_date">ファイルの日付は2通りに読めます: どちらですか?</string>
     <string name="dvw_no_date">ファイルに日付がありません: 選んでください</string>
@@ -346,8 +347,6 @@
     <string name="dvw_against_name">対戦相手 %1$s(名前だけ)</string>
     <string name="dvw_match_numbers">この試合で別の番号の選手: %1$d</string>
     <string name="dvw_competition">大会: %1$s</string>
-    <string name="dvw_already_saved">%1$sにはこの試合がすでにあります: 上書きしますか?</string>
-    <string name="dvw_overwrite">上書きする</string>
     <string name="dvw_dont_import">インポートしない</string>
     <string name="dvw_imported">%1$s: インポートしました</string>
     <string name="dvw_not_imported">%1$s: インポートしませんでした、%2$s</string>
@@ -474,6 +473,10 @@
     <string name="score_gap">点差</string>
     <string name="close_score">接戦 (±2)</string>
     <string name="wide_score">大差</string>
+    <string name="digs">守備</string>
+    <string name="digs_all">すべて</string>
+    <string name="digs_defense">ディグ</string>
+    <string name="digs_cover">フォロー</string>
     <string name="video_less">減らす</string>
     <string name="video_more">増やす</string>
     <string name="team_a">チーム</string>
@@ -481,6 +484,9 @@
     <string name="neutral_game">中立</string>
     <string name="friendly">親善試合</string>
     <string name="competition">大会</string>
+    <string name="all_competitions">すべての大会</string>
+    <string name="seen_from">視点</string>
+    <string name="compare">比較</string>
     <string name="competition_format">形式</string>
     <string name="stage">ステージ</string>
     <string name="round">ラウンド</string>
@@ -491,6 +497,7 @@
     <string name="delete_team_kept">他チームとの試合（%1$d）は相手チームに残りますが、%2$sのスカウティングは削除されます。</string>
     <string name="scouted_by_opponent">相手チームのスカウティング</string>
     <string name="scouted_by_text">この試合は%1$sがスカウティングしました。ここでは%2$sから見た結果のみを表示します。統計とスカウティングは%1$sの試合にあります。</string>
+    <string name="scouted_both_text">この試合は%1$sが両チームをスカウティングしました。ここでは%2$sから見た結果と統計を表示します。スカウティングは%1$sの試合にあります。</string>
     <string name="open_as_team">%1$sとして開く</string>
     <string name="name_or_existing">名前を入力すると、登録済みの人が候補に出ます</string>
     <string name="in_registry">登録済み：同じ人物で、データも共通です</string>
@@ -513,4 +520,6 @@
     <plurals name="matches_count">
         <item quantity="other">%d 試合</item>
     </plurals>
+    <string name="scout_both">両チームを記録</string>
+    <string name="roster_of_b">%1$sのメンバー表</string>
 </resources>

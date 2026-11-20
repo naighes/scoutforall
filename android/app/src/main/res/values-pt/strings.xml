@@ -86,6 +86,7 @@
     <string name="close">Fechar</string>
     <string name="undo">Desfazer</string>
     <string name="touch_the_player">Toque no jogador em quadra</string>
+    <string name="swap_side">Outra equipe</string>
     <string name="the_team">A equipe</string>
     <string name="who_comes_in">Quem entra?</string>
     <string name="their_point">Ponto deles</string>
@@ -300,14 +301,15 @@
     <string name="tutorial_serve">O saque já está pronto para avaliar: negativo, toque em −.</string>
     <string name="tutorial_block">Eles atacam e Danesi bloqueia: toque no seu nome.</string>
     <string name="tutorial_block_event">Toque em Bloqueio.</string>
-    <string name="tutorial_block_eval">O bloqueio toca, mas a bola fica do lado deles: toque em −.</string>
+    <string name="tutorial_block_eval">O bloqueio toca, mas a bola fica do lado deles: toque em !.</string>
     <string name="tutorial_dig">Eles atacam de novo, Fahr defende: toque no seu nome.</string>
     <string name="tutorial_dig_event">Toque em Defesa.</string>
     <string name="tutorial_dig_eval">Uma boa defesa: toque em +.</string>
     <string name="tutorial_opposite">Egonu ataca: toque no seu nome.</string>
-    <string name="tutorial_attack_kept">Eles defendem, mas não conseguem atacar: a bola volta para nós, toque em +.</string>
+    <string name="tutorial_attack_kept">Eles defendem com dificuldade, sem contra-atacar: toque em +.</string>
     <string name="tutorial_attack_dug">Eles defendem e atacam: toque em −.</string>
     <string name="tutorial_their_freeball">Eles devolvem fácil, uma bola de graça: toque em Bola de graça deles.</string>
+    <string name="tutorial_no_cause">Os botões +1 dão um ponto sem causa: para uma jogada que o scout perdeu. Use só se nenhum evento servir.</string>
     <string name="tutorial_opposite_again">Egonu ataca de novo: toque no seu nome.</string>
     <string name="tutorial_attack_event">Toque em Ataque.</string>
     <string name="tutorial_their_error">O ataque deles sai: toque em Erro deles. 2–0.</string>
@@ -329,7 +331,6 @@
     <string name="import_dvw">Importar do DataVolley</string>
     <string name="dvw_home">%1$s (mandante)</string>
     <string name="dvw_visiting">%1$s (visitante)</string>
-    <string name="dvw_both">As duas</string>
     <string name="dvw_which_team">Qual equipe você importa?</string>
     <string name="dvw_which_date">A data do arquivo pode ser lida de duas formas: qual é?</string>
     <string name="dvw_no_date">O arquivo não tem data: escolha-a</string>
@@ -347,8 +348,6 @@
     <string name="dvw_against_name">Contra %1$s (só o nome)</string>
     <string name="dvw_match_numbers">Jogadores com outro número nesta partida: %1$d</string>
     <string name="dvw_competition">Competição: %1$s</string>
-    <string name="dvw_already_saved">%1$s já tem esta partida: sobrescrevê-la?</string>
-    <string name="dvw_overwrite">Sobrescrever</string>
     <string name="dvw_dont_import">Não importar</string>
     <string name="dvw_imported">%1$s: importada</string>
     <string name="dvw_not_imported">%1$s: não importada, %2$s</string>
@@ -475,6 +474,10 @@
     <string name="score_gap">Placar</string>
     <string name="close_score">Apertado (±2)</string>
     <string name="wide_score">Folgado</string>
+    <string name="digs">Defesas</string>
+    <string name="digs_all">Todas</string>
+    <string name="digs_defense">Defesa</string>
+    <string name="digs_cover">Cobertura</string>
     <string name="video_less">Menos</string>
     <string name="video_more">Mais</string>
     <string name="team_a">Equipe</string>
@@ -482,6 +485,9 @@
     <string name="neutral_game">Neutro</string>
     <string name="friendly">Amistoso</string>
     <string name="competition">Competição</string>
+    <string name="all_competitions">Todas as competições</string>
+    <string name="seen_from">Visto de</string>
+    <string name="compare">Comparar</string>
     <string name="competition_format">Formato</string>
     <string name="stage">Fase</string>
     <string name="round">Rodada</string>
@@ -492,6 +498,7 @@
     <string name="delete_team_kept">As partidas contra outras equipes (%1$d) ficam com elas, sem o scout de %2$s.</string>
     <string name="scouted_by_opponent">Scout do adversário</string>
     <string name="scouted_by_text">%1$s fez o scout desta partida: aqui só o resultado, visto por %2$s. Estatísticas e scout estão na partida de %1$s.</string>
+    <string name="scouted_both_text">%1$s fez o scout desta partida dos dois lados: aqui o resultado e as estatísticas, vistos por %2$s. O scout está na partida de %1$s.</string>
     <string name="open_as_team">Abrir como %1$s</string>
     <string name="name_or_existing">Digite o nome: quem já está no cadastro é sugerido</string>
     <string name="in_registry">Já no cadastro: a mesma pessoa, com os mesmos dados</string>
@@ -515,4 +522,6 @@
         <item quantity="one">%d partida</item>
         <item quantity="other">%d partidas</item>
     </plurals>
+    <string name="scout_both">Registrar as duas equipes</string>
+    <string name="roster_of_b">Súmula de %1$s</string>
 </resources>

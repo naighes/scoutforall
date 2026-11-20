@@ -43,6 +43,18 @@ pub struct Report {
     pub points_won: Table,
     pub points_lost: Table,
     pub point_sequence: PointSequence,
+    /// the two teams side by side, A | B: only when both sides are scouted
+    pub versus: Option<Versus>,
+    /// the pages of the other team, as the report of its own match
+    pub opponent: Option<Box<Report>>,
+}
+
+/// The figures of the two teams of a match scouted on both sides, the same
+/// ones each has in its own pages: no new calculation.
+#[derive(Debug, Serialize)]
+pub struct Versus {
+    pub fundamentals: Comparison,
+    pub phases: Comparison,
 }
 
 /// The closing box of the scoresheet, where DataVolley has it: the points
@@ -274,7 +286,90 @@ pub fn build_report(m: &MatchEntry, labels: &Labels) -> Result<Report, AppError>
         points_won: points_won_table(labels, &replay),
         points_lost: points_lost_table(labels, &replay),
         point_sequence: point_sequence(labels, m, &replay),
+        versus: None,
+        opponent: None,
     })
+}
+
+/// The report of a match scouted on both sides: ours, the two teams side by
+/// side, then the pages of the opponent, from `b`, the same match seen by
+/// its team.
+pub fn build_report_of_both(
+    a: &MatchEntry,
+    b: &MatchEntry,
+    labels: &Labels,
+) -> Result<Report, AppError> {
+    let ours = Replay::new(a)?;
+    let theirs = Replay::new(b)?;
+    let versus = versus(
+        labels,
+        [&a.team.name, &b.team.name],
+        [&ours.stats, &theirs.stats],
+    );
+    Ok(Report {
+        versus: Some(versus),
+        opponent: Some(Box::new(build_report(b, labels)?)),
+        ..build_report(a, labels)?
+    })
+}
+
+fn versus(labels: &Labels, names: [&String; 2], stats: [&Stats; 2]) -> Versus {
+    use EventTypeEnum::*;
+    let all = StatsFilter::default();
+    let groups = names.map(|name| name.clone());
+    let fundamental = |label: &str, event: EventTypeEnum| ComparisonRow {
+        label: label.to_string(),
+        values: stats.map(|stats| {
+            vec![
+                stats.event_count(event, None, &all).to_string(),
+                stats
+                    .event_count(event, Some(EvalEnum::Error), &all)
+                    .to_string(),
+                fmt_pct(stats.event_percentage(event, EvalEnum::Perfect, &all)),
+                fmt_pct(stats.metric_percentage(event, Metric::Positive, &all)),
+                fmt_pct(stats.metric_percentage(event, Metric::Efficiency, &all)),
+            ]
+        }),
+    };
+    let phase = |phase: PhaseEnum| ComparisonRow {
+        label: phase.friendly_name(labels).to_string(),
+        values: stats.map(|stats| {
+            match stats.rallies_won(&StatsFilter::new(Some(phase), None, None)) {
+                Some((value, won, total)) => {
+                    vec![total.to_string(), won.to_string(), fmt_pct(Some(value))]
+                }
+                None => vec![String::new(), String::new(), fmt_pct(None)],
+            }
+        }),
+    };
+    Versus {
+        fundamentals: Comparison {
+            title: labels.comparison.to_string(),
+            groups: groups.clone(),
+            columns: vec![
+                labels.tot.to_string(),
+                labels.err.to_string(),
+                labels.prf_perc.to_string(),
+                labels.pos_perc.to_string(),
+                labels.eff_perc.to_string(),
+            ],
+            rows: vec![
+                fundamental(labels.reception, P),
+                fundamental(labels.serve, S),
+                fundamental(labels.attack, A),
+            ],
+        },
+        phases: Comparison {
+            title: String::new(),
+            groups,
+            columns: vec![
+                labels.tot.to_string(),
+                labels.pt.to_string(),
+                labels.pt_perc.to_string(),
+            ],
+            rows: vec![phase(PhaseEnum::SideOut), phase(PhaseEnum::Break)],
+        },
+    }
 }
 
 /// The values of us and them, in the order of the scoresheet: the home
@@ -1047,19 +1142,31 @@ fn freeballs_table(labels: &Labels, stats: &Stats) -> Table {
 
 /// A table of where the points come from: a row per source, with its
 /// count and share in the match, then its count in each set, as
-/// DataVolley's points won by set; then the total.
+/// DataVolley's points won by set; then the total. The points without a
+/// cause (`PW`, `PL`) come last, only when the match has some: the reports
+/// of the matches with none stay as they were.
 fn origin_table(
     labels: &Labels,
     title: &str,
     replay: &Replay,
     sources: Vec<(&str, &dyn Fn(&Stats) -> u32)>,
+    no_cause: EventTypeEnum,
 ) -> Table {
     let stats = once(&replay.stats)
         .chain(replay.sets.iter().map(|(_, snapshot)| &snapshot.stats))
         .collect::<Vec<_>>();
+    let all = StatsFilter::default();
+    let no_cause_count = |s: &Stats| s.event_count(no_cause, None, &all);
     let counts: Vec<(&str, Vec<u32>)> = sources
         .iter()
         .map(|(label, count)| (*label, stats.iter().map(|s| count(s)).collect()))
+        .chain(
+            Some((
+                labels.no_cause,
+                stats.iter().map(|s| no_cause_count(s)).collect::<Vec<_>>(),
+            ))
+            .filter(|(_, c)| c.first().is_some_and(|n| *n > 0)),
+        )
         .collect();
     let totals: Vec<u32> = (0..stats.len())
         .map(|i| counts.iter().map(|(_, c)| c[i]).sum())
@@ -1094,7 +1201,7 @@ fn origin_table(
     }
 }
 
-/// Our points: aces, kills, block points, their errors.
+/// Our points: aces, kills, block points, their errors, without a cause.
 fn points_won_table(labels: &Labels, replay: &Replay) -> Table {
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -1113,11 +1220,12 @@ fn points_won_table(labels: &Labels, replay: &Replay) -> Table {
             (labels.block, &count(B, Some(Perfect))),
             (labels.opponent_errors, &count(OE, None)),
         ],
+        PW,
     )
 }
 
 /// Their points: their own ones, then our errors by fundamental and our
-/// faults (see `EventTypeEnum::rally_winner`).
+/// faults, without a cause (see `EventTypeEnum::rally_winner`).
 fn points_lost_table(labels: &Labels, replay: &Replay) -> Table {
     use EvalEnum::*;
     use EventTypeEnum::*;
@@ -1141,6 +1249,7 @@ fn points_lost_table(labels: &Labels, replay: &Replay) -> Table {
             (labels.defense, &count(D, Some(Error))),
             (labels.faults, &count(F, None)),
         ],
+        PL,
     )
 }
 

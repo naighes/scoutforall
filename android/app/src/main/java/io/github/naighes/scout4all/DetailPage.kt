@@ -44,7 +44,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.DetailFilter
+import io.github.naighes.scout4all.core.DigsEnum
 import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.LiveStats
+import io.github.naighes.scout4all.core.PhaseChoice
+import io.github.naighes.scout4all.core.RotationChoice
 import io.github.naighes.scout4all.core.SituationChoices
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -137,7 +141,7 @@ fun Detail(
             )
         }
     }
-    if (filters) DetailFilters(detail, situation, filter) { onQuery(query.copy(filter = it)) }
+    if (filters) DetailFilters(detail, situation, filter, query.event) { onQuery(query.copy(filter = it)) }
     watch?.header?.invoke(detail, query, choice) { choice = ClipChoice() }
     detail.fundamental?.let { f ->
         FundamentalContent(f, query, onQuery, choice.takeIf { watch != null }) { choice = it }
@@ -145,13 +149,20 @@ fun Detail(
     detail.freeballs?.let { FreeballContent(it) }
 }
 
-/** The filters of the statistics: the player, the rotation, the phase and,
- * with its choices, the situation of the game (the role, the reception of
- * the rally, the touch before, the set, the reception formation, the P1),
- * on as many lines as they take. */
+/** The filters of the statistics: the player, the rotation, the phase, in
+ * the detail of the defense ([event] the dig) the digs counted and, with its
+ * choices, the situation of the game (the role, the reception of the rally,
+ * the touch before, the set, the reception formation, the P1), on as many
+ * lines as they take. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun DetailFilters(detail: DetailStats, situation: SituationChoices?, filter: DetailFilter, onFilter: (DetailFilter) -> Unit) =
+fun DetailFilters(
+    detail: DetailStats,
+    situation: SituationChoices?,
+    filter: DetailFilter,
+    event: EventTypeEnum?,
+    onFilter: (DetailFilter) -> Unit,
+) =
     FlowRow(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -163,19 +174,17 @@ fun DetailFilters(detail: DetailStats, situation: SituationChoices?, filter: Det
             detail.players.map { "${it.number} ${it.name}" to it.id },
             { chosen -> detail.players.filter { it.id in chosen }.joinToString(", ") { it.number.toString() } },
         ) { onFilter(filter.copy(players = it)) }
-        ManyFilterMenu(
-            stringResource(R.string.filter_rotation),
-            // a byte array in the core's record: the rotations 0 to 5
-            filter.rotations.map { it.toUByte() },
-            emptyList(),
-            detail.rotations.map { it.name to it.value },
-            { chosen -> detail.rotations.filter { it.value in chosen }.joinToString(" ") { it.name } },
-        ) { onFilter(filter.copy(rotations = it.map(UByte::toByte).toByteArray())) }
-        FilterMenu(
-            stringResource(R.string.filter_phase),
-            detail.phases.find { it.value == filter.phase }?.name,
-            detail.phases.map { it.name to it.value },
-        ) { onFilter(filter.copy(phase = it)) }
+        NarrowMenus(detail.rotations, detail.phases, filter, onFilter)
+        if (event == EventTypeEnum.D) {
+            // all of them, the digs that aren't covers, the covers
+            val digs = listOf(stringResource(R.string.digs_defense) to DigsEnum.DEFENSE, stringResource(R.string.digs_cover) to DigsEnum.COVER)
+            FilterMenu(
+                stringResource(R.string.digs),
+                digs.find { it.second == filter.digs }?.first,
+                digs,
+                all = stringResource(R.string.digs_all),
+            ) { onFilter(filter.copy(digs = it)) }
+        }
         if (situation == null) return@FlowRow
         ManyFilterMenu(
             stringResource(R.string.role),
@@ -242,6 +251,39 @@ private fun evalGroups(situation: SituationChoices): List<Pair<String, List<Eval
 private fun symbolsOf(situation: SituationChoices, chosen: List<EvalEnum>): String =
     situation.symbols.filter { it.value in chosen }.joinToString("") { it.symbol }
 
+/** The rotation and the phase the figures are narrowed to, as two chips:
+ * to put in the line of the filters. */
+@Composable
+fun NarrowMenus(
+    rotations: List<RotationChoice>,
+    phases: List<PhaseChoice>,
+    filter: DetailFilter,
+    onFilter: (DetailFilter) -> Unit,
+) {
+    ManyFilterMenu(
+        stringResource(R.string.filter_rotation),
+        // a byte array in the core's record: the rotations 0 to 5
+        filter.rotations.map { it.toUByte() },
+        emptyList(),
+        rotations.map { it.name to it.value },
+        { chosen -> rotations.filter { it.value in chosen }.joinToString(" ") { it.name } },
+    ) { onFilter(filter.copy(rotations = it.map(UByte::toByte).toByteArray())) }
+    FilterMenu(
+        stringResource(R.string.filter_phase),
+        phases.find { it.value == filter.phase }?.name,
+        phases.map { it.name to it.value },
+    ) { onFilter(filter.copy(phase = it)) }
+}
+
+/** What the pages of the summary, the distribution and the errors are
+ * narrowed to: the rotation and the phase, as on the detail. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun Narrowing(stats: LiveStats, onFilter: (DetailFilter) -> Unit) =
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        NarrowMenus(stats.rotationChoices, stats.phaseChoices, stats.filter, onFilter)
+    }
+
 /** A chip naming the filter, or what's chosen; a menu to choose more of
  * them: "all", the groups (just them), each one on or off. */
 @Composable
@@ -303,7 +345,14 @@ private fun <T> ManyFilterMenu(
 /** A chip naming the filter, or what it's set to; a menu to choose, "all"
  * first. */
 @Composable
-private fun <T> FilterMenu(label: String, chosen: String?, options: List<Pair<String, T>>, onChoose: (T?) -> Unit) =
+private fun <T> FilterMenu(
+    label: String,
+    chosen: String?,
+    options: List<Pair<String, T>>,
+    // the first choice, none of the options
+    all: String? = null,
+    onChoose: (T?) -> Unit,
+) =
     Box {
         var open by remember { mutableStateOf(false) }
         FilterChip(
@@ -318,7 +367,7 @@ private fun <T> FilterMenu(label: String, chosen: String?, options: List<Pair<St
         }
         Menu(expanded = open, onDismissRequest = { open = false }) {
             DropdownMenuItem(
-                text = { Text(stringResource(R.string.filter_all)) },
+                text = { Text(all ?: stringResource(R.string.filter_all)) },
                 leadingIcon = { tick(chosen == null) },
                 onClick = {
                     open = false

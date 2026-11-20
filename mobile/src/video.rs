@@ -5,7 +5,8 @@
 //! player) and ask the review the rest: the logic is the same on both.
 
 use crate::{
-    AnalysisPeriod, ClipPick, MobileError, Scout4All, SetEvent, VideoEvent, clips_of, count_of,
+    AnalysisPeriod, ClipPick, MatchSide, MobileError, Origins, Scout4All, SetEvent, VideoEvent,
+    clips_of, count_of,
     strip::{ClipSpan, clip_spans},
 };
 use chrono::{FixedOffset, Local, Offset};
@@ -18,6 +19,7 @@ use std::{
     path::Path,
     sync::{Arc, Mutex, MutexGuard},
 };
+use uuid::Uuid;
 
 /// The seconds of a clip before and after its action, at most.
 pub const MAX_MARGIN_SECONDS: u32 = 30;
@@ -183,6 +185,11 @@ pub struct VideoReview {
 
 struct Review {
     the_match: MatchEntry,
+    /// team A: the profile is its, whichever side is shown
+    team_id: String,
+    /// B's, seen by the events of B, each told by the event of A of its
+    /// touch when A's has one
+    of_b: Option<Origins>,
     /// none: written by a newer version, left as it is
     profile: Option<VideoProfile>,
     /// the names of the files added here, by their path (a `content://`
@@ -198,14 +205,19 @@ struct Review {
 #[uniffi::export]
 impl Scout4All {
     /// The video of the match: all its events, or only the ones the pick
-    /// keeps (the actions of a statistic).
+    /// keeps (the actions of a statistic). Of the side B, as it is told by
+    /// its events, the corrections kept by their touches (`EventRef`).
     pub fn video_review(
         self: Arc<Self>,
         team_id: String,
         match_id: String,
+        side: MatchSide,
         pick: Option<ClipPick>,
     ) -> Result<Arc<VideoReview>, MobileError> {
-        let (the_match, stored) = self.video(&team_id, &match_id)?;
+        let (the_match, stored) = self.video_of(&team_id, &match_id, side)?;
+        let of_b = (side == MatchSide::B)
+            .then(|| self.origins_of_b(&team_id, &match_id))
+            .transpose()?;
         let profile = match stored {
             StoredProfile::Missing => Some(VideoProfile::default()),
             StoredProfile::Profile(p) => Some(p),
@@ -214,6 +226,8 @@ impl Scout4All {
         let picked = pick.map(|p| clips_of(&the_match, &p)).transpose()?;
         let mut review = Review {
             the_match,
+            team_id,
+            of_b,
             profile,
             names: vec![],
             durations: vec![],
@@ -224,6 +238,7 @@ impl Scout4All {
             &review.the_match,
             &review.current_profile(),
             &review.durations,
+            review.of_b.as_ref(),
         )?;
         Ok(Arc::new(VideoReview {
             core: self,
@@ -236,9 +251,10 @@ impl Scout4All {
         &self,
         team_id: String,
         match_id: String,
+        side: MatchSide,
         pick: ClipPick,
     ) -> Result<u32, MobileError> {
-        self.match_clips(&team_id, &match_id, &pick)
+        self.match_clips_of(&team_id, &match_id, side, &pick)
             .map(|c| count_of(c.len()))
     }
 
@@ -248,10 +264,11 @@ impl Scout4All {
         &self,
         team_id: String,
         period: AnalysisPeriod,
+        competition: Option<Uuid>,
         pick: ClipPick,
     ) -> Result<Vec<TeamClipMatch>, MobileError> {
         Ok(self
-            .team_clips(&team_id, &period, &pick)?
+            .team_clips(&team_id, &period, competition, &pick)?
             .into_iter()
             .map(|m| TeamClipMatch {
                 actions: count_of(m.events.len()),
@@ -632,9 +649,12 @@ impl VideoReview {
 
     /// The events placed again, as the profile and the durations say.
     fn reload(&self, st: &mut Review) -> Result<(), MobileError> {
-        st.all = self
-            .core
-            .video_events(&st.the_match, &st.current_profile(), &st.durations)?;
+        st.all = self.core.video_events(
+            &st.the_match,
+            &st.current_profile(),
+            &st.durations,
+            st.of_b.as_ref(),
+        )?;
         Ok(())
     }
 
@@ -655,7 +675,8 @@ impl VideoReview {
     }
 
     fn save(&self, st: &mut Review, profile: VideoProfile) -> Result<(), MobileError> {
-        self.core.save_video(&st.the_match, &profile)?;
+        self.core
+            .save_video_of(&st.team_id, &st.the_match, &profile)?;
         st.profile = Some(profile);
         self.reload(st)
     }
@@ -681,7 +702,7 @@ impl Review {
         self.all.iter().filter(|e| {
             self.picked
                 .as_ref()
-                .is_none_or(|picked| picked.contains(&event_ref(e)))
+                .is_none_or(|picked| picked.contains(&own_ref(e)))
         })
     }
 
@@ -760,11 +781,15 @@ fn millis(ms: u64) -> i64 {
     i64::try_from(ms).unwrap_or(i64::MAX)
 }
 
+/// What the profile keeps the event by (`VideoEvent::stored`).
 pub fn event_ref(e: &VideoEvent) -> EventRef {
-    EventRef {
-        set_number: e.set_number,
-        index: e.event.index as usize,
-    }
+    e.stored
+}
+
+/// The event by its own place in the stream of the side shown: what the
+/// clips (`ClipPick`) are told by.
+pub fn own_ref(e: &VideoEvent) -> EventRef {
+    EventRef::of_a(e.set_number, e.event.index as usize)
 }
 
 /// Where the video goes for the event: `lead_ms` before it, not before the
@@ -934,6 +959,10 @@ pub struct SavedClips {
     pub matches: Vec<TeamClipMatch>,
     /// without a video: left out, said
     pub left_out: Vec<TeamClipMatch>,
+    /// the team of the matches: B's actions of a match scouted on both
+    /// sides (missing when saved by a version without it: A)
+    #[serde(default)]
+    pub side: MatchSide,
 }
 
 /// The actions picked written to be saved (empty if they can't be: then
@@ -1043,6 +1072,7 @@ mod tests {
             court_zone::{CourtZoneEnum, ServeStartEnum},
             enums::{EvalEnum, RoleEnum},
             flags::ReceptionSchemeEnum,
+            stats::DigsEnum,
             technique::SetTypeEnum,
         };
         let filter = DetailFilter {
@@ -1058,6 +1088,7 @@ mod tests {
             late: Some(false),
             close: Some(true),
             serve_start: Some(ServeStartEnum::Z6),
+            digs: Some(DigsEnum::Cover),
         };
         let clips = SavedClips {
             team_id: "t".to_string(),
@@ -1084,8 +1115,17 @@ mod tests {
                 actions: 2,
                 has_video: false,
             }],
+            side: MatchSide::B,
         };
-        assert_eq!(restore_clips(&save_clips(clips.clone())), Some(clips));
+        assert_eq!(
+            restore_clips(&save_clips(clips.clone())),
+            Some(clips.clone())
+        );
+        // saved before the side: A
+        assert_eq!(
+            restore_clips(&save_clips(clips.clone()).replace(r#","side":"B""#, "")).map(|c| c.side),
+            Some(MatchSide::A)
+        );
         assert_eq!(restore_clips(""), None);
         assert_eq!(restore_clips("{\"team_id\": 3}"), None);
     }
@@ -1133,7 +1173,7 @@ mod tests {
             gender: Some(GenderEnum::Women),
             country: CountryCode::known("SI"),
         };
-        let done = app.import_dvw(timed(), choice, false).unwrap();
+        let done = app.import_dvw(timed(), choice).unwrap();
         (app, done.team_id, done.match_id)
     }
 
@@ -1152,7 +1192,7 @@ mod tests {
         let (app, team, m) = imported(&dir);
         let review = app
             .clone()
-            .video_review(team.clone(), m.clone(), None)
+            .video_review(team.clone(), m.clone(), MatchSide::A, None)
             .unwrap();
         assert!(!review.newer());
         assert!(review.files().is_empty());
@@ -1174,7 +1214,7 @@ mod tests {
         // read again: the names from the paths
         let again = app
             .clone()
-            .video_review(team.clone(), m.clone(), None)
+            .video_review(team.clone(), m.clone(), MatchSide::A, None)
             .unwrap();
         assert_eq!(again.files()[1].name, "20150125 185442.mp4");
         assert_eq!(
@@ -1201,7 +1241,10 @@ mod tests {
     fn the_events_lined_up_with_the_video() {
         let dir = tempfile::tempdir().unwrap();
         let (app, team, m) = imported(&dir);
-        let review = app.clone().video_review(team, m, None).unwrap();
+        let review = app
+            .clone()
+            .video_review(team, m, MatchSide::A, None)
+            .unwrap();
         review.add_files(vec![file("partita.mp4")], 0).unwrap();
         review.set_durations(vec![3 * 3600 * 1000]).unwrap();
         assert_eq!(review.alignment(), VideoAlignment::Missing);
@@ -1253,7 +1296,10 @@ mod tests {
     fn an_event_put_at_its_own_time() {
         let dir = tempfile::tempdir().unwrap();
         let (app, team, m) = imported(&dir);
-        let review = app.clone().video_review(team, m, None).unwrap();
+        let review = app
+            .clone()
+            .video_review(team, m, MatchSide::A, None)
+            .unwrap();
         review.add_files(vec![file("partita.mp4")], 0).unwrap();
         review.set_durations(vec![3 * 3600 * 1000]).unwrap();
         let at = |i: usize| review.events()[i].offset_ms;
@@ -1292,6 +1338,109 @@ mod tests {
         assert!(review.events().iter().all(|e| e.corrected_ms.is_none()));
     }
 
+    /// The video of B's side (a match imported on both sides): its events
+    /// placed by their touches, the ones born from a touch of A with the
+    /// correction of A's event of the same touch, corrected the same way;
+    /// the others with a correction of their own.
+    #[test]
+    fn the_video_of_b_is_corrected_by_the_touches() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            side: DvwSide::Home,
+            day: "2015-01-25".into(),
+            max_substitutions: 6,
+            team_id: None,
+            classification: Some(TeamClassificationEnum::Regional),
+            gender: Some(GenderEnum::Women),
+            country: CountryCode::known("SI"),
+        };
+        let done = app.import_dvw(timed(), choice).unwrap();
+        let (team, m) = (done.team_id, done.match_id);
+        let of_a = app
+            .clone()
+            .video_review(team.clone(), m.clone(), MatchSide::A, None)
+            .unwrap();
+        of_a.add_files(vec![file("a.mp4")], 0).unwrap();
+        of_a.set_durations(vec![9_000_000]).unwrap();
+        of_a.anchor_here(0, 10_000).unwrap();
+        let origins = app.origins_of_b(&team, &m).unwrap();
+        let (set, of_set) = origins.first().cloned().unwrap();
+        assert_eq!(set, 1);
+        let (b_index, a_index) = of_set
+            .iter()
+            .enumerate()
+            .find_map(|(b, a)| a.map(|a| (b, a)))
+            .unwrap();
+        let alone = of_set.iter().position(Option::is_none).unwrap();
+        of_a.correct_here(u32::try_from(a_index).unwrap(), 200_000)
+            .unwrap();
+        of_a.correct_here(u32::try_from(alone).unwrap(), 300_000)
+            .unwrap();
+        let of_b = app
+            .clone()
+            .video_review(team.clone(), m.clone(), MatchSide::B, None)
+            .unwrap();
+        // the video is A's: B's events are placed in it
+        assert_eq!(of_b.files().len(), 1);
+        of_b.set_durations(vec![9_000_000]).unwrap();
+        let (a_events, b_events) = (of_a.events(), of_b.events());
+        assert!(b_events.iter().all(|e| e.offset_ms.is_some()));
+        // the same touch, the same instant: A's correction
+        assert_eq!(
+            b_events[b_index].offset_ms, a_events[a_index].offset_ms,
+            "B's event {b_index} comes from A's {a_index}"
+        );
+        assert_eq!(a_events[a_index].offset_ms, Some(200_000));
+        // an event of B with no event of A at its touch: not the one of
+        // A at the same index
+        assert_ne!(b_events[alone].offset_ms, Some(300_000));
+        // B's events are corrected too: the one born from A's touch by A's
+        // event, the other one by its own (side B)
+        let b_index_u32 = u32::try_from(b_index).unwrap();
+        let alone_u32 = u32::try_from(alone).unwrap();
+        of_b.correct_here(b_index_u32, 250_000).unwrap();
+        of_b.correct_here(alone_u32, 50_000).unwrap();
+        let fresh = |side| {
+            let review = app
+                .clone()
+                .video_review(team.clone(), m.clone(), side, None)
+                .unwrap();
+            review.set_durations(vec![9_000_000]).unwrap();
+            review.events()
+        };
+        let (a_after, b_after) = (fresh(MatchSide::A), fresh(MatchSide::B));
+        assert_eq!(a_after[a_index].offset_ms, Some(250_000));
+        assert_eq!(b_after[b_index].offset_ms, Some(250_000));
+        assert_eq!(b_after[alone].offset_ms, Some(50_000));
+        assert!(b_after[alone].corrected_ms.is_some());
+        // A's event at the same index is not the one of B
+        assert_eq!(a_after[alone].offset_ms, Some(300_000));
+        // the clips of B are B's own
+        let pick = ClipPick {
+            scope: StatsScope::Match,
+            event: EventTypeEnum::S,
+            filter: DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let count = |side| {
+            app.match_clip_count(team.clone(), m.clone(), side, pick.clone())
+                .unwrap()
+        };
+        assert!(count(MatchSide::B) > 0);
+        let shown = app
+            .clone()
+            .video_review(team.clone(), m.clone(), MatchSide::B, Some(pick.clone()))
+            .unwrap();
+        assert_eq!(
+            u32::try_from(shown.events().len()).unwrap(),
+            count(MatchSide::B)
+        );
+    }
+
     /// The actions of a statistic: only them, the next clip not at the
     /// same time, the pieces of their montage, in the files.
     #[test]
@@ -1300,7 +1449,7 @@ mod tests {
         let (app, team, m) = imported(&dir);
         let whole = app
             .clone()
-            .video_review(team.clone(), m.clone(), None)
+            .video_review(team.clone(), m.clone(), MatchSide::A, None)
             .unwrap();
         whole
             .add_files(vec![file("a.mp4"), file("b.mp4")], 0)
@@ -1316,15 +1465,18 @@ mod tests {
             target: None,
         };
         let count = app
-            .match_clip_count(team.clone(), m.clone(), pick.clone())
+            .match_clip_count(team.clone(), m.clone(), MatchSide::A, pick.clone())
             .unwrap();
         let period = AnalysisPeriod::LastMatches { count: 4 };
         let matches = app
-            .team_clip_matches(team.clone(), period, pick.clone())
+            .team_clip_matches(team.clone(), period, None, pick.clone())
             .unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!((matches[0].actions, matches[0].has_video), (count, true));
-        let review = app.clone().video_review(team, m, Some(pick)).unwrap();
+        let review = app
+            .clone()
+            .video_review(team, m, MatchSide::A, Some(pick))
+            .unwrap();
         review.set_durations(vec![1_800_000, 9_000_000]).unwrap();
         assert!(review.is_clips());
         let events = review.events();

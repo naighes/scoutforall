@@ -93,15 +93,18 @@ private val rallies = listOf(
     touch("eval:NEGATIVE", R.string.tutorial_serve),
     touch("player:11", R.string.tutorial_block),
     touch("event:B", R.string.tutorial_block_event),
-    touch("eval:NEGATIVE", R.string.tutorial_block_eval),
+    // the block `!`: the ball back to them, who attack again
+    touch("eval:EXCLAMATIVE", R.string.tutorial_block_eval),
     touch("player:19", R.string.tutorial_dig),
     touch("event:D", R.string.tutorial_dig_event),
     touch("eval:POSITIVE", R.string.tutorial_dig_eval),
-    // the evaluation tells who plays the ball next: + us (their freeball),
-    // − them (they attack)
+    // + dug with difficulty, no counterattack: they send a freeball (or
+    // the ball falls back to us); − dug well, they attack
     touch("player:18", R.string.tutorial_opposite),
     touch("eval:POSITIVE", R.string.tutorial_attack_kept),
     touch("event:OF", R.string.tutorial_their_freeball),
+    // back at the first step: the points without a cause are in view
+    TutorialStep.Read("no-cause", R.string.tutorial_no_cause),
     // in the front row after their freeball she may attack or block
     touch("player:18", R.string.tutorial_opposite_again),
     touch("event:A", R.string.tutorial_attack_event),

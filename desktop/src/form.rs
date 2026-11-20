@@ -294,6 +294,9 @@ pub enum Message {
     /// more about a field asked (the number and the role of a player on
     /// the score sheet): for the screen, the form stays as it is
     Details(usize),
+    /// the other answer of a question asked over the form (not the one
+    /// Save gives, not Cancel): for the screen, the form stays as it is
+    Another,
     Save,
     Cancel,
 }
@@ -761,7 +764,7 @@ impl Form {
                 self.focused = field.min(self.fields.len().saturating_sub(1));
                 Outcome::Stay
             }
-            Message::Details(_) => Outcome::Stay,
+            Message::Details(_) | Message::Another => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,
         }
@@ -1134,16 +1137,17 @@ impl Form {
             }
             Value::Check { .. } => iced::widget::space::vertical().height(0).into(),
             Value::Choice { options, index } => {
-                let all = options.clone();
+                // the field is one line high: a long label is cut with an
+                // ellipsis (the items are told apart by their index)
+                let items: Vec<ChoiceItem> = options
+                    .iter()
+                    .enumerate()
+                    .map(|(n, o)| ChoiceItem::new(n, o))
+                    .collect();
                 pick_list(
-                    options.as_slice(),
-                    options.get(*index),
-                    move |chosen: String| {
-                        on(Message::Choose(
-                            i,
-                            all.iter().position(|o| *o == chosen).unwrap_or(0),
-                        ))
-                    },
+                    items.clone(),
+                    items.get(*index).cloned(),
+                    move |chosen: ChoiceItem| on(Message::Choose(i, chosen.index)),
                 )
                 .width(Length::Fill)
                 .text_size(SIZE_BODY)
@@ -1259,6 +1263,39 @@ impl Form {
         iced::widget::mouse_area(body)
             .on_press(on(Message::Focus(i)))
             .into()
+    }
+}
+
+/// Longest label shown in a drop-down, in characters.
+const CHOICE_LABEL_MAX: usize = 48;
+
+/// An option of a drop-down: compared by position, shown cut when long.
+#[derive(Clone)]
+struct ChoiceItem {
+    index: usize,
+    label: String,
+}
+
+impl ChoiceItem {
+    fn new(index: usize, option: &str) -> Self {
+        Self {
+            index,
+            label: scout4all_core::names::cut(option, CHOICE_LABEL_MAX, '…'),
+        }
+    }
+}
+
+impl PartialEq for ChoiceItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
+}
+
+impl Eq for ChoiceItem {}
+
+impl std::fmt::Display for ChoiceItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
     }
 }
 

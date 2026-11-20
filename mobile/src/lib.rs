@@ -17,19 +17,19 @@ use scout4all_core::{
     competition_form::{CompetitionForm, CompetitionFormError},
     db,
     detail::{Breakdown, FUNDAMENTALS, ServePath, Tone, by_player, by_rotation_in},
-    domain::{CompetitionFormat, Stage},
+    domain::{CompetitionFormat, ScoutingMode, Side as ScoutSide, Stage},
     dvw::{
         self,
         import::{
-            MatchPlan, OpponentChoice as DvwOpponentChoice, OpponentPlan,
+            ImportedSides, MatchPlan, OpponentChoice as DvwOpponentChoice, OpponentPlan,
             TeamChoice as DvwTeamChoice, TeamIssue, TeamPlan, default_max_substitutions,
-            match_date, match_exists, match_plan, opponent_plan, save_import, season_year,
-            similar_teams, similarity, team_plan,
+            imported_already, imported_already_message, match_date, match_plan, opponent_plan,
+            save_import, season_year, similar_teams, similarity, team_name, team_plan,
         },
         model::{DvwFile, MatchDate as DvwDate, Side},
     },
     errors::{AppError, IOError},
-    event_edit::{EditField, EventEdit},
+    event_edit::{Correcting, EditField, EventEdit},
     example,
     legacy::{
         archive::file_team_id,
@@ -52,7 +52,7 @@ use scout4all_core::{
             matches::{SqliteMatchReader, SqliteMatchWriter},
             persons::SqlitePersons,
             queue::SqliteQueue,
-            sets::SqliteSetWriter,
+            sets::{SqliteSetReader, SqliteSetWriter},
             teams::{SqliteTeamReader, SqliteTeamWriter},
             upload::SqliteUploads,
             video::SqliteVideoProfiles,
@@ -80,8 +80,8 @@ use scout4all_core::{
         set::SetEntry,
         snapshot::{EventEntry, Formation},
         stats::{
-            AttackSummary, EvalSet, EventPick, Metric, RoleSet, SetTypeSet, SituationFilter, Stats,
-            StatsFilter,
+            AttackSummary, DigsEnum, EvalSet, EventPick, Metric, RoleSet, SetTypeSet,
+            SituationFilter, Stats, StatsFilter,
         },
         team::TeamEntry,
         technique::{ServeTypeEnum, SetTypeEnum, TechniqueEnum},
@@ -92,6 +92,7 @@ use scout4all_core::{
         layout::{self, CONFIG, UNREADABLE_CONFIG},
     },
     team_form::{TeamForm, TeamFormError},
+    touch_edit::TouchEdit,
     trend::{Replay, Series, TrendPoint},
     video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place},
 };
@@ -193,6 +194,8 @@ pub enum EventTypeEnum {
     LR,
     LF,
     CS,
+    PW,
+    PL,
 }
 
 #[uniffi::remote(Enum)]
@@ -282,6 +285,13 @@ pub enum PhaseEnum {
 }
 
 #[uniffi::remote(Enum)]
+pub enum DigsEnum {
+    All,
+    Defense,
+    Cover,
+}
+
+#[uniffi::remote(Enum)]
 pub enum Tone {
     Excellent,
     Good,
@@ -366,6 +376,8 @@ pub struct MatchForm {
     pub round: String,
     #[uniffi(default = [])]
     pub numbers: Vec<RosterNumber>,
+    #[uniffi(default = false)]
+    pub both: bool,
 }
 
 /// The form of a competition: edited in their list, created in the form
@@ -462,19 +474,53 @@ pub enum MobileError {
 /// The language of the app, for the errors converted with `?` (see
 /// `From<AppError>`): the one of the last `Scout4All` made, which follows
 /// its `set_language`.
+#[cfg(not(test))]
 static ERRORS_LANGUAGE: std::sync::RwLock<Option<Language>> = std::sync::RwLock::new(None);
+
+#[cfg(not(test))]
+fn set_errors_language(language: Language) {
+    *ERRORS_LANGUAGE
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(language);
+}
+
+#[cfg(not(test))]
+fn errors_labels() -> &'static Labels {
+    ERRORS_LANGUAGE
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .as_ref()
+        .map_or_else(|| Language::default().labels(), Language::labels)
+}
+
+// the tests run at the same time, each on its thread, each with its app: one
+// language of the errors per thread, or a test would read another's
+#[cfg(test)]
+thread_local! {
+    static ERRORS_LANGUAGE: std::cell::RefCell<Option<Language>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+fn set_errors_language(language: Language) {
+    ERRORS_LANGUAGE.with(|l| *l.borrow_mut() = Some(language));
+}
+
+#[cfg(test)]
+fn errors_labels() -> &'static Labels {
+    ERRORS_LANGUAGE.with(|l| {
+        l.borrow()
+            .as_ref()
+            .map_or_else(|| Language::default().labels(), Language::labels)
+    })
+}
 
 impl From<AppError> for MobileError {
     fn from(e: AppError) -> Self {
         // the messages of the core are in the labels of the domain, for the
         // user as they are; the files and the network in the language
-        let labels = ERRORS_LANGUAGE
-            .read()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .as_ref()
-            .map_or_else(|| Language::default().labels(), Language::labels);
         MobileError::Failed {
-            reason: e.message(labels),
+            reason: e.message(errors_labels()),
         }
     }
 }
@@ -550,7 +596,9 @@ pub enum MatchField {
 impl From<MatchFormError> for MatchField {
     fn from(e: MatchFormError) -> Self {
         match e {
-            MatchFormError::EmptyOpponent | MatchFormError::OpponentIsTeamA => MatchField::Opponent,
+            MatchFormError::EmptyOpponent
+            | MatchFormError::OpponentIsTeamA
+            | MatchFormError::ScoutingBothNeedsTeam => MatchField::Opponent,
             MatchFormError::InvalidDate => MatchField::Date,
             MatchFormError::InvalidMaxSubstitutions | MatchFormError::MaxSubstitutionsBelowUsed => {
                 MatchField::MaxSubstitutions
@@ -966,8 +1014,6 @@ pub struct DvwReady {
     pub team: String,
     pub sets: u32,
     pub new_players: u32,
-    /// The team has the match already: saved only when the user confirms.
-    pub saved_already: bool,
     /// Team B, its name, and the players of the file added to it when a
     /// team (none when only a name).
     pub opponent: String,
@@ -979,6 +1025,10 @@ pub struct DvwReady {
     /// Maschile · Regular season · Andata – giornata 1"; none when
     /// nothing.
     pub competition: Option<String>,
+    /// Why the match goes in only from the side of team A when team B is a
+    /// team: the touches of B left out (TODO/001); none on both sides or
+    /// against a name.
+    pub one_side: Option<String>,
 }
 
 /// What an import saved.
@@ -1074,6 +1124,18 @@ pub struct MatchDetails {
     pub notes: String,
     /// as in `MatchListing`: the match seen by team B, scouted by A
     pub scouted_by: Option<ScoutedBy>,
+    /// scouted on both sides: the statistics of each team can be read
+    /// (`MatchSide`)
+    pub both_sides: bool,
+}
+
+/// The team of a match whose statistics are read: A, the team that
+/// scouted it, or B, only of a match scouted on both sides.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, uniffi::Enum)]
+pub enum MatchSide {
+    #[default]
+    A,
+    B,
 }
 
 /// Team A of a match seen by B: the team that scouted it.
@@ -1135,6 +1197,8 @@ pub struct SetStart {
     match_id: String,
     opponent: String,
     form: Mutex<SetStartForm>,
+    /// the start of B, scouting both sides: who serves isn't chosen there
+    of_b: bool,
     labels: &'static Labels,
 }
 
@@ -1150,7 +1214,7 @@ impl SetStart {
             set_number: form.set_number,
             team: self.team.name.clone(),
             opponent: self.opponent.clone(),
-            chooses_serving_team: form.chooses_serving_team(),
+            chooses_serving_team: form.chooses_serving_team() && !self.of_b,
             serving_team: form.serving_team,
             positions: form.positions.iter().map(|id| player(*id)).collect(),
             setter: player(form.setter),
@@ -1158,7 +1222,10 @@ impl SetStart {
             fallback_libero: player(form.fallback_libero),
             allows_fallback_libero: self.team.active_players().len()
                 >= MIN_PLAYERS_FOR_FALLBACK_LIBERO,
-            complete: form.clone().validate(&self.team).is_ok(),
+            complete: match self.of_b {
+                true => form.validate_side(&self.team).is_ok(),
+                false => form.clone().validate(&self.team).is_ok(),
+            },
             women: self.team.gender == Some(GenderEnum::Women),
         }
     }
@@ -1362,6 +1429,9 @@ pub struct ScoutingPlayer {
 pub struct EventChoice {
     pub value: EventTypeEnum,
     pub name: String,
+    /// scouting both sides: the event is B's
+    #[uniffi(default)]
+    pub side_b: bool,
 }
 
 /// An evaluation of the event being chosen, e.g. "ace" for a perfect serve.
@@ -1441,6 +1511,9 @@ pub struct ScoutedEvent {
     pub blockers: Option<String>,
     /// where our serve started from, if told: e.g. "1"
     pub serve_start: Option<String>,
+    /// scouting both sides: the event is B's
+    #[uniffi(default)]
+    pub side_b: bool,
 }
 
 /// An event of a set, in the list to correct it.
@@ -1462,6 +1535,8 @@ pub struct SetEvents {
     pub set_number: u8,
     pub team: String,
     pub opponent: String,
+    /// scouted on both sides: each event says whose it is
+    pub both: bool,
     pub events: Vec<SetEvent>,
 }
 
@@ -1538,6 +1613,16 @@ pub struct ScoutingState {
     /// whether the team can make the event chosen, no player: our fault
     /// (e.g. a rotation fault), see `choose_team`
     pub team_choice: bool,
+    /// scouting both sides: the scores, the court and the choices are of
+    /// the side on screen, B's when `side_b`
+    #[uniffi(default)]
+    pub both: bool,
+    #[uniffi(default)]
+    pub side_b: bool,
+    /// scouting both sides: the rotation of the side not on screen, as
+    /// `rotation` is the one on screen's (empty scouting one side)
+    #[uniffi(default)]
+    pub other_rotation: String,
 }
 
 /// The sets the statistics are of: one of the match, or all of them so
@@ -1716,6 +1801,12 @@ pub struct LiveStats {
     pub opponent: String,
     /// the six rotations, in order, played or not
     pub rotations: Vec<RotationStats>,
+    /// what the figures above are narrowed to (not the trend, nor the
+    /// points: those are of every rally)
+    pub filter: DetailFilter,
+    /// the rotations and the phases to narrow them to
+    pub rotation_choices: Vec<RotationChoice>,
+    pub phase_choices: Vec<PhaseChoice>,
 }
 
 /// The phases won in a rotation, and all its rallies.
@@ -1773,6 +1864,10 @@ pub struct DetailFilter {
     /// from there
     #[uniffi(default)]
     pub serve_start: Option<ServeStartEnum>,
+    /// the digs counted as defense: the ones that aren't covers, only the
+    /// covers; none, all of them (the other fundamentals count every event)
+    #[uniffi(default)]
+    pub digs: Option<DigsEnum>,
 }
 
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
@@ -2009,10 +2104,12 @@ impl Scouting {
         let snapshot = session.snapshot();
         let lineup = &snapshot.current_lineup;
         let current_match = session.current_match();
-        let team = &current_match.team;
-        let (won, lost) = current_match
-            .get_status()
-            .map_or((0, 0), |s| (s.us_wins, s.them_wins));
+        let team = session.team();
+        let side = session.side();
+        let (won, lost) = current_match.get_status().map_or((0, 0), |s| match side {
+            ScoutSide::A => (s.us_wins, s.them_wins),
+            ScoutSide::B => (s.them_wins, s.us_wins),
+        });
         let choices = session.player_choices();
         let selectable = |id: &Uuid| match (session.step(), session.player()) {
             (ScoutingStep::Event, None) => !session.player_events(id).is_empty(),
@@ -2074,14 +2171,37 @@ impl Scouting {
                 receives: receivers.contains(&position),
             })
             .collect();
-        let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
-        events.sort_by_key(|e| e.timestamp);
+        let events: Vec<ScoutedEvent> = match session.is_both() {
+            true => session
+                .touches()
+                .iter()
+                .rev()
+                .filter_map(|(of, e)| {
+                    session.team_of(*of).map(|t| ScoutedEvent {
+                        side_b: *of == ScoutSide::B,
+                        ..self.scouted_event(t, e)
+                    })
+                })
+                .collect(),
+            false => {
+                let mut events: Vec<&EventEntry> = session.set().events.iter().collect();
+                events.sort_by_key(|e| e.timestamp);
+                events
+                    .into_iter()
+                    .rev()
+                    .map(|e| self.scouted_event(team, e))
+                    .collect()
+            }
+        };
         ScoutingState {
             women: team.gender == Some(GenderEnum::Women),
             set_number: session.set().set_number,
             team: team.name.clone(),
-            opponent: current_match.opponent.clone(),
-            home: current_match.home,
+            opponent: session
+                .team_of(side.other())
+                .map_or_else(|| current_match.opponent.clone(), |t| t.name.clone()),
+            // the home side of the match is A's: B is on screen away
+            home: current_match.home == (side == ScoutSide::A),
             score_us: snapshot.score_us,
             score_them: snapshot.score_them,
             won,
@@ -2104,11 +2224,7 @@ impl Scouting {
                 .player()
                 .and_then(|id| team.find_player(id))
                 .map(|p| self.scouting_player(team, p)),
-            events: events
-                .into_iter()
-                .rev()
-                .map(|e| self.scouted_event(team, e))
-                .collect(),
+            events,
             ball: snapshot.get_ball_side(),
             last_touch: snapshot
                 .get_last_touch()
@@ -2118,7 +2234,47 @@ impl Scouting {
             reception: session.reception().players(),
             reception_open: session.can_tell_reception(),
             team_choice: session.team_choice(),
+            both: session.is_both(),
+            side_b: side == ScoutSide::B,
+            other_rotation: session
+                .snapshot_of(side.other())
+                .and_then(|s| s.current_lineup.get_current_rotation().ok())
+                .map_or_else(String::new, |r| rotation_name(r, self.labels)),
         }
+    }
+
+    /// The events that can follow: scouting both sides, with their side
+    /// (the active one's first), see `ScoutingSession::event_choices`.
+    pub fn event_choices(&self) -> Vec<EventChoice> {
+        let session = self.session();
+        session
+            .event_choices()
+            .into_iter()
+            .map(|(of, e)| EventChoice {
+                side_b: of == ScoutSide::B,
+                ..self.event_choice(&session, e)
+            })
+            .collect()
+    }
+
+    /// The scout chooses the event of a side, among `event_choices`.
+    pub fn choose_event_of(
+        &self,
+        side_b: bool,
+        event: EventTypeEnum,
+    ) -> Result<Progress, MobileError> {
+        let side = match side_b {
+            true => ScoutSide::B,
+            false => ScoutSide::A,
+        };
+        let mut session = self.session();
+        self.scouted(self.runtime.block_on(session.choose_event_of(side, event)))
+    }
+
+    /// Swaps the side the choices are for (F5): true when it is B's now.
+    pub fn swap_side(&self) -> Result<bool, MobileError> {
+        let mut session = self.session();
+        self.scouted(session.swap_side().map(|side| side == ScoutSide::B))
     }
 
     /// The events that can follow.
@@ -2143,13 +2299,17 @@ impl Scouting {
     }
 
     /// The events that come before their player: the opponent's, the
-    /// faults, the changes of the lineup.
+    /// faults, the changes of the lineup; scouting both sides, the other
+    /// side's too, with their side.
     pub fn other_events(&self) -> Vec<EventChoice> {
         let session = self.session();
         session
             .other_events()
             .into_iter()
-            .map(|e| self.event_choice(&session, e))
+            .map(|(of, e)| EventChoice {
+                side_b: of == ScoutSide::B,
+                ..self.event_choice(&session, e)
+            })
             .collect()
     }
 
@@ -2388,8 +2548,8 @@ impl Scouting {
     }
 
     /// The statistics of a set of the match so far, or of all of them,
-    /// with their trend rally by rally.
-    pub fn stats(&self, scope: StatsScope) -> Result<LiveStats, MobileError> {
+    /// with their trend rally by rally, the figures narrowed by the filter.
+    pub fn stats(&self, scope: StatsScope, filter: DetailFilter) -> Result<LiveStats, MobileError> {
         let session = self.session();
         let current_match = session.current_match();
         live_stats(
@@ -2398,7 +2558,31 @@ impl Scouting {
             current_match.max_substitutions,
             (&current_match.team, &current_match.opponent),
             self.labels,
+            filter,
         )
+    }
+
+    /// The same for B of a match scouted on both sides: its sets as B sees
+    /// them, B's team first. `None` scouting only A.
+    pub fn stats_of_b(
+        &self,
+        scope: StatsScope,
+        filter: DetailFilter,
+    ) -> Result<Option<LiveStats>, MobileError> {
+        let session = self.session();
+        let current_match = session.current_match();
+        side_b(&session)
+            .map(|(sets, team)| {
+                live_stats(
+                    &sets.iter().collect::<Vec<_>>(),
+                    scope,
+                    current_match.max_substitutions,
+                    (team, &current_match.team.name),
+                    self.labels,
+                    filter,
+                )
+            })
+            .transpose()
     }
 
     /// A fundamental of a set of the match so far, or of all of them,
@@ -2421,6 +2605,34 @@ impl Scouting {
             filter,
         )
     }
+
+    /// The same for B of a match scouted on both sides.
+    pub fn detail_of_b(
+        &self,
+        scope: StatsScope,
+        event: EventTypeEnum,
+        filter: DetailFilter,
+    ) -> Result<Option<DetailStats>, MobileError> {
+        let session = self.session();
+        side_b(&session)
+            .map(|(sets, team)| {
+                detail_stats(
+                    &sets.iter().collect::<Vec<_>>(),
+                    session.current_match().max_substitutions,
+                    team,
+                    self.labels,
+                    scope,
+                    event,
+                    filter,
+                )
+            })
+            .transpose()
+    }
+}
+
+/// B's sets so far and its team, scouting both sides; `None` scouting A.
+fn side_b(session: &ScoutingSession) -> Option<(Vec<SetEntry>, &TeamEntry)> {
+    session.sets_of_b().zip(session.team_of(ScoutSide::B))
 }
 
 /// The statistics of a set of the match, or of all of them, with their
@@ -2431,17 +2643,19 @@ fn live_stats(
     max_substitutions: u8,
     (team, opponent): (&TeamEntry, &str),
     labels: &Labels,
+    filter: DetailFilter,
 ) -> Result<LiveStats, MobileError> {
     let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
     let (trend, points) = trend_lines(all, max_substitutions, team, labels)?;
     Ok(LiveStats {
         scope,
+        filter: filter.clone(),
         sets: all.iter().map(|s| s.set_number).collect(),
         trend,
         points,
         team_name: team.name.clone(),
         opponent: opponent.to_string(),
-        ..summary(&stats, &StatsFilter::default(), team, labels)
+        ..summary(&stats, &narrowed(&filter)?, team, labels)
     })
 }
 
@@ -2548,7 +2762,31 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
                 break_points: phase(r.break_points, Some(Measure::BreakPoint)),
             })
             .collect(),
+        filter: DetailFilter::default(),
+        rotation_choices: rotation_choices(labels),
+        phase_choices: phase_choices(labels),
     }
+}
+
+/// The rotations to narrow the figures to, the six of them.
+fn rotation_choices(labels: &Labels) -> Vec<RotationChoice> {
+    (0..6)
+        .map(|r| RotationChoice {
+            value: r,
+            name: rotation_name(r, labels),
+        })
+        .collect()
+}
+
+/// The phases to narrow the figures to.
+fn phase_choices(labels: &Labels) -> Vec<PhaseChoice> {
+    [PhaseEnum::SideOut, PhaseEnum::Break]
+        .into_iter()
+        .map(|p| PhaseChoice {
+            value: p,
+            name: p.friendly_name(labels).to_string(),
+        })
+        .collect()
 }
 
 /// The sets of the scope, among the sets of the match so far.
@@ -2766,22 +3004,12 @@ fn detail_of(
             .map(|e| EventChoice {
                 value: *e,
                 name: fundamental_name(*e),
+                side_b: false,
             })
             .collect(),
         players,
-        rotations: (0..6)
-            .map(|r| RotationChoice {
-                value: r,
-                name: rotation_name(r, labels),
-            })
-            .collect(),
-        phases: [PhaseEnum::SideOut, PhaseEnum::Break]
-            .into_iter()
-            .map(|p| PhaseChoice {
-                value: p,
-                name: p.friendly_name(labels).to_string(),
-            })
-            .collect(),
+        rotations: rotation_choices(labels),
+        phases: phase_choices(labels),
         fundamental,
         freeballs,
     })
@@ -2807,7 +3035,8 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
             inverted_p1: filter.inverted_p1,
             late: filter.late,
             close: filter.close,
-        }))
+        })
+        .with_digs(filter.digs.unwrap_or_default()))
 }
 
 /// The players with an event of ours of the kind `event` in the
@@ -2866,6 +3095,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         target: e.flags.target().map(|t| t.described()),
         blockers: e.flags.blockers().map(|b| b.name(labels).to_string()),
         serve_start: e.flags.serve_start().map(|z| z.to_string()),
+        side_b: false,
     }
 }
 
@@ -3031,8 +3261,8 @@ impl Scouting {
     ) -> Vec<ScoutingPlayer> {
         choices
             .into_iter()
-            .filter_map(|c| session.current_match().team.find_player(c.id))
-            .map(|p| self.scouting_player(&session.current_match().team, p))
+            .filter_map(|c| session.team().find_player(c.id))
+            .map(|p| self.scouting_player(session.team(), p))
             .collect()
     }
 
@@ -3045,6 +3275,7 @@ impl Scouting {
                 .snapshot()
                 .next_event_name(event, self.labels)
                 .to_string(),
+            side_b: false,
         }
     }
 
@@ -3070,6 +3301,9 @@ pub struct VideoEvent {
     /// put at its own time by the user: how far from where the anchor puts
     /// it (`VideoProfile::correction`)
     pub corrected_ms: Option<i64>,
+    /// what the profile keeps it by: its own place in the stream of its
+    /// side, or, of B's, the event of A of the same touch (`stored_ref`)
+    pub stored: EventRef,
     /// after it, for the rally to come: our rotation ("-" without the
     /// setter on the court) and the phase, to show over the video (the
     /// score is the event's)
@@ -3105,24 +3339,44 @@ impl Scout4All {
     ) -> Result<Arc<Scouting>, MobileError> {
         let m = self.read_match(team_id, match_id)?;
         match next_set(&m.get_status()?, &m.team) {
-            NextSet::Resume(set) => set_start::resume(m, set, self.set_writer.clone())
-                .map(|session| {
-                    Arc::new(Scouting {
-                        runtime: self.runtime.clone(),
-                        session: Mutex::new(
-                            session
-                                .with_order(order)
-                                .with_finished(self.finished_matches()),
-                        ),
-                        labels: self.language.labels(),
-                    })
+            NextSet::Resume(set) => self.resumed(team_id, match_id, m, set).map(|session| {
+                Arc::new(Scouting {
+                    runtime: self.runtime.clone(),
+                    session: Mutex::new(
+                        session
+                            .with_order(order)
+                            .with_finished(self.finished_matches()),
+                    ),
+                    labels: self.language.labels(),
                 })
-                .map_err(|e| MobileError::Failed {
-                    reason: e.message(self.language.labels()),
-                }),
+            }),
             NextSet::Start(_) | NextSet::Over => Err(MobileError::Failed {
                 reason: format!("no set in progress in {match_id}"),
             }),
+        }
+    }
+
+    /// The set in progress scouted again: on both sides when it has the
+    /// touches of B. Why the match or B can't be read is told as it is.
+    fn resumed(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        m: MatchEntry,
+        set: SetEntry,
+    ) -> Result<ScoutingSession, MobileError> {
+        let labels = self.language.labels();
+        let failed = |e: set_start::SetStartError| MobileError::Failed {
+            reason: e.message(labels),
+        };
+        match self.set_reader.read_touches(&m, set.set_number)? {
+            None => set_start::resume(m, set, self.set_writer.clone()).map_err(failed),
+            Some(touches) => {
+                let b = self.read_match_of(team_id, match_id, MatchSide::B)?;
+                set_start::resume_both(m, set, touches, b.team, self.set_writer.clone())
+                    .map(|session| session.with_earlier_of_b(&b.sets))
+                    .map_err(failed)
+            }
         }
     }
 
@@ -3133,10 +3387,22 @@ impl Scout4All {
         team_id: &str,
         match_id: &str,
     ) -> Result<(MatchEntry, StoredProfile), MobileError> {
-        let m = self.read_match(team_id, match_id)?;
+        self.video_of(team_id, match_id, MatchSide::A)
+    }
+
+    /// The match of team A `team_id` as the side sees it, with the profile
+    /// of its video: it's A's, B's events are placed by their touches
+    /// (`origins_of_b`).
+    pub fn video_of(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        side: MatchSide,
+    ) -> Result<(MatchEntry, StoredProfile), MobileError> {
+        let m = self.read_match_of(team_id, match_id, side)?;
         let profile = self
             .runtime
-            .block_on(self.videos.read(&m.team.id, &m.id))
+            .block_on(self.videos.read(&self.read_team(team_id)?.id, &m.id))
             .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?;
         Ok((m, profile))
     }
@@ -3144,11 +3410,16 @@ impl Scout4All {
     /// The events of the match, set by set, and where each is in its
     /// video, the files `durations_ms` long (none: the video and the events
     /// not lined up).
+    ///
+    /// The profile corrects the events of A: of B's (`origins`, from
+    /// `origins_of_b`) each takes the correction of the event of A born
+    /// from the same touch, if there is one.
     pub fn video_events(
         &self,
         m: &MatchEntry,
         profile: &VideoProfile,
         durations_ms: &[u64],
+        origins: Option<&Origins>,
     ) -> Result<Vec<VideoEvent>, MobileError> {
         let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
         sets.sort_by_key(|s| s.set_number);
@@ -3163,10 +3434,8 @@ impl Scout4All {
                     .zip(rows)
                     .zip(states)
                     .map(|((e, row), state)| {
-                        let corrected_ms = profile.correction(EventRef {
-                            set_number: set.set_number,
-                            index: row.index as usize,
-                        });
+                        let stored = stored_ref(origins, set.set_number, row.index as usize);
+                        let corrected_ms = profile.correction(stored);
                         VideoEvent {
                             set_number: set.set_number,
                             event: row,
@@ -3174,6 +3443,7 @@ impl Scout4All {
                             offset_ms: place(profile, m, durations_ms, e.timestamp)
                                 .map(|ms| ms + corrected_ms.unwrap_or(0)),
                             corrected_ms,
+                            stored,
                             rotation: state
                                 .rotation
                                 .map_or_else(|| "-".to_string(), |r| rotation_name(r, labels)),
@@ -3193,14 +3463,49 @@ impl Scout4All {
         match_id: &str,
         pick: &ClipPick,
     ) -> Result<Vec<EventRef>, MobileError> {
-        let m = self.read_match(team_id, match_id)?;
+        self.match_clips_of(team_id, match_id, MatchSide::A, pick)
+    }
+
+    /// The same for the side: B's events, by their own indexes.
+    pub fn match_clips_of(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        side: MatchSide,
+        pick: &ClipPick,
+    ) -> Result<Vec<EventRef>, MobileError> {
+        let m = self.read_match_of(team_id, match_id, side)?;
         clips_of(&m, pick)
+    }
+
+    /// For each event of B's side, set by set, the event of A's born from
+    /// the same touch (`SqliteMatchReader::origins_of_b`): what the
+    /// corrections of the video, saved by A's events, are read by.
+    pub fn origins_of_b(&self, team_id: &str, match_id: &str) -> Result<Origins, MobileError> {
+        let team = self.read_team(team_id)?;
+        self.match_reader
+            .origins_of_b(&team, match_id)
+            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))
     }
 
     /// Saves the profile of the video of the match.
     pub fn save_video(&self, m: &MatchEntry, profile: &VideoProfile) -> Result<(), MobileError> {
+        self.save_video_of(&m.team.id.to_string(), m, profile)
+    }
+
+    /// The same for the match of team A `team_id`, as either side sees it
+    /// (the profile is A's: the match of B has B's team).
+    pub fn save_video_of(
+        &self,
+        team_id: &str,
+        m: &MatchEntry,
+        profile: &VideoProfile,
+    ) -> Result<(), MobileError> {
         self.runtime
-            .block_on(self.videos.write(&m.team.id, &m.id, profile))
+            .block_on(
+                self.videos
+                    .write(&self.read_team(team_id)?.id, &m.id, profile),
+            )
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })
@@ -3225,12 +3530,28 @@ impl Scouting {
     }
 }
 
-/// Correcting an event of a set (see `event_edit` in the core): saved
-/// with `Scout4All::save_correction`.
+/// What is being corrected: an event of a set of A alone, or a touch of a
+/// set scouted on both sides, with the starts of the sides to save it and
+/// the team of B.
+// one at a time, kept for a correction: no need to box
+#[allow(clippy::large_enum_variant)]
+enum Editing {
+    Own(EventEdit),
+    Both {
+        edit: TouchEdit,
+        a: SetEntry,
+        b: SetEntry,
+        team_b: TeamEntry,
+    },
+}
+
+/// Correcting an event of a set (see `event_edit` in the core), or a touch
+/// of a set of both sides (`touch_edit`): saved with
+/// `Scout4All::save_correction`.
 #[derive(uniffi::Object)]
 pub struct Correction {
     current_match: MatchEntry,
-    edit: Mutex<EventEdit>,
+    edit: Mutex<Editing>,
     labels: &'static Labels,
 }
 
@@ -3239,12 +3560,20 @@ impl Correction {
     pub fn state(&self) -> CorrectionState {
         let edit = self.edit();
         let labels = self.labels;
-        let team = &self.current_match.team;
-        let event = edit.event();
-        let before = edit.before();
+        let correcting = edit.correcting();
+        let (event, before) = (correcting.event(), correcting.before());
+        let (team, side_b) = match &*edit {
+            Editing::Both {
+                edit: e, team_b, ..
+            } if e.side() == scout4all_core::domain::Side::B => (team_b, true),
+            _ => (&self.current_match.team, false),
+        };
         CorrectionState {
-            index: u32::try_from(edit.index()).unwrap_or(u32::MAX),
-            event: scouted_event(team, event, labels),
+            index: u32::try_from(correcting.index()).unwrap_or(u32::MAX),
+            event: ScoutedEvent {
+                side_b,
+                ..scouted_event(team, event, labels)
+            },
             score_us: before.score_us,
             score_them: before.score_them,
             rotation: before
@@ -3256,22 +3585,23 @@ impl Correction {
                 .get_current_phase()
                 .friendly_name(labels)
                 .to_string(),
-            fields: edit.fields(),
-            event_types: edit
+            fields: correcting.fields(),
+            event_types: correcting
                 .event_types()
                 .into_iter()
                 .map(|e| EventChoice {
                     value: e,
                     name: e.friendly_name(labels).to_string(),
+                    side_b,
                 })
                 .collect(),
-            evals: edit
+            evals: correcting
                 .evals()
                 .into_iter()
                 .map(|eval| eval_choice(eval, event.event_type, labels))
                 .collect(),
             eval: event.eval,
-            techniques: edit
+            techniques: correcting
                 .techniques()
                 .into_iter()
                 .flatten()
@@ -3281,21 +3611,38 @@ impl Correction {
     }
 
     pub fn choose_event_type(&self, event: EventTypeEnum) {
-        self.edit().choose_event_type(event);
+        self.edit().correcting_mut().choose_event_type(event);
     }
 
     pub fn choose_eval(&self, eval: EvalEnum) {
-        self.edit().choose_eval(eval);
+        self.edit().correcting_mut().choose_eval(eval);
     }
 
     /// A set or serve, or none.
     pub fn choose_technique(&self, technique: Option<TechniqueEnum>) {
-        self.edit().choose_technique(technique);
+        self.edit().correcting_mut().choose_technique(technique);
+    }
+}
+
+impl Editing {
+    /// The correction, whichever it is.
+    fn correcting(&self) -> &dyn Correcting {
+        match self {
+            Editing::Own(edit) => edit,
+            Editing::Both { edit, .. } => edit,
+        }
+    }
+
+    fn correcting_mut(&mut self) -> &mut dyn Correcting {
+        match self {
+            Editing::Own(edit) => edit,
+            Editing::Both { edit, .. } => edit,
+        }
     }
 }
 
 impl Correction {
-    fn edit(&self) -> MutexGuard<'_, EventEdit> {
+    fn edit(&self) -> MutexGuard<'_, Editing> {
         self.edit
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -3315,6 +3662,7 @@ pub struct Scout4All {
     team_reader: SqliteTeamReader,
     team_writer: SqliteTeamWriter,
     match_reader: SqliteMatchReader,
+    set_reader: SqliteSetReader,
     match_writer: SqliteMatchWriter,
     competitions: SqliteCompetitions,
     persons: SqlitePersons,
@@ -3346,9 +3694,7 @@ impl Scout4All {
     pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
         let language = Language::new(LanguageEnum::from_str(&language).unwrap_or(LanguageEnum::En));
-        *ERRORS_LANGUAGE
-            .write()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(language.clone());
+        set_errors_language(language.clone());
         std::fs::create_dir_all(&data_dir).map_err(|e| failed(AppError::IO(IOError::from(e))))?;
         let store: Arc<dyn Store> = Arc::new(FsStore::new(&data_dir));
         let runtime = Builder::new_current_thread()
@@ -3357,7 +3703,7 @@ impl Scout4All {
             .map_err(|e| MobileError::Failed {
                 reason: e.to_string(),
             })?;
-        let db = Database::new(db::open(&data_dir.join(layout::DATABASE))?);
+        let db = open_database(&data_dir.join(layout::DATABASE), language.labels())?;
         let notice = migrate_folder(&runtime, &*store, &db, &data_dir, language.labels());
         let queue = Arc::new(SqliteQueue::new(db.clone()));
         let app = Self {
@@ -3372,6 +3718,7 @@ impl Scout4All {
             persons: SqlitePersons::new(db.clone()),
             set_writer: Arc::new(SqliteSetWriter::new(db.clone(), language.clone())),
             match_reader: SqliteMatchReader::new(db.clone(), language.clone()),
+            set_reader: SqliteSetReader::new(db.clone(), language.clone()),
             videos: SqliteVideoProfiles(db.clone()),
             db,
             store,
@@ -3478,29 +3825,6 @@ impl Scout4All {
                 },
             })
             .collect())
-    }
-
-    /// What the opponent of a new match of the team may be, offered as it's
-    /// written: the other teams and the opponents it met, each once, by
-    /// name.
-    pub fn opponents(&self, team_id: String) -> Result<Vec<String>, MobileError> {
-        let team = self.read_team(&team_id)?;
-        let teams = self.runtime.block_on(self.team_reader.read_all())?;
-        let met = self
-            .runtime
-            .block_on(self.match_reader.read_summaries(&team))?;
-        let ours = team.name.to_lowercase();
-        let mut names: Vec<String> = teams
-            .into_iter()
-            .flatten()
-            .map(|t| t.name)
-            .chain(met.into_iter().flatten().map(|m| m.opponent))
-            .map(|name| name.trim().to_string())
-            .filter(|name| !name.is_empty() && name.to_lowercase() != ours)
-            .collect();
-        names.sort_by_key(|name| name.to_lowercase());
-        names.dedup_by_key(|name| name.to_lowercase());
-        Ok(names)
     }
 
     /// What team B of a match of the team may be, offered as it's written:
@@ -3687,6 +4011,7 @@ impl Scout4All {
             .as_ref()
             .map_or(team_id, |(a, _)| a.id.to_string());
         let m = self.read_match(&team_a, &match_id)?;
+        let (row, _) = self.match_reader.details(&m.team, &match_id)?;
         let status = m.get_status()?;
         let sets = set_scores(&m)?;
         let details = MatchDetails {
@@ -3701,6 +4026,7 @@ impl Scout4All {
             next: next_kind(&status, &m.team),
             notes: m.notes.clone(),
             scouted_by: None,
+            both_sides: row.scouting == ScoutingMode::Both,
         };
         Ok(match seen_by_b {
             Some((a, home)) => MatchDetails {
@@ -3738,14 +4064,16 @@ impl Scout4All {
     }
 
     /// The statistics of a set of the match, or of all of them, as while
-    /// scouting.
+    /// scouting, of the team of the side.
     pub fn match_stats(
         &self,
         team_id: String,
         match_id: String,
+        side: MatchSide,
         scope: StatsScope,
+        filter: DetailFilter,
     ) -> Result<LiveStats, MobileError> {
-        let m = self.read_match(&team_id, &match_id)?;
+        let m = self.read_match_of(&team_id, &match_id, side)?;
         let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
         sets.sort_by_key(|s| s.set_number);
         live_stats(
@@ -3754,20 +4082,22 @@ impl Scout4All {
             m.max_substitutions,
             (&m.team, &m.opponent),
             self.language.labels(),
+            filter,
         )
     }
 
     /// A fundamental of a set of the match, or of all of them, narrowed by
-    /// the filter, as while scouting.
+    /// the filter, as while scouting, of the team of the side.
     pub fn match_detail(
         &self,
         team_id: String,
         match_id: String,
+        side: MatchSide,
         scope: StatsScope,
         event: EventTypeEnum,
         filter: DetailFilter,
     ) -> Result<DetailStats, MobileError> {
-        let m = self.read_match(&team_id, &match_id)?;
+        let m = self.read_match_of(&team_id, &match_id, side)?;
         let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
         sets.sort_by_key(|s| s.set_number);
         detail_stats(
@@ -3781,7 +4111,8 @@ impl Scout4All {
         )
     }
 
-    /// The events of a set of the match, to correct them.
+    /// The events of a set of the match, to correct them: the touches of
+    /// both sides for a set scouted on both.
     pub fn set_events(
         &self,
         team_id: String,
@@ -3790,15 +4121,27 @@ impl Scout4All {
     ) -> Result<SetEvents, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let set = find_set(&m, set_number)?;
+        let (both, events) = match self.set_reader.read_touches(&m, set_number)? {
+            None => (false, set_event_rows(&m, set, self.language.labels())?),
+            Some(touches) => {
+                let b = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
+                (
+                    true,
+                    touch_rows(&m, &b.team, &touches, self.language.labels())?,
+                )
+            }
+        };
         Ok(SetEvents {
             set_number,
             team: m.team.name.clone(),
             opponent: m.opponent.clone(),
-            events: set_event_rows(&m, set, self.language.labels())?,
+            both,
+            events,
         })
     }
 
-    /// Starts correcting an event of a set of the match.
+    /// Starts correcting an event of a set of the match, a touch of either
+    /// side for a set scouted on both.
     pub fn correction(
         &self,
         team_id: String,
@@ -3808,14 +4151,29 @@ impl Scout4All {
     ) -> Result<Arc<Correction>, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let labels = self.language.labels();
-        let edit = EventEdit::new(
-            find_set(&m, set_number)?,
-            usize::try_from(index).unwrap_or(usize::MAX),
-            m.max_substitutions,
-        )
-        .map_err(|e| MobileError::Failed {
+        let index = usize::try_from(index).unwrap_or(usize::MAX);
+        let failed = |e: scout4all_core::event_edit::EventEditError| MobileError::Failed {
             reason: e.message(labels).to_string(),
-        })?;
+        };
+        let edit = match self.set_reader.read_touches(&m, set_number)? {
+            None => Editing::Own(
+                EventEdit::new(find_set(&m, set_number)?, index, m.max_substitutions)
+                    .map_err(failed)?,
+            ),
+            Some(touches) => Editing::Both {
+                edit: TouchEdit::new(
+                    &touches.a,
+                    &touches.b,
+                    &touches.touches,
+                    index,
+                    m.max_substitutions,
+                )
+                .map_err(failed)?,
+                team_b: self.read_match_of(&team_id, &match_id, MatchSide::B)?.team,
+                a: touches.a,
+                b: touches.b,
+            },
+        };
         Ok(Arc::new(Correction {
             current_match: m,
             edit: Mutex::new(edit),
@@ -3823,15 +4181,30 @@ impl Scout4All {
         }))
     }
 
-    /// Saves the set with the event corrected, if the events after it still
-    /// fit and the set ends as it did.
+    /// Saves the set with the event corrected (with its pair, on both
+    /// sides), if the events after it still fit and the set ends as it did.
     pub fn save_correction(&self, correction: Arc<Correction>) -> Result<(), MobileError> {
         let labels = self.language.labels();
-        let set = correction.edit().apply().map_err(|e| MobileError::Failed {
+        let failed = |e: scout4all_core::event_edit::EventEditError| MobileError::Failed {
             reason: e.message(labels).to_string(),
-        })?;
-        self.runtime
-            .block_on(self.set_writer.update(&correction.current_match, &set))?;
+        };
+        let saved = match &*correction.edit() {
+            Editing::Own(edit) => {
+                let set = edit.apply().map_err(failed)?;
+                self.runtime
+                    .block_on(self.set_writer.update(&correction.current_match, &set))
+            }
+            Editing::Both { edit, a, b, .. } => {
+                let touches = edit.apply().map_err(failed)?;
+                self.runtime.block_on(self.set_writer.update_sides(
+                    &correction.current_match,
+                    a,
+                    Some(b),
+                    &touches,
+                ))
+            }
+        };
+        saved?;
         // as the TUI: a finished match is uploaded again with the events
         // corrected (the set ends as it did)
         let m = &correction.current_match;
@@ -3856,12 +4229,73 @@ impl Scout4All {
                 match_id: m.id,
                 opponent: m.opponent,
                 form: Mutex::new(form),
+                of_b: false,
                 labels: self.language.labels(),
             })),
             NextSet::Resume(_) | NextSet::Over => Err(MobileError::Failed {
                 reason: format!("no set to start in {match_id}"),
             }),
         }
+    }
+
+    /// The start of B in the same set, to choose its lineup: only for a
+    /// match scouted on both sides, `None` for the others. The lineup of
+    /// its last set is proposed.
+    pub fn set_start_of_b(
+        &self,
+        team_id: String,
+        match_id: String,
+    ) -> Result<Option<Arc<SetStart>>, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let both = self.match_reader.details(&team, &match_id)?.0.scouting == ScoutingMode::Both;
+        match both {
+            false => Ok(None),
+            true => {
+                let m = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
+                match next_set(&m.get_status()?, &m.team) {
+                    NextSet::Start(form) => Ok(Some(Arc::new(SetStart {
+                        team: m.team,
+                        match_id: match_id.clone(),
+                        opponent: self.read_match(&team_id, &match_id)?.team.name,
+                        form: Mutex::new(form),
+                        of_b: true,
+                        labels: self.language.labels(),
+                    }))),
+                    NextSet::Resume(_) | NextSet::Over => Err(MobileError::Failed {
+                        reason: format!("no set to start in {match_id}"),
+                    }),
+                }
+            }
+        }
+    }
+
+    /// Saves the set that `set_start` and `of_b` start, on both sides.
+    pub fn start_set_both(
+        &self,
+        set_start: Arc<SetStart>,
+        of_b: Arc<SetStart>,
+    ) -> Result<(), MobileError> {
+        let team_id = set_start.team.id.to_string();
+        let m = self.read_match(&team_id, &set_start.match_id)?;
+        let b = self.read_match_of(&team_id, &set_start.match_id, MatchSide::B)?;
+        let failed = |e: set_start::SetStartError| MobileError::Failed {
+            reason: e.message(self.language.labels()),
+        };
+        let form_b = of_b.form().clone();
+        let input = set_start
+            .form()
+            .clone()
+            .validate_both(&m.team, Some((&form_b, &b.team)))
+            .map_err(failed)?;
+        self.runtime
+            .block_on(set_start::start(
+                m,
+                input,
+                self.set_writer.clone(),
+                Some(b.team),
+            ))
+            .map(|_| ())
+            .map_err(failed)
     }
 
     /// Scouts the set in progress of the match.
@@ -3881,7 +4315,7 @@ impl Scout4All {
         };
         let input = set_start.form().clone().validate(&m.team).map_err(failed)?;
         self.runtime
-            .block_on(set_start::start(m, input, self.set_writer.clone()))
+            .block_on(set_start::start(m, input, self.set_writer.clone(), None))
             .map(|_| ())
             .map_err(failed)
     }
@@ -3972,6 +4406,66 @@ impl Scout4All {
                     reason: e.message(labels),
                 })
         })
+    }
+
+    /// The roster of team B of a match of team A scouted on both sides: its
+    /// players, with `toggled` put on the score sheet or taken off. As the
+    /// roster of A, with the form of the roster only (`MatchForm::default`
+    /// the first time).
+    pub fn roster_of_b(
+        &self,
+        team_id: String,
+        match_id: String,
+        form: MatchForm,
+        toggled: Option<Uuid>,
+    ) -> Result<MatchRoster, MobileError> {
+        self.roster_of_b_after(team_id, match_id, form, |form, team, existing| {
+            if let Some(player) = toggled {
+                form.toggle(player, team, existing);
+            }
+            Ok(())
+        })
+    }
+
+    /// `correct_roster_number` for team B.
+    pub fn correct_roster_of_b_number(
+        &self,
+        team_id: String,
+        match_id: String,
+        form: MatchForm,
+        player: Uuid,
+        number: String,
+        role: Option<RoleEnum>,
+    ) -> Result<MatchRoster, MobileError> {
+        let labels = self.language.labels();
+        self.roster_of_b_after(team_id, match_id, form, |form, team, existing| {
+            form.correct(player, &number, role, team, existing)
+                .map_err(|e| MobileError::InvalidMatch {
+                    field: e.into(),
+                    reason: e.message(labels),
+                })
+        })
+    }
+
+    /// Saves the roster of team B as the form has it: as for A, from
+    /// `MIN_ROSTER` to `MAX_ROSTER` players with a number each.
+    pub fn save_roster_of_b(
+        &self,
+        team_id: String,
+        match_id: String,
+        form: MatchForm,
+    ) -> Result<(), MobileError> {
+        let m = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
+        let numbers =
+            form.roster_of_b_numbers(&m.team, Some(&m))
+                .map_err(|e| MobileError::InvalidMatch {
+                    field: e.into(),
+                    reason: e.message(self.language.labels()),
+                })?;
+        let a = self.read_match(&team_id, &match_id)?;
+        self.runtime
+            .block_on(self.match_writer.save_roster_of_b(&a, &numbers))?;
+        Ok(())
     }
 
     /// The form of a match of the team, to edit it.
@@ -4139,6 +4633,24 @@ impl Scout4All {
         Ok(PlayerForm {
             number: free.map(|n| n.to_string()).unwrap_or_default(),
             ..PlayerForm::default()
+        })
+    }
+
+    /// The person of the registry with the name written (case, accents and
+    /// spaces aside) that can be added to the team: the one to ask about
+    /// before a new person with the same name is made.
+    pub fn registry_namesake(
+        &self,
+        team_id: String,
+        name: String,
+    ) -> Result<Option<ExistingPlayer>, MobileError> {
+        let written = scout4all_core::dvw::import::normalized(&name);
+        Ok(match written.trim().is_empty() {
+            true => None,
+            false => self
+                .existing_players(team_id)?
+                .into_iter()
+                .find(|p| scout4all_core::dvw::import::normalized(&p.name) == written),
         })
     }
 
@@ -4329,11 +4841,21 @@ impl Scout4All {
     /// The report of the match as a PDF, in the language of the app: the
     /// file to save or print, as the TUI opens it.
     pub fn match_pdf(&self, team_id: String, match_id: String) -> Result<Vec<u8>, MobileError> {
+        use scout4all_core::reporting::pdf::{render_both_pdf, render_match_pdf};
         let m = self.read_match(&team_id, &match_id)?;
-        Ok(scout4all_core::reporting::pdf::render_match_pdf(
-            &m,
-            self.language.labels(),
-        )?)
+        let labels = self.language.labels();
+        // a match scouted on both sides has the opponent's pages too
+        match self
+            .match_reader
+            .read_of_b(&self.read_team(&team_id)?, &match_id)
+        {
+            Ok(Some(mut b)) => {
+                name_the_removed(&mut b.team, labels);
+                Ok(render_both_pdf(&m, &b, labels)?)
+            }
+            Ok(None) => Ok(render_match_pdf(&m, labels)?),
+            Err(e) => Err(unreadable(&e, labels.unreadable_match)),
+        }
     }
 
     /// What the archive holds, unless it can't be imported: e.g. a match
@@ -4425,13 +4947,14 @@ impl Scout4All {
         Ok(ImportedArchive::of(&imported, labels))
     }
 
-    /// What the DataVolley file holds.
+    /// What the DataVolley file holds: the teams as the import names them,
+    /// without the year of the season.
     pub fn preview_dvw(&self, bytes: Vec<u8>) -> Result<DvwPreview, MobileError> {
         let file = self.parse_dvw(&bytes)?;
         let day = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
         Ok(DvwPreview {
-            home: file.home.name.trim().to_string(),
-            visiting: file.visiting.name.trim().to_string(),
+            home: team_name(&file, Side::Home),
+            visiting: team_name(&file, Side::Visiting),
             days: match file.match_info.date {
                 DvwDate::Known(d) => vec![day(d)],
                 DvwDate::Ambiguous(a, b) => vec![day(a), day(b)],
@@ -4511,9 +5034,6 @@ impl Scout4All {
     pub fn plan_dvw(&self, bytes: Vec<u8>, choice: DvwChoice) -> Result<DvwReady, MobileError> {
         let file = self.parse_dvw(&bytes)?;
         let (team, opponent, plan) = self.dvw_plans(&file, &choice)?;
-        let saved_already = self
-            .runtime
-            .block_on(match_exists(&plan, &self.match_reader))?;
         let labels = self.language.labels();
         let competition = [
             plan.input.competition.as_ref().map(|c| match c {
@@ -4531,21 +5051,29 @@ impl Scout4All {
             team: team.team.name.clone(),
             sets: count_of(plan.entry.sets.len()),
             new_players: count_of(team.new_players.len()),
-            saved_already,
             opponent: opponent.name().to_string(),
             opponent_new_players: opponent.team().map(|b| count_of(b.new_players.len())),
             match_numbers: count_of(team.match_numbers.len()),
             competition: Some(competition).filter(|c| !c.is_empty()),
+            one_side: match &plan.sides {
+                ImportedSides::A(Some(issue)) => Some(
+                    labels
+                        .dvw_one_side
+                        .replace("{team}", &team.team.name)
+                        .replace("{opponent}", opponent.name())
+                        .replace("{reason}", &issue.describe(labels)),
+                ),
+                ImportedSides::A(None) | ImportedSides::Both(_) => None,
+            },
         })
     }
 
-    /// Saves the import as chosen; a match saved already only when
-    /// `overwrite`.
+    /// Saves the import as chosen; a match imported already refused. The
+    /// match queued asks the sender (`finished_matches`).
     pub fn import_dvw(
         &self,
         bytes: Vec<u8>,
         choice: DvwChoice,
-        overwrite: bool,
     ) -> Result<DvwImported, MobileError> {
         let file = self.parse_dvw(&bytes)?;
         let (team, opponent, plan) = self.dvw_plans(&file, &choice)?;
@@ -4553,14 +5081,12 @@ impl Scout4All {
             &team,
             &opponent,
             &plan,
-            overwrite,
             &self.team_writer,
             &self.match_reader,
             &self.match_writer,
             &*self.set_writer,
             &*self.finished_matches(),
         ))?;
-        self.sender.request();
         Ok(DvwImported {
             team_id: team.team.id.to_string(),
             match_id: m.id,
@@ -4926,6 +5452,16 @@ struct Tutorial {
     example_team: Option<String>,
 }
 
+/// The database of the app, its errors in `labels` (not in the global
+/// language of the errors, which another app may change meanwhile).
+fn open_database(file: &Path, labels: &Labels) -> Result<Database, MobileError> {
+    db::open(file)
+        .map(Database::new)
+        .map_err(|e| MobileError::Failed {
+            reason: e.message(labels),
+        })
+}
+
 fn failed(e: impl std::fmt::Display) -> MobileError {
     MobileError::Failed {
         reason: e.to_string(),
@@ -5102,7 +5638,14 @@ impl Scout4All {
             labels,
         )
         .map_err(|e| failed(e.describe(labels)))?;
-        Ok((team, opponent, plan))
+        // refused, not overwritten: to import it again the user deletes it
+        match self
+            .runtime
+            .block_on(imported_already(&plan, &opponent, &self.match_reader))?
+        {
+            Some(saved) => Err(failed(imported_already_message(&saved, labels))),
+            None => Ok((team, opponent, plan)),
+        }
     }
 
     fn readable_teams(&self) -> Result<Vec<TeamEntry>, MobileError> {
@@ -5137,6 +5680,18 @@ impl Scout4All {
         let existing = match_id
             .map(|id| self.read_match(&team_id, &id))
             .transpose()?;
+        self.roster_with(team, existing, form, change)
+    }
+
+    /// `roster_after` for the team and the match as given: the match of
+    /// team A, or the one seen by B.
+    fn roster_with(
+        &self,
+        team: TeamEntry,
+        existing: Option<MatchEntry>,
+        form: MatchForm,
+        change: impl FnOnce(&mut MatchForm, &TeamEntry, Option<&MatchEntry>) -> Result<(), MobileError>,
+    ) -> Result<MatchRoster, MobileError> {
         let mut form = form;
         change(&mut form, &team, existing.as_ref())?;
         let labels = self.language.labels();
@@ -5157,6 +5712,27 @@ impl Scout4All {
             })
             .collect();
         Ok(MatchRoster { form, players })
+    }
+
+    /// The roster of B for a match of team A `team_id` scouted on both
+    /// sides: B as a team, the match as B sees it.
+    fn roster_of_b_after(
+        &self,
+        team_id: String,
+        match_id: String,
+        form: MatchForm,
+        change: impl FnOnce(&mut MatchForm, &TeamEntry, Option<&MatchEntry>) -> Result<(), MobileError>,
+    ) -> Result<MatchRoster, MobileError> {
+        let m = self.read_match_of(&team_id, &match_id, MatchSide::B)?;
+        let previous = self
+            .match_reader
+            .previous_roster_of_b(&self.read_team(&team_id)?, &match_id)
+            .map_err(|e| unreadable(&e, self.language.labels().unreadable_match))?
+            .unwrap_or_default();
+        self.roster_with(m.team.clone(), Some(m), form, |form, team, existing| {
+            form.start_from(&previous, team, existing);
+            change(form, team, existing)
+        })
     }
 
     /// The members of the new season as the form shows them.
@@ -5208,6 +5784,32 @@ impl Scout4All {
         name_the_removed(&mut m.team, labels);
         Ok(m)
     }
+
+    /// The match of team A `team_id` as the team of the side sees it: B
+    /// only of a match scouted on both sides (`SqliteMatchReader::read_of_b`).
+    fn read_match_of(
+        &self,
+        team_id: &str,
+        match_id: &str,
+        side: MatchSide,
+    ) -> Result<MatchEntry, MobileError> {
+        let labels = self.language.labels();
+        match side {
+            MatchSide::A => self.read_match(team_id, match_id),
+            MatchSide::B => {
+                let team = self.read_team(team_id)?;
+                let mut m = self
+                    .match_reader
+                    .read_of_b(&team, match_id)
+                    .map_err(|e| unreadable(&e, labels.unreadable_match))?
+                    .ok_or_else(|| MobileError::Failed {
+                        reason: labels.one_side_only.to_string(),
+                    })?;
+                name_the_removed(&mut m.team, labels);
+                Ok(m)
+            }
+        }
+    }
 }
 
 /// What the user reads when a team or a match can't be read; the detail
@@ -5252,16 +5854,68 @@ fn set_event_rows(
             event: scouted_event(&m.team, e, labels),
             score_us,
             score_them,
-            editable: !matches!(
-                e.event_type,
-                EventTypeEnum::R
-                    | EventTypeEnum::CL
-                    | EventTypeEnum::LR
-                    | EventTypeEnum::LF
-                    | EventTypeEnum::CS
-            ),
+            editable: !e.event_type.changes_lineup(),
         })
         .collect())
+}
+
+/// The touches of a set scouted on both sides, to correct them: the score
+/// after each, from A's side.
+fn touch_rows(
+    m: &MatchEntry,
+    team_b: &TeamEntry,
+    touches: &scout4all_core::rally::Touches,
+    labels: &Labels,
+) -> Result<Vec<SetEvent>, MobileError> {
+    touches
+        .touches
+        .iter()
+        .enumerate()
+        .map(|(i, (side, e))| {
+            let (a, _) = scout4all_core::rally::replay(
+                &touches.a,
+                &touches.b,
+                touches.touches.get(..=i).unwrap_or(&touches.touches),
+                m.max_substitutions,
+            )
+            .map_err(|e| MobileError::Failed {
+                reason: e.to_string(),
+            })?;
+            let (team, side_b) = match side {
+                scout4all_core::domain::Side::A => (&m.team, false),
+                scout4all_core::domain::Side::B => (team_b, true),
+            };
+            Ok(SetEvent {
+                index: u32::try_from(i).unwrap_or(u32::MAX),
+                event: ScoutedEvent {
+                    side_b,
+                    ..scouted_event(team, e, labels)
+                },
+                score_us: a.score_us,
+                score_them: a.score_them,
+                editable: !e.event_type.changes_lineup(),
+            })
+        })
+        .collect()
+}
+
+/// For each event of B's side, set by set, the index of the event of A's
+/// born from the same touch (`origins_of_b`).
+pub type Origins = Vec<(u8, Vec<Option<usize>>)>;
+
+/// What the profile keeps the event `index` of a side by (`EventRef`):
+/// A's, itself; B's (`origins`), the event of A of the same touch, or, with
+/// none, its own with the side B.
+fn stored_ref(origins: Option<&Origins>, set_number: u8, index: usize) -> EventRef {
+    origins.map_or(EventRef::of_a(set_number, index), |origins| {
+        origins
+            .iter()
+            .find(|(set, _)| *set == set_number)
+            .and_then(|(_, of_a)| of_a.get(index).copied().flatten())
+            .map_or(EventRef::of_b(set_number, index), |a| {
+                EventRef::of_a(set_number, a)
+            })
+    })
 }
 
 /// The events of the match the statistics counted for the pick, set by
@@ -5292,10 +5946,7 @@ fn clips_of(m: &MatchEntry, pick: &ClipPick) -> Result<Vec<EventRef>, MobileErro
             keys.iter()
                 .enumerate()
                 .filter(|(_, k)| k.as_ref().is_some_and(|k| picked.keeps(k)))
-                .map(|(index, _)| EventRef {
-                    set_number: set.set_number,
-                    index,
-                }),
+                .map(|(index, _)| EventRef::of_a(set.set_number, index)),
         );
     }
     Ok(refs)
@@ -5619,6 +6270,38 @@ mod tests {
         let e = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
             .err()
             .unwrap();
+        assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
+    }
+
+    /// The database that can't be opened is told in the language of the
+    /// app being made, even when another app (another test running at the
+    /// same time) changed the language of the errors meanwhile.
+    #[test]
+    fn the_database_not_opened_is_told_in_the_language_of_its_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(layout::DATABASE);
+        drop(scout4all_core::db::open(&file).unwrap());
+        let newer = scout4all_core::db::schema_version() + 1;
+        sql(&dir, &format!("PRAGMA user_version = {newer}"));
+        set_errors_language(Language::new(LanguageEnum::En));
+        let it = Language::new(LanguageEnum::It);
+        let e = open_database(&file, it.labels()).err().unwrap();
+        assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
+    }
+
+    /// An app made by another test at the same time doesn't change the
+    /// language of this test's errors.
+    #[test]
+    fn the_errors_of_a_test_stay_in_its_language() {
+        let dir = tempfile::tempdir().unwrap();
+        let _app = app(&dir, "it");
+        std::thread::spawn(|| {
+            let other = tempfile::tempdir().unwrap();
+            drop(app(&other, "en"));
+        })
+        .join()
+        .unwrap();
+        let e = MobileError::from(AppError::IO(IOError::DatabaseNewer { found: 2, known: 1 }));
         assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
     }
 
@@ -6612,30 +7295,6 @@ mod tests {
     }
 
     #[test]
-    fn the_opponents_offered_are_the_other_teams_and_the_ones_met() {
-        let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
-        let team = app.save_team(None, form("Cortona")).unwrap();
-        app.save_team(None, form("Livorno")).unwrap();
-        for n in 1..=7 {
-            app.save_player(
-                team.clone(),
-                None,
-                player(&format!("P{n}"), &n.to_string()),
-                false,
-            )
-            .unwrap();
-        }
-        let date = "2026-10-24T18:00:00+02:00";
-        for opponent in ["Arezzo", "livorno"] {
-            app.save_match(team.clone(), None, match_form(opponent, date, "8"))
-                .unwrap();
-        }
-        // the team itself left out, each name once
-        assert_eq!(app.opponents(team).unwrap(), vec!["Arezzo", "Livorno"]);
-    }
-
-    #[test]
     fn matches_are_created_and_edited() {
         let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
@@ -6919,6 +7578,7 @@ mod tests {
         let analysis = app.team_analysis(
             livorno.clone(),
             AnalysisPeriod::LastMatches { count: 10 },
+            None,
             EventTypeEnum::S,
             DetailFilter::default(),
         );
@@ -6937,6 +7597,78 @@ mod tests {
                 removed: 0
             }
         );
+    }
+
+    /// The analysis and the clips of a team narrowed to a competition: the
+    /// last matches are the last of the competition, the competitions
+    /// offered are named, and none changes nothing.
+    #[test]
+    fn the_analysis_of_a_competition() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, first) = match_with_a_set(&app);
+        let cup = |name: &str| MatchForm {
+            competition: name.into(),
+            competition_format: Some(CompetitionFormat::Cup),
+            ..match_form("Siena", "2026-10-31T18:00:00+01:00", "8")
+        };
+        let second = app.save_match(team.clone(), None, cup("Coppa")).unwrap();
+        for m in [&first, &second] {
+            started_set(&app, &team, m)
+                .choose_eval(EvalEnum::Perfect)
+                .unwrap();
+        }
+        let coppa = app.competitions().unwrap().remove(0);
+        let analysis = |competition, count| {
+            app.team_analysis(
+                team.clone(),
+                AnalysisPeriod::LastMatches { count },
+                competition,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap()
+        };
+        let all = analysis(None, 2);
+        assert_eq!(all.matches.len(), 2);
+        assert_eq!(all.competition, None);
+        assert_eq!(
+            all.competitions
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Coppa"]
+        );
+        // the last 2 of the cup are the only one of the cup
+        let only = analysis(Some(coppa.id), 2);
+        assert_eq!(only.competition, Some(coppa.id));
+        assert_eq!(
+            only.matches
+                .iter()
+                .map(|m| m.opponent.as_str())
+                .collect::<Vec<_>>(),
+            ["Siena"]
+        );
+        assert_eq!(only.summary.aces, 1);
+        assert_eq!(all.summary.aces, 2);
+        let clips = |competition| {
+            app.team_clip_matches(
+                team.clone(),
+                AnalysisPeriod::LastMatches { count: 2 },
+                competition,
+                ClipPick {
+                    scope: StatsScope::Match,
+                    event: EventTypeEnum::S,
+                    filter: DetailFilter::default(),
+                    evals: vec![],
+                    zone: None,
+                    target: None,
+                },
+            )
+            .unwrap()
+            .len()
+        };
+        assert_eq!((clips(None), clips(Some(coppa.id))), (2, 1));
     }
 
     /// A team of seven, a match and its first set started, the team serving.
@@ -6978,6 +7710,165 @@ mod tests {
         start.choose_libero(Some(ids[6].clone())).unwrap();
         app.start_set(start).unwrap();
         app.scouting(team.into(), m.into()).unwrap()
+    }
+
+    /// A match against a team of seven scouted on both sides, its first set
+    /// started, the team serving; the team, the match.
+    fn set_started_on_both_sides(app: &Scout4All) -> (String, String) {
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let other = app.save_team(None, form("Livorno")).unwrap();
+        for (t, prefix) in [(&team, "P"), (&other, "L")] {
+            for n in 1..=7 {
+                app.save_player(
+                    t.clone(),
+                    None,
+                    player(&format!("{prefix}{n}"), &n.to_string()),
+                    false,
+                )
+                .unwrap();
+            }
+        }
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                MatchForm {
+                    opponent_team: Some(parse_id(&other).unwrap()),
+                    both: true,
+                    ..match_form("Livorno", "2026-10-24T18:00:00+02:00", "8")
+                },
+            )
+            .unwrap();
+        let ids = |t: &str| -> Vec<String> {
+            app.team(t.into())
+                .unwrap()
+                .players
+                .into_iter()
+                .map(|p| p.id)
+                .collect()
+        };
+        let place = |start: &SetStart, ids: &[String]| {
+            for (position, id) in (1..=6).zip(ids) {
+                start.place(position, Some(id.clone())).unwrap();
+            }
+            start.choose_setter(Some(ids[0].clone())).unwrap();
+            start.choose_libero(Some(ids[6].clone())).unwrap();
+        };
+        let start = app.set_start(team.clone(), m.clone()).unwrap();
+        start.choose_serving_team(TeamSideEnum::Us);
+        place(&start, &ids(&team));
+        let of_b = app
+            .set_start_of_b(team.clone(), m.clone())
+            .unwrap()
+            .unwrap();
+        place(&of_b, &ids(&other));
+        app.start_set_both(start, of_b).unwrap();
+        (team, m)
+    }
+
+    /// While scouting both sides, the statistics of B are of B's team; none
+    /// scouting A only.
+    #[test]
+    fn the_statistics_of_b_while_scouting() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, m) = set_started_on_both_sides(&app);
+        let scouting = app.scouting(team.clone(), m).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        let filter = DetailFilter::default();
+        let b = scouting
+            .stats_of_b(StatsScope::Match, filter.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (b.team_name.as_str(), b.opponent.as_str()),
+            ("Livorno", "Cortona")
+        );
+        assert_eq!((b.sets.clone(), b.aces_against), (vec![1], 1));
+        let detail = scouting
+            .detail_of_b(StatsScope::Match, EventTypeEnum::R, filter.clone())
+            .unwrap()
+            .unwrap();
+        assert!(detail.players.iter().all(|p| p.name.starts_with('L')));
+        let (one, single) = match_with_a_set(&app);
+        let alone = started_set(&app, &one, &single);
+        assert_eq!(
+            alone.stats_of_b(StatsScope::Match, filter.clone()).unwrap(),
+            None
+        );
+        assert_eq!(
+            alone
+                .detail_of_b(StatsScope::Match, EventTypeEnum::S, filter)
+                .unwrap(),
+            None
+        );
+    }
+
+    /// The set in progress of a match on both sides scouted again on both;
+    /// B unreadable meanwhile (the match no longer on both sides, B's
+    /// touches still there): told why, not "could not compute".
+    #[test]
+    fn a_set_on_both_sides_resumed_or_told_why_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, m) = set_started_on_both_sides(&app);
+        assert!(app.scouting(team.clone(), m.clone()).unwrap().state().both);
+        sql(&dir, "UPDATE matches SET scouting = 'a';");
+        let reason = app.scouting(team, m).err().map(reason_of);
+        assert_eq!(
+            reason.as_deref(),
+            Some(labels(LanguageEnum::En).one_side_only)
+        );
+    }
+
+    /// The digs of the detail of the defense: all of them with none, the
+    /// ones that aren't covers, only the covers (our dig after our attack
+    /// blocked back, `A!`).
+    #[test]
+    fn the_defense_by_digs() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        let player = |n: usize| {
+            scouting
+                .player_choices()
+                .into_iter()
+                .nth(n)
+                .map(|p| p.id)
+                .unwrap_or_default()
+        };
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        for (event, eval) in [
+            (EventTypeEnum::D, EvalEnum::Positive),
+            (EventTypeEnum::A, EvalEnum::Exclamative),
+            (EventTypeEnum::D, EvalEnum::Negative),
+            (EventTypeEnum::A, EvalEnum::Perfect),
+        ] {
+            scouting.choose_event(event).unwrap();
+            scouting.choose_player(player(1)).unwrap();
+            scouting.choose_eval(eval).unwrap();
+        }
+        let total = |digs| {
+            app.match_detail(
+                team.clone(),
+                m.clone(),
+                MatchSide::A,
+                StatsScope::Match,
+                EventTypeEnum::D,
+                DetailFilter {
+                    digs,
+                    ..DetailFilter::default()
+                },
+            )
+            .unwrap()
+            .fundamental
+            .map_or(0, |f| f.total)
+        };
+        assert_eq!(total(None), 2);
+        assert_eq!(total(Some(DigsEnum::All)), 2);
+        assert_eq!(total(Some(DigsEnum::Defense)), 1);
+        assert_eq!(total(Some(DigsEnum::Cover)), 1);
     }
 
     /// How many blocked: on our block from one on, the one chosen saved
@@ -7280,7 +8171,8 @@ mod tests {
     }
 
     /// Our serve `/`, their reception straight over: our block among the
-    /// events of the players in the front row, saved with its evaluation.
+    /// events of the players in the front row, only as the invasion (the
+    /// block answers an attack, scouting rules v4), saved.
     #[test]
     fn our_block_on_their_reception_straight_over() {
         let dir = tempfile::tempdir().unwrap();
@@ -7307,8 +8199,11 @@ mod tests {
         if scouting.state().step == ScoutingStep::Event {
             scouting.choose_event(EventTypeEnum::B).unwrap();
         }
+        let evals: Vec<_> = scouting.available_evals().iter().map(|e| e.value).collect();
+        assert_eq!(evals, vec![EvalEnum::Over]);
+        assert!(scouting.choose_eval(EvalEnum::Perfect).is_err());
         assert_eq!(
-            scouting.choose_eval(EvalEnum::Perfect).unwrap(),
+            scouting.choose_eval(EvalEnum::Over).unwrap(),
             Progress::Saved
         );
         match scouting.state().events.as_slice() {
@@ -7875,7 +8770,9 @@ mod tests {
                 .unwrap()
         };
 
-        let set = scouting.stats(StatsScope::Set { number: 2 }).unwrap();
+        let set = scouting
+            .stats(StatsScope::Set { number: 2 }, DetailFilter::default())
+            .unwrap();
         assert_eq!(set.scope, StatsScope::Set { number: 2 });
         assert_eq!(set.sets, vec![1, 2]);
         assert_eq!(
@@ -8002,7 +8899,9 @@ mod tests {
         );
         assert_eq!(line(&set, Series::SideOut).sets[0].values, vec![None; 25]);
 
-        let first = scouting.stats(StatsScope::Set { number: 1 }).unwrap();
+        let first = scouting
+            .stats(StatsScope::Set { number: 1 }, DetailFilter::default())
+            .unwrap();
         assert_eq!(serve(&first), ("battuta".into(), 25, Some(100.0), 25, 0));
         assert_eq!(first.aces, 25);
         assert_eq!(phase(&first.break_points), Some((25, 25)));
@@ -8013,7 +8912,9 @@ mod tests {
         assert_eq!(first.points, set.points);
 
         // the match: the trend goes on across the sets
-        let all = scouting.stats(StatsScope::Match).unwrap();
+        let all = scouting
+            .stats(StatsScope::Match, DetailFilter::default())
+            .unwrap();
         assert_eq!(serve(&all).1, 27);
         assert_eq!(serve(&all).3, 25);
         assert_eq!(all.aces, 25);
@@ -8021,7 +8922,9 @@ mod tests {
         assert_eq!(all.trend, set.trend);
 
         // a set not played yet: nothing
-        let none = scouting.stats(StatsScope::Set { number: 3 }).unwrap();
+        let none = scouting
+            .stats(StatsScope::Set { number: 3 }, DetailFilter::default())
+            .unwrap();
         assert!(
             none.fundamentals
                 .iter()
@@ -8031,7 +8934,16 @@ mod tests {
         assert_eq!(none.sets, vec![1, 2]);
 
         // from the page of the match, the same as while scouting
-        let saved = |scope| app.match_stats(team.clone(), m.clone(), scope).unwrap();
+        let saved = |scope| {
+            app.match_stats(
+                team.clone(),
+                m.clone(),
+                MatchSide::A,
+                scope,
+                DetailFilter::default(),
+            )
+            .unwrap()
+        };
         assert_eq!(saved(StatsScope::Set { number: 2 }), set);
         assert_eq!(saved(StatsScope::Set { number: 1 }), first);
         assert_eq!(saved(StatsScope::Match), all);
@@ -8431,6 +9343,7 @@ mod tests {
             app.match_detail(
                 team.clone(),
                 m.clone(),
+                MatchSide::A,
                 StatsScope::Match,
                 EventTypeEnum::S,
                 DetailFilter {
@@ -8446,6 +9359,7 @@ mod tests {
             app.match_detail(
                 team.clone(),
                 m.clone(),
+                MatchSide::A,
                 StatsScope::Match,
                 EventTypeEnum::S,
                 all
@@ -8457,7 +9371,10 @@ mod tests {
         // the phases of each rotation: the 25 aces and the first error in
         // break in the first, their error in side out; the next serve
         // error in break in the rotation after
-        let rotations = scouting.stats(StatsScope::Match).unwrap().rotations;
+        let rotations = scouting
+            .stats(StatsScope::Match, DetailFilter::default())
+            .unwrap()
+            .rotations;
         let won = |p: &Option<PhaseStats>| p.as_ref().map(|p| (p.won, p.rallies));
         let played: Vec<_> = rotations
             .iter()
@@ -8493,6 +9410,67 @@ mod tests {
                 .iter()
                 .all(|r| r.total.as_ref().is_none_or(|t| t.grade.is_none()))
         );
+
+        // the summary narrowed by the phase and the rotation agrees with
+        // the detail of the fundamental, and says what it is narrowed to
+        let serves = |live: &LiveStats| {
+            live.fundamentals
+                .iter()
+                .find(|f| f.event == EventTypeEnum::S)
+                .map(|f| f.total)
+        };
+        let filters = [
+            DetailFilter {
+                phase: Some(PhaseEnum::Break),
+                ..DetailFilter::default()
+            },
+            DetailFilter {
+                phase: Some(PhaseEnum::SideOut),
+                ..DetailFilter::default()
+            },
+            DetailFilter {
+                rotations: vec![0],
+                ..DetailFilter::default()
+            },
+            DetailFilter {
+                rotations: vec![1],
+                phase: Some(PhaseEnum::Break),
+                ..DetailFilter::default()
+            },
+        ];
+        let everything = scouting
+            .stats(StatsScope::Match, DetailFilter::default())
+            .unwrap();
+        assert_eq!(everything.filter, DetailFilter::default());
+        assert_eq!(
+            (
+                everything.rotation_choices.len(),
+                everything.phase_choices.len()
+            ),
+            (6, 2)
+        );
+        for filter in filters.clone() {
+            let live = scouting.stats(StatsScope::Match, filter.clone()).unwrap();
+            let detail = scouting
+                .detail(StatsScope::Match, EventTypeEnum::S, filter.clone())
+                .unwrap();
+            assert_eq!(live.filter, filter);
+            assert_eq!(
+                serves(&live),
+                detail.fundamental.as_ref().map(|f| f.total),
+                "{filter:?}"
+            );
+        }
+        let side_out = scouting
+            .stats(StatsScope::Match, filters[1].clone())
+            .unwrap();
+        assert!(side_out.break_points.is_none() && side_out.side_out.is_some());
+        let first = scouting
+            .stats(StatsScope::Match, filters[2].clone())
+            .unwrap();
+        // the table of the rotations stays the one of every rotation
+        assert_eq!(first.rotations, everything.rotations);
+        assert!(serves(&first) < serves(&everything));
     }
 
     #[test]
@@ -8596,12 +9574,80 @@ mod tests {
         assert!(app.correction(team, m, 2, 0).is_err());
     }
 
+    /// A set scouted on both sides: its touches listed with their side and
+    /// the score from A's, a touch of B corrected with B's team and saved
+    /// on both sides (B's statistics read it).
+    #[test]
+    fn the_touches_of_a_set_on_both_sides_are_corrected() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice).unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        let events = app.set_events(team.clone(), m.clone(), 1).unwrap();
+        assert!(events.both);
+        assert!(events.events.iter().any(|e| e.event.side_b));
+        assert!(events.events.iter().any(|e| !e.event.side_b));
+        let last = events.events.last().unwrap();
+        assert_eq!(last.score_us.max(last.score_them), 25);
+        // a serve of B
+        let serve = events
+            .events
+            .iter()
+            .find(|e| e.event.side_b && e.event.event == EventTypeEnum::S)
+            .unwrap();
+        let correction = app
+            .correction(team.clone(), m.clone(), 1, serve.index)
+            .unwrap();
+        let state = correction.state();
+        assert_eq!(state.index, serve.index);
+        assert!(state.event.side_b);
+        assert!(state.event_types.iter().all(|e| e.side_b));
+        let other = state
+            .techniques
+            .iter()
+            .find(|t| !t.chosen)
+            .map(|t| t.value)
+            .unwrap();
+        correction.choose_technique(Some(other));
+        app.save_correction(correction).unwrap();
+        let saved = app.set_events(team.clone(), m.clone(), 1).unwrap();
+        assert!(saved.both);
+        assert_eq!(saved.events.len(), events.events.len());
+        let index = usize::try_from(serve.index).unwrap();
+        assert_eq!(
+            saved.events[index].event.technique.as_deref(),
+            Some(other.to_string().as_str())
+        );
+        assert!(
+            app.match_stats(
+                team,
+                m,
+                MatchSide::B,
+                StatsScope::Match,
+                DetailFilter::default()
+            )
+            .is_ok()
+        );
+    }
+
     #[test]
     fn the_statistics_of_a_match_without_sets_are_empty() {
         let dir = tempfile::tempdir().unwrap();
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
-        let stats = app.match_stats(team, m, StatsScope::Match).unwrap();
+        let stats = app
+            .match_stats(
+                team,
+                m,
+                MatchSide::A,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
+            .unwrap();
         assert!(stats.sets.is_empty());
         assert!(stats.fundamentals.iter().all(|f| f.total == 0));
         assert!(stats.trend.iter().all(|t| t.sets.is_empty()));
@@ -9075,7 +10121,7 @@ mod tests {
         let api = FakeApi::start();
         sending_to(&app, api.url.clone());
         assert!(eventually(|| !app.sender.running()));
-        app.import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+        app.import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None))
             .unwrap();
         assert!(eventually(|| api.puts() == 1 && queued(&dir).is_empty()));
     }
@@ -9105,7 +10151,7 @@ mod tests {
         // match too, failing it twice in a row
         assert!(eventually(|| !app.sender.running()));
         let imported = app
-            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None))
             .unwrap();
         assert!(eventually(
             || queued(&dir) == vec![(imported.match_id.clone(), 1)]
@@ -9115,6 +10161,22 @@ mod tests {
         api.down.store(false, Ordering::SeqCst);
         app.send_uploads();
         assert!(eventually(|| api.puts() == 1 && queued(&dir).is_empty()));
+    }
+
+    /// An import asks the sender once: a second request while the first
+    /// attempt runs is a second attempt right after it, which with the API
+    /// down fails the match twice in a row.
+    #[test]
+    fn an_import_asks_to_send_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        app.accept_terms().unwrap();
+        let api = FakeApi::start();
+        sending_to(&app, api.url.clone());
+        assert_eq!(app.sender.requests(), 1);
+        app.import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None))
+            .unwrap();
+        assert_eq!(app.sender.requests(), 2);
     }
 
     /// Before `send_in_background` (Android, with WorkManager) nothing is
@@ -9147,6 +10209,187 @@ mod tests {
         }
     }
 
+    /// A match imported on both sides (B a new team): its statistics from
+    /// B's side too, with B's players and A's aces as aces against.
+    #[test]
+    fn the_statistics_of_b_of_a_match_on_both_sides() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice).unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        assert!(
+            app.match_details(team.clone(), m.clone())
+                .unwrap()
+                .both_sides
+        );
+        let stats = |side| {
+            app.match_stats(
+                team.clone(),
+                m.clone(),
+                side,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
+            .unwrap()
+        };
+        let (a, b) = (stats(MatchSide::A), stats(MatchSide::B));
+        assert_eq!(b.sets, a.sets);
+        assert_eq!((b.aces, b.aces_against), (a.aces_against, a.aces));
+        assert_ne!(a, b);
+        let players = |side| {
+            app.match_detail(
+                team.clone(),
+                m.clone(),
+                side,
+                StatsScope::Match,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap()
+            .players
+            .into_iter()
+            .map(|p| p.id)
+            .collect::<Vec<_>>()
+        };
+        let of_a: Vec<String> = app
+            .team(team.clone())
+            .unwrap()
+            .players
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        let (pa, pb) = (players(MatchSide::A), players(MatchSide::B));
+        assert!(!pa.is_empty() && pa.iter().all(|p| of_a.contains(p)));
+        assert!(!pb.is_empty() && pb.iter().all(|p| !of_a.contains(p)));
+    }
+
+    /// The report of a match on both sides is longer than the one of a
+    /// match scouted on one: it has the opponent's pages.
+    #[test]
+    fn the_report_of_a_match_on_both_sides_has_the_opponent() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let report = |opponent| {
+            let choice = DvwChoice {
+                opponent,
+                ..dvw_choice(DvwSide::Home, None)
+            };
+            let imported = app.import_dvw(THREE_SETS.to_vec(), choice).unwrap();
+            app.match_pdf(imported.team_id, imported.match_id).unwrap()
+        };
+        let (one, both) = (report(DvwOpponent::Name), report(DvwOpponent::NewTeam));
+        assert!(one.starts_with(b"%PDF") && both.starts_with(b"%PDF"));
+        assert!(both.len() > one.len());
+    }
+
+    /// The analysis of the opponent over the matches scouted on both
+    /// sides: its choices, its figures those of B in the match, a match on
+    /// one side left out.
+    #[test]
+    fn the_analysis_of_an_opponent_over_matches_on_both_sides() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(
+                THREE_SETS.to_vec(),
+                DvwChoice {
+                    opponent: DvwOpponent::NewTeam,
+                    ..dvw_choice(DvwSide::Home, None)
+                },
+            )
+            .unwrap();
+        let team = imported.team_id.clone();
+        // a match against a name only: no side B to analyse
+        app.import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Visiting, None))
+            .unwrap();
+        let opponents = app.analysis_opponents(team.clone()).unwrap();
+        assert_eq!(opponents.len(), 1);
+        assert_eq!(opponents[0].matches, 1);
+        let period = AnalysisPeriod::Between {
+            from: "2015-01-01".into(),
+            to: "2015-12-31".into(),
+        };
+        // the team over the same matches, to compare: the one on both sides
+        let ours = app
+            .analysis_against(
+                team.clone(),
+                opponents[0].id,
+                period.clone(),
+                None,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        assert_eq!(ours.matches.len(), 1);
+        assert_eq!(ours.matches[0].id, imported.match_id);
+        let a = app
+            .match_stats(
+                team.clone(),
+                imported.match_id.clone(),
+                MatchSide::A,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        assert_eq!(ours.summary.aces, a.aces);
+        let of_b = app
+            .opponent_analysis(
+                team.clone(),
+                opponents[0].id,
+                period,
+                None,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        assert_eq!(of_b.matches.len(), 1);
+        assert_eq!(of_b.matches[0].id, imported.match_id);
+        let b = app
+            .match_stats(
+                team,
+                imported.match_id,
+                MatchSide::B,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        assert_eq!(of_b.summary.aces, b.aces);
+        assert_eq!(of_b.summary.aces_against, b.aces_against);
+        // the score as B sees it: the sets A won are B's lost
+        assert_eq!((of_b.matches[0].won, of_b.matches[0].lost), (0, 3));
+    }
+
+    /// B of a match scouted on A's side only: said so, no panic.
+    #[test]
+    fn no_statistics_of_b_of_a_match_on_one_side() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None))
+            .unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        assert!(
+            !app.match_details(team.clone(), m.clone())
+                .unwrap()
+                .both_sides
+        );
+        let read = app.match_stats(
+            team,
+            m,
+            MatchSide::B,
+            StatsScope::Match,
+            DetailFilter::default(),
+        );
+        assert!(
+            matches!(&read, Err(MobileError::Failed { reason }) if reason == "this match is scouted on one side only"),
+            "{read:?}"
+        );
+    }
+
     #[test]
     fn a_datavolley_file_previewed() {
         let dir = tempfile::tempdir().unwrap();
@@ -9171,6 +10414,10 @@ mod tests {
         let text = String::from_utf8_lossy(THREE_SETS).replacen("01/25/2015", "02/03/2015", 1);
         let preview = app.preview_dvw(text.into_bytes()).unwrap();
         assert_eq!(preview.days, vec!["2015-03-02", "2015-02-03"]);
+        // the year of the season out of the names
+        let text = String::from_utf8_lossy(THREE_SETS).replacen("H;Home;", "H;Home 2014;", 1);
+        let preview = app.preview_dvw(text.into_bytes()).unwrap();
+        assert_eq!(preview.home, "Home");
         assert_eq!(app.dvw_max_substitutions(Some("2025-12-31".into())), 6);
         assert_eq!(app.dvw_max_substitutions(Some("2026-01-01".into())), 8);
         assert_eq!(app.dvw_max_substitutions(None), 8);
@@ -9183,7 +10430,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = app(&dir, "en");
         let imported = app
-            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None), false)
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None))
             .unwrap();
         let (team, m) = (imported.team_id, imported.match_id);
         let scopes = [StatsScope::Match, StatsScope::Set { number: 2 }];
@@ -9196,6 +10443,7 @@ mod tests {
                 .match_detail(
                     team.clone(),
                     m.clone(),
+                    MatchSide::A,
                     scope,
                     event,
                     DetailFilter::default(),
@@ -9278,15 +10526,15 @@ mod tests {
                 team: "Home".into(),
                 sets: 3,
                 new_players: 7,
-                saved_already: false,
                 opponent: "Visiting".into(),
                 opponent_new_players: None,
                 match_numbers: 0,
                 competition: Some("Test".into()),
+                one_side: None,
             }
         );
         assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
-        let imported = app.import_dvw(THREE_SETS.to_vec(), choice, false).unwrap();
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice).unwrap();
         let team = app.team(imported.team_id.clone()).unwrap();
         assert_eq!((team.name.as_str(), team.year), ("Home", 2014));
         assert_eq!(team.gender.as_deref(), Some("women"));
@@ -9308,17 +10556,13 @@ mod tests {
     }
 
     /// The visiting team into a team of ours like it; then again: the match
-    /// saved already, overwritten only when confirmed.
+    /// saved already, refused.
     #[test]
     fn a_datavolley_team_into_a_similar_team() {
         let dir = tempfile::tempdir().unwrap();
         let app = app(&dir, "en");
         let first = app
-            .import_dvw(
-                THREE_SETS.to_vec(),
-                dvw_choice(DvwSide::Visiting, None),
-                false,
-            )
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Visiting, None))
             .unwrap();
         let similar = app
             .dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting, None)
@@ -9335,12 +10579,14 @@ mod tests {
             }]
         );
         let choice = dvw_choice(DvwSide::Visiting, Some(first.team_id.clone()));
-        let ready = app.plan_dvw(THREE_SETS.to_vec(), choice.clone()).unwrap();
-        assert_eq!((ready.new_players, ready.saved_already), (0, true));
-        // not overwritten unless confirmed
-        reason(app.import_dvw(THREE_SETS.to_vec(), choice.clone(), false));
-        let again = app.import_dvw(THREE_SETS.to_vec(), choice, true).unwrap();
-        assert_eq!(again, first);
+        // the match saved already: refused, to delete first
+        let refused = "Visiting – Home is saved already, played the same day with the same sets: \
+                       to import it again, delete it first";
+        assert_eq!(
+            reason(app.plan_dvw(THREE_SETS.to_vec(), choice.clone())),
+            refused
+        );
+        assert_eq!(reason(app.import_dvw(THREE_SETS.to_vec(), choice)), refused);
         let matches = app.matches(first.team_id).unwrap();
         assert!(
             matches!(
@@ -9358,8 +10604,8 @@ mod tests {
 
     /// Team B: the teams like the other team of the file proposed, team A
     /// left out, the team of the side imported before first; a new team
-    /// with the players of the file, told in the check; both sides, two
-    /// matches, the second against the team of the first.
+    /// with the players of the file, told in the check; the other side
+    /// against the team of the first: the same match, refused.
     #[test]
     fn a_datavolley_match_against_a_team() {
         let dir = tempfile::tempdir().unwrap();
@@ -9374,7 +10620,7 @@ mod tests {
             ("Visiting", Some(7))
         );
         assert!(app.teams().unwrap().is_empty(), "checking saves nothing");
-        let first = app.import_dvw(THREE_SETS.to_vec(), home, false).unwrap();
+        let first = app.import_dvw(THREE_SETS.to_vec(), home).unwrap();
         let visiting = app
             .dvw_similar_teams(THREE_SETS.to_vec(), DvwSide::Visiting, None)
             .unwrap()
@@ -9405,17 +10651,12 @@ mod tests {
             },
             ..dvw_choice(DvwSide::Visiting, visiting.first().cloned())
         };
-        let ready = app.plan_dvw(THREE_SETS.to_vec(), second.clone()).unwrap();
+        // the same match, on both sides already: refused
         assert_eq!(
-            (
-                ready.new_players,
-                ready.opponent_new_players,
-                ready.saved_already
-            ),
-            (0, Some(0), false)
+            reason(app.plan_dvw(THREE_SETS.to_vec(), second)),
+            "Home – Visiting is saved already, played the same day with the same sets: \
+             to import it again, delete it first"
         );
-        assert_eq!(ready.competition.as_deref(), Some("Test"));
-        app.import_dvw(THREE_SETS.to_vec(), second, false).unwrap();
         assert_eq!(app.teams().unwrap().len(), 2);
         // team A as B: refused, said
         let itself = DvwChoice {
@@ -9430,6 +10671,35 @@ mod tests {
         );
     }
 
+    /// Team B a team whose side doesn't translate: the match only from
+    /// A's side, the check telling why; against a name, nothing to tell.
+    #[test]
+    fn a_datavolley_match_on_one_side_tells_why() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        // the serve of B by a player not on the court
+        let text = String::from_utf8(THREE_SETS.to_vec())
+            .unwrap()
+            .replacen("a11SM-", "a12SM-", 1);
+        let bytes = text.into_bytes();
+        let home = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let ready = app.plan_dvw(bytes.clone(), home).unwrap();
+        let told = ready.one_side.unwrap_or_default();
+        assert!(
+            told.starts_with(
+                "only the side of Home, without the touches of Visiting: set 1, line "
+            ),
+            "{told}"
+        );
+        let name = app
+            .plan_dvw(bytes, dvw_choice(DvwSide::Home, None))
+            .unwrap();
+        assert_eq!(name.one_side, None);
+    }
+
     /// Asked from a team, the import offers it first: before the alike
     /// ones, even if not alike; once only.
     #[test]
@@ -9437,11 +10707,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = app(&dir, "en");
         let alike = app
-            .import_dvw(
-                THREE_SETS.to_vec(),
-                dvw_choice(DvwSide::Visiting, None),
-                false,
-            )
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Visiting, None))
             .unwrap()
             .team_id;
         let ours = app.save_team(None, form("Cortona")).unwrap();
@@ -9499,8 +10765,7 @@ mod tests {
             for result in [
                 app.plan_dvw(THREE_SETS.to_vec(), choice.clone())
                     .map(|_| ()),
-                app.import_dvw(THREE_SETS.to_vec(), choice, false)
-                    .map(|_| ()),
+                app.import_dvw(THREE_SETS.to_vec(), choice).map(|_| ()),
             ] {
                 match result {
                     Err(MobileError::InvalidTeam { field: f, reason }) => {
@@ -9527,7 +10792,7 @@ mod tests {
             message.contains("25-3 in the file, 25-0 from its rallies"),
             "{message}"
         );
-        assert!(app.import_dvw(text.into_bytes(), choice, false).is_err());
+        assert!(app.import_dvw(text.into_bytes(), choice).is_err());
         assert!(app.teams().unwrap().is_empty());
     }
 
@@ -9561,7 +10826,7 @@ mod tests {
         scouting.choose_eval(EvalEnum::Perfect).unwrap();
         scouting.choose_eval(EvalEnum::Error).unwrap();
         let analysis = |period, filter| {
-            app.team_analysis(team.clone(), period, EventTypeEnum::S, filter)
+            app.team_analysis(team.clone(), period, None, EventTypeEnum::S, filter)
                 .unwrap()
         };
         let last_two = analysis(
@@ -9628,6 +10893,7 @@ mod tests {
                     from: "31/10/2026".into(),
                     to: "2026-10-24".into(),
                 },
+                None,
                 EventTypeEnum::S,
                 DetailFilter::default(),
             )

@@ -86,6 +86,7 @@
     <string name="close">Zamknij</string>
     <string name="undo">Cofnij</string>
     <string name="touch_the_player">Dotknij zawodnika na boisku</string>
+    <string name="swap_side">Druga drużyna</string>
     <string name="the_team">Drużyna</string>
     <string name="who_comes_in">Kto wchodzi?</string>
     <string name="their_point">Punkt rywala</string>
@@ -302,14 +303,15 @@
     <string name="tutorial_serve">Zagrywka czeka na ocenę: negatywna, dotknij −.</string>
     <string name="tutorial_block">Rywal atakuje, blokuje Danesi: dotknij nazwiska.</string>
     <string name="tutorial_block_event">Dotknij Blok.</string>
-    <string name="tutorial_block_eval">Blok dotyka piłki, ale zostaje po ich stronie: dotknij −.</string>
+    <string name="tutorial_block_eval">Blok dotyka piłki, ale zostaje po ich stronie: dotknij !.</string>
     <string name="tutorial_dig">Rywal znowu atakuje, broni Fahr: dotknij nazwiska.</string>
     <string name="tutorial_dig_event">Dotknij Obrona.</string>
     <string name="tutorial_dig_eval">Dobra obrona: dotknij +.</string>
     <string name="tutorial_opposite">Atakuje Egonu: dotknij nazwiska.</string>
-    <string name="tutorial_attack_kept">Rywal broni, ale nie może zaatakować: piłka wraca do nas, dotknij +.</string>
+    <string name="tutorial_attack_kept">Rywal broni z trudem, bez kontrataku: dotknij +.</string>
     <string name="tutorial_attack_dug">Rywal broni i atakuje: dotknij −.</string>
     <string name="tutorial_their_freeball">Odbijają łatwo, wolna piłka: dotknij Wolna rywala.</string>
+    <string name="tutorial_no_cause">Przyciski +1 dają punkt bez przyczyny: za akcję, którą scout przeoczył. Użyj tylko, gdy żadne zdarzenie nie pasuje.</string>
     <string name="tutorial_opposite_again">Znowu atakuje Egonu: dotknij nazwiska.</string>
     <string name="tutorial_attack_event">Dotknij Atak.</string>
     <string name="tutorial_their_error">Ich atak w aut: dotknij Błąd rywala. 2–0.</string>
@@ -331,7 +333,6 @@
     <string name="import_dvw">Importuj z DataVolley</string>
     <string name="dvw_home">%1$s (gospodarze)</string>
     <string name="dvw_visiting">%1$s (goście)</string>
-    <string name="dvw_both">Obie</string>
     <string name="dvw_which_team">Którą drużynę importujesz?</string>
     <string name="dvw_which_date">Datę z pliku można odczytać na dwa sposoby: która jest właściwa?</string>
     <string name="dvw_no_date">Plik nie ma daty: wybierz ją</string>
@@ -349,8 +350,6 @@
     <string name="dvw_against_name">Przeciw %1$s (tylko nazwa)</string>
     <string name="dvw_match_numbers">Zawodnicy z innym numerem w tym meczu: %1$d</string>
     <string name="dvw_competition">Rozgrywki: %1$s</string>
-    <string name="dvw_already_saved">%1$s ma już ten mecz: nadpisać go?</string>
-    <string name="dvw_overwrite">Nadpisz</string>
     <string name="dvw_dont_import">Nie importuj</string>
     <string name="dvw_imported">%1$s: zaimportowano</string>
     <string name="dvw_not_imported">%1$s: nie zaimportowano, %2$s</string>
@@ -477,6 +476,10 @@
     <string name="score_gap">Wynik</string>
     <string name="close_score">Wyrównany (±2)</string>
     <string name="wide_score">Wyraźny</string>
+    <string name="digs">Obrony</string>
+    <string name="digs_all">Wszystkie</string>
+    <string name="digs_defense">Obrona</string>
+    <string name="digs_cover">Asekuracja</string>
     <string name="video_less">Mniej</string>
     <string name="video_more">Więcej</string>
     <string name="team_a">Drużyna</string>
@@ -484,6 +487,9 @@
     <string name="neutral_game">Neutralny</string>
     <string name="friendly">Towarzyski</string>
     <string name="competition">Rozgrywki</string>
+    <string name="all_competitions">Wszystkie rozgrywki</string>
+    <string name="seen_from">Z perspektywy</string>
+    <string name="compare">Porównanie</string>
     <string name="competition_format">Format</string>
     <string name="stage">Faza</string>
     <string name="round">Runda</string>
@@ -494,6 +500,7 @@
     <string name="delete_team_kept">Mecze z innymi drużynami (%1$d) zostają przy nich, bez scoutingu drużyny %2$s.</string>
     <string name="scouted_by_opponent">Scouting rywala</string>
     <string name="scouted_by_text">Ten mecz scoutowała drużyna %1$s: tutaj tylko wynik z perspektywy drużyny %2$s. Statystyki i scouting są w meczu drużyny %1$s.</string>
+    <string name="scouted_both_text">Ten mecz scoutowała drużyna %1$s z obu stron: tutaj wynik i statystyki z perspektywy drużyny %2$s. Scouting jest w meczu drużyny %1$s.</string>
     <string name="open_as_team">Otwórz jako %1$s</string>
     <string name="name_or_existing">Wpisz imię: osoby z rejestru zostaną podpowiedziane</string>
     <string name="in_registry">Już w rejestrze: ta sama osoba, z tymi samymi danymi</string>
@@ -519,4 +526,6 @@
         <item quantity="many">%d meczów</item>
         <item quantity="other">%d meczu</item>
     </plurals>
+    <string name="scout_both">Rejestruj obie drużyny</string>
+    <string name="roster_of_b">Skład %1$s</string>
 </resources>

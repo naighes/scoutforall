@@ -87,6 +87,7 @@
     <string name="close">Close</string>
     <string name="undo">Undo</string>
     <string name="touch_the_player">Touch the player on court</string>
+    <string name="swap_side">Other team</string>
     <string name="the_team">The team</string>
     <string name="who_comes_in">Who comes in?</string>
     <string name="their_point">Their point</string>
@@ -301,14 +302,15 @@
     <string name="tutorial_serve">The serve is ready to rate: a negative one, tap −.</string>
     <string name="tutorial_block">They attack and Danesi blocks: tap her name.</string>
     <string name="tutorial_block_event">Tap Block.</string>
-    <string name="tutorial_block_eval">The block touches it, but the ball stays on their side: tap −.</string>
+    <string name="tutorial_block_eval">The block touches it, but the ball stays on their side: tap !.</string>
     <string name="tutorial_dig">They attack again, Fahr digs: tap her name.</string>
     <string name="tutorial_dig_event">Tap Defense.</string>
     <string name="tutorial_dig_eval">A good dig: tap +.</string>
     <string name="tutorial_opposite">Egonu attacks: tap her name.</string>
-    <string name="tutorial_attack_kept">They dig it, but can\'t attack: the ball is ours again, tap +.</string>
+    <string name="tutorial_attack_kept">They dig it with difficulty, they can\'t counterattack: tap +.</string>
     <string name="tutorial_attack_dug">They dig it and attack: tap −.</string>
     <string name="tutorial_their_freeball">They send it back easy, a freeball: tap Their free.</string>
+    <string name="tutorial_no_cause">The +1 buttons give a point with no cause: for a rally the scout missed. Use them only when no event fits.</string>
     <string name="tutorial_opposite_again">Egonu attacks again: tap her name.</string>
     <string name="tutorial_attack_event">Tap Attack.</string>
     <string name="tutorial_their_error">Their attack goes out: tap Their error. 2–0.</string>
@@ -330,7 +332,6 @@
     <string name="import_dvw">Import from DataVolley</string>
     <string name="dvw_home">%1$s (home)</string>
     <string name="dvw_visiting">%1$s (away)</string>
-    <string name="dvw_both">Both</string>
     <string name="dvw_which_team">Which team do you import?</string>
     <string name="dvw_which_date">The date of the file reads two ways: which one is it?</string>
     <string name="dvw_no_date">The file has no date: choose it</string>
@@ -348,8 +349,6 @@
     <string name="dvw_against_name">Against %1$s (only the name)</string>
     <string name="dvw_match_numbers">Players with another number in this match: %1$d</string>
     <string name="dvw_competition">Competition: %1$s</string>
-    <string name="dvw_already_saved">%1$s has this match already: overwrite it?</string>
-    <string name="dvw_overwrite">Overwrite it</string>
     <string name="dvw_dont_import">Don\'t import it</string>
     <string name="dvw_imported">%1$s: imported</string>
     <string name="dvw_not_imported">%1$s: not imported, %2$s</string>
@@ -476,6 +475,11 @@
     <string name="score_gap">Score</string>
     <string name="close_score">Close (±2)</string>
     <string name="wide_score">Wide</string>
+    <!-- the digs counted in the defense: all, the digs that aren't covers, only the covers -->
+    <string name="digs">Digs</string>
+    <string name="digs_all">All</string>
+    <string name="digs_defense">Defense</string>
+    <string name="digs_cover">Cover</string>
     <string name="video_less">Less</string>
     <string name="video_more">More</string>
     <string name="team_a">Team</string>
@@ -483,6 +487,9 @@
     <string name="neutral_game">Neutral</string>
     <string name="friendly">Friendly</string>
     <string name="competition">Competition</string>
+    <string name="all_competitions">All competitions</string>
+    <string name="seen_from">Seen from</string>
+    <string name="compare">Compare</string>
     <string name="competition_format">Format</string>
     <string name="stage">Stage</string>
     <string name="round">Round</string>
@@ -493,6 +500,7 @@
     <string name="delete_team_kept">The matches against other teams (%1$d) stay to them, without what was scouted of %2$s.</string>
     <string name="scouted_by_opponent">Scouted by the opponent</string>
     <string name="scouted_by_text">%1$s scouted this match: here only its result, as %2$s sees it. Statistics and scouting are in the match of %1$s.</string>
+    <string name="scouted_both_text">%1$s scouted this match on both sides: here its result and statistics, as %2$s sees it. Scouting is in the match of %1$s.</string>
     <string name="open_as_team">Open as %1$s</string>
     <string name="name_or_existing">Type the name: people already in the registry are offered</string>
     <string name="in_registry">Already in the registry: the same person, with the same details</string>
@@ -516,4 +524,6 @@
         <item quantity="one">%d match</item>
         <item quantity="other">%d matches</item>
     </plurals>
+    <string name="scout_both">Scout both teams</string>
+    <string name="roster_of_b">Score sheet of %1$s</string>
 </resources>

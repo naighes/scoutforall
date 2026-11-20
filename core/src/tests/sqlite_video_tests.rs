@@ -8,7 +8,7 @@
 mod tests {
     use crate::{
         constants::DEFAULT_MAX_SUBSTITUTIONS,
-        domain::adapters::{EventsOfA, SetRows, VideoRows},
+        domain::adapters::{EventRefs, SetRows, VideoRows},
         legacy::migrate::unzip,
         localization::Language,
         providers::{
@@ -169,10 +169,7 @@ mod tests {
     }
 
     fn event(index: usize) -> EventRef {
-        EventRef {
-            set_number: 1,
-            index,
-        }
+        EventRef::of_a(1, index)
     }
 
     /// Two files (one in the data folder, from its name; one elsewhere),
@@ -393,26 +390,13 @@ mod tests {
         let rows = video_rows(&db);
         for wrong in [
             profile().corrected(event(8), 100),
-            profile().corrected(
-                EventRef {
-                    set_number: 2,
-                    index: 0,
-                },
-                100,
-            ),
+            profile().corrected(EventRef::of_a(2, 0), 100),
             VideoProfile {
                 anchor: Some(anchor_on(event(8), start(), 0)),
                 ..VideoProfile::default()
             },
             VideoProfile {
-                anchor: Some(anchor_on(
-                    EventRef {
-                        set_number: 0,
-                        index: 0,
-                    },
-                    start(),
-                    0,
-                )),
+                anchor: Some(anchor_on(EventRef::of_a(0, 0), start(), 0)),
                 ..VideoProfile::default()
             },
         ] {
@@ -537,7 +521,7 @@ mod tests {
         let (_, m) = scouted_match(&p).await;
         let id = Uuid::new_v4();
         let set = SetRows::of(&m.sets[0], id).unwrap();
-        let events = EventsOfA::of(std::slice::from_ref(&set));
+        let events = EventRefs::of(std::slice::from_ref(&set));
         let mut rows = VideoRows::of(&profile(), id, &events).unwrap();
         assert_eq!(rows.profile(&events), profile());
 
@@ -546,7 +530,7 @@ mod tests {
 
         let mut removed = set;
         removed.row.deleted = true;
-        let none = EventsOfA::of(&[removed]);
+        let none = EventRefs::of(&[removed]);
         assert_eq!(none.id(event(0)), None);
         assert!(VideoRows::of(&profile(), id, &none).is_err());
     }

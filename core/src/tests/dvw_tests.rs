@@ -517,16 +517,25 @@ mod tests {
     }
 
     /// The teams of a folder of files as new teams: the season, the names
-    /// of the players, the conflicts and the similar teams between files:
+    /// of the players, the conflicts and the similar teams between files,
+    /// how each match imports (on both sides, B the other team, or not):
     /// `DVW_DIR=... cargo test -p scout4all-core dvw_import_probe -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn dvw_import_probe() {
         use crate::dvw::import::{
-            MatchIssue, TeamChoice, match_date, match_plan, season_year, similar_teams, team_plan,
+            ImportedSides, MatchIssue, TeamChoice, match_date, match_plan, season_year,
+            similar_teams, team_plan,
         };
         use crate::dvw::model::MatchDate;
+        let new_team = || TeamChoice::New {
+            classification: Some(crate::shapes::enums::TeamClassificationEnum::Regional),
+            gender: Some(crate::shapes::enums::GenderEnum::Women),
+            country: crate::shapes::country::CountryCode::parse("AT"),
+        };
         let mut matches: std::collections::BTreeMap<String, usize> = Default::default();
+        // the first pair out of `rally::answer_evals` stopping a match on both sides
+        let mut pairs: std::collections::BTreeMap<String, usize> = Default::default();
         let dir = std::env::var("DVW_DIR").expect("DVW_DIR");
         let mut paths = walk(std::path::Path::new(&dir));
         paths.sort();
@@ -544,12 +553,7 @@ mod tests {
                         )
                     })
                     .collect();
-                let choice = TeamChoice::New {
-                    classification: Some(crate::shapes::enums::TeamClassificationEnum::Regional),
-                    gender: Some(crate::shapes::enums::GenderEnum::Women),
-                    country: crate::shapes::country::CountryCode::parse("AT"),
-                };
-                match team_plan(&file, side, choice) {
+                match team_plan(&file, side, new_team()) {
                     Ok(plan) => {
                         println!(
                             "{name}\t{side:?}\t{:?}\t{}\t{}\tliberos {:?}\tsimilar {similar:?}\t{:?}",
@@ -569,14 +573,53 @@ mod tests {
                         };
                         let offset = chrono::FixedOffset::east_opt(0).unwrap();
                         let when = match_date(&file, day, offset);
-                        let opponent = crate::dvw::import::OpponentPlan::Name(String::new());
+                        // B a team, when its side is a team: the match on both sides
+                        let opponent = match team_plan(&file, side.other(), new_team()) {
+                            Ok(b) => crate::dvw::import::OpponentPlan::Team(b),
+                            Err(_) => crate::dvw::import::OpponentPlan::Name(String::new()),
+                        };
                         let labels = crate::localization::Language::default().labels();
                         let outcome =
                             match match_plan(&file, side, &plan, &opponent, when, 6, labels) {
-                                Ok(_) => "ok".to_string(),
-                                Err(MatchIssue::Set(e)) => {
-                                    format!("set {:?}", std::mem::discriminant(&e.issue))
-                                }
+                                Ok(plan) => match plan.sides {
+                                    ImportedSides::Both(_) => "ok both".to_string(),
+                                    ImportedSides::A(None) => "ok a".to_string(),
+                                    ImportedSides::A(Some(MatchIssue::Set(e))) => {
+                                        if let crate::dvw::translate::Issue::Answer {
+                                            answered,
+                                            answer,
+                                            ..
+                                        } = &e.issue
+                                        {
+                                            *pairs
+                                                .entry(format!("{answered:?} -> {answer:?}"))
+                                                .or_default() += 1;
+                                        }
+                                        format!(
+                                            "ok a, not both: {:?}",
+                                            std::mem::discriminant(&e.issue)
+                                        )
+                                    }
+                                    ImportedSides::A(Some(_)) => "ok a, not both".to_string(),
+                                },
+                                Err(MatchIssue::Set(e)) => match &e.issue {
+                                    // an error of the scout: which one
+                                    crate::dvw::translate::Issue::Impossible(
+                                        crate::dvw::translate::Impossible::TouchAfterOver {
+                                            over,
+                                            touch,
+                                            ..
+                                        },
+                                    ) => format!("refused: {over:?} then {touch:?}"),
+                                    crate::dvw::translate::Issue::Impossible(
+                                        crate::dvw::translate::Impossible::MissingAttack {
+                                            before,
+                                            touch,
+                                            ..
+                                        },
+                                    ) => format!("refused: no attack {before:?} then {touch:?}"),
+                                    issue => format!("set {:?}", std::mem::discriminant(issue)),
+                                },
                                 Err(e) => {
                                     println!("MATCH\t{name}\t{side:?}\t{e:?}");
                                     format!("{e:?}")
@@ -594,6 +637,11 @@ mod tests {
             }
         }
         println!("matches: {matches:?}");
+        let mut pairs: Vec<_> = pairs.into_iter().collect();
+        pairs.sort_by_key(|a| std::cmp::Reverse(a.1));
+        for (pair, n) in pairs {
+            println!("PAIR\t{n}\t{pair}");
+        }
     }
 
     /// How the sets of a folder of files translate, for both teams:
@@ -678,6 +726,20 @@ mod tests {
                                 }
                                 Issue::Score { .. } => "Score".to_string(),
                                 Issue::UnknownPlayer(_) => "UnknownPlayer".to_string(),
+                                Issue::Impossible(
+                                    crate::dvw::translate::Impossible::MissingAttack {
+                                        before,
+                                        touch,
+                                        ..
+                                    },
+                                ) => format!("MissingAttack {before:?} {touch:?}"),
+                                Issue::Impossible(
+                                    crate::dvw::translate::Impossible::TouchAfterOver {
+                                        over,
+                                        touch,
+                                        ..
+                                    },
+                                ) => format!("TouchAfterOver {over:?} {touch:?}"),
                                 other => format!("{other:?}"),
                             };
                             let example = format!(
@@ -714,6 +776,161 @@ mod tests {
         }
         println!("\nmappings: {mappings:#?}");
         println!("\nevents with the P1 inverted: {inverted:#?}");
+    }
+
+    /// How the sets of a folder of files translate on both sides, and how
+    /// much the stream of each side projected from the fused touches
+    /// differs from its own translation (by type and evaluation):
+    /// `DVW_DIR=... cargo test -p scout4all-core dvw_both_probe -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn dvw_both_probe() {
+        use crate::dvw::{
+            both::{fused, translate_both},
+            model::{DvwRole, MatchDate},
+            translate::{Issue, Us, translate_lined},
+        };
+        use crate::rally::{Incoherence, project};
+        use crate::shapes::snapshot::EventEntry;
+        use std::collections::{BTreeMap, HashMap};
+        let dir = std::env::var("DVW_DIR").expect("DVW_DIR");
+        let mut paths = walk(std::path::Path::new(&dir));
+        paths.sort();
+        let (mut ok, mut failed, mut matches_ok) = (0, 0, 0);
+        let (mut events, mut changed) = (0i64, 0i64);
+        // (type, evaluation): own translations less the projected streams
+        let mut changes: BTreeMap<String, i64> = BTreeMap::new();
+        let mut issues: BTreeMap<String, (usize, String)> = BTreeMap::new();
+        let short = |e: &EventEntry| format!("{:?}{:?}", e.event_type, e.eval);
+        // the reason without the touch it's at
+        let touch = regex::Regex::new(r"touch \d+").unwrap();
+        for path in &paths {
+            let name = path.file_name().unwrap().to_string_lossy().to_string();
+            let file = parse(&std::fs::read(path).unwrap()).unwrap();
+            let day = match file.match_info.date {
+                MatchDate::Known(d) | MatchDate::Ambiguous(d, _) => d,
+                MatchDate::Missing => date(2000, 1, 1),
+            };
+            let at = day.and_time(NaiveTime::MIN).and_utc().fixed_offset();
+            let team = |side: Side| {
+                let players: HashMap<u8, uuid::Uuid> = file
+                    .players(side)
+                    .iter()
+                    .map(|p| (p.number, uuid::Uuid::new_v4()))
+                    .collect();
+                let liberos: Vec<u8> = file
+                    .players(side)
+                    .iter()
+                    .filter(|p| p.libero || p.role == Some(DvwRole::Libero))
+                    .map(|p| p.number)
+                    .collect();
+                (players, liberos)
+            };
+            let (home, home_liberos) = team(Side::Home);
+            let (visiting, visiting_liberos) = team(Side::Visiting);
+            let a = Us {
+                side: Side::Home,
+                players: &home,
+                liberos: &home_liberos,
+            };
+            let b = Us {
+                side: Side::Visiting,
+                players: &visiting,
+                liberos: &visiting_liberos,
+            };
+            let mut whole = true;
+            for set in &file.sets {
+                match translate_both(&file, &a, &b, set.set_number, at, 6) {
+                    Ok((both, _)) => {
+                        ok += 1;
+                        let streams = project(&both.touches);
+                        let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+                        for (own, projected) in
+                            [(&both.a.events, &streams.a), (&both.b.events, &streams.b)]
+                        {
+                            events += own.len() as i64;
+                            own.iter()
+                                .for_each(|e| *counts.entry(short(e)).or_default() += 1);
+                            projected
+                                .iter()
+                                .for_each(|p| *counts.entry(short(&p.entry)).or_default() -= 1);
+                        }
+                        for (k, v) in counts.into_iter().filter(|(_, v)| *v != 0) {
+                            changed += v.abs();
+                            *changes.entry(k).or_default() += v;
+                        }
+                    }
+                    Err(e) => {
+                        failed += 1;
+                        whole = false;
+                        // `DVW_DEBUG=<file name>:<set>`: the touches before
+                        // the one refused, and the translations of the two
+                        // sides by line
+                        if std::env::var("DVW_DEBUG").ok()
+                            == Some(format!("{name}:{}", set.set_number))
+                        {
+                            let source = match &e.issue {
+                                Issue::Sides(Incoherence::Refused { source, .. }) => *source,
+                                _ => 0,
+                            };
+                            let (Ok((sa, _, la)), Ok((sb, _, lb))) = (
+                                translate_lined(&file, &a, set.set_number, at, 6),
+                                translate_lined(&file, &b, set.set_number, at, 6),
+                            ) else {
+                                continue;
+                            };
+                            let touches = fused(&sa.events, &la, &sb.events, &lb);
+                            for (i, (side, t)) in touches
+                                .iter()
+                                .enumerate()
+                                .skip(source.saturating_sub(12))
+                                .take(16)
+                            {
+                                println!("touch {i} {side:?} {}", short(t));
+                            }
+                            for (tag, own, lines) in
+                                [("A", &sa.events, &la), ("B", &sb.events, &lb)]
+                            {
+                                for (e, l) in own.iter().zip(lines) {
+                                    println!("{tag} line {l:?} {}", short(e));
+                                }
+                            }
+                        }
+                        let key = match &e.issue {
+                            Issue::Sides(i) => {
+                                format!("Sides({})", touch.replace_all(&i.to_string(), "touch _"))
+                            }
+                            other => format!("{other:?}").chars().take(40).collect(),
+                        };
+                        let example = format!(
+                            "{name} set {} line {:?}: {:?}",
+                            e.set_number, e.line, e.issue
+                        );
+                        issues.entry(key).or_insert((0, example)).0 += 1;
+                    }
+                }
+            }
+            if whole {
+                matches_ok += 1;
+            }
+        }
+        println!(
+            "{} files, {matches_ok} matches whole on both sides",
+            paths.len()
+        );
+        println!("sets: {ok} on both sides, {failed} failed");
+        println!("events (type, evaluation) changed: {changed} of {events} (own - projected):");
+        let mut changes: Vec<_> = changes.into_iter().filter(|(_, v)| *v != 0).collect();
+        changes.sort_by_key(|(_, v)| std::cmp::Reverse(v.abs()));
+        for (k, v) in changes.iter().take(14) {
+            println!("  {v:+5} {k}");
+        }
+        println!("\nissues (count, first example):");
+        let mut issues: Vec<_> = issues.into_iter().collect();
+        issues.sort_by_key(|entry| std::cmp::Reverse(entry.1.0));
+        for (key, (count, example)) in issues.iter().take(30) {
+            println!("{count:5}  {key}\n       {example}");
+        }
     }
 
     /// The statistics of the translated sets against the codes of the file,

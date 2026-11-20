@@ -142,9 +142,9 @@ mod tests {
     /// The schema of v1, table by table: a column added, removed or renamed
     /// by mistake shows up here (a released migration never changes).
     #[test]
-    fn a_new_database_has_the_tables_of_v1() {
+    fn a_new_database_has_the_tables_of_this_version() {
         let db = db::open_in_memory().unwrap();
-        assert_eq!(db::schema_version(), 1);
+        assert_eq!(db::schema_version(), 4);
         let expected: &[(&str, &[&str])] = &[
             (
                 "competitions",
@@ -246,7 +246,14 @@ mod tests {
             ),
             (
                 "sets",
-                &["match_id", "number", "serving", "lineup_rules", "deleted"],
+                &[
+                    "match_id",
+                    "number",
+                    "serving",
+                    "lineup_rules",
+                    "deleted",
+                    "scouting_rules",
+                ],
             ),
             (
                 "team_members",
@@ -507,6 +514,10 @@ mod tests {
         fails(&db, "UPDATE matches SET stage = 'semifinal'");
         fails(&db, "UPDATE matches SET source = 'csv'");
         fails(&db, "UPDATE sets SET lineup_rules = 'v3'");
+        fails(&db, "UPDATE sets SET scouting_rules = 'v9'");
+        for rules in ["v1", "v2", "v3", "v4"] {
+            passes(&db, &format!("UPDATE sets SET scouting_rules = '{rules}'"));
+        }
         fails(&db, "UPDATE sets SET serving = 'us'");
         fails(&db, "UPDATE events SET side = 'them'");
         for stage in [
@@ -537,8 +548,100 @@ mod tests {
         }
         passes(
             &db,
-            "UPDATE team_members SET role = NULL; UPDATE sets SET lineup_rules = NULL",
+            "UPDATE team_members SET role = NULL;
+             UPDATE sets SET lineup_rules = NULL, scouting_rules = NULL",
         );
+    }
+
+    /// A database of v1 (up to v1.0.0): its sets get no scouting rules,
+    /// the rules of those versions (v1), their rows as they were.
+    #[test]
+    fn the_sets_of_a_database_of_v1_keep_no_scouting_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scout4all.db");
+        let old = db::open_with(&path, &db::MIGRATIONS[..1]).unwrap();
+        old.execute_batch(&format!(
+            "INSERT INTO teams (id, name, year) VALUES ('{TEAM_A}', 'A', 2026);
+             INSERT INTO matches (id, team_a, team_b_name, home, scouting, start, max_substitutions)
+                 VALUES ('{MATCH}', '{TEAM_A}', 'B', 'a', 'a',
+                         '2025-11-12T18:00:00+01:00', 6);
+             INSERT INTO sets (match_id, number, serving, lineup_rules)
+                 VALUES ('{MATCH}', 1, 'a', 'v2');"
+        ))
+        .unwrap();
+        drop(old);
+        let db = db::open(&path).unwrap();
+        let set: (String, Option<String>, Option<String>) = db
+            .query_row(
+                "SELECT serving, lineup_rules, scouting_rules FROM sets",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(set, ("a".to_string(), Some("v2".to_string()), None));
+    }
+
+    /// A database of v2: its sets keep their scouting rules when the
+    /// column takes v3 too.
+    #[test]
+    fn the_sets_of_a_database_of_v2_keep_their_scouting_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scout4all.db");
+        let old = db::open_with(&path, &db::MIGRATIONS[..2]).unwrap();
+        old.execute_batch(&format!(
+            "INSERT INTO teams (id, name, year) VALUES ('{TEAM_A}', 'A', 2026);
+             INSERT INTO matches (id, team_a, team_b_name, home, scouting, start, max_substitutions)
+                 VALUES ('{MATCH}', '{TEAM_A}', 'B', 'a', 'a',
+                         '2025-11-12T18:00:00+01:00', 6);
+             INSERT INTO sets (match_id, number, serving, lineup_rules, scouting_rules)
+                 VALUES ('{MATCH}', 1, 'a', 'v2', 'v2'), ('{MATCH}', 2, 'b', 'v2', NULL);"
+        ))
+        .unwrap();
+        drop(old);
+        let db = db::open(&path).unwrap();
+        let rules: Vec<Option<String>> = db
+            .prepare("SELECT scouting_rules FROM sets ORDER BY number")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(rules, vec![Some("v2".to_string()), None]);
+        passes(&db, "UPDATE sets SET scouting_rules = 'v3'");
+    }
+
+    /// A database of v3: its sets keep their scouting rules when the
+    /// column takes v4 too.
+    #[test]
+    fn the_sets_of_a_database_of_v3_keep_their_scouting_rules() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scout4all.db");
+        let old = db::open_with(&path, &db::MIGRATIONS[..3]).unwrap();
+        old.execute_batch(&format!(
+            "INSERT INTO teams (id, name, year) VALUES ('{TEAM_A}', 'A', 2026);
+             INSERT INTO matches (id, team_a, team_b_name, home, scouting, start, max_substitutions)
+                 VALUES ('{MATCH}', '{TEAM_A}', 'B', 'a', 'a',
+                         '2025-11-12T18:00:00+01:00', 6);
+             INSERT INTO sets (match_id, number, serving, lineup_rules, scouting_rules)
+                 VALUES ('{MATCH}', 1, 'a', 'v2', 'v3'), ('{MATCH}', 2, 'b', 'v2', 'v2'),
+                        ('{MATCH}', 3, 'a', 'v2', NULL);"
+        ))
+        .unwrap();
+        drop(old);
+        let db = db::open(&path).unwrap();
+        let rules: Vec<Option<String>> = db
+            .prepare("SELECT scouting_rules FROM sets ORDER BY number")
+            .unwrap()
+            .query_map([], |r| r.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(
+            rules,
+            vec![Some("v3".to_string()), Some("v2".to_string()), None]
+        );
+        passes(&db, "UPDATE sets SET scouting_rules = 'v4'");
+        fails(&db, "UPDATE sets SET scouting_rules = 'v5'");
     }
 
     #[test]

@@ -2,6 +2,7 @@ package io.github.naighes.scout4all
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.animation.core.animateDpAsState
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.Icon
@@ -37,6 +39,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 import androidx.compose.ui.graphics.StrokeCap
@@ -115,6 +118,9 @@ data class CourtBall(
  * the 3 meters before the attack line, the back row in the 6 behind it. */
 private val zones = listOf(7.5f to 6f, 7.5f to 1.5f, 4.5f to 1.5f, 1.5f to 1.5f, 1.5f to 6f, 4.5f to 6f)
 
+/** The widest the court gets: 1.4 times as wide as deep. */
+private const val WidestCourt = 1.4f
+
 /** The half court of the team seen from the bench, the net at the top: the
  * attack line at 3 of the 9 meters, the front row 4 3 2 before it, the back
  * row 5 6 1 behind it. `slot` tells what position 1 to 6 shows, and where:
@@ -139,6 +145,9 @@ fun Court(
      * their court: 5 7 6 9 1 from the left, as our server sees them */
     starts: List<ServeStartChoice> = emptyList(),
     onStart: (ServeStartChoice) -> Unit = {},
+    /** the court takes the height it's given, up to a square, instead of
+     * keeping its width-to-depth */
+    grow: Boolean = false,
 ) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
     // the zones where the ball went (our serve on theirs, our reception on
     // ours) on a square court (its true proportions), to leave them room to
@@ -147,15 +156,24 @@ fun Court(
     val zone = when {
         aiming && starts.isNotEmpty() -> StartZones
         aiming -> 0.dp
+        // the strip of the server is for the server: without him it only
+        // shows the end line, the court takes the rest
+        serveZone && grow && !slot(1).serving -> IdleServeZone
         serveZone -> ServeZone
         else -> 0.dp
     }
-    val aspect = if (aiming) 1f else 1.4f
-    val width = when {
-        constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * aspect)
-        else -> maxWidth
+    // wider than deep to leave room to the choices, but the room left
+    // under the court is the court's: it grows toward the square (its true
+    // proportions) as long as it has the height
+    val room = if (constraints.hasBoundedHeight) (maxHeight - zone).coerceAtLeast(0.dp) else null
+    val aspect = when {
+        aiming -> 1f
+        !grow -> WidestCourt
+        room == null || room <= 0.dp -> WidestCourt
+        else -> (maxWidth / room).coerceIn(1f, WidestCourt)
     }
-    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, targetsName, onTarget, starts, onStart, Modifier.width(width))
+    val width = if (room != null) minOf(maxWidth, room * aspect) else maxWidth
+    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, targetsName, onTarget, starts, onStart, Modifier.width(width), aspect, zone)
 }
 
 @Composable
@@ -172,13 +190,15 @@ private fun CourtColumn(
     starts: List<ServeStartChoice>,
     onStart: (ServeStartChoice) -> Unit,
     modifier: Modifier,
+    aspect: Float,
+    serveHeight: Dp,
 ) = Column(modifier) {
     val floor = MaterialTheme.colorScheme.surfaceVariant
     val lines = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
     val net = MaterialTheme.colorScheme.onSurface
     val server = slot(1).takeIf { serveZone && it.serving }
     val aiming = targets.isNotEmpty()
-    Box(Modifier.fillMaxWidth().aspectRatio(if (aiming) 1f else 1.4f)) {
+    Box(Modifier.fillMaxWidth().aspectRatio(aspect)) {
         Canvas(Modifier.fillMaxSize()) {
             val line = 2.dp.toPx()
             drawRect(floor)
@@ -237,6 +257,24 @@ private fun CourtColumn(
                 }
                 Freeball(from, ballX to ballY, MaterialTheme.colorScheme.primary)
             }
+            // a name another jersey would cover goes in one line, abbreviated;
+            // where not even one line is free, it isn't drawn (the number
+            // tells the player, TalkBack still reads the name)
+            val line = with(LocalDensity.current) { ceil(nameStyle().lineHeight.toPx()).toDp() }
+            val cover = { position: Int ->
+                val (x, y) = corner(position)
+                val below = (1..6).filter { other ->
+                    other != position && abs((corner(other).first - x).value) < ((width + token) / 2).value && corner(other).second > y &&
+                        corner(other).second < y + height
+                }.minOfOrNull { corner(it).second - y }
+                when {
+                    below == null -> NameCover.None
+                    below >= token + 2.dp + line -> NameCover.OneLine
+                    // the receiver above the player hiding behind keeps its name
+                    slot(position).above -> NameCover.OneLine
+                    else -> NameCover.Hidden
+                }
+            }
             (1..6).forEach { position ->
                 val s = slot(position)
                 // the server left the court for the serve
@@ -245,7 +283,7 @@ private fun CourtColumn(
                     val (cx, cy) = corner(position)
                     val x by animateDpAsState(cx, tween(450), label = "x")
                     val y by animateDpAsState(cy, tween(450), label = "y")
-                    Spot(position, s, showPositions, scale, Modifier.zIndex(if (s.above) 1f else 0f).offset(x, y).size(width, height)) {
+                    Spot(position, s, showPositions, scale, Modifier.zIndex(if (s.above) 1f else 0f).offset(x, y).size(width, height), cover = cover(position)) {
                         onPosition(position)
                     }
                 }
@@ -267,7 +305,7 @@ private fun CourtColumn(
     }
     if (serveZone && !aiming) {
         // behind the end line, under position 1
-        Row(Modifier.fillMaxWidth().height(ServeZone)) {
+        Row(Modifier.fillMaxWidth().height(serveHeight)) {
             Box(Modifier.weight(2f))
             when (server) {
                 null -> Box(Modifier.weight(1f))
@@ -278,6 +316,9 @@ private fun CourtColumn(
 }
 
 private val ServeZone = 72.dp
+
+/** The strip behind the end line while nobody serves from it. */
+private val IdleServeZone = 16.dp
 
 /** Under their court, the zones our serve starts from: as high as a cell
  * to touch, apart from the net. */
@@ -395,7 +436,7 @@ private fun TargetZones(rows: List<List<CourtCellChoice>>, name: Int, onTarget: 
  * the name under it. TalkBack reads the number, the name, then what the
  * badges say. */
 @Composable
-private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: Float, modifier: Modifier, onClick: () -> Unit) =
+private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: Float, modifier: Modifier, cover: NameCover = NameCover.None, onClick: () -> Unit) =
     Box(modifier.tutorial("player:${slot.number}").clickable(enabled = slot.enabled, role = Role.Button, onClick = onClick)) {
         if (showPosition) {
             Text(
@@ -414,7 +455,7 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: F
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Token(slot, scale, dim)
-            CourtName(slot.name.orEmpty(), Modifier.alpha(dim))
+            CourtName(slot.name.orEmpty(), slot.above, cover != NameCover.None, Modifier.alpha(if (cover == NameCover.Hidden) 0f else dim).let { if (cover == NameCover.Hidden) it.testTag(HIDDEN_NAME) else it })
             badges(slot).takeIf { it.isNotEmpty() }?.let { Box(Modifier.readAs(it)) }
         }
     }
@@ -433,21 +474,28 @@ private fun badges(slot: CourtSlot): String = listOfNotNull(
     },
 ).joinToString(", ")
 
+/** What another jersey does to the name of a player. */
+private enum class NameCover { None, OneLine, Hidden }
+
 /** The name under the jersey in two lines, or abbreviated if it doesn't
  * fit ("Ale. Mag.", by the core: no guess about which word is the surname),
  * never a word broken: the jersey tells the rest. */
 @Composable
-private fun CourtName(name: String, modifier: Modifier = Modifier) {
-    var abbreviated by remember(name) { mutableStateOf(false) }
+private fun CourtName(name: String, over: Boolean, oneLine: Boolean, modifier: Modifier = Modifier) {
+    var abbreviated by remember(name, oneLine) { mutableStateOf(oneLine) }
     val text = if (abbreviated) abbreviatedName(name) else name
     Text(
         text,
-        modifier = modifier.padding(horizontal = 4.dp).let { if (text.isEmpty()) it.notRead() else it },
+        modifier = modifier
+            .padding(horizontal = 4.dp)
+            // above a player hiding behind: on the floor, not on their jersey
+            .let { if (over && text.isNotEmpty()) it.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)) else it }
+            .let { if (text.isEmpty()) it.notRead() else it },
         style = nameStyle().copy(
             hyphens = if (abbreviated) Hyphens.Auto else Hyphens.None,
             lineBreak = LineBreak.Paragraph,
         ),
-        maxLines = 2,
+        maxLines = if (oneLine) 1 else 2,
         overflow = TextOverflow.Ellipsis,
         textAlign = TextAlign.Center,
         onTextLayout = { layout ->
@@ -567,6 +615,8 @@ private val BADGE = 18.dp
 
 /** The badge of the setter, for the tests. */
 const val SETTER_BADGE = "setter badge"
+/** the name of a player a jersey covers, not drawn */
+const val HIDDEN_NAME = "hidden name"
 
 /** On the jersey: the setter, the evaluation of the last touch. */
 @Composable

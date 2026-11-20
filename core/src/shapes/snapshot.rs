@@ -198,11 +198,17 @@ impl Snapshot {
     }
 
     /// The name of the event to choose next: the libero replacement says
-    /// what it does now, the libero going out or coming back in.
+    /// what it does now, the libero going out or coming back in; the dig
+    /// after our attack blocked back is a cover.
     pub fn next_event_name(&self, event: EventTypeEnum, labels: &Labels) -> &'static str {
-        match (event, self.current_lineup.is_libero_out()) {
-            (EventTypeEnum::LR, false) => labels.libero_out,
-            (EventTypeEnum::LR, true) => labels.libero_in,
+        let after = self.last_event.as_ref().map(|e| (e.event_type, e.eval));
+        match (event, self.current_lineup.is_libero_out(), after) {
+            (EventTypeEnum::LR, false, _) => labels.libero_out,
+            (EventTypeEnum::LR, true, _) => labels.libero_in,
+            // the dig after our attack blocked back: a cover (rules v3)
+            (EventTypeEnum::D, _, Some((EventTypeEnum::A, Some(EvalEnum::Exclamative)))) => {
+                labels.cover
+            }
             _ => event.friendly_name(labels),
         }
     }
@@ -280,7 +286,7 @@ impl Snapshot {
 
     fn event_refusal(&self, event: &EventEntry) -> Option<Refusal> {
         self.sequence_issue(event)
-            .or_else(|| Self::evaluation_issue(event))
+            .or_else(|| self.evaluation_issue(event))
             .or_else(|| self.player_issue(event))
             .or_else(|| Self::technique_issue(event))
             .or_else(|| self.replacement_issue(event))
@@ -299,10 +305,36 @@ impl Snapshot {
         }
     }
 
-    fn evaluation_issue(event: &EventEntry) -> Option<Refusal> {
+    /// The evaluations the event can have now, after the one before it
+    /// (TODO/001, §4.2): our dig after our block tells what the block left
+    /// us, `+` or `#` after a block `+`, `-` or `/` after a block `-`; our
+    /// cover after our attack `!` (or their block `!`, untold) rebuilds
+    /// (`!`) or struggles (`-`); `!` is only a cover. The block answers an
+    /// attack, as in DataVolley: on their freeball or their reception
+    /// straight back after our serve `/`, only the invasion (`/`).
+    pub fn available_evals(&self, event_type: EventTypeEnum) -> Vec<EvalEnum> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        let after = self.last_event.as_ref().map(|e| (e.event_type, e.eval));
+        let admitted: &[EvalEnum] = match (event_type, after) {
+            (D, Some((B, Some(Positive)))) => &[Perfect, Positive],
+            (D, Some((B, Some(Negative)))) => &[Negative, Over],
+            (D, Some((A, Some(Exclamative)))) => &[Exclamative, Negative],
+            (B, Some((OF, _) | (S, Some(Over)))) => &[Over],
+            (D, _) => &[Perfect, Positive, Negative, Over, Error],
+            _ => &EvalEnum::ALL,
+        };
+        event_type
+            .available_evals()
+            .into_iter()
+            .filter(|eval| admitted.contains(eval))
+            .collect()
+    }
+
+    fn evaluation_issue(&self, event: &EventEntry) -> Option<Refusal> {
         match (event.event_type.requires_evaluation(), event.eval) {
             (true, None) => Some(Refusal::MissingEvaluation),
-            (true, Some(eval)) if !event.event_type.available_evals().contains(&eval) => {
+            (true, Some(eval)) if !self.available_evals(event.event_type).contains(&eval) => {
                 Some(Refusal::EvaluationNotAllowed(eval))
             }
             (false, Some(_)) => Some(Refusal::UnexpectedEvaluation),
@@ -587,7 +619,7 @@ impl Snapshot {
         // be scored, and the substitutions and libero and setter changes
         // aren't part of the rally; the player only of the events asking
         // one (our freeball named it once)
-        let skip = matches!(event.event_type, R | CL | LR | LF | CS)
+        let skip = event.event_type.changes_lineup()
             || (event.event_type.requires_evaluation() && event.eval.is_none());
         let situation = match skip {
             true => self.rally,
@@ -633,6 +665,11 @@ impl Snapshot {
                     .filter(|e| e.event_type.rally_winner(e.eval).is_none())
                     .and_then(|e| e.eval),
                 set_type,
+                // our dig after our attack blocked back
+                cover: event.event_type == D
+                    && self.last_event.as_ref().is_some_and(|e| {
+                        (e.event_type, e.eval) == (A, Some(EvalEnum::Exclamative))
+                    }),
             }),
         });
         if let Some(key) = &self.last_key {
@@ -718,27 +755,24 @@ impl Snapshot {
 
     /// Their freeball (`OF`) is exploited when we win the rally before they
     /// attack again, whoever scores the point (our kill, their error, their
-    /// fault, our block on the freeball itself). It isn't when they win the
-    /// rally, when they attack again (our dig or block comes next, even a
-    /// block point) or when they send us another freeball, which is counted
-    /// on its own. Their error after
+    /// fault). It isn't when they win the rally, when they attack again (our
+    /// dig or block comes next, even a block point: the block answers an
+    /// attack, on the freeball itself only the invasion) or when they send
+    /// us another freeball, which is counted on its own. Their error after
     /// digging our attack (`A-`, `OE`) counts as exploited: the scouting
     /// doesn't tell whether they attacked.
     fn record_freeball(&mut self, event: &EventEntry, phase: PhaseEnum, rotation: u8) {
         use EventTypeEnum::*;
-        // our block on their freeball itself, not on an attack after it
-        let on_the_freeball = self.last_event.as_ref().is_some_and(|e| e.event_type == OF);
         let exploited = match (
             self.pending_freeball,
             event.event_type,
             event.event_type.rally_winner(event.eval),
-            on_the_freeball,
         ) {
-            (false, _, _, _) => None,
+            (false, _, _) => None,
             // even our block point comes after their attack
-            (true, D | OF, _, _) | (true, B, _, false) => Some(false),
-            (true, _, Some(winner), _) => Some(winner == TeamSideEnum::Us),
-            (true, _, None, _) => None,
+            (true, D | OF | B, _) => Some(false),
+            (true, _, Some(winner)) => Some(winner == TeamSideEnum::Us),
+            (true, _, None) => None,
         };
         if let Some(exploited) = exploited {
             self.stats.freeballs.add(FreeballKey {
@@ -758,7 +792,7 @@ impl Snapshot {
     /// The possessions of a side out: the first comes with their serve,
     /// unless they miss it or we fault before it; another one each time the
     /// ball comes back to our side to play: our dig keeping it (also over
-    /// the net, `/`), our block keeping it (`+`), their freeball (`OF`), or
+    /// the net, `/`), our block keeping it (`+`, `-`), their freeball (`OF`), or
     /// our touch after an attack of ours they couldn't counter (`+`) or
     /// blocked but covered (`!`), or after a block of theirs. The rally's
     /// point goes to the last possession, also when scored on their side
@@ -782,7 +816,7 @@ impl Snapshot {
             (_, 0, _, P | OS, _) => (1, true),
             (_, 0, _, _, _) => (0, false),
             (_, n, false, D, Some(Perfect | Positive | Exclamative | Negative | Over))
-            | (_, n, false, B, Some(Positive))
+            | (_, n, false, B, Some(Positive | Negative))
             | (_, n, false, OF | A | FB, _) => (n.saturating_add(1), true),
             (_, n, _, _, _) => (n, false),
         };
@@ -809,7 +843,7 @@ impl Snapshot {
                 self.possession = possession;
                 self.ball_ours = match (event.event_type, event.eval) {
                     (P | D, eval) => kept(eval),
-                    (B, Some(Positive)) | (OF, _) => true,
+                    (B, Some(Positive | Negative)) | (OF, _) => true,
                     (A | FB | B, _) => false,
                     _ => self.ball_ours,
                 };
@@ -855,8 +889,8 @@ impl Snapshot {
         use EventTypeEnum::*;
         let mut options = match phase {
             // the libero for a player last: the rarest
-            PhaseEnum::SideOut => vec![OS, OE, F, P, R, CL, LR, CS, LF],
-            PhaseEnum::Break => vec![OE, F, S, R, CL, LR, CS, LF],
+            PhaseEnum::SideOut => vec![OS, OE, F, P, PW, PL, R, CL, LR, CS, LF],
+            PhaseEnum::Break => vec![OE, F, S, PW, PL, R, CL, LR, CS, LF],
         };
         if self.current_lineup.get_fallback_libero().is_none() {
             options.retain(|o| *o != CL);
@@ -869,17 +903,26 @@ impl Snapshot {
         use EventTypeEnum::*;
         let serve_them = || self.get_rally_start_options(PhaseEnum::SideOut);
         let serve_us = || self.get_rally_start_options(PhaseEnum::Break);
-        // order: OS, OE, F, A, S, P, D, B, FB, OF, R, CL, LR, CS, LF
+        // order: OS, OE, F, A, S, P, D, B, FB, OF, PW, PL, R, CL, LR, CS, LF
+        //
+        // the point without a cause, ours or theirs (`PW`, `PL`), always:
+        // the referee's, or a ball nobody touched as the scout tells it.
         //
         // the ball on our side, to play on our second or third touch: our
         // attack or our freeball (`FB`). Never a freeball on a first touch:
         // our reception or dig going straight over is `/`.
         //
+        // after our block `+` or `-` the ball stays with us, the blockers:
+        // our dig after it is optional, its evaluation the block's (see
+        // `available_evals`); after our attack `!` (blocked and covered) our
+        // cover is optional, `!` or `-`.
+        //
         // on their side, they attack (our dig or block comes next) or they
-        // don't: after our attack or block `+` we play the ball again, their
-        // freeball (`OF`) optional; after our serve `/` their reception came
-        // back, not a freeball; after our serve `+`, `!` or `-`, our attack
-        // or block `-` they attack or send a freeball (`OF`): the evaluation
+        // don't: after our serve `/` their reception came back, not a
+        // freeball; after our serve `+`, `!` or `-`, our attack `-` or `+`
+        // (defended with difficulty: the roads are open, the ball back to
+        // us after their dig `/`, untold) or our block `!` (back to them,
+        // who attacked) they attack or send a freeball (`OF`): the evaluation
         // tells their reception or dig, the freeball what they made of it,
         // as our reception or dig and our freeball (`FB`) do: a perfect
         // reception the setter sends over is `#`, then the freeball. A ball
@@ -901,19 +944,26 @@ impl Snapshot {
         match (event.event_type, event.eval) {
             (R | CL | LR | LF | CS, _) => self.available_options.clone(),
             // their point
-            (OS | F, None) | (A | B | D | P | S, Some(Error)) | (A | B, Some(Over)) => serve_them(),
-            // ours
-            (OE, None) | (A | B | S, Some(Perfect)) => serve_us(),
-            (A | B, Some(Positive)) => vec![OE, F, A, FB, OF],
-            (A, Some(Exclamative)) | (D | P, Some(Exclamative | Negative | Positive | Perfect)) => {
-                vec![OE, F, A, FB]
+            (OS | F | PL, None) | (A | B | D | P | S, Some(Error)) | (A | B, Some(Over)) => {
+                serve_them()
             }
-            (A | B, Some(Negative))
+            // ours
+            (OE | PW, None) | (A | B | S, Some(Perfect)) => serve_us(),
+            // the ball stays with the blockers, or comes back to the
+            // attackers: the dig or the cover after it optional
+            (B, Some(Positive | Negative)) | (A, Some(Exclamative)) => {
+                vec![OE, F, A, D, FB, PW, PL]
+            }
+            (D | P, Some(Exclamative | Negative | Positive | Perfect)) => {
+                vec![OE, F, A, FB, PW, PL]
+            }
+            (A, Some(Negative | Positive))
+            | (B, Some(Exclamative))
             | (D | P, Some(Over))
             | (S, Some(Positive | Exclamative | Negative))
-            | (FB, None) => vec![OS, OE, F, A, D, B, FB, OF],
-            (S, Some(Over)) => vec![OE, A, F, B, FB],
-            (OF, None) => vec![OS, OE, F, A, B, FB],
+            | (FB, None) => vec![OS, OE, F, A, D, B, FB, OF, PW, PL],
+            (S, Some(Over)) => vec![OE, A, F, B, FB, PW, PL],
+            (OF, None) => vec![OS, OE, F, A, B, FB, PW, PL],
             _ => vec![],
         }
     }

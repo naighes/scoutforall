@@ -81,6 +81,16 @@ pub enum TeamSideEnum {
     Them,
 }
 
+impl TeamSideEnum {
+    /// The team across the net.
+    pub fn other(self) -> Self {
+        match self {
+            TeamSideEnum::Us => TeamSideEnum::Them,
+            TeamSideEnum::Them => TeamSideEnum::Us,
+        }
+    }
+}
+
 /// The rules moving the lineup when the events of a set are replayed: a set
 /// is replayed with the rules it was scouted with, or the lineup could differ
 /// from the one the events were chosen on.
@@ -101,6 +111,39 @@ impl LineupRulesEnum {
     pub const CURRENT: LineupRulesEnum = LineupRulesEnum::V2;
 
     pub const ALL: [LineupRulesEnum; 2] = [LineupRulesEnum::V1, LineupRulesEnum::V2];
+}
+
+/// The rules a set was scouted with: what can follow what, what each
+/// evaluation means (TODO/001, §4.2). A set saved with older rules is
+/// translated to the current ones when it's read (`domain::rules`); the
+/// data saved stays as it was until the set is written again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScoutingRulesEnum {
+    /// Up to v1.0.0, the data of the versions before the database too.
+    V1,
+    /// The block `!` (the ball back to the team attacking), `+` and `-`
+    /// keeping the ball with the blockers, the dig after the block.
+    V2,
+    /// The attack `+` defended with difficulty, the roads open after it;
+    /// the dig `!` only a cover, optional after the own attack `!`.
+    V3,
+    /// The block only of an attack, as in DataVolley: on a ball coming
+    /// over without one (their freeball, their reception straight back
+    /// after our serve `/`) only the invasion.
+    V4,
+}
+
+impl ScoutingRulesEnum {
+    /// The rules new sets are scouted with.
+    pub const CURRENT: ScoutingRulesEnum = ScoutingRulesEnum::V4;
+
+    pub const ALL: [ScoutingRulesEnum; 4] = [
+        ScoutingRulesEnum::V1,
+        ScoutingRulesEnum::V2,
+        ScoutingRulesEnum::V3,
+        ScoutingRulesEnum::V4,
+    ];
 }
 
 impl fmt::Display for TeamSideEnum {
@@ -177,6 +220,16 @@ impl FromStr for TeamSideEnum {
 ///   point when it falls on our court untouched (`OS`). An attack on it is
 ///   a counter-attack.
 ///
+/// - **PW**: Point Won (no cause)
+///   Our point, no touch telling why and nobody's (DataVolley's green
+///   code `$$&`): e.g. their reception came back on our serve `/` and
+///   they let it fall on their court. Always possible; only the score and
+///   its own count.
+///
+/// - **PL**: Point Lost (no cause)
+///   Their point, no touch telling why and nobody's: e.g. their reception
+///   came back on our serve `/` and we let it fall. Always possible.
+///
 /// - **R**: Substitution  
 ///   A player change performed by either team.
 ///
@@ -213,6 +266,8 @@ pub enum EventTypeEnum {
     LR,
     LF,
     CS,
+    PW,
+    PL,
 }
 
 impl fmt::Display for EventTypeEnum {
@@ -234,6 +289,8 @@ impl fmt::Display for EventTypeEnum {
             LR => "LR",
             LF => "LF",
             CS => "CS",
+            PW => "PW",
+            PL => "PL",
         };
         write!(f, "{}", label)
     }
@@ -247,7 +304,7 @@ impl WithDesc<EventTypeEnum> for EventTypeEnum {
 }
 
 impl EventTypeEnum {
-    pub const ALL: [EventTypeEnum; 15] = [
+    pub const ALL: [EventTypeEnum; 17] = [
         EventTypeEnum::S,  // serve
         EventTypeEnum::P,  // pass/reception
         EventTypeEnum::A,  // attack
@@ -263,7 +320,16 @@ impl EventTypeEnum {
         EventTypeEnum::LR, // libero replacement, in or out
         EventTypeEnum::LF, // the libero for a player of the back row
         EventTypeEnum::CS, // change setter
+        EventTypeEnum::PW, // our point, no cause
+        EventTypeEnum::PL, // their point, no cause
     ];
+
+    /// Whether the event changes the lineup (a substitution, a libero or
+    /// setter change) instead of touching the ball.
+    pub fn changes_lineup(&self) -> bool {
+        use EventTypeEnum::*;
+        matches!(self, R | CL | LR | LF | CS)
+    }
 
     pub fn requires_evaluation(&self) -> bool {
         use EventTypeEnum::*;
@@ -296,8 +362,7 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match self {
-            B => vec![Perfect, Positive, Over, Negative, Error],
-            S | A | D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
+            S | A | B | D | P => vec![Perfect, Positive, Exclamative, Over, Negative, Error],
             _ => vec![],
         }
     }
@@ -322,8 +387,8 @@ impl EventTypeEnum {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self, eval) {
-            (OE, _) | (B | A | S, Some(Perfect)) => Some(TeamSideEnum::Us),
-            (B | A, Some(Error | Over)) | (D | P | S, Some(Error)) | (F | OS, _) => {
+            (OE | PW, _) | (B | A | S, Some(Perfect)) => Some(TeamSideEnum::Us),
+            (B | A, Some(Error | Over)) | (D | P | S, Some(Error)) | (F | OS | PL, _) => {
                 Some(TeamSideEnum::Them)
             }
             _ => None,
@@ -334,21 +399,23 @@ impl EventTypeEnum {
     /// goes on; `None` when it ends the rally (see `rally_winner`) or isn't
     /// a touch (the changes of the lineup).
     ///
-    /// - on our side: our reception or dig (`/` aside), our attack coming
-    ///   back (`+` off their block, `!` blocked and covered), our block `+`,
-    ///   their reception coming straight back (serve `/`), their freeball;
+    /// - on our side: our reception or dig (`/` aside), our attack blocked
+    ///   and covered (`!`), our block `+` or `-` (the ball stays with the
+    ///   blockers), their reception coming straight back (serve `/`), their
+    ///   freeball;
     /// - on their side: our serve, our reception or dig going straight over
-    ///   (`/`), our attack defended (`-`), our block `-` (touched, played by
-    ///   them), our freeball.
+    ///   (`/`), our attack defended (`-`, or `+` with difficulty: the roads
+    ///   are open, the ball can come back to us, see `rally::admits`), our
+    ///   block `!` (the ball back to them, who attacked), our freeball.
     pub fn ball_side_after(&self, eval: Option<EvalEnum>) -> Option<TeamSideEnum> {
         use EvalEnum::*;
         use EventTypeEnum::*;
         match (self.rally_winner(eval), self, eval) {
-            (Some(_), _, _) | (None, R | CL | LR | LF | CS | F | OS | OE, _) => None,
+            (Some(_), _, _) | (None, R | CL | LR | LF | CS | F | OS | OE | PW | PL, _) => None,
             (None, S, Some(Over))
             | (None, P | D, Some(Perfect | Positive | Exclamative | Negative))
-            | (None, A, Some(Positive | Exclamative))
-            | (None, B, Some(Positive))
+            | (None, A, Some(Exclamative))
+            | (None, B, Some(Positive | Negative))
             | (None, OF, _) => Some(TeamSideEnum::Us),
             (None, S | P | D | A | B, _) | (None, FB, _) => Some(TeamSideEnum::Them),
         }
@@ -388,6 +455,8 @@ impl FriendlyName for EventTypeEnum {
             LR => labels.libero_in_out,
             LF => labels.libero_for,
             CS => labels.change_setter,
+            PW => labels.point_won,
+            PL => labels.point_lost,
         }
     }
 }
@@ -412,6 +481,8 @@ impl FromStr for EventTypeEnum {
             "LR" => Ok(LR),
             "LF" => Ok(LF),
             "CS" => Ok(CS),
+            "PW" => Ok(PW),
+            "PL" => Ok(PL),
             _ => Err(AppError::IO(IOError::Msg(format!(
                 "invalid event type: {}",
                 s
@@ -427,8 +498,10 @@ impl FromStr for EventTypeEnum {
 /// quality or outcome of a play. These evaluations are applied across
 /// all fundamentals (serve, reception, attack, block, dig/defense).
 ///
-/// A rally going on, `+` and `-` tell who plays the ball next: `+` us, `-`
-/// them (attacking), however hard the touch was. The serve mirrors their
+/// A rally going on (TODO/001, §4.2): after the attack `-` they attack,
+/// after `+` the roads are open (they struggle, or the ball comes back to
+/// us), after `!` we cover; the block keeps the ball with us on `+` and
+/// `-`, `!` sends it back to them. The serve mirrors their
 /// reception: `+` is their `-`, `!` their `!`, `-` their `+` or `#`, `/`
 /// their `/`.
 ///
@@ -447,11 +520,10 @@ impl FromStr for EventTypeEnum {
 ///   - Serve: puts the opponent in trouble, limiting their attack.
 ///   - Reception: accurate pass, but not perfect — still allows
 ///     first-tempo attacks.  
-///   - Attack: does not score, but we play the ball again without their
-///     attack: it rebounds off their block, their dig goes straight over,
-///     or they send a freeball (`OF`, optional).
-///   - Block: does not score, but we play the ball again without their
-///     attack (they can send a freeball, `OF`, optional).
+///   - Attack: defended with difficulty, they don't counterattack: their
+///     dig `-` (a freeball or an easy attack) or `/` (back to us).
+///   - Block: touched, the ball stays with us and we counterattack (our
+///     dig after it, optional, `+` or `#`).
 ///   - Defense: playable ball, but with limited attacking transition.
 ///
 /// - **Exclamative (`!`)**  
@@ -460,8 +532,10 @@ impl FromStr for EventTypeEnum {
 ///   - Reception: between `+` and `-` - pass is neither perfect nor bad.
 ///   - Attack: blocked, but kept alive by our team coverage, allowing a
 ///     possible re-attack (still a positive attack).
-///   - Block: not used.
-///   - Defense: similar to reception - playable, but not perfect.
+///   - Block: touched, the ball goes back to them, who attacked, however
+///     they rebuild.
+///   - Defense: only a cover, after our attack `!`: we rebuild (`-` when
+///     we struggle).
 ///
 /// - **Over (`/`)**  
 ///   The action gives the opponent a direct advantage or results
@@ -487,8 +561,9 @@ impl FromStr for EventTypeEnum {
 ///   A weak action that puts the team at disadvantage, though play continues.
 ///   - Serve: too easy, giving full control to the opponent.
 ///   - Reception: poor pass, only one predictable attack available.
-///   - Attack: defended, they attack again.
-///   - Block: touched, they attack again.
+///   - Attack: defended easily, they counterattack.
+///   - Block: touched, the ball stays with us but we struggle (our dig
+///     after it, optional, `-` or `/`).
 ///   - Defense: keeps the ball in play, but no chance for a strong counter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum EvalEnum {
@@ -570,29 +645,30 @@ impl EvalEnum {
         use EventTypeEnum::*;
         match (self, event) {
             (Perfect, A) => Some(labels.winning_attack.to_string()),
-            (Positive, A) => Some(labels.attack_continuation.to_string()),
+            (Positive, A) => Some(labels.attack_dug_with_difficulty.to_string()),
             (Exclamative, A) => Some(labels.kept_alive_by_our_coverage.to_string()),
             (Negative, A) => Some(labels.opponent_counter_attack_opportunity.to_string()),
 
             (Perfect, B) => Some(labels.winning_block.to_string()),
             (Positive, B) => Some(labels.counter_attack_opportunity.to_string()),
-            (Negative, B) => Some(labels.opponent_counter_attack_opportunity.to_string()),
+            (Exclamative, B) => Some(labels.kept_alive_by_their_coverage.to_string()),
+            (Negative, B) => Some(labels.limited_attack_options.to_string()),
 
             (Positive, D) => Some(labels.first_tempo_still_available.to_string()),
-            (Exclamative, D) => Some(labels.few_attack_options_available.to_string()),
+            (Exclamative, D) => Some(labels.rebuilt_after_the_block.to_string()),
             (Negative, D) => Some(labels.limited_attack_options.to_string()),
             (Over, D) => Some(labels.ball_goes_straight_over_the_net.to_string()),
 
             (Positive, P) => Some(labels.first_tempo_still_available.to_string()),
             (Exclamative, P) => Some(labels.few_attack_options_available.to_string()),
             (Negative, P) => Some(labels.limited_attack_options.to_string()),
-            (Over, P) => Some(labels.ball_goes_straight_over_the_net.to_string()),
+            (Over, P) => Some(labels.ball_over_or_forced_freeball.to_string()),
 
             (Perfect, S) => None,
             (Positive, S) => Some(labels.opponent_with_limited_attack_options.to_string()),
             (Exclamative, S) => Some(labels.opponent_with_few_attack_options.to_string()),
             (Negative, S) => Some(labels.opponent_with_full_attack_options.to_string()),
-            (Over, S) => Some(labels.ball_goes_straight_back_to_our_court.to_string()),
+            (Over, S) => Some(labels.ball_back_or_forced_freeball.to_string()),
             _ => None,
         }
     }
@@ -610,13 +686,14 @@ impl EvalEnum {
 
             (Perfect, B) => labels.winning_block.to_string(),
             (Positive, B) => labels.positive.to_string(),
+            (Exclamative, B) => labels.covered.to_string(),
             (Negative, B) => labels.negative.to_string(),
             (Error, B) => labels.error.to_string(),
             (Over, B) => labels.net_fault.to_string(),
 
             (Perfect, D) => labels.perfect.to_string(),
             (Positive, D) => labels.positive.to_string(),
-            (Exclamative, D) => labels.subpositive.to_string(),
+            (Exclamative, D) => labels.good_cover.to_string(),
             (Negative, D) => labels.negative.to_string(),
             (Error, D) => labels.error.to_string(),
             (Over, D) => labels.overpass.to_string(),

@@ -3,13 +3,17 @@ package io.github.naighes.scout4all
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.AnnotatedString
 import java.time.LocalDate
+import io.github.naighes.scout4all.core.EvalEnum
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -98,6 +102,76 @@ class AnalysisTest {
         days("20261131", "20261130")
         rule.waitForText(string(R.string.not_a_day))
         rule.waitForText("2026-11-01 → 2026-11-30", substring = true)
+    }
+
+    /** An opponent scouted on both sides: the analysis can be seen from its
+     * side; with none, no such choice. */
+    @Test
+    fun theAnalysisSeenFromAnOpponentScoutedOnBothSides() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona")
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        rule.waitForText(string(R.string.matches_count, 1), substring = true)
+        rule.onAllNodesWithText(string(R.string.seen_from)).assertCountEquals(0)
+    }
+
+    @Test
+    fun theAnalysisSeenFromTheOpponent() {
+        val both = saveNationalTeam()
+        serve(both, startFirstSetBoth(both), EvalEnum.PERFECT)
+        rule.setContent { Scout4AllTheme { AnalysisScreen(both, onBack = {}) } }
+        rule.waitForText(string(R.string.seen_from))
+        val chip = { name: String -> rule.onNode(hasText(name) and hasClickAction()) }
+        chip("Arezzo").performClick()
+        rule.waitFor { runCatching { chip("Arezzo").assertIsSelected() }.isSuccess }
+        rule.waitForText(string(R.string.matches_count, 1), substring = true)
+    }
+
+    /** The opponent beside the team, in their matches: the chip is offered
+     * on the summary once an opponent is chosen, and shows both sides. */
+    @Test
+    fun theTeamAndTheOpponentSideBySide() {
+        val both = saveNationalTeam()
+        serve(both, startFirstSetBoth(both), EvalEnum.PERFECT)
+        rule.setContent { Scout4AllTheme { AnalysisScreen(both, onBack = {}) } }
+        rule.waitForText(string(R.string.seen_from))
+        // none until an opponent is chosen
+        rule.onAllNodesWithText(string(R.string.compare)).assertCountEquals(0)
+        val chip = { name: String -> rule.onNode(hasText(name) and hasClickAction()) }
+        chip("Arezzo").performClick()
+        rule.waitForText(string(R.string.compare))
+        chip(string(R.string.compare)).performClick()
+        rule.waitFor { runCatching { chip(string(R.string.compare)).assertIsSelected() }.isSuccess }
+        rule.waitForText(string(R.string.stats_errors))
+        // another page leaves the comparison
+        rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performClick()
+        rule.waitFor { rule.onAllNodesWithText(string(R.string.compare)).fetchSemanticsNodes().isEmpty() }
+    }
+
+    /** One competition alone: nothing to choose. */
+    @Test
+    fun oneCompetitionIsNotOffered() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona", "Coppa")
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        rule.waitForText(string(R.string.matches_count, 1), substring = true)
+        assertEquals(0, rule.onAllNodesWithText(string(R.string.all_competitions)).fetchSemanticsNodes().size)
+    }
+
+    /** Two competitions: the row offers them, the one chosen narrows the
+     * matches, all of them bring the others back. */
+    @Test
+    fun theCompetitionOfTheMatches() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona", "Coppa")
+        winMatch(team, "Arezzo", "Serie A")
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        rule.waitForText(string(R.string.all_competitions))
+        rule.waitForText(string(R.string.matches_count, 2), substring = true)
+        rule.onNode(hasText("Coppa") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.matches_count, 1), substring = true)
+        rule.onNode(hasText(string(R.string.all_competitions)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.matches_count, 2), substring = true)
     }
 
     /** The reception of the rally chosen by its group: the chip says it. */

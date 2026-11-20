@@ -981,10 +981,7 @@ mod tests {
             .iter()
             .flat_map(|set| {
                 set.events.iter().enumerate().map(move |(index, e)| {
-                    let correction = profile.correction(EventRef {
-                        set_number: set.set_number,
-                        index,
-                    });
+                    let correction = profile.correction(EventRef::of_a(set.set_number, index));
                     place(profile, m, &durations, e.timestamp)
                         .map(|ms| ms + correction.unwrap_or(0))
                 })
@@ -1213,6 +1210,63 @@ mod tests {
         assert_eq!(
             video_in_database(&db, &team).await.1,
             StoredProfile::Profile(expected)
+        );
+    }
+
+    /// The profile of the folder refers to the rows of the files: a row
+    /// the current rules leave out (a block `+` of their freeball, the dig
+    /// after it) takes its references away, the rows after it keep theirs.
+    #[tokio::test]
+    async fn references_follow_their_rows_past_the_events_left_out() {
+        let device = Device::of("v0.18.0");
+        let (_, folder) = video_folder(&device.data());
+        let csv = folder.join("set_1.csv");
+        let rows: Vec<String> = std::fs::read_to_string(&csv)
+            .unwrap()
+            .lines()
+            .enumerate()
+            .map(|(i, row)| match i {
+                2 => row.replacen(",FB,", ",OF,", 1),
+                3 => row.replacen(",-,", ",+,", 1),
+                _ => row.to_string(),
+            })
+            .collect();
+        std::fs::write(&csv, rows.join("\n") + "\n").unwrap();
+        let profile = folder.join("video.json");
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&profile).unwrap()).unwrap();
+        json["corrections"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({"event": {"set_number": 1, "index": 3}, "by_ms": 700}));
+        std::fs::write(&profile, serde_json::to_vec(&json).unwrap()).unwrap();
+
+        let db = database();
+        let migrated = device.migrate(&db).await;
+        assert_eq!((migrated.videos, migrated.left), (1, vec![]));
+        // the reception of row 7, fifth among the events read
+        assert_eq!(
+            count(
+                &db,
+                "SELECT count(*) FROM match_video_corrections c
+                 JOIN events e ON e.id = c.event_id
+                 WHERE e.set_number = 1 AND e.seq = 5 AND e.event_type = 'P'
+                   AND c.by_ms = -1500"
+            ),
+            1
+        );
+        // the block left out takes its correction away
+        assert_eq!(
+            count(&db, "SELECT count(*) FROM match_video_corrections"),
+            1
+        );
+        assert_eq!(
+            count(
+                &db,
+                "SELECT count(*) FROM match_videos v JOIN events e ON e.id = v.anchor_event
+                 WHERE e.set_number = 1 AND e.seq = 0"
+            ),
+            1
         );
     }
 

@@ -25,10 +25,19 @@ use crate::{
     domain::{
         Event, Home, LegacyId, Match, MatchSet, MatchVideo, MatchVideoFile, Membership, Person,
         RosterEntry, ScoutingMode, SetLineup, Side, Team, TeamRef, VideoAnchor, VideoCorrection,
+        rules::translate_rows,
     },
-    errors::{AppError, IOError},
+    errors::{AppError, IOError, MatchError},
     player_form::removed,
-    shapes::{r#match::MatchEntry, player::PlayerEntry, set::SetEntry, team::TeamEntry},
+    rally::{Incoherence, Touches, project, replay},
+    shapes::{
+        enums::{ScoutingRulesEnum, TeamSideEnum},
+        r#match::MatchEntry,
+        player::PlayerEntry,
+        set::SetEntry,
+        snapshot::{EventEntry, Snapshot},
+        team::TeamEntry,
+    },
     video::{Anchor, Correction, EventRef, VIDEO_PROFILE_VERSION, VideoFile, VideoProfile},
 };
 use std::{collections::BTreeMap, num::NonZeroI64};
@@ -221,25 +230,98 @@ impl MatchRows {
                 self.row.id
             ))),
         }?;
-        let team = self.team_of_a(team_a)?;
-        let mut sets: Vec<&SetRows> = self.sets.iter().filter(|s| !s.row.deleted).collect();
-        sets.sort_by_key(|s| s.row.number);
-        let sets = sets
+        let sets = self
+            .played()
             .into_iter()
             .map(SetRows::entry)
             .collect::<Result<_, _>>()?;
+        self.entry_of(
+            self.row.team_a,
+            team_a,
+            opponent,
+            self.row.home.is_a(),
+            sets,
+        )
+    }
+
+    /// The match from B's side, scouted on both sides: `team_a` its team A
+    /// (the opponent), `team_b` its team B with the numbers and roles of
+    /// the roster, its sets as B sees them (`SetRows::entry_of_b`). `None`
+    /// scouting only A.
+    pub fn entry_of_b(
+        &self,
+        team_a: &TeamEntry,
+        team_b: &TeamEntry,
+    ) -> Result<Option<MatchEntry>, AppError> {
+        match (self.row.scouting, &self.row.team_b) {
+            (ScoutingMode::A, _) => Ok(None),
+            (ScoutingMode::Both, TeamRef::Team(id))
+                if *id == team_b.id && team_a.id == self.row.team_a =>
+            {
+                let sets = self
+                    .played()
+                    .into_iter()
+                    .map(|s| {
+                        s.entry_of_b().ok_or_else(|| {
+                            not_consistent(format!(
+                                "set {} of match {} without the lineup of B",
+                                s.row.number, self.row.id
+                            ))
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
+                self.entry_of(*id, team_b, team_a.name.clone(), self.row.home.is_b(), sets)
+                    .map(Some)
+            }
+            (ScoutingMode::Both, _) => Err(not_consistent(format!(
+                "match {}: teams {} and {} given, not its teams",
+                self.row.id, team_a.id, team_b.id
+            ))),
+        }
+    }
+
+    /// The sets played, with, for each event of B's stream, the event of
+    /// A's it comes from (`SetRows::origins_in_a`). Nothing scouting only A.
+    pub fn origins_of_b(&self) -> Vec<(u8, Vec<Option<usize>>)> {
+        match self.row.scouting {
+            ScoutingMode::A => vec![],
+            ScoutingMode::Both => self
+                .played()
+                .into_iter()
+                .map(|s| (s.row.number, s.origins_in_a()))
+                .collect(),
+        }
+    }
+
+    /// The sets not removed, in order.
+    fn played(&self) -> Vec<&SetRows> {
+        let mut sets: Vec<&SetRows> = self.sets.iter().filter(|s| !s.row.deleted).collect();
+        sets.sort_by_key(|s| s.row.number);
+        sets
+    }
+
+    /// The match as the team `team_id` (`team`) sees it, with its sets.
+    fn entry_of(
+        &self,
+        team_id: Uuid,
+        team: &TeamEntry,
+        opponent: String,
+        home: bool,
+        sets: Vec<SetEntry>,
+    ) -> Result<MatchEntry, AppError> {
+        let team = self.team_of(team_id, team)?;
         let roster = team
             .players
             .iter()
             .map(|p| p.id)
-            .filter(|id| self.in_roster_of_a(*id).is_some())
+            .filter(|id| self.in_roster_of(team_id, *id).is_some())
             .collect::<Vec<_>>();
         Ok(MatchEntry {
             opponent,
             date: self.row.start,
             id: self.row.id.to_string(),
             team: team.with_roster(&roster),
-            home: self.row.home.is_a(),
+            home,
             max_substitutions: self.row.max_substitutions,
             notes: self.row.notes.clone(),
             roster,
@@ -249,33 +331,34 @@ impl MatchRows {
         })
     }
 
-    fn in_roster_of_a(&self, person_id: Uuid) -> Option<&RosterEntry> {
+    fn in_roster_of(&self, team_id: Uuid, person_id: Uuid) -> Option<&RosterEntry> {
         self.roster
             .iter()
-            .find(|r| r.team_id == self.row.team_a && r.person_id == person_id)
+            .find(|r| r.team_id == team_id && r.person_id == person_id)
     }
 
-    /// Team A with the numbers and roles of the roster of the match.
-    fn team_of_a(&self, team_a: &TeamEntry) -> Result<TeamEntry, AppError> {
+    /// The team `team_id` with the numbers and roles of the roster of the
+    /// match.
+    fn team_of(&self, team_id: Uuid, team: &TeamEntry) -> Result<TeamEntry, AppError> {
         let missing = self
             .roster
             .iter()
-            .filter(|r| r.team_id == self.row.team_a)
-            .find(|r| team_a.find_player(r.person_id).is_none());
-        match (team_a.id == self.row.team_a, missing) {
+            .filter(|r| r.team_id == team_id)
+            .find(|r| team.find_player(r.person_id).is_none());
+        match (team.id == team_id, missing) {
             (false, _) => Err(not_consistent(format!(
-                "match {}: team A is {}, not {}",
-                self.row.id, self.row.team_a, team_a.id
+                "match {}: team {team_id} expected, not {}",
+                self.row.id, team.id
             ))),
             (true, Some(r)) => Err(not_consistent(format!(
                 "match {}: player {} of the roster not in team {}",
-                self.row.id, r.person_id, team_a.id
+                self.row.id, r.person_id, team.id
             ))),
             (true, None) => Ok(TeamEntry {
-                players: team_a
+                players: team
                     .players
                     .iter()
-                    .map(|p| match self.in_roster_of_a(p.id) {
+                    .map(|p| match self.in_roster_of(team_id, p.id) {
                         Some(r) => PlayerEntry {
                             number: r.number,
                             role: r.role,
@@ -284,7 +367,7 @@ impl MatchRows {
                         None => p.clone(),
                     })
                     .collect(),
-                ..team_a.clone()
+                ..team.clone()
             }),
         }
     }
@@ -326,6 +409,8 @@ impl SetRows {
                 number: set.set_number,
                 serving: Side::from_a(set.serving_team),
                 lineup_rules: set.lineup_rules,
+                // a set in memory follows the current rules
+                scouting_rules: Some(ScoutingRulesEnum::CURRENT),
                 deleted: false,
             },
             lineups: vec![SetLineup {
@@ -341,6 +426,56 @@ impl SetRows {
         })
     }
 
+    /// A set of match `match_id` scouted on both sides: the starts of A
+    /// and B (lineup, serving team as each sees it, their events aside),
+    /// the touches of the two in order, each with an id of its own.
+    pub fn of_both(
+        a: &SetEntry,
+        b: &SetEntry,
+        touches: &[(Side, EventEntry)],
+        match_id: Uuid,
+    ) -> Result<Self, AppError> {
+        let of_a = SetRows::of(
+            &SetEntry {
+                events: vec![],
+                ..a.clone()
+            },
+            match_id,
+        )?;
+        let lineup_b = SetLineup {
+            side: Side::B,
+            positions: b.initial_positions,
+            libero: b.libero,
+            fallback_libero: b.fallback_libero,
+            setter: b.setter,
+            ..of_a.lineups.first().cloned().ok_or_else(|| {
+                not_consistent(format!("set {} without the lineup of A", a.set_number))
+            })?
+        };
+        let events = touches
+            .iter()
+            .enumerate()
+            .map(|(i, (side, e))| {
+                u32::try_from(i)
+                    .map(|seq| Event {
+                        id: Uuid::new_v4(),
+                        match_id,
+                        set_number: a.set_number,
+                        seq,
+                        side: *side,
+                        entry: e.clone(),
+                        deleted: false,
+                    })
+                    .map_err(|_| not_consistent(format!("touch {i} of set {}", a.set_number)))
+            })
+            .collect::<Result<_, _>>()?;
+        Ok(SetRows {
+            lineups: [of_a.lineups, vec![lineup_b]].concat(),
+            events,
+            ..of_a
+        })
+    }
+
     /// The set from A's side.
     pub fn entry(&self) -> Result<SetEntry, AppError> {
         let lineup = self
@@ -353,7 +488,6 @@ impl SetRows {
                     self.row.number, self.row.match_id
                 ))
             })?;
-        let events = self.events_of_a();
         Ok(SetEntry {
             set_number: self.row.number,
             serving_team: self.row.serving.to_a(),
@@ -362,62 +496,239 @@ impl SetRows {
             fallback_libero: lineup.fallback_libero,
             setter: lineup.setter,
             lineup_rules: self.row.lineup_rules,
-            events: events.into_iter().map(|e| e.entry.clone()).collect(),
+            events: self.stream_of_a().into_iter().map(|(_, e)| e).collect(),
         })
     }
 
-    /// The events of A not undone, in their order: those of `SetEntry`.
-    pub fn events_of_a(&self) -> Vec<&Event> {
-        let mut events: Vec<&Event> = self
-            .events
+    /// The set from B's side, scouted on both sides: B's lineup and the
+    /// touches projected on B's side. `None` without B's lineup.
+    pub fn entry_of_b(&self) -> Option<SetEntry> {
+        self.start(Side::B).map(|start| SetEntry {
+            events: project(&self.touches()).entries(Side::B),
+            ..start
+        })
+    }
+
+    /// For each event of B's stream (`entry_of_b`), the index of the event
+    /// of A's stream coming from the same touch, if A's has one: the
+    /// touch of A an event of B is born from, for what is saved by the
+    /// events of A (the corrections of the video).
+    pub fn origins_in_a(&self) -> Vec<Option<usize>> {
+        let streams = project(&self.touches());
+        streams
+            .b
             .iter()
-            .filter(|e| e.side == Side::A && !e.deleted)
-            .collect();
+            .map(|b| streams.a.iter().position(|a| a.source == b.source))
+            .collect()
+    }
+
+    /// The ids of the touches B's stream (`entry_of_b`) comes from, one
+    /// per event: what the corrections of the video are kept by. Nothing
+    /// without B's lineup.
+    pub fn ids_of_b(&self) -> Vec<Uuid> {
+        match self.on_both_sides() {
+            false => vec![],
+            true => {
+                let entries = self.entries();
+                let touches: Vec<(Side, EventEntry)> = entries
+                    .iter()
+                    .map(|(row, entry)| (row.side, entry.clone()))
+                    .collect();
+                project(&touches)
+                    .b
+                    .into_iter()
+                    .filter_map(|p| entries.get(p.source).map(|(row, _)| row.id))
+                    .collect()
+            }
+        }
+    }
+
+    /// Whether the set is scouted on both sides: B has its lineup.
+    pub fn on_both_sides(&self) -> bool {
+        self.lineups.iter().any(|l| l.side == Side::B)
+    }
+
+    /// The stream of A, each event with the row it comes from: the events
+    /// of A, or, scouted on both sides, the touches projected on A's side
+    /// (what B's touches tell A from B's rows).
+    pub fn stream_of_a(&self) -> Vec<(&Event, EventEntry)> {
+        let entries = self.entries();
+        match self.on_both_sides() {
+            true => {
+                let touches: Vec<(Side, EventEntry)> = entries
+                    .iter()
+                    .map(|(row, entry)| (row.side, entry.clone()))
+                    .collect();
+                project(&touches)
+                    .a
+                    .into_iter()
+                    .filter_map(|p| entries.get(p.source).map(|(row, _)| (*row, p.entry)))
+                    .collect()
+            }
+            false => entries
+                .into_iter()
+                .filter(|(row, _)| row.side == Side::A)
+                .collect(),
+        }
+    }
+
+    /// The events of A not undone, in their order.
+    pub fn events_of_a(&self) -> Vec<&Event> {
+        self.rows()
+            .into_iter()
+            .filter(|e| e.side == Side::A)
+            .collect()
+    }
+
+    /// The touches of both sides not undone, in their order: the sequence
+    /// `rally::project` reads.
+    pub fn touches(&self) -> Vec<(Side, EventEntry)> {
+        self.entries()
+            .into_iter()
+            .map(|(row, entry)| (row.side, entry))
+            .collect()
+    }
+
+    /// The rows not undone, in their order, each with its event as the
+    /// current scouting rules tell it (`rules::translate`): the rows keep
+    /// the rules they were saved with.
+    pub fn entries(&self) -> Vec<(&Event, EventEntry)> {
+        self.translated()
+            .into_iter()
+            .filter_map(|(row, entry)| entry.map(|entry| (row, entry)))
+            .collect()
+    }
+
+    /// Every row not undone, in their order, with its event as the current
+    /// scouting rules tell it, `None` when they leave it out
+    /// (`rules::translate_rows`).
+    pub fn translated(&self) -> Vec<(&Event, Option<EventEntry>)> {
+        let rows = self.rows();
+        let touches: Vec<(Side, EventEntry)> =
+            rows.iter().map(|e| (e.side, e.entry.clone())).collect();
+        rows.into_iter()
+            .zip(translate_rows(self.row.scouting_rules, &touches))
+            .map(|(row, told)| (row, told.map(|(_, entry)| entry)))
+            .collect()
+    }
+
+    // the rows not undone, in their order
+    fn rows(&self) -> Vec<&Event> {
+        let mut events: Vec<&Event> = self.events.iter().filter(|e| !e.deleted).collect();
         events.sort_by_key(|e| e.seq);
         events
     }
+
+    /// The start of the set as the side sees it, without its events: its
+    /// lineup, the serving team from its point of view. `None` without the
+    /// lineup of the side (B, scouting only A).
+    pub fn start(&self, side: Side) -> Option<SetEntry> {
+        self.lineups
+            .iter()
+            .find(|l| l.side == side)
+            .map(|lineup| SetEntry {
+                set_number: self.row.number,
+                serving_team: match self.row.serving == side {
+                    true => TeamSideEnum::Us,
+                    false => TeamSideEnum::Them,
+                },
+                initial_positions: lineup.positions,
+                libero: lineup.libero,
+                fallback_libero: lineup.fallback_libero,
+                setter: lineup.setter,
+                lineup_rules: self.row.lineup_rules,
+                events: vec![],
+            })
+    }
+
+    /// The set as scouted on both sides, when B has its lineup.
+    pub fn both(&self) -> Option<Touches> {
+        Some(Touches {
+            a: self.start(Side::A)?,
+            b: self.start(Side::B)?,
+            touches: self.touches(),
+        })
+    }
+
+    /// The snapshots of the set, A's and B's when B has its lineup (scouted
+    /// on both sides): the touches projected and replayed on each side
+    /// (`rally::replay`). Scouting only A, A's events replayed as today.
+    pub fn sides(&self, max_substitutions: u8) -> Result<Sides, AppError> {
+        let incoherent = |e: Incoherence| {
+            AppError::Match(MatchError::LoadSetError(format!(
+                "set {} of match {}: {e}",
+                self.row.number, self.row.match_id
+            )))
+        };
+        match (self.start(Side::A), self.start(Side::B)) {
+            (Some(a), Some(b)) => replay(&a, &b, &self.touches(), max_substitutions)
+                .map(|(a, b)| Sides { a, b: Some(b) })
+                .map_err(incoherent),
+            (Some(_), None) => self
+                .entry()?
+                .compute_snapshot(max_substitutions)
+                .map(|a| Sides { a, b: None }),
+            (None, _) => Err(not_consistent(format!(
+                "set {} of match {} without the lineup of A",
+                self.row.number, self.row.match_id
+            ))),
+        }
+    }
+}
+
+/// The snapshots of the two sides of a set, each from its point of view;
+/// B's only when scouted on both sides.
+#[derive(Debug, Clone)]
+pub struct Sides {
+    pub a: Snapshot,
+    pub b: Option<Snapshot>,
 }
 
 /// The events of the sets of a match as `SetEntry` has them, by
-/// `EventRef` and by id.
+/// `EventRef` and by id: an event B's touch tells A by the id of that
+/// touch.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EventsOfA {
-    by_ref: BTreeMap<(u8, usize), Uuid>,
+pub struct EventRefs {
+    by_ref: BTreeMap<(Side, u8, usize), Uuid>,
     by_id: BTreeMap<Uuid, EventRef>,
 }
 
-impl EventsOfA {
+impl EventRefs {
     pub fn of(sets: &[SetRows]) -> Self {
-        let pairs: Vec<(EventRef, Uuid)> = sets
-            .iter()
-            .filter(|s| !s.row.deleted)
+        let played = || sets.iter().filter(|s| !s.row.deleted);
+        let of_a: Vec<(EventRef, Uuid)> = played()
             .flat_map(|s| {
-                s.events_of_a()
+                s.stream_of_a()
                     .into_iter()
                     .enumerate()
-                    .map(|(index, e)| {
-                        (
-                            EventRef {
-                                set_number: s.row.number,
-                                index,
-                            },
-                            e.id,
-                        )
-                    })
+                    .map(|(index, (e, _))| (EventRef::of_a(s.row.number, index), e.id))
                     .collect::<Vec<_>>()
             })
             .collect();
-        EventsOfA {
-            by_ref: pairs
+        let of_b: Vec<(EventRef, Uuid)> = played()
+            .flat_map(|s| {
+                s.ids_of_b()
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, id)| (EventRef::of_b(s.row.number, index), id))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        EventRefs {
+            by_ref: of_a
                 .iter()
-                .map(|(r, id)| ((r.set_number, r.index), *id))
+                .chain(&of_b)
+                .map(|(r, id)| ((r.side, r.set_number, r.index), *id))
                 .collect(),
-            by_id: pairs.into_iter().map(|(r, id)| (id, r)).collect(),
+            // the touch of both streams is told by A's event
+            by_id: of_b.iter().chain(&of_a).map(|(r, id)| (*id, *r)).collect(),
         }
     }
 
     pub fn id(&self, event: EventRef) -> Option<Uuid> {
-        self.by_ref.get(&(event.set_number, event.index)).copied()
+        self.by_ref
+            .get(&(event.side, event.set_number, event.index))
+            .copied()
     }
 
     pub fn event_ref(&self, id: Uuid) -> Option<EventRef> {
@@ -443,7 +754,7 @@ impl VideoRows {
     pub fn of(
         profile: &VideoProfile,
         match_id: Uuid,
-        events: &EventsOfA,
+        events: &EventRefs,
     ) -> Result<Self, AppError> {
         let id_of = |event: EventRef| {
             events.id(event).ok_or_else(|| {
@@ -499,7 +810,7 @@ impl VideoRows {
 
     /// The profile from A's side, its events those of `events`: the
     /// corrections in the order of their events.
-    pub fn profile(&self, events: &EventsOfA) -> VideoProfile {
+    pub fn profile(&self, events: &EventRefs) -> VideoProfile {
         let mut files: Vec<&MatchVideoFile> = self.files.iter().collect();
         files.sort_by_key(|f| f.position);
         let mut corrections: Vec<Correction> = self

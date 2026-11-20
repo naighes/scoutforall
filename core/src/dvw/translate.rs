@@ -1,14 +1,20 @@
 //! A set of DataVolley as one of ours, for one of the two teams: rally by
 //! rally, our touches become our events and the touches of the opponent
 //! only what ends a rally (`OS`, `OE`), all validated by our `Snapshot` as
-//! the scouting would. Nothing is guessed: a rally that doesn't translate
-//! exactly, a lineup different from the six on court of the file, a score
-//! different from the file's stop the set.
+//! the scouting would. Before that the rally is told as our rules tell it,
+//! the same for both teams (`decide`): who decides an evaluation, the
+//! touches the file leaves untold, the scenarios refused. Nothing is
+//! guessed: a rally that doesn't translate exactly, a lineup different from
+//! the six on court of the file, a score different from the file's stop the
+//! set; an error of the scout (`Impossible`) stops it with the line and the
+//! touches, to correct the file.
 
 use crate::{
+    dvw::decide::decide,
     dvw::model::{
         AttackCombination, Code, DvwFile, ScoutLine, Side, Skill, SkillCode, WinningSymbols,
     },
+    rally::Incoherence,
     shapes::{
         court_zone::{CourtTarget, ServeStartEnum, SubzoneEnum, TargetKind},
         enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum, TeamSideEnum},
@@ -59,7 +65,45 @@ pub enum Issue {
     },
     /// The file ends the set before one of the teams wins it.
     Unfinished,
+    /// The touches of the two teams don't replay on both sides.
+    Sides(Incoherence),
+    /// An answer (a reception, a dig, a block) the touch it answers, at
+    /// `answered_line`, doesn't admit (`rally::answer_evals`): the two
+    /// teams tell the same transition differently.
+    Answer {
+        answered: (EventTypeEnum, Option<EvalEnum>),
+        answered_line: usize,
+        answer: (EventTypeEnum, Option<EvalEnum>),
+    },
+    /// An error of the scout (`dvw::decide`): the match doesn't import
+    /// until the file is corrected.
+    Impossible(Impossible),
 }
+
+/// A rally that can't have been played as the file tells it: the touches
+/// by skill and evaluation, as the file writes them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Impossible {
+    /// A touch of the team after its own reception or dig over (`/`), at
+    /// `over_line`: the ball was on the other side.
+    TouchAfterOver {
+        over: (Skill, char),
+        over_line: usize,
+        touch: (Skill, char),
+    },
+    /// A dig or a block without the attack of the other team, right after
+    /// `before`, at `before_line`.
+    MissingAttack {
+        before: (Skill, char),
+        before_line: usize,
+        touch: (Skill, char),
+    },
+}
+
+/// Where an event comes from in the file: the line, and the touch of the
+/// rally (as `dvw::decide` tells it, the same for both teams) it comes
+/// from, 0 before the touches, `usize::MAX` the point.
+pub(crate) type At = (usize, usize);
 
 /// What the file tells in a way we can't translate exactly.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,10 +123,6 @@ pub enum Untranslatable {
     /// which.
     LiberoForWhom(Vec<u8>),
     OurTouchWithoutPlayer,
-    /// Their attack back from our block (`!`) without our block.
-    TheirAttackBackWithoutOurBlock,
-    /// Their attack blocked (`/`) without our block point.
-    TheirAttackBlockedWithoutOurBlock,
     UnknownEvaluation(char),
 }
 
@@ -114,6 +154,21 @@ pub fn translate_set(
     date: DateTime<FixedOffset>,
     max_substitutions: u8,
 ) -> Result<(SetEntry, Mappings), TranslateError> {
+    translate_lined(file, us, set_number, date, max_substitutions)
+        .map(|(set, mappings, _)| (set, mappings))
+}
+
+/// [`translate_set`], with the line of the file each event comes from: the
+/// touch it translates, the first touch of the rally for what comes before
+/// the touches (a libero change), the point for what ends the rally on the
+/// other side.
+pub(crate) fn translate_lined(
+    file: &DvwFile,
+    us: &Us,
+    set_number: u8,
+    date: DateTime<FixedOffset>,
+    max_substitutions: u8,
+) -> Result<(SetEntry, Mappings, Vec<At>), TranslateError> {
     let fail = |line: Option<usize>, issue: Issue| TranslateError {
         set_number,
         line,
@@ -130,6 +185,8 @@ pub fn translate_set(
         combinations: &file.attack_combinations,
         snapshot,
         events: vec![],
+        lines: vec![],
+        step: 0,
         rally_start: 0,
         mappings: Mappings::new(),
         clock: midnight(date, video_clock),
@@ -140,6 +197,7 @@ pub fn translate_set(
         earlier: None,
         at: None,
         inverted_p1: false,
+        block_left_out: false,
     };
     set.translate(lines)
         .map_err(|(line, issue)| fail(line, issue))?;
@@ -150,6 +208,7 @@ pub fn translate_set(
                 ..start
             },
             set.mappings,
+            set.lines,
         )),
         None => Err(fail(None, Issue::Unfinished)),
     }
@@ -309,7 +368,7 @@ fn number(us: &Us, id: Uuid) -> u8 {
 }
 
 /// The symbols of DataVolley when the file has none (Click&Scout).
-fn default_symbols() -> WinningSymbols {
+pub(crate) fn default_symbols() -> WinningSymbols {
     WinningSymbols {
         skills: vec![
             (Skill::Serve, vec!['='], vec!['#']),
@@ -331,37 +390,18 @@ enum Ending {
     Goes,
 }
 
-/// Who plays the ball after a touch of ours, up to our next touch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum After {
-    /// we do, at once
-    Kept,
-    /// we do, sending a freeball: their freeball received (`F`)
-    OurFreeball,
-    /// they do, attacking
-    TheyAttack,
-    /// they do, and send it back without attacking: we receive their
-    /// freeball (`F`), or they send it (`F` theirs)
-    TheirFreeball,
-    /// they do, and send it back without attacking (e.g. their dig over)
-    BackWithoutAttack,
-    /// they do, and the rally ends on their side without their attack
-    /// (e.g. their error)
-    Ended,
-}
-
 /// A touch of the rally: of a player, the freeball a player sends over,
 /// or a point without one (`$$&`).
-#[derive(Debug, Clone, Copy)]
-enum Touch<'a> {
-    Skill(Side, &'a SkillCode),
-    Sent(Side, &'a SkillCode),
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Touch {
+    Skill(Side, SkillCode),
+    Sent(Side, SkillCode),
     Green(Side, char),
 }
 
-impl<'a> Touch<'a> {
+impl Touch {
     // a player's touch: its side and its code
-    fn played(&self) -> Option<(Side, &'a SkillCode)> {
+    pub(crate) fn played(&self) -> Option<(Side, &SkillCode)> {
         match self {
             Touch::Skill(side, skill) | Touch::Sent(side, skill) => Some((*side, skill)),
             Touch::Green(_, _) => None,
@@ -385,8 +425,10 @@ fn after_ball_off_a_block(before: &[(&ScoutLine, Touch)], us: Side) -> bool {
 /// The file's `F` is the freeball received, except right after a touch of
 /// the same side with the other side touching next (or nobody, after a
 /// touch keeping the ball): then it's the freeball sent over, as some
-/// scouts write it.
-fn freeballs_sent<'a>(touches: &[(&'a ScoutLine, Touch<'a>)]) -> Vec<(&'a ScoutLine, Touch<'a>)> {
+/// scouts write it. After a touch of the same side sending the ball over
+/// (`/`) it's received all the same, sent back by the other side
+/// (`&MIL-27.dvw` `a11SQ/ *18RQ/ *20FH=`).
+fn freeballs_sent<'a>(touches: &[(&'a ScoutLine, Touch)]) -> Vec<(&'a ScoutLine, Touch)> {
     touches
         .iter()
         .enumerate()
@@ -403,21 +445,23 @@ fn freeballs_sent<'a>(touches: &[(&'a ScoutLine, Touch<'a>)]) -> Vec<(&'a ScoutL
                 .iter()
                 .find_map(|(_, t)| t.played());
             match (touch, before, after) {
-                (Touch::Skill(side, skill), Some((before_side, _)), Some((after_side, _)))
+                (Touch::Skill(side, skill), Some((before_side, before)), Some((after_side, _)))
                     if skill.skill == Skill::Freeball
                         && before_side == *side
+                        && before.evaluation != '/'
                         && after_side != *side =>
                 {
-                    (*line, Touch::Sent(*side, skill))
+                    (*line, Touch::Sent(*side, skill.clone()))
                 }
                 (Touch::Skill(side, skill), Some((before_side, before)), None)
                     if skill.skill == Skill::Freeball
                         && before_side == *side
+                        && before.evaluation != '/'
                         && !matches!(before.skill, Skill::Attack | Skill::Block) =>
                 {
-                    (*line, Touch::Sent(*side, skill))
+                    (*line, Touch::Sent(*side, skill.clone()))
                 }
-                _ => (*line, *touch),
+                _ => (*line, touch.clone()),
             }
         })
         .collect()
@@ -430,6 +474,10 @@ struct SetTranslator<'a> {
     combinations: &'a [AttackCombination],
     snapshot: Snapshot,
     events: Vec<EventEntry>,
+    // where each event comes from in the file
+    lines: Vec<At>,
+    // the touch of the rally being translated (see `At`)
+    step: usize,
     // where the rally being translated starts in `events`
     rally_start: usize,
     mappings: Mappings,
@@ -452,6 +500,9 @@ struct SetTranslator<'a> {
     // or outside hitter attacked from in P1 in side out (see
     // `inverted_p1_of`), the last one told going on; canonical until then
     inverted_p1: bool,
+    // our block of no attack keeping the ball left out (see `apply_flagged`):
+    // our dig after it too
+    block_left_out: bool,
 }
 
 /// Where a rally starts (the dead ball before it): to translate again from
@@ -473,12 +524,15 @@ impl SetTranslator<'_> {
         while let Some(line) = lines.get(index) {
             index += 1;
             let at = Some(line.line);
+            // a substitution, a setter change: at their line
+            self.at = at;
+            self.step = 0;
             self.tick(line);
             match &line.code {
                 // the six on court of the file left aside: DataVolley may
                 // leave them behind, ours follow the rules
                 Code::Skill(side, skill) => {
-                    rally.push((line, Touch::Skill(*side, skill)));
+                    rally.push((line, Touch::Skill(*side, skill.clone())));
                 }
                 Code::Green(side, evaluation) => {
                     rally.push((line, Touch::Green(*side, *evaluation)))
@@ -492,7 +546,7 @@ impl SetTranslator<'_> {
                         true => TeamSideEnum::Us,
                         false => TeamSideEnum::Them,
                     };
-                    if let Err(issue) = self.rally(&rally, winner) {
+                    if let Err(issue) = self.rally(&rally, winner, line.line) {
                         // the libero for another player: chosen a rally
                         // earlier, translated again from there
                         let earlier = self.earlier.take();
@@ -587,10 +641,12 @@ impl SetTranslator<'_> {
     fn restore(&mut self, checkpoint: &Checkpoint, rally_number: usize) {
         self.snapshot = checkpoint.snapshot.clone();
         self.events.truncate(checkpoint.events);
+        self.lines.truncate(checkpoint.events);
         self.mappings = checkpoint.mappings.clone();
         self.clock = checkpoint.clock;
         self.inverted_p1 = checkpoint.inverted_p1;
         self.rally_number = rally_number;
+        self.block_left_out = false;
     }
 
     // the time of the line (in the video, when linked to it), or a second
@@ -644,6 +700,45 @@ impl SetTranslator<'_> {
         technique: Option<TechniqueEnum>,
         flags: EventFlags,
     ) -> Result<(), Issue> {
+        use EvalEnum::*;
+        use EventTypeEnum::*;
+        // the block answers an attack (scouting rules v4): our block of a
+        // ball coming over without one (their freeball, their reception
+        // back after our serve `/`) told as the translation of v3 tells it
+        // (`domain::rules`): `#` an attack point, `=` an attack error, `!`
+        // our freeball, `+` and `-` (the ball kept) left out with our dig
+        // after them
+        let no_attack = matches!(
+            self.snapshot
+                .last_event
+                .as_ref()
+                .map(|e| (e.event_type, e.eval)),
+            Some((OF, _) | (S, Some(Over)))
+        );
+        let told = match (event_type, eval, no_attack, self.block_left_out) {
+            (D, _, _, true) => None,
+            (B, Some(Perfect), true, _) => Some((A, Some(Perfect), None)),
+            (B, Some(Error), true, _) => Some((A, Some(Error), None)),
+            (B, Some(Exclamative), true, _) => Some((FB, None, None)),
+            (B, Some(Positive | Negative), true, _) => None,
+            _ => Some((event_type, eval, technique)),
+        };
+        // a change of the lineup between the block and the dig keeps it
+        self.block_left_out = match event_type {
+            R | CL | LR | LF | CS => self.block_left_out,
+            _ => matches!(
+                (event_type, eval, no_attack),
+                (B, Some(Positive | Negative), true)
+            ),
+        };
+        let Some((told_type, eval, technique)) = told else {
+            self.mapped("B of no attack kept, or the dig after it: left out");
+            return Ok(());
+        };
+        if told_type != event_type {
+            self.mapped("B of no attack as A or FB");
+        }
+        let event_type = told_type;
         let event = EventEntry {
             timestamp: self.clock,
             event_type,
@@ -663,6 +758,7 @@ impl SetTranslator<'_> {
             return Err(Issue::Event(e.to_string()));
         }
         self.events.push(event);
+        self.lines.push((self.at.unwrap_or_default(), self.step));
         Ok(())
     }
 
@@ -709,11 +805,19 @@ impl SetTranslator<'_> {
         &mut self,
         touches: &[(&ScoutLine, Touch)],
         winner: TeamSideEnum,
+        point: usize,
     ) -> Result<(), Issue> {
         self.rally_start = self.events.len();
         self.inverted_p1 = self.inverted_p1_of(touches).unwrap_or(self.inverted_p1);
-        let touches = &freeballs_sent(touches);
         self.at = touches.first().map(|(line, _)| line.line);
+        self.step = 0;
+        let decided =
+            decide(&freeballs_sent(touches), &self.symbols).map_err(|(line, issue)| {
+                self.at = Some(line);
+                issue
+            })?;
+        decided.mapped.iter().for_each(|name| self.mapped(name));
+        let touches = &decided.touches;
         self.change_libero(touches)?;
         self.libero_in_or_out(touches)?;
         let mut last_cause: Option<(Side, Ending)> = None;
@@ -722,6 +826,7 @@ impl SetTranslator<'_> {
         let mut green: Option<(Side, Ending)> = None;
         for (index, (line, touch)) in touches.iter().enumerate() {
             self.at = Some(line.line);
+            self.step = index + 1;
             let next = touches.get(index + 1..).unwrap_or_default();
             match (self.rally_over(), touch) {
                 // what the file adds after the end: the other side of the
@@ -767,17 +872,13 @@ impl SetTranslator<'_> {
                 (false, Touch::Skill(side, skill) | Touch::Sent(side, skill))
                     if *side == self.us.side =>
                 {
-                    let before = touches.get(..index).unwrap_or_default();
                     let sent = matches!(touch, Touch::Sent(_, _));
-                    self.our_touch(skill, sent, before, next)?;
+                    self.our_touch(skill, sent, next)?;
                     last_cause = None;
                 }
                 (false, Touch::Skill(side, skill) | Touch::Sent(side, skill)) => {
-                    let before = touches.get(..index).unwrap_or_default();
                     let sent = matches!(touch, Touch::Sent(_, _));
-                    last_cause = self
-                        .their_touch(*side, skill, sent, before, next)?
-                        .or(last_cause);
+                    last_cause = self.their_touch(*side, skill, sent)?.or(last_cause);
                 }
                 (false, Touch::Green(side, evaluation)) => {
                     let ending = match evaluation {
@@ -788,13 +889,18 @@ impl SetTranslator<'_> {
                 }
             }
         }
-        self.at = None;
-        match (self.rally_over(), winner, last_cause.or(green)) {
-            (true, _, _) => Ok(()),
-            // their point: their ace, kill or block point, or their point
-            // without a touch
-            // the ball ours: our fault, though the file tells their point
-            (false, TeamSideEnum::Them, Some((side, Ending::Won)))
+        self.at = Some(point);
+        self.step = usize::MAX;
+        // the winner a point without a touch tells
+        let green = green.map(|(side, ending)| match (side == self.us.side, ending) {
+            (true, Ending::Won) | (false, Ending::Lost) => TeamSideEnum::Us,
+            _ => TeamSideEnum::Them,
+        });
+        match (self.rally_over(), winner, last_cause, green) {
+            (true, _, _, _) => Ok(()),
+            // their point: their ace, kill or block point; the ball ours,
+            // our fault, though the file tells their point
+            (false, TeamSideEnum::Them, Some((side, Ending::Won)), _)
                 if side != self.us.side
                     && !self
                         .snapshot
@@ -804,22 +910,24 @@ impl SetTranslator<'_> {
                 self.mapped("their point with the ball ours: F");
                 self.apply(EventTypeEnum::F, None, None, None, None)
             }
-            (false, TeamSideEnum::Them, Some((side, Ending::Won))) if side != self.us.side => {
+            (false, TeamSideEnum::Them, Some((side, Ending::Won)), _) if side != self.us.side => {
                 self.apply(EventTypeEnum::OS, None, None, None, None)
             }
-            // ours: their error, or our point without a touch (their fault)
-            (false, TeamSideEnum::Us, Some((side, Ending::Lost))) if side != self.us.side => {
+            // ours: their error
+            (false, TeamSideEnum::Us, Some((side, Ending::Lost)), _) if side != self.us.side => {
                 self.apply(EventTypeEnum::OE, None, None, None, None)
             }
-            (false, TeamSideEnum::Us, Some((side, Ending::Won))) if side == self.us.side => {
-                self.mapped("our point without a touch: OE");
-                self.apply(EventTypeEnum::OE, None, None, None, None)
+            // a point without a touch (`$$&`, e.g. a rotation fault, a net
+            // fault): the point without a cause, ours or theirs
+            (false, winner, None, Some(green)) if green == winner => {
+                self.mapped("point without a touch: PW or PL");
+                let event_type = match winner {
+                    TeamSideEnum::Us => EventTypeEnum::PW,
+                    TeamSideEnum::Them => EventTypeEnum::PL,
+                };
+                self.apply(event_type, None, None, None, None)
             }
-            // our fault without a player: the team's (e.g. a rotation fault)
-            (false, TeamSideEnum::Them, Some((side, Ending::Lost))) if side == self.us.side => {
-                self.apply(EventTypeEnum::F, None, None, None, None)
-            }
-            (false, _, _) => Err(Issue::Untranslatable(Untranslatable::PointWithoutCause)),
+            (false, _, _, _) => Err(Issue::Untranslatable(Untranslatable::PointWithoutCause)),
         }
     }
 
@@ -963,146 +1071,62 @@ impl SetTranslator<'_> {
         }
     }
 
-    /// Who plays the ball after a touch of ours, up to our next touch: our
-    /// evaluations tell it, the file's tell how good the touch was.
-    fn after(&self, next: &[(&ScoutLine, Touch)]) -> After {
-        // a freeball sent over: no skill, neither received nor an attack
-        let skills: Vec<(Side, Option<Skill>)> = next
-            .iter()
-            .filter_map(|(_, t)| match t {
-                Touch::Skill(side, skill) => Some((*side, Some(skill.skill))),
-                Touch::Sent(side, _) => Some((*side, None)),
-                Touch::Green(_, _) => None,
-            })
-            .collect();
-        let ours = |side: &Side| *side == self.us.side;
-        let theirs: Vec<Option<Skill>> = skills
-            .iter()
-            .take_while(|(side, _)| !ours(side))
-            .map(|(_, skill)| *skill)
-            .collect();
-        let our_next = skills
-            .iter()
-            .find(|(side, _)| ours(side))
-            .map(|(_, skill)| *skill);
-        // their reception or dig straight over
-        let their_first_over = next
-            .iter()
-            .find_map(|(_, t)| t.played())
-            .filter(|(side, _)| !ours(side))
-            .is_some_and(|(_, s)| {
-                matches!(s.skill, Skill::Reception | Skill::Dig) && s.evaluation == '/'
-            });
-        match (
-            theirs.first(),
-            theirs.contains(&Some(Skill::Attack)),
-            our_next,
-        ) {
-            // their freeball received: we sent it
-            (Some(Some(Skill::Freeball)), _, _) => After::OurFreeball,
-            (_, true, _) => After::TheyAttack,
-            (_, _, Some(Some(Skill::Freeball))) => After::TheirFreeball,
-            // their freeball sent over
-            _ if theirs.contains(&None) => After::TheirFreeball,
-            // our block next: they attacked, not in the file (their
-            // reception or dig over isn't an attack)
-            (_, _, Some(Some(Skill::Block))) if !their_first_over => After::TheyAttack,
-            (None, _, Some(_)) => After::Kept,
-            (Some(_), _, Some(_)) => After::BackWithoutAttack,
-            (_, _, None) => After::Ended,
-        }
+    /// Whether they attack after a touch of ours, before our next touch.
+    fn they_attack(&self, next: &[(&ScoutLine, Touch)]) -> bool {
+        next.iter()
+            .filter_map(|(_, t)| t.played())
+            .take_while(|(side, _)| *side != self.us.side)
+            .any(|(_, skill)| skill.skill == Skill::Attack)
     }
 
     fn our_touch(
         &mut self,
         skill: &SkillCode,
         sent: bool,
-        before: &[(&ScoutLine, Touch)],
         next: &[(&ScoutLine, Touch)],
     ) -> Result<(), Issue> {
         use EvalEnum::*;
         use EventTypeEnum::*;
-        // the freeball received after their attack: an easy attack, our dig
-        let they_attacked = before
-            .iter()
-            .rev()
-            .filter_map(|(_, t)| t.played().map(|(side, s)| (side, s.skill)))
-            .take_while(|(side, _)| *side != self.us.side)
-            .any(|(_, skill)| skill == Skill::Attack);
-        let kind = match (skill.skill, they_attacked) {
-            (Skill::Freeball, true) => {
-                self.mapped("F after their attack as D");
-                Skill::Dig
+        // the touch as `dvw::decide` tells it: the evaluations agree with
+        // the other team's, the freeballs sent told
+        let kind = skill.skill;
+        // a freeball sent untold (`dvw::decide`) has no player
+        let player = match (skill.player, sent) {
+            (Some(number), _) => Some(player(self.us, number)?),
+            (None, true) => None,
+            (None, false) => {
+                return Err(Issue::Untranslatable(Untranslatable::OurTouchWithoutPlayer));
             }
-            (kind, _) => kind,
         };
-        let number = skill
-            .player
-            .ok_or(Issue::Untranslatable(Untranslatable::OurTouchWithoutPlayer))?;
-        let player = player(self.us, number)?;
         // our set `=` attacked by us next: the rally went on, the `=` is
         // how bad the set was, not a fault
         let attacked_next = next
             .iter()
             .find_map(|(_, t)| t.played())
             .is_some_and(|(side, s)| side == self.us.side && s.skill == Skill::Attack);
-        // our attack `=` with their block `=` next: the ball off their
-        // hands ("mani fuori"), our winning attack
-        let their_block_out_next =
-            next.iter()
-                .find_map(|(_, t)| t.played())
-                .is_some_and(|(side, s)| {
-                    side != self.us.side && s.skill == Skill::Block && s.evaluation == '='
-                });
         let ending = match (
             kind,
             self.ending(skill.skill, skill.evaluation),
-            skill.evaluation,
             attacked_next,
-            their_block_out_next,
         ) {
-            (Skill::Set, Ending::Lost, _, true, _) => {
+            (Skill::Set, Ending::Lost, true) => {
                 self.mapped("set error attacked: no fault");
                 Ending::Goes
             }
-            (Skill::Attack, Ending::Lost, '=', _, true) => {
-                self.mapped("attack error off their block out: A#");
-                Ending::Won
-            }
-            (_, ending, _, _, _) => ending,
+            (_, ending, _) => ending,
         };
-        let touched = self
-            .rally_events()
-            .iter()
-            .any(|e| e.event_type.ball_side_after(e.eval).is_some());
-        let ball_ours =
-            self.snapshot.get_ball_side() == TeamSideEnum::Us && touched && !self.rally_over();
-        let after = self.after(next);
         let last = self.rally_events().last().map(|e| (e.event_type, e.eval));
-        // their reception or dig straight over (`/`): back without their
-        // freeball
-        let their_first_over = next
-            .iter()
-            .find_map(|(_, t)| t.played())
-            .is_some_and(|(_, s)| {
-                matches!(s.skill, Skill::Reception | Skill::Dig) && s.evaluation == '/'
-            });
-        // their block sent it back: no freeball of theirs
-        let their_block = next
-            .iter()
-            .filter_map(|(_, t)| t.played())
-            .take_while(|(side, _)| *side != self.us.side)
-            .any(|(_, s)| s.skill == Skill::Block);
-        // our freeball received going back over
-        let over = kind == Skill::Freeball
-            && (skill.evaluation == '/'
-                || matches!(
-                    after,
-                    After::TheyAttack | After::TheirFreeball | After::BackWithoutAttack
-                ));
-        // a team event following the one of the touch
-        let mut then: Option<EventTypeEnum> = None;
-        let event = match (kind, ending, skill.evaluation, ball_ours, after) {
+        // the touch after the one before: our cover after our attack `!`
+        // (their block `!` untold), our dig after our block, the first
+        // touch of their freeball (in it already)
+        let after_last = match last {
+            Some((A, Some(Exclamative))) => Some(Kept::Cover),
+            Some((B, Some(Positive | Negative))) => Some(Kept::Block),
+            Some((OF, None) | (S, Some(Over))) => Some(Kept::Freeball),
+            _ => None,
+        };
+        let they_attack = self.they_attack(next);
+        let event = match (kind, ending, skill.evaluation, after_last, they_attack) {
             // the ending touches: as the file says, `/` blocked or invasion
             (Skill::Serve, Ending::Won, _, _, _) => Some((S, Some(Perfect))),
             (Skill::Serve, Ending::Lost, _, _, _) => Some((S, Some(Error))),
@@ -1110,16 +1134,24 @@ impl SetTranslator<'_> {
             (Skill::Attack, Ending::Lost, '/', _, _) => Some((A, Some(Over))),
             (Skill::Attack, Ending::Lost, _, _, _) => Some((A, Some(Error))),
             (Skill::Block, Ending::Won, _, _, _) => Some((B, Some(Perfect))),
+            // the invasion, a fault: with the ball ours (no block now)
+            // the player's fault
+            (Skill::Block, Ending::Lost, '/', _, _)
+                if !self.snapshot.get_available_options().contains(&B) =>
+            {
+                self.mapped("invasion with the ball ours: F");
+                Some((F, None))
+            }
             (Skill::Block, Ending::Lost, '/', _, _) => Some((B, Some(Over))),
             (Skill::Block, Ending::Lost, _, _, _) => Some((B, Some(Error))),
             (Skill::Reception, Ending::Lost, _, _, _) => Some((P, Some(Error))),
-            (Skill::Dig, Ending::Lost, _, false, _) => Some((D, Some(Error))),
-            // a dig with the ball on our side covers our attack: an error
-            // is our fault, a ball sent over our freeball
-            (Skill::Dig, Ending::Lost, _, true, _) => {
-                self.mapped("cover error: F");
+            // the error of our cover, of our dig after our block or of
+            // their freeball: our fault
+            (Skill::Dig, Ending::Lost, _, Some(_), _) => {
+                self.mapped("cover, dig after the block or of a freeball, error: F");
                 Some((F, None))
             }
+            (Skill::Dig, Ending::Lost, _, None, _) => Some((D, Some(Error))),
             (Skill::Set | Skill::Freeball, Ending::Lost, _, _, _) => {
                 self.mapped("set or freeball error: F");
                 Some((F, None))
@@ -1130,152 +1162,54 @@ impl SetTranslator<'_> {
                     evaluation: skill.evaluation,
                 });
             }
-            // the serve: they attack (`/` is then our `+`), or send a
-            // freeball (our freeball received tells it, `OF`), the serve
-            // telling their reception; their reception back: our `/`
-            (Skill::Serve, Ending::Goes, e, _, After::TheirFreeball) if e != '/' => {
-                Some((S, Some(eval(e)?)))
-            }
-            (Skill::Serve, Ending::Goes, '/', _, After::TheyAttack) => {
+            // the serve without their reception, attacked: not over
+            (Skill::Serve, Ending::Goes, '/', _, true) => {
                 self.mapped("S/ attacked as S+");
                 Some((S, Some(Positive)))
             }
-            (Skill::Serve, Ending::Goes, e, _, After::TheyAttack | After::Ended) => {
-                Some((S, Some(eval(e)?)))
-            }
-            // back to us without their attack: their reception not over,
-            // their freeball not scouted
-            (Skill::Serve, Ending::Goes, e, _, After::BackWithoutAttack)
-                if e != '/' && !their_first_over && !their_block =>
-            {
-                self.mapped("S back without attack: their freeball OF");
-                then = Some(OF);
-                Some((S, Some(eval(e)?)))
-            }
-            // back to us with their reception over
-            (Skill::Serve, Ending::Goes, e, _, _) => {
-                if e != '/' {
-                    self.mapped("S back without attack as S/");
-                }
-                Some((S, Some(Over)))
-            }
-            // reception and dig: kept, `/` our `-`; played by them, our `/`
-            (Skill::Reception, Ending::Goes, '/', _, After::Kept | After::OurFreeball) => {
-                self.mapped("R/ kept as P-");
-                Some((P, Some(Negative)))
-            }
-            (Skill::Reception, Ending::Goes, e, _, After::Kept | After::OurFreeball) => {
-                Some((P, Some(eval(e)?)))
-            }
-            (Skill::Reception, Ending::Goes, e, _, _) => {
-                if e != '/' {
-                    self.mapped("R over as P/");
-                }
-                Some((P, Some(Over)))
-            }
-            // attack and block: they attack, our `-`; the ball back without
-            // their attack, our `+` (`!` blocked and covered), their
-            // freeball after it, unless they dug it (`-`)
-            (Skill::Attack, Ending::Goes, '!', _, After::Kept | After::OurFreeball) => {
-                Some((A, Some(Exclamative)))
-            }
-            // dug by them (`-`), then their freeball: the evaluation tells
-            // their dig, the freeball (`OF`) what they made of it
-            (Skill::Attack | Skill::Block, Ending::Goes, '-', _, After::TheirFreeball) => {
-                Some((attack_or_block(skill.skill), Some(Negative)))
-            }
-            (Skill::Attack | Skill::Block, Ending::Goes, '-', _, After::BackWithoutAttack)
-                if !their_first_over && !their_block =>
-            {
-                self.mapped("A or B dug, back without attack: their freeball OF");
-                then = Some(OF);
-                Some((attack_or_block(skill.skill), Some(Negative)))
-            }
             (
-                Skill::Attack | Skill::Block,
+                Skill::Serve | Skill::Reception | Skill::Attack | Skill::Block,
                 Ending::Goes,
                 e,
                 _,
-                After::Kept | After::OurFreeball | After::BackWithoutAttack | After::TheirFreeball,
-            ) => {
-                if e != '+' {
-                    self.mapped("A or B back without their attack as +");
-                }
-                Some((attack_or_block(skill.skill), Some(Positive)))
-            }
-            (Skill::Attack | Skill::Block, Ending::Goes, e, _, _) => {
-                if e != '-' {
-                    self.mapped("A or B played by them as -");
-                }
-                Some((attack_or_block(skill.skill), Some(Negative)))
-            }
-            // a cover of our attack: not scouted, unless it sends the ball
-            // over
-            (Skill::Dig, Ending::Goes, '/', true, _) => {
-                self.mapped("cover over the net: FB");
-                Some((FB, None))
-            }
-            (
-                Skill::Dig,
-                Ending::Goes,
                 _,
-                true,
-                After::TheyAttack | After::TheirFreeball | After::BackWithoutAttack,
-            ) => {
-                self.mapped("cover played by them: FB");
+            ) => Some((event_of(kind), Some(eval(e)?))),
+            // our cover: it rebuilds (`!`) or struggles (`-`), over the net
+            // our freeball
+            (Skill::Dig, Ending::Goes, '/', Some(Kept::Cover | Kept::Freeball), _) => {
+                self.mapped("cover or dig of a freeball over the net: FB");
                 Some((FB, None))
             }
-            (Skill::Dig, Ending::Goes, _, true, _) => {
-                self.mapped("cover skipped");
+            (Skill::Dig, Ending::Goes, '#' | '+' | '!', Some(Kept::Cover), _) => {
+                Some((D, Some(Exclamative)))
+            }
+            (Skill::Dig, Ending::Goes, _, Some(Kept::Cover), _) => Some((D, Some(Negative))),
+            // our dig of their freeball: in the freeball
+            (Skill::Dig, Ending::Goes, _, Some(Kept::Freeball), _) => {
+                self.mapped("dig of a freeball: in the freeball");
                 None
             }
-            (Skill::Dig, Ending::Goes, '/', false, After::Kept | After::OurFreeball) => {
-                self.mapped("D/ kept as D-");
-                Some((D, Some(Negative)))
+            // `!` lets us build: our dig `!` is only a cover
+            (Skill::Dig, Ending::Goes, '!', _, _) => {
+                self.mapped("D! as D+");
+                Some((D, Some(Positive)))
             }
-            (Skill::Dig, Ending::Goes, e, false, After::Kept | After::OurFreeball) => {
-                Some((D, Some(eval(e)?)))
-            }
-            (Skill::Dig, Ending::Goes, e, false, _) => {
-                if e != '/' {
-                    self.mapped("D over as D/");
-                }
-                Some((D, Some(Over)))
-            }
-            // our freeball sent over, as some scouts write it
-            (Skill::Freeball, Ending::Goes, _, _, _) if sent => {
-                self.mapped("freeball sent: FB");
-                Some((FB, None))
-            }
-            // their freeball, received by us: told by our serve `/` already,
-            // or by their freeball sent
-            (Skill::Freeball, Ending::Goes, e, _, _) => match (last, e) {
-                (Some((S, Some(Over))), _) => {
-                    self.mapped("their freeball after S/: in the serve");
-                    None
-                }
-                // received straight over (or they play it next): our freeball
-                (Some((OF, None)), _) if over => {
-                    self.mapped("their freeball received over: FB");
-                    Some((FB, None))
-                }
-                (Some((OF, None)), _) => None,
-                _ if over => {
-                    self.mapped("their freeball received over: OF, FB");
-                    then = Some(FB);
-                    Some((OF, None))
-                }
-                _ => Some((OF, None)),
-            },
-            // the set: not scouted, unless it goes over without an attack,
-            // our freeball (theirs received tells it already)
-            (Skill::Set, Ending::Goes, _, _, After::Kept | After::OurFreeball | After::Ended) => {
+            (Skill::Dig, Ending::Goes, e, _, _) => Some((D, Some(eval(e)?))),
+            // our freeball sent over
+            (Skill::Freeball, Ending::Goes, _, _, _) if sent => Some((FB, None)),
+            // their freeball, received by us: told by their freeball sent
+            // (`dvw::decide`), or after our serve `/` by the serve
+            (Skill::Freeball, Ending::Goes, _, _, _) => {
+                self.mapped("F received: in the freeball");
                 None
             }
-            (Skill::Set, Ending::Goes, _, _, _) => {
+            // the set: not scouted, unless it goes over (`/`), our
+            // freeball
+            (Skill::Set, Ending::Goes, '/', _, _) => {
                 self.mapped("set over: FB");
                 Some((FB, None))
             }
+            (Skill::Set, Ending::Goes, _, _, _) => None,
         };
         // an evaluation ending the rally for us and not in the file
         let ends = event.is_some_and(|(t, e)| t.rally_winner(e).is_some());
@@ -1319,7 +1253,7 @@ impl SetTranslator<'_> {
                 };
                 self.apply_flagged(
                     event_type,
-                    Some(player),
+                    player,
                     eval,
                     None,
                     technique,
@@ -1330,60 +1264,24 @@ impl SetTranslator<'_> {
                 )
             }
             None => Ok(()),
-        }?;
-        match then {
-            Some(event_type) => self.apply(event_type, None, None, None, None),
-            None => Ok(()),
         }
     }
 
     /// Their touch: what it says about the end of the rally, for the
-    /// closing event; their freeball received is our freeball (`FB`), a
-    /// team event, unless our freeball sent tells it already; their
-    /// freeball sent is theirs (`OF`), unless our serve `/` tells it;
-    /// right after their attack, the ball came back to them without ours
-    /// told: our freeball (`FB`) first, unless our block sent it back
-    /// (their attack `!`), whose player we can't tell.
+    /// closing event (their attack blocked, our block untold, is their
+    /// error: the block is optional); their freeball received is our
+    /// freeball (`FB`), a team event, unless our freeball sent tells it
+    /// already; their freeball sent is theirs (`OF`), unless our serve `/`
+    /// tells it.
     fn their_touch(
         &mut self,
         side: Side,
         skill: &SkillCode,
         sent: bool,
-        before: &[(&ScoutLine, Touch)],
-        next: &[(&ScoutLine, Touch)],
     ) -> Result<Option<(Side, Ending)>, Issue> {
         let ending = self.ending(skill.skill, skill.evaluation);
-        let block_point_next = next
-            .iter()
-            .find_map(|(_, t)| t.played())
-            .filter(|(side, _)| *side == self.us.side)
-            .is_some_and(|(_, s)| {
-                s.skill == Skill::Block && self.ending(s.skill, s.evaluation) == Ending::Won
-            });
-        let after_their_attack = before
-            .iter()
-            .rev()
-            .find_map(|(_, t)| t.played())
-            .filter(|(s, attack)| *s == side && attack.skill == Skill::Attack)
-            .map(|(_, attack)| attack.evaluation);
-        match (skill.skill, ending, after_their_attack, sent) {
-            (Skill::Freeball, Ending::Goes, Some('!'), true) => {
-                return Err(Issue::Untranslatable(
-                    Untranslatable::TheirAttackBackWithoutOurBlock,
-                ));
-            }
-            (Skill::Freeball, Ending::Goes, Some(_), true) => {
-                self.mapped("back to them after their attack: FB");
-                self.apply(EventTypeEnum::FB, None, None, None, None)?;
-            }
-            _ => {}
-        }
         let last = self.rally_events().last().map(|e| (e.event_type, e.eval));
         match (skill.skill, ending, skill.evaluation, sent, last) {
-            // blocked by us: our block point must follow
-            (Skill::Attack, Ending::Lost, '/', _, _) if !block_point_next => Err(
-                Issue::Untranslatable(Untranslatable::TheirAttackBlockedWithoutOurBlock),
-            ),
             (
                 Skill::Freeball,
                 Ending::Goes,
@@ -1399,18 +1297,39 @@ impl SetTranslator<'_> {
                 self.apply(EventTypeEnum::OF, None, None, None, None)
                     .map(|_| None)
             }
-            (Skill::Freeball, Ending::Goes, _, false, _) => self
-                .apply(EventTypeEnum::FB, None, None, None, None)
-                .map(|_| None),
+            // their freeball received: the freeball sent, ours, is told
+            // already (`dvw::decide`)
+            (Skill::Freeball, Ending::Goes, _, false, _) => Ok(None),
+            // their set over the net: their freeball
+            (Skill::Set, Ending::Goes, '/', _, _) => {
+                self.mapped("their set over: OF");
+                self.apply(EventTypeEnum::OF, None, None, None, None)
+                    .map(|_| None)
+            }
             (_, Ending::Goes, _, _, _) => Ok(None),
             (_, ending, _, _, _) => Ok(Some((side, ending))),
         }
     }
 }
 
-fn attack_or_block(skill: Skill) -> EventTypeEnum {
+/// What the ball was left by the touch before our dig: our attack `!`
+/// (our dig a cover), our block keeping it, their freeball or their
+/// reception back over after our serve `/` (no attack: our first touch
+/// isn't scouted).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kept {
+    Cover,
+    Block,
+    Freeball,
+}
+
+/// Our event of a touch of ours with an evaluation.
+fn event_of(skill: Skill) -> EventTypeEnum {
     match skill {
+        Skill::Serve => EventTypeEnum::S,
+        Skill::Reception => EventTypeEnum::P,
         Skill::Block => EventTypeEnum::B,
+        Skill::Dig => EventTypeEnum::D,
         _ => EventTypeEnum::A,
     }
 }

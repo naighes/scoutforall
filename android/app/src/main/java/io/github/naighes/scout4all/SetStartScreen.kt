@@ -83,6 +83,9 @@ sealed interface SetStartState {
         /** an error of the start */
         val error: String? = null,
         val busy: Boolean = false,
+        /** scouting both sides: the lineup of B is the one chosen, after A's */
+        val both: Boolean = false,
+        val onB: Boolean = false,
     ) : SetStartState
     /** saved: the screen goes back */
     data object Started : SetStartState
@@ -100,6 +103,13 @@ class SetStartViewModel(
     private val mutableState = MutableStateFlow<SetStartState>(SetStartState.Loading)
     val state: StateFlow<SetStartState> = mutableState
     private var setStart: SetStart? = null
+    /** the start of B, scouting both sides */
+    private var setStartOfB: SetStart? = null
+    /** the start the choices are for now: B's while its lineup is shown */
+    private val current get() = when ((mutableState.value as? SetStartState.Choosing)?.onB) {
+        true -> setStartOfB
+        else -> setStart
+    }
 
     init {
         viewModelScope.launch {
@@ -107,10 +117,15 @@ class SetStartViewModel(
                 val start = app.core { it.setStart(teamId, matchId) }
                 if (example) start.tutorialLineup()
                 setStart = start
+                setStartOfB = if (example) null else app.core { it.setStartOfB(teamId, matchId) }
                 // the lineup of the last set, a player removed since then
                 // left out: their choice opens by itself
                 val lineup = start.lineup()
-                SetStartState.Choosing(lineup, pick = missing(lineup).takeIf { anyChosen(lineup) })
+                SetStartState.Choosing(
+                    lineup,
+                    pick = missing(lineup).takeIf { anyChosen(lineup) },
+                    both = setStartOfB != null,
+                )
             } catch (e: MobileException) {
                 SetStartState.Failed(e.reason)
             }
@@ -129,7 +144,7 @@ class SetStartViewModel(
     /** The players for `pick`, by number; the setters first for the setter,
      * the liberos first for the liberos. */
     fun choices(pick: Pick): List<LineupPlayer> {
-        val start = setStart ?: return emptyList()
+        val start = current ?: return emptyList()
         return when (pick) {
             is Pick.Position -> start.positionChoices(pick.position.toUByte())
             Pick.Setter -> start.setterChoices().sortedByDescending { it.role == RoleEnum.SETTER }
@@ -161,15 +176,36 @@ class SetStartViewModel(
         }
     }
 
+    /** Scouting both sides: from the lineup of A to the one of B, and back;
+     * the lineup of B opens its first empty choice when it has players. */
+    fun side(b: Boolean) {
+        val start = (if (b) setStartOfB else setStart) ?: return
+        mutableState.update { s ->
+            when (s) {
+                is SetStartState.Choosing -> {
+                    val lineup = start.lineup()
+                    s.copy(
+                        lineup = lineup,
+                        onB = b,
+                        pick = missing(lineup).takeIf { anyChosen(lineup) },
+                        error = null,
+                    )
+                }
+                else -> s
+            }
+        }
+    }
+
     /** Saves the set, once at a time. */
     fun start() {
         val choosing = mutableState.value as? SetStartState.Choosing ?: return
         val start = setStart ?: return
+        val ofB = setStartOfB
         if (choosing.busy) return
         mutableState.value = choosing.copy(busy = true, error = null)
         viewModelScope.launch {
             mutableState.value = try {
-                app.core { it.startSet(start) }
+                app.core { if (ofB == null) it.startSet(start) else it.startSetBoth(start, ofB) }
                 SetStartState.Started
             } catch (e: MobileException) {
                 choosing.copy(error = e.reason, busy = false)
@@ -178,7 +214,7 @@ class SetStartViewModel(
     }
 
     private fun edit(pick: Pick?, change: (SetStart) -> Unit) {
-        val start = setStart ?: return
+        val start = current ?: return
         mutableState.update { s ->
             when (s) {
                 is SetStartState.Choosing -> try {
@@ -229,12 +265,16 @@ fun SetStartScreen(
                 title = {
                     Text(
                         (state as? SetStartState.Choosing)?.let {
-                            stringResource(R.string.start_set_n, it.lineup.setNumber.toInt())
+                            val title = stringResource(R.string.start_set_n, it.lineup.setNumber.toInt())
+                            // scouting both sides, whose lineup it is
+                            if (it.both) "$title · ${it.lineup.team}" else title
                         } ?: "",
                         Modifier.title(),
                     )
                 },
-                navigationIcon = { BackButton(onBack) },
+                navigationIcon = {
+                    BackButton { if ((state as? SetStartState.Choosing)?.onB == true) model.side(false) else onBack() }
+                },
             )
         },
     ) { padding ->
@@ -256,10 +296,12 @@ private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewMo
     val pick = state.pick
     // back closes the players to choose, before leaving the screen
     BackHandler(enabled = pick != null) { model.open(null) }
+    // and the lineup of B, back to the one of A
+    BackHandler(enabled = pick == null && state.onB) { model.side(false) }
     BoxWithConstraints(modifier) {
         val court = @Composable { m: Modifier ->
             Column(m.tutorial("lineup").padding(vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                ServingTeam(lineup, model)
+                if (!state.onB) ServingTeam(lineup, model)
                 Court(
                     slot = { position ->
                         val player = lineup.positions.getOrNull(position - 1)
@@ -313,11 +355,13 @@ private fun Choices(state: SetStartState.Choosing, model: SetStartViewModel, mod
             Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
         }
         // big and at the bottom, where the thumb is
+        // scouting both sides, the lineup of A is followed by the one of B
+        val toB = state.both && !state.onB
         Button(
-            onClick = model::start,
+            onClick = { if (toB) model.side(true) else model.start() },
             enabled = lineup.complete && !state.busy,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp).tutorial("start-set"),
-        ) { Text(stringResource(R.string.start_set)) }
+        ) { Text(stringResource(if (toB) R.string.go_on else R.string.start_set)) }
     }
 
 /** Who serves: chosen in the first set and in the tie-break, else as the

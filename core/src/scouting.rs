@@ -7,8 +7,10 @@
 
 use crate::{
     analytics::finished::{FinishedMatches, GlobalFinishedMatches},
+    domain::Side,
     localization::Labels,
     providers::set_writer::SetWriter,
+    rally::{self, Touches},
     shapes::{
         court_zone::{
             CourtCell, CourtSide, CourtTarget, CourtZoneEnum, ServeStartEnum, TargetKind,
@@ -19,6 +21,7 @@ use crate::{
         set::SetEntry,
         snapshot::{EventEntry, Snapshot},
         stats::Stats,
+        team::TeamEntry,
         technique::{ServeTypeEnum, TechniqueEnum},
     },
 };
@@ -116,10 +119,34 @@ impl ScoutingError {
     }
 }
 
+/// The other team of a set scouted on both sides: its team, its start and
+/// the touches of the set in order.
+struct Theirs {
+    team: TeamEntry,
+    start_a: SetEntry,
+    start_b: SetEntry,
+    /// the touches of both sides, in order
+    touches: Vec<(Side, EventEntry)>,
+    snapshot: Snapshot,
+    /// the statistics of B in the sets before this one
+    earlier_stats: Stats,
+    /// the sets of B before this one, from B's side
+    earlier: Vec<SetEntry>,
+    /// the inverted P1 of B, written on every touch of B saved
+    inverted_p1: bool,
+}
+
 pub struct ScoutingSession {
     current_match: MatchEntry,
+    /// the set from A's side
     set: SetEntry,
+    /// A's snapshot
     snapshot: Snapshot,
+    /// B, when scouting both sides
+    theirs: Option<Theirs>,
+    /// the side the scout is choosing for: the one the ball is on, unless
+    /// the scout swapped it (`swap_side`)
+    side: Side,
     /// the statistics of the sets before this one
     earlier_stats: Stats,
     step: ScoutingStep,
@@ -183,6 +210,8 @@ impl ScoutingSession {
             current_match,
             set,
             snapshot,
+            theirs: None,
+            side: Side::A,
             earlier_stats,
             step: ScoutingStep::Event,
             event: None,
@@ -197,6 +226,105 @@ impl ScoutingSession {
             set_writer,
             finished: Arc::new(GlobalFinishedMatches),
         }
+    }
+
+    /// The session scouting both sides: `touches` are the set as saved (the
+    /// starts of the sides and the touches so far), `team` the team of B.
+    pub fn with_theirs(mut self, team: TeamEntry, touches: Touches) -> Result<Self, ScoutingError> {
+        let Touches { a, b, touches } = touches;
+        let (snapshot_a, snapshot_b) =
+            rally::replay(&a, &b, &touches, self.current_match.max_substitutions)
+                .map_err(|_| ScoutingError::CouldNotComputeSnapshot)?;
+        self.set.events = rally::project(&touches).entries(Side::A);
+        self.snapshot = snapshot_a;
+        let inverted_p1 = touches
+            .iter()
+            .rev()
+            .find(|(side, _)| *side == Side::B)
+            .is_some_and(|(_, e)| e.flags.inverted_p1());
+        self.theirs = Some(Theirs {
+            team,
+            start_a: a,
+            start_b: b,
+            touches,
+            snapshot: snapshot_b,
+            earlier_stats: Stats::new(),
+            earlier: vec![],
+            inverted_p1,
+        });
+        self.start_next();
+        Ok(self)
+    }
+
+    /// The sets of B before this one, from B's side: their statistics, and
+    /// the inverted P1 a new set goes on with, as for A. Nothing scouting
+    /// A alone.
+    pub fn with_earlier_of_b(self, earlier: &[SetEntry]) -> Self {
+        let max_substitutions = self.current_match.max_substitutions;
+        let before: Vec<SetEntry> = earlier
+            .iter()
+            .filter(|s| s.set_number < self.set.set_number)
+            .cloned()
+            .collect();
+        let theirs = self.theirs.map(|theirs| Theirs {
+            earlier_stats: before
+                .iter()
+                .filter_map(|s| s.compute_snapshot(max_substitutions).ok())
+                .fold(Stats::new(), |mut stats, s| {
+                    stats.merge(&s.stats);
+                    stats
+                }),
+            inverted_p1: match theirs.touches.iter().any(|(side, _)| *side == Side::B) {
+                true => theirs.inverted_p1,
+                false => earlier_inverted_p1(earlier, &theirs.start_b),
+            },
+            earlier: before,
+            ..theirs
+        });
+        Self { theirs, ..self }
+    }
+
+    /// Whether both sides are scouted.
+    pub fn is_both(&self) -> bool {
+        self.theirs.is_some()
+    }
+
+    /// The side the scout is choosing for now.
+    pub fn side(&self) -> Side {
+        self.side
+    }
+
+    /// The touches of both sides so far, in order; none scouting A alone.
+    pub fn touches(&self) -> &[(Side, EventEntry)] {
+        self.theirs.as_ref().map_or(&[], |t| &t.touches)
+    }
+
+    /// The team of `side`: B's only when both sides are scouted.
+    pub fn team_of(&self, side: Side) -> Option<&TeamEntry> {
+        match (side, &self.theirs) {
+            (Side::A, _) => Some(&self.current_match.team),
+            (Side::B, Some(theirs)) => Some(&theirs.team),
+            (Side::B, None) => None,
+        }
+    }
+
+    /// The snapshot of `side`: B's only when both sides are scouted.
+    pub fn snapshot_of(&self, side: Side) -> Option<&Snapshot> {
+        match (side, &self.theirs) {
+            (Side::A, _) => Some(&self.snapshot),
+            (Side::B, Some(theirs)) => Some(&theirs.snapshot),
+            (Side::B, None) => None,
+        }
+    }
+
+    /// The snapshot of the side the scout is choosing for.
+    fn active(&self) -> &Snapshot {
+        self.snapshot_of(self.side).unwrap_or(&self.snapshot)
+    }
+
+    /// The team of the side the scout is choosing for.
+    pub fn team(&self) -> &TeamEntry {
+        self.team_of(self.side).unwrap_or(&self.current_match.team)
     }
 
     /// The session sending the finished match to `finished`, not to the
@@ -225,8 +353,10 @@ impl ScoutingSession {
         &self.set
     }
 
+    /// The snapshot of the side the scout is choosing for (A's when
+    /// scouting one side).
     pub fn snapshot(&self) -> &Snapshot {
-        &self.snapshot
+        self.active()
     }
 
     /// The statistics of the match up to now: the sets before, and this
@@ -235,6 +365,19 @@ impl ScoutingSession {
         let mut stats = self.earlier_stats.clone();
         stats.merge(&self.snapshot.stats);
         stats
+    }
+
+    /// The same for `side`: B's only when both sides are scouted.
+    pub fn match_stats_of(&self, side: Side) -> Option<Stats> {
+        match (side, &self.theirs) {
+            (Side::A, _) => Some(self.match_stats()),
+            (Side::B, Some(theirs)) => {
+                let mut stats = theirs.earlier_stats.clone();
+                stats.merge(&theirs.snapshot.stats);
+                Some(stats)
+            }
+            (Side::B, None) => None,
+        }
     }
 
     /// The sets of the match up to this one, in order: the ones before, and
@@ -249,6 +392,20 @@ impl ScoutingSession {
         sets.sort_by_key(|s| s.set_number);
         sets.push(&self.set);
         sets
+    }
+
+    /// The sets of B up to this one, from B's side: the ones before, and
+    /// this one as scouted so far. `None` scouting only A.
+    pub fn sets_of_b(&self) -> Option<Vec<SetEntry>> {
+        self.theirs.as_ref().map(|theirs| {
+            let mut sets = theirs.earlier.clone();
+            sets.sort_by_key(|s| s.set_number);
+            sets.push(SetEntry {
+                events: rally::project(&theirs.touches).entries(Side::B),
+                ..theirs.start_b.clone()
+            });
+            sets
+        })
     }
 
     pub fn step(&self) -> ScoutingStep {
@@ -269,13 +426,21 @@ impl ScoutingSession {
     /// from 4 and the opposite from 2. As the last event of the match says
     /// until the scout changes it.
     pub fn inverted_p1(&self) -> bool {
-        self.inverted_p1
+        self.inverted_p1_of(self.side)
+    }
+
+    /// The inverted P1 of `side` (A's when scouting one side).
+    pub fn inverted_p1_of(&self, side: Side) -> bool {
+        match (side, &self.theirs) {
+            (Side::B, Some(theirs)) => theirs.inverted_p1,
+            _ => self.inverted_p1,
+        }
     }
 
     /// Whether the inverted P1 makes a difference now: in P1 (the setter in
     /// position 1) in side out only, as the scouting shows it.
     pub fn inverted_p1_applies(&self) -> bool {
-        let lineup = &self.snapshot.current_lineup;
+        let lineup = &self.active().current_lineup;
         lineup.get_current_phase() == PhaseEnum::SideOut
             && lineup.get_current_rotation().is_ok_and(|r| r == 0)
     }
@@ -283,7 +448,10 @@ impl ScoutingSession {
     /// The scout inverts the P1, or makes it canonical again: the events
     /// saved from now on say so.
     pub fn set_inverted_p1(&mut self, inverted: bool) {
-        self.inverted_p1 = inverted;
+        match (self.side, &mut self.theirs) {
+            (Side::B, Some(theirs)) => theirs.inverted_p1 = inverted,
+            _ => self.inverted_p1 = inverted,
+        }
     }
 
     /// How many receive their next serve: three unless told otherwise.
@@ -294,8 +462,8 @@ impl ScoutingSession {
     /// Whether the reception can be told: they serve, the rally not yet
     /// started.
     pub fn can_tell_reception(&self) -> bool {
-        self.snapshot.current_lineup.get_current_phase() == PhaseEnum::SideOut
-            && self.snapshot.get_last_touch().is_none()
+        self.active().current_lineup.get_current_phase() == PhaseEnum::SideOut
+            && self.active().get_last_touch().is_none()
     }
 
     /// The scout tells how many receive their next serve: the next scheme,
@@ -460,8 +628,154 @@ impl ScoutingSession {
     }
 
     /// The events that can follow.
-    pub fn available_events(&self) -> &[EventTypeEnum] {
-        self.snapshot.get_available_options()
+    pub fn available_events(&self) -> Vec<EventTypeEnum> {
+        self.events_of(self.side)
+    }
+
+    /// The events `side` can play now: scouting both sides, the ones the
+    /// sequence of the set admits (`rally::admits`), with at least one of
+    /// their evaluations.
+    fn events_of(&self, side: Side) -> Vec<EventTypeEnum> {
+        let Some(snapshot) = self.snapshot_of(side) else {
+            return vec![];
+        };
+        snapshot
+            .get_available_options()
+            .iter()
+            .copied()
+            .filter(|event| self.theirs.is_none() || self.admits(side, *event, None))
+            .collect()
+    }
+
+    /// Whether the touch of `side` (with `eval`, or any it can have) is
+    /// admitted after the touches so far. Always, scouting one side.
+    fn admits(&self, side: Side, event: EventTypeEnum, eval: Option<EvalEnum>) -> bool {
+        self.theirs
+            .as_ref()
+            .zip(self.snapshot_of(side))
+            .is_none_or(|(theirs, own)| self.admits_on(theirs, own, side, event, eval))
+    }
+
+    /// Whether the touch of `side` (with `eval`, or any it can have) is
+    /// admitted after the touches so far, scouting both sides: `own` the
+    /// snapshot of `side`.
+    fn admits_on(
+        &self,
+        theirs: &Theirs,
+        own: &Snapshot,
+        side: Side,
+        event: EventTypeEnum,
+        eval: Option<EvalEnum>,
+    ) -> bool {
+        let touch = |eval| EventEntry {
+            timestamp: Utc::now(),
+            event_type: event,
+            eval,
+            player: None,
+            target_player: None,
+            technique: None,
+            flags: Default::default(),
+        };
+        let admitted = |eval| {
+            rally::admits(
+                &theirs.touches,
+                &self.snapshot,
+                &theirs.snapshot,
+                side,
+                &touch(eval),
+            )
+        };
+        match (eval, event.requires_evaluation()) {
+            (Some(eval), _) => admitted(Some(eval)),
+            (None, true) => own
+                .available_evals(event)
+                .into_iter()
+                .any(|e| admitted(Some(e))),
+            (None, false) => admitted(None),
+        }
+    }
+
+    /// The events to choose from, each with its side: the active side's,
+    /// and the other side's where the ball could be on either (a touch
+    /// skipped) and for the changes of the lineup and the points without a
+    /// cause, always (see TODO/001, §5.3). Scouting one side: A's.
+    pub fn event_choices(&self) -> Vec<(Side, EventTypeEnum)> {
+        let own = self.events_of(self.side);
+        let other = self.events_of(self.side.other());
+        let ambiguous =
+            own.iter().any(|e| !is_neutral(*e)) && other.iter().any(|e| !is_neutral(*e));
+        let still = self.ball_still();
+        own.iter()
+            .map(|e| (self.side, *e))
+            .chain(
+                other
+                    .iter()
+                    .filter(|e| match is_neutral(**e) {
+                        true => still || matches!(e, EventTypeEnum::PW | EventTypeEnum::PL),
+                        false => ambiguous,
+                    })
+                    .map(|e| (self.side.other(), *e)),
+            )
+            .collect()
+    }
+
+    /// Whether the ball is still: the rally hasn't started, on neither side.
+    fn ball_still(&self) -> bool {
+        self.snapshot.get_last_touch().is_none()
+            && self
+                .theirs
+                .as_ref()
+                .is_none_or(|t| t.snapshot.get_last_touch().is_none())
+    }
+
+    /// The side the scout is choosing for next: scouting both sides, the
+    /// only one with a touch of the ball to play, or the one the ball is on
+    /// when it could be either.
+    fn deduced_side(&self) -> Side {
+        let touching = |side| self.events_of(side).iter().any(|e| !is_neutral(*e));
+        match (&self.theirs, touching(Side::A), touching(Side::B)) {
+            (None, _, _) => Side::A,
+            (Some(_), true, false) => Side::A,
+            (Some(_), false, true) => Side::B,
+            (Some(theirs), _, _) => rally::ball_side(&theirs.touches, &self.snapshot),
+        }
+    }
+
+    /// The scout swaps the side the choices are for (F5): the ball isn't
+    /// where it seems. Before anything is chosen; the next event goes back
+    /// to the side the ball is on.
+    pub fn swap_side(&mut self) -> Result<Side, ScoutingError> {
+        match (self.theirs.is_some(), self.step, self.event) {
+            (true, ScoutingStep::Event, None) => {
+                self.side = self.side.other();
+                self.start_next_on_side();
+                Ok(self.side)
+            }
+            _ => Err(ScoutingError::InvalidSelection),
+        }
+    }
+
+    /// The scout chooses the event of `side` among `event_choices`.
+    pub async fn choose_event_of(
+        &mut self,
+        side: Side,
+        event: EventTypeEnum,
+    ) -> Result<Progress, ScoutingError> {
+        // the serve chosen by itself gives way, as for `choose_event`
+        let open = self.step == ScoutingStep::Event || self.serve_pending();
+        match (open, self.event_choices().contains(&(side, event))) {
+            (true, true) => {
+                let before = self.side;
+                self.side = side;
+                let chosen = self.choose_event(event).await;
+                if chosen.is_err() {
+                    self.side = before;
+                }
+                chosen
+            }
+            (true, false) => Err(ScoutingError::EventNotAvailable(event)),
+            _ => Err(ScoutingError::InvalidSelection),
+        }
     }
 
     /// The players to choose for the event: the ones on court who can play
@@ -472,7 +786,7 @@ impl ScoutingSession {
     }
 
     fn choices_for(&self, event: Option<EventTypeEnum>) -> Vec<PlayerChoice> {
-        let lineup = &self.snapshot.current_lineup;
+        let lineup = &self.active().current_lineup;
         let choices = match event {
             Some(EventTypeEnum::R) => lineup.get_replaceable_lineup_choices(),
             _ => lineup.get_lineup_choices(),
@@ -488,9 +802,9 @@ impl ScoutingSession {
                     // anyone else would move it, even to the front row; the
                     // saved sets with another one stay readable
                     Some(EventTypeEnum::CS) => lineup.get_setter_diagonal() == Some(*id),
-                    Some(event) => self.snapshot.can_play(event, id),
+                    Some(event) => self.active().can_play(event, id),
                 })
-                .and_then(|id| self.current_match.team.find_player(id))
+                .and_then(|id| self.team().find_player(id))
                 .map(|player| PlayerChoice {
                     index,
                     id: player.id,
@@ -521,14 +835,23 @@ impl ScoutingSession {
     /// With the player first, the events that come before their player,
     /// if any: the ones of the opponent, the faults, the changes of the
     /// lineup. Available before a player is chosen, and while our serve
-    /// waits for its evaluation.
-    pub fn other_events(&self) -> Vec<EventTypeEnum> {
+    /// waits for its evaluation. Each with its side: the active one's, and
+    /// scouting both sides the other side's as well, when `event_choices`
+    /// offers them (the changes of the lineup while the ball is still, the
+    /// touches where the ball could be on either side, even the ones of a
+    /// player, as the screen shows the players of the active side only).
+    pub fn other_events(&self) -> Vec<(Side, EventTypeEnum)> {
         match (self.step, self.player, self.serve_pending()) {
             (ScoutingStep::Event, None, _) | (_, _, true) => self
                 .available_events()
-                .iter()
-                .copied()
+                .into_iter()
                 .filter(|e| *e != EventTypeEnum::S && !played_by_the_player(*e))
+                .map(|e| (self.side, e))
+                .chain(
+                    self.event_choices()
+                        .into_iter()
+                        .filter(|(side, e)| *side != self.side && *e != EventTypeEnum::S),
+                )
                 .collect(),
             _ => vec![],
         }
@@ -546,9 +869,9 @@ impl ScoutingSession {
     pub fn replacement_choices(&self) -> Vec<PlayerChoice> {
         match (self.event, self.player) {
             (Some(EventTypeEnum::R), Some(replaced)) => self
-                .snapshot
+                .active()
                 .current_lineup
-                .get_available_replacements(&self.current_match.team, replaced)
+                .get_available_replacements(self.team(), replaced)
                 .into_iter()
                 .map(|(index, player)| PlayerChoice {
                     index,
@@ -564,9 +887,17 @@ impl ScoutingSession {
         }
     }
 
+    /// The evaluations of the event chosen, after the one before it (see
+    /// `Snapshot::available_evals`).
     pub fn available_evals(&self) -> Vec<EvalEnum> {
         self.event
-            .map(|event| event.available_evals())
+            .map(|event| {
+                self.active()
+                    .available_evals(event)
+                    .into_iter()
+                    .filter(|eval| self.admits(self.side, event, Some(*eval)))
+                    .collect()
+            })
             .unwrap_or_default()
     }
 
@@ -575,7 +906,7 @@ impl ScoutingSession {
     pub fn available_techniques(&self) -> Vec<TechniqueEnum> {
         match (self.event, self.player) {
             (Some(EventTypeEnum::A), Some(attacker)) => self
-                .snapshot
+                .active()
                 .available_set_types(&attacker)
                 .into_iter()
                 .map(TechniqueEnum::Set)
@@ -605,12 +936,30 @@ impl ScoutingSession {
     fn preselected_technique(&self) -> Option<TechniqueEnum> {
         match (self.event, self.player) {
             (Some(EventTypeEnum::A), Some(attacker)) => self
-                .snapshot
+                .active()
                 .preselected_set_type(&attacker)
                 .map(TechniqueEnum::Set),
             (Some(EventTypeEnum::S), Some(server)) => Some(TechniqueEnum::Serve(
                 ServeTypeEnum::preselected(&server, self.match_events()),
             )),
+            _ => None,
+        }
+    }
+
+    /// Where the ball goes before the scout tells it, scouting both sides:
+    /// where the touch just before sent it, for the reception of a serve and
+    /// the dig of an attack (the scout can change it).
+    fn preselected_target(&self) -> Option<CourtTarget> {
+        let (side, last) = self.theirs.as_ref()?.touches.last()?;
+        match (self.event, last.event_type) {
+            (Some(EventTypeEnum::P), EventTypeEnum::S)
+            | (Some(EventTypeEnum::D), EventTypeEnum::A)
+                if *side != self.side =>
+            {
+                last.flags
+                    .target()
+                    .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)))
+            }
             _ => None,
         }
     }
@@ -686,7 +1035,7 @@ impl ScoutingSession {
         use EventTypeEnum::*;
         let available = self.available_events().contains(&event);
         let substitutions_left = !self
-            .snapshot
+            .active()
             .current_lineup
             .was_max_number_of_substitutions_reached();
         match (self.step, available, event) {
@@ -695,7 +1044,7 @@ impl ScoutingSession {
             }
             (ScoutingStep::Event, true, S) => {
                 self.event = Some(S);
-                self.player = self.snapshot.current_lineup.get_serving_player();
+                self.player = self.active().current_lineup.get_serving_player();
                 self.step = ScoutingStep::Eval;
                 self.technique = self.preselected_technique();
                 self.serve_start = self.preselected_serve_start();
@@ -706,7 +1055,7 @@ impl ScoutingSession {
                 self.step = ScoutingStep::Player;
                 Ok(Progress::Choosing)
             }
-            (ScoutingStep::Event, true, OE | OS | OF | FB | CL | LR) => {
+            (ScoutingStep::Event, true, OE | OS | OF | FB | PW | PL | CL | LR) => {
                 self.save(EventEntry {
                     timestamp: Utc::now(),
                     event_type: event,
@@ -736,6 +1085,7 @@ impl ScoutingSession {
                 self.step = ScoutingStep::Eval;
                 self.technique = self.preselected_technique();
                 self.serve_start = self.preselected_serve_start();
+                self.target = self.preselected_target();
                 Ok(Progress::Choosing)
             }
             (ScoutingStep::Player, true, Some(EventTypeEnum::R)) => {
@@ -833,7 +1183,7 @@ impl ScoutingSession {
         use EventTypeEnum::*;
         match (self.step, self.event) {
             (ScoutingStep::Eval, Some(event @ (A | B | P | D | S)))
-                if event.available_evals().contains(&eval) =>
+                if self.available_evals().contains(&eval) =>
             {
                 self.save(EventEntry {
                     timestamp: Utc::now(),
@@ -927,11 +1277,17 @@ impl ScoutingSession {
     /// The next event, from its first choice: with the player first, our
     /// serve goes straight to its evaluation.
     fn start_next(&mut self) {
+        self.side = self.deduced_side();
+        self.start_next_on_side();
+    }
+
+    /// The next event of the side chosen, from its first choice.
+    fn start_next_on_side(&mut self) {
         self.reset();
         let serving = self.available_events().contains(&EventTypeEnum::S);
         if self.order == ChoiceOrder::PlayerFirst && serving {
             self.event = Some(EventTypeEnum::S);
-            self.player = self.snapshot.current_lineup.get_serving_player();
+            self.player = self.active().current_lineup.get_serving_player();
             self.step = ScoutingStep::Eval;
             self.technique = self.preselected_technique();
             self.serve_start = self.preselected_serve_start();
@@ -950,17 +1306,16 @@ impl ScoutingSession {
 
     async fn undo_last_event(&mut self) -> Result<(), ScoutingError> {
         use EventTypeEnum::*;
-        let removed = match self
-            .set_writer
-            .remove_last_event(&self.current_match, self.set.set_number)
-            .await
-        {
+        let removed = match &self.theirs {
+            Some(_) => self.undo_last_touch().await,
+            None => self.undo_last_own_event().await,
+        };
+        let removed = match removed {
             Ok(Some(removed)) => removed,
             // nothing to undo
             Ok(None) => return Ok(()),
-            Err(_) => return Err(ScoutingError::CouldNotUndo),
+            Err(e) => return Err(e),
         };
-        self.set.events.pop();
         // the set ended by the event is open again
         if let Some(ended) = self
             .current_match
@@ -970,12 +1325,6 @@ impl ScoutingSession {
         {
             *ended = self.set.clone();
         }
-        // the snapshot replays the events left
-        let snapshot = self
-            .set
-            .compute_snapshot(self.current_match.max_substitutions)
-            .map_err(|_| ScoutingError::CouldNotComputeSnapshot)?;
-        self.snapshot = snapshot;
         self.reset();
         // the reception told for the serve again, if the event removed
         // took it
@@ -995,7 +1344,8 @@ impl ScoutingSession {
                 self.target = removed
                     .flags
                     .target()
-                    .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)));
+                    .filter(|t| self.target_kind().is_some_and(|k| k.fits(t)))
+                    .or_else(|| self.preselected_target());
                 // and how many blocked
                 self.blockers = removed
                     .flags
@@ -1025,6 +1375,110 @@ impl ScoutingSession {
         Ok(())
     }
 
+    /// The last event of A removed (scouting A alone): the snapshot replays
+    /// the events left.
+    async fn undo_last_own_event(&mut self) -> Result<Option<EventEntry>, ScoutingError> {
+        let removed = match self
+            .set_writer
+            .remove_last_event(&self.current_match, self.set.set_number)
+            .await
+        {
+            Ok(Some(removed)) => removed,
+            Ok(None) => return Ok(None),
+            Err(_) => return Err(ScoutingError::CouldNotUndo),
+        };
+        self.set.events.pop();
+        self.snapshot = self
+            .set
+            .compute_snapshot(self.current_match.max_substitutions)
+            .map_err(|_| ScoutingError::CouldNotComputeSnapshot)?;
+        Ok(Some(removed))
+    }
+
+    /// The last touch of the set removed (scouting both sides), of
+    /// whichever side: the sides replay the touches left, and the scout
+    /// goes back to the side that played it.
+    async fn undo_last_touch(&mut self) -> Result<Option<EventEntry>, ScoutingError> {
+        let touches = self
+            .theirs
+            .as_ref()
+            .map(|theirs| theirs.touches.clone())
+            .ok_or(ScoutingError::CouldNotUndo)?;
+        let removed = self
+            .set_writer
+            .remove_last_touch(&self.current_match, self.set.set_number)
+            .await
+            .map_err(|_| ScoutingError::CouldNotUndo)?;
+        match removed {
+            Some((side, removed)) => {
+                let left = touches.split_last().map_or(&[][..], |(_, left)| left);
+                self.replay_touches(left.to_vec())?;
+                self.side = side;
+                Ok(Some(removed))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// The sides at the touches: their snapshots, and the set from A's
+    /// side.
+    fn replay_touches(&mut self, touches: Vec<(Side, EventEntry)>) -> Result<(), ScoutingError> {
+        let theirs = self
+            .theirs
+            .as_mut()
+            .ok_or(ScoutingError::CouldNotComputeSnapshot)?;
+        let (a, b) = rally::replay(
+            &theirs.start_a,
+            &theirs.start_b,
+            &touches,
+            self.current_match.max_substitutions,
+        )
+        .map_err(|_| ScoutingError::CouldNotComputeSnapshot)?;
+        self.set.events = rally::project(&touches).entries(Side::A);
+        self.snapshot = a;
+        theirs.snapshot = b;
+        theirs.touches = touches;
+        Ok(())
+    }
+
+    /// Saves the touch of the side being scouted, in the sequence of the
+    /// set: admitted by `rally::admits`, and the two sides still replaying.
+    async fn save_touch(&mut self, event: &EventEntry) -> Result<(), ScoutingError> {
+        let theirs = self
+            .theirs
+            .as_ref()
+            .ok_or(ScoutingError::CouldNotAddEvent)?;
+        let touches: Vec<(Side, EventEntry)> = theirs
+            .touches
+            .iter()
+            .cloned()
+            .chain([(self.side, event.clone())])
+            .collect();
+        let fits = rally::admits(
+            &theirs.touches,
+            &self.snapshot,
+            &theirs.snapshot,
+            self.side,
+            event,
+        ) && rally::replay(
+            &theirs.start_a,
+            &theirs.start_b,
+            &touches,
+            self.current_match.max_substitutions,
+        )
+        .is_ok();
+        match fits {
+            true => {
+                self.set_writer
+                    .append_touch(&self.current_match, self.set.set_number, self.side, event)
+                    .await
+                    .map_err(|_| ScoutingError::CouldNotAddEvent)?;
+                self.replay_touches(touches)
+            }
+            false => Err(ScoutingError::CouldNotAddEvent),
+        }
+    }
+
     /// Saves the event if it applies, then starts the next one.
     pub(crate) async fn save(&mut self, event: EventEntry) -> Result<Progress, ScoutingError> {
         // the reception goes on the reception, or on their ace before it
@@ -1032,22 +1486,27 @@ impl ScoutingSession {
             (EventTypeEnum::P, _) | (EventTypeEnum::OS, true) => Some(self.reception),
             _ => None,
         };
-        let flags = event.flags.with_inverted_p1(self.inverted_p1);
+        let flags = event.flags.with_inverted_p1(self.inverted_p1());
         let event = EventEntry {
             flags: received.map_or(flags, |scheme| flags.with_reception(scheme)),
             ..event
         };
         let points = self.points();
-        let mut snapshot = self.snapshot.clone();
-        snapshot
-            .add_event(&event)
-            .map_err(|_| ScoutingError::CouldNotAddEvent)?;
-        self.set_writer
-            .append_event(&self.current_match, self.set.set_number, &event)
-            .await
-            .map_err(|_| ScoutingError::CouldNotAddEvent)?;
-        self.snapshot = snapshot;
-        self.set.events.push(event);
+        match self.theirs {
+            Some(_) => self.save_touch(&event).await?,
+            None => {
+                let mut snapshot = self.snapshot.clone();
+                snapshot
+                    .add_event(&event)
+                    .map_err(|_| ScoutingError::CouldNotAddEvent)?;
+                self.set_writer
+                    .append_event(&self.current_match, self.set.set_number, &event)
+                    .await
+                    .map_err(|_| ScoutingError::CouldNotAddEvent)?;
+                self.snapshot = snapshot;
+                self.set.events.push(event);
+            }
+        }
         // told for one serve: written, or the rally over without it
         if received.is_some() || self.points() != points {
             self.reception = ReceptionSchemeEnum::default();
@@ -1094,11 +1553,22 @@ impl ScoutingSession {
     }
 }
 
+/// Whether the event is no touch of the ball: a change of the lineup, a
+/// fault, a point without a cause.
+fn is_neutral(event: EventTypeEnum) -> bool {
+    use EventTypeEnum::*;
+    matches!(event, R | CL | LR | LF | CS | F | PW | PL)
+}
+
 /// The inverted P1 of the last event of the match, in this set or in the
 /// sets before: a new set goes on as the last one ended.
 fn last_inverted_p1(current_match: &MatchEntry, set: &SetEntry) -> bool {
-    let mut earlier: Vec<&SetEntry> = current_match
-        .sets
+    earlier_inverted_p1(&current_match.sets, set)
+}
+
+/// The same from the sets `sets`, those before `set` counting.
+fn earlier_inverted_p1(sets: &[SetEntry], set: &SetEntry) -> bool {
+    let mut earlier: Vec<&SetEntry> = sets
         .iter()
         .filter(|s| s.set_number < set.set_number)
         .collect();

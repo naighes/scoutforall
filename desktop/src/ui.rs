@@ -553,11 +553,12 @@ pub fn top_bar<'a, M: Clone + 'a>(
     column![
         bar(
             row![
-                container(logo).width(Length::Fill),
-                title,
-                container(row(right).spacing(10))
+                logo,
+                container(title)
                     .width(Length::Fill)
-                    .align_x(Alignment::End),
+                    .padding(Padding::from([0, 16]))
+                    .align_x(Alignment::Center),
+                row(right).spacing(10),
             ]
             .align_y(Alignment::Center),
             58.0,
@@ -742,6 +743,21 @@ pub fn confirm<'a, M: Clone + 'a>(
     s: &Strings,
     title: &str,
     what: &str,
+    yes: (&'static [u8], &str),
+    on_yes: M,
+    on_no: M,
+    c: Colors,
+) -> Element<'a, M> {
+    confirm_with(s, title, what, vec![], yes, on_yes, on_no, c)
+}
+
+/// As `confirm`, with other answers between the no and the yes.
+#[allow(clippy::too_many_arguments)]
+pub fn confirm_with<'a, M: Clone + 'a>(
+    s: &Strings,
+    title: &str,
+    what: &str,
+    others: Vec<(&'static [u8], &str, M)>,
     (yes_icon, yes): (&'static [u8], &str),
     on_yes: M,
     on_no: M,
@@ -755,8 +771,9 @@ pub fn confirm<'a, M: Clone + 'a>(
                 .font(theme::fonts().bold)
                 .color(c.text),
             body(what.to_string()),
-            answers(
+            answers_with(
                 Some((theme::icons::CLOSE, s.cancel, on_no)),
+                others,
                 yes_icon,
                 yes,
                 Some(on_yes),
@@ -807,6 +824,43 @@ pub fn choice_line<'a, M: 'a>(
     c: Colors,
 ) -> Element<'a, M> {
     labelled_choices(name, on, pills, Length::Fixed(130.0), c)
+}
+
+/// Zones on the court they belong to: the net on top, the attack line
+/// between the front row and the back, the court's lines around.
+pub fn court_frame<'a, M: 'a>(
+    front: impl Into<Element<'a, M>>,
+    back: impl Into<Element<'a, M>>,
+    c: Colors,
+) -> Element<'a, M> {
+    let line = |thick: f32| {
+        container(space::horizontal())
+            .width(Length::Fill)
+            .height(Length::Fixed(thick))
+            .style(move |_| container::Style {
+                background: Some(c.court_lines.into()),
+                ..container::Style::default()
+            })
+    };
+    container(
+        column![
+            line(4.0),
+            container(front).padding([6, 4]),
+            line(2.0),
+            container(back).padding([6, 4]),
+        ]
+        .width(Length::Fill),
+    )
+    .style(move |_| container::Style {
+        background: Some(c.court.into()),
+        border: iced::Border {
+            color: c.court_lines,
+            width: 2.0,
+            radius: 0.0.into(),
+        },
+        ..container::Style::default()
+    })
+    .into()
 }
 
 /// A choice in a bar of a few, beside the others: the name as wide as it

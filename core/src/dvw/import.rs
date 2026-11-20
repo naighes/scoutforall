@@ -6,28 +6,34 @@ use crate::{
     analytics::finished::FinishedMatches,
     constants::{DEFAULT_MAX_SUBSTITUTIONS, LEGACY_MAX_SUBSTITUTIONS},
     domain::{CompetitionFormat, Stage},
+    domain::{ScoutingMode, Side as DomainSide},
     dvw::{
-        model::{DvwFile, DvwRole, MatchDate, Player, Side},
+        both::{BothSet, translate_both},
+        model::{DvwFile, DvwRole, MatchDate, Player, SetResult, Side, Skill},
         translate::{
-            Issue, Mappings, TranslateError, Untranslatable, Us, has_video_clock, translate_set,
+            Impossible, Issue, Mappings, TranslateError, Untranslatable, Us, has_video_clock,
+            translate_set,
         },
     },
     errors::{AppError, MatchError},
     localization::Labels,
     match_form::{CompetitionInput, MatchInput, Opponent, RosterNumber},
     providers::{
-        match_reader::MatchReader,
+        match_reader::{MatchReader, PlayedOn},
         match_writer::MatchWriter,
         set_writer::SetWriter,
         team_writer::{TeamInput, TeamWriter},
     },
+    rally::{Incoherence, answer_evals, project},
     shapes::{
         country::CountryCode,
-        enums::{FriendlyName, GenderEnum, RoleEnum, TeamClassificationEnum},
+        enums::{
+            EvalEnum, EventTypeEnum, FriendlyName, GenderEnum, RoleEnum, TeamClassificationEnum,
+        },
         r#match::{MatchEntry, MatchSource},
         player::PlayerEntry,
         refusal::Refusal,
-        set::ReplayIssue,
+        set::{ReplayIssue, SetEntry},
         team::TeamEntry,
     },
     team_form::TeamFormError,
@@ -136,6 +142,19 @@ pub fn season_year(file: &DvwFile) -> Option<u16> {
     written.or(dated)
 }
 
+/// The name of the team of the side as written, without the year of the
+/// season at its end (TODO/001): our lists add it ("CORTONA VOLLEY 2026"
+/// would be "CORTONA VOLLEY 2026 2026"), and the same team from a file
+/// without it is one. Another year, or only the year, stays.
+pub fn team_name(file: &DvwFile, side: Side) -> String {
+    let name = file.team(side).name.split_whitespace().collect::<Vec<_>>();
+    let year = season_year(file).map(|y| y.to_string());
+    match name.split_last() {
+        Some((last, rest)) if !rest.is_empty() && Some(*last) == year.as_deref() => rest.join(" "),
+        _ => name.join(" "),
+    }
+}
+
 // a run of four digits that is a plausible year
 fn first_year(season: &str) -> Option<u16> {
     season
@@ -173,7 +192,7 @@ pub fn similar_teams<'a>(
 
 /// How much `team` is like the one of the side: the name, the players.
 pub fn similarity<'a>(file: &DvwFile, side: Side, team: &'a TeamEntry) -> SimilarTeam<'a> {
-    let name = normalized(&file.team(side).name);
+    let name = normalized(&team_name(file, side));
     let players = file.players(side);
     SimilarTeam {
         team,
@@ -199,7 +218,7 @@ pub fn team_plan(file: &DvwFile, side: Side, choice: TeamChoice) -> Result<TeamP
             country,
         } => (
             TeamEntry {
-                name: file.team(side).name.trim().to_string(),
+                name: team_name(file, side),
                 year: season_year(file).ok_or(TeamIssue::NoYear)?,
                 players: vec![],
                 id: Uuid::new_v4(),
@@ -261,14 +280,14 @@ pub fn opponent_plan(
 ) -> Result<OpponentPlan, TeamIssue> {
     let other = side.other();
     match choice {
-        OpponentChoice::Name => Ok(OpponentPlan::Name(file.team(other).name.trim().to_string())),
+        OpponentChoice::Name => Ok(OpponentPlan::Name(team_name(file, other))),
         OpponentChoice::Existing(b) if b.id == a.id => Err(TeamIssue::OpponentIsTeamA),
         OpponentChoice::Existing(b) => {
             with_players(file, other, b.clone(), false).map(OpponentPlan::Team)
         }
         OpponentChoice::New => {
             let b = TeamEntry {
-                name: file.team(other).name.trim().to_string(),
+                name: team_name(file, other),
                 year: a.year,
                 players: vec![],
                 id: Uuid::new_v4(),
@@ -461,12 +480,25 @@ pub enum MatchIssue {
     Replay(ReplayIssue),
 }
 
+/// How the match is imported: on both sides, each set as one sequence of
+/// touches, when B is a team and every set translates and replays on both
+/// sides (TODO/001); otherwise only A's side, with why not both when B is
+/// a team.
+#[derive(Debug, Clone)]
+pub enum ImportedSides {
+    Both(Vec<BothSet>),
+    A(Option<MatchIssue>),
+}
+
 /// The match of the side for the team of the plan, ready to be saved, and
 /// the mappings used by its sets, for the summary.
 #[derive(Debug, Clone)]
 pub struct MatchPlan {
+    /// The match from A's side: on both sides, A's stream projected from
+    /// the touches.
     pub entry: MatchEntry,
     pub mappings: Mappings,
+    pub sides: ImportedSides,
     /// What the match is saved with: team B, the numbers of the match, the
     /// competition, its stage and round.
     pub input: MatchInput,
@@ -625,25 +657,7 @@ pub fn match_plan(
     for result in &file.sets {
         let (set, used) = translate_set(file, &us, result.set_number, date, max_substitutions)
             .map_err(MatchIssue::Set)?;
-        let snapshot = set.compute_snapshot(max_substitutions).map_err(|e| {
-            MatchIssue::Set(TranslateError {
-                set_number: result.set_number,
-                line: None,
-                issue: Issue::Event(e.to_string()),
-            })
-        })?;
-        let ours = (snapshot.score_us, snapshot.score_them);
-        let written = match side {
-            Side::Home => result.final_score,
-            Side::Visiting => (result.final_score.1, result.final_score.0),
-        };
-        if ours != written {
-            return Err(MatchIssue::SetScore {
-                set_number: result.set_number,
-                file: written,
-                ours,
-            });
-        }
+        let set = with_score(set, result, side, max_substitutions)?;
         for (name, count) in used {
             *mappings.entry(name).or_default() += count;
         }
@@ -652,6 +666,18 @@ pub fn match_plan(
     if sets.is_empty() {
         return Err(MatchIssue::NoSets);
     }
+    let sides = match opponent.team() {
+        Some(b) => both_sides(file, &us, b, date, max_substitutions),
+        None => Err(None),
+    };
+    let (sets, mappings, sides) = match sides {
+        Ok((both, used)) => (
+            both.iter().map(stream_of_a).collect(),
+            used,
+            ImportedSides::Both(both),
+        ),
+        Err(why) => (sets, mappings, ImportedSides::A(why)),
+    };
     let entry = MatchEntry {
         id: MatchEntry::id_of(&opponent_name, &date),
         opponent: opponent_name.clone(),
@@ -695,10 +721,82 @@ pub fn match_plan(
         Ok(status) if status.match_finished => Ok(MatchPlan {
             entry,
             mappings,
+            sides,
             input,
             roster_b,
         }),
         _ => Err(MatchIssue::Unfinished),
+    }
+}
+
+/// The set when its final score is the one `[3SET]` writes.
+fn with_score(
+    set: SetEntry,
+    result: &SetResult,
+    side: Side,
+    max_substitutions: u8,
+) -> Result<SetEntry, MatchIssue> {
+    let snapshot = set.compute_snapshot(max_substitutions).map_err(|e| {
+        MatchIssue::Set(TranslateError {
+            set_number: result.set_number,
+            line: None,
+            issue: Issue::Event(e.to_string()),
+        })
+    })?;
+    let ours = (snapshot.score_us, snapshot.score_them);
+    let written = match side {
+        Side::Home => result.final_score,
+        Side::Visiting => (result.final_score.1, result.final_score.0),
+    };
+    match ours == written {
+        true => Ok(set),
+        false => Err(MatchIssue::SetScore {
+            set_number: result.set_number,
+            file: written,
+            ours,
+        }),
+    }
+}
+
+/// Every set of the file on both sides (`translate_both`), A's stream
+/// with the final score of `[3SET]`, and the mappings of both teams; or
+/// why not.
+fn both_sides(
+    file: &DvwFile,
+    a: &Us,
+    b: &TeamPlan,
+    date: DateTime<FixedOffset>,
+    max_substitutions: u8,
+) -> Result<(Vec<BothSet>, Mappings), Option<MatchIssue>> {
+    let b = Us {
+        side: a.side.other(),
+        players: &b.numbers,
+        liberos: &b.liberos,
+    };
+    file.sets
+        .iter()
+        .try_fold(
+            (vec![], Mappings::new()),
+            |(mut sets, mut mappings), result| {
+                let (both, used) =
+                    translate_both(file, a, &b, result.set_number, date, max_substitutions)
+                        .map_err(MatchIssue::Set)?;
+                with_score(stream_of_a(&both), result, a.side, max_substitutions)?;
+                for (name, count) in used {
+                    *mappings.entry(name).or_default() += count;
+                }
+                sets.push(both);
+                Ok((sets, mappings))
+            },
+        )
+        .map_err(Some)
+}
+
+/// The set from A's side: its start and the touches projected on it.
+fn stream_of_a(both: &BothSet) -> SetEntry {
+    SetEntry {
+        events: project(&both.touches).entries(crate::domain::Side::A),
+        ..both.a.clone()
     }
 }
 
@@ -718,49 +816,56 @@ fn numbers_of(plan: &TeamPlan) -> Vec<RosterNumber> {
         .collect()
 }
 
-/// Whether team A has the match already: the import overwrites it only
-/// when the user confirms.
-pub async fn match_exists(
+/// The match saved already that the import tells again, if any: started
+/// the same day, with the same score in each set, team A or team B (when a
+/// team) playing in it on either side; refused, not overwritten (TODO/001:
+/// to import it again the user deletes it). A team doesn't play the same
+/// match twice in a day: against another team B too it's the same match.
+pub async fn imported_already(
     plan: &MatchPlan,
+    opponent: &OpponentPlan,
     match_reader: &(impl MatchReader + Sync + ?Sized),
-) -> Result<bool, AppError> {
-    saved_as(plan, match_reader).await.map(|id| id.is_some())
+) -> Result<Option<PlayedOn>, AppError> {
+    let a = plan.entry.team.id;
+    let b = opponent.team().map(|b| b.team.id);
+    let teams: Vec<Uuid> = [Some(a), b].into_iter().flatten().collect();
+    let ours = plan.entry.set_scores()?;
+    let mirrored: Vec<(u8, u8)> = ours.iter().map(|(us, them)| (*them, *us)).collect();
+    let saved = match_reader
+        .played_on(&teams, plan.entry.date.date_naive())
+        .await?;
+    Ok(saved.into_iter().find(|m| {
+        let same_way = m.team_a == a || (b.is_some() && m.team_b == b);
+        let other_way = m.team_b == Some(a) || Some(m.team_a) == b;
+        (same_way && m.scores == ours) || (other_way && m.scores == mirrored)
+    }))
 }
 
-/// The id of the match saved already that the import tells again, if any
-/// (`MatchReader::saved_as`).
-async fn saved_as(
-    plan: &MatchPlan,
-    match_reader: &(impl MatchReader + Sync + ?Sized),
-) -> Result<Option<String>, AppError> {
-    match_reader
-        .saved_as(&plan.entry.team, &plan.entry.id)
-        .await
+/// Why the match isn't imported again, in the language of the app.
+pub fn imported_already_message(saved: &PlayedOn, labels: &Labels) -> String {
+    labels
+        .dvw_imported_already
+        .replace("{a}", &saved.names.0)
+        .replace("{b}", &saved.names.1)
 }
 
 /// Saves the import: team A with its new players, team B with its own when
-/// a team, then the match and its sets, in place of the one saved when
-/// `overwrite` (what the file doesn't tell kept, its sets beyond the
-/// imported ones removed), the roster of B, and the match queued for the
-/// statistics as any finished match. A match saved and not to overwrite:
-/// nothing saved.
+/// a team, then the match and its sets, the roster of B, and the match
+/// queued for the statistics as any finished match. A match imported
+/// already (`imported_already`): nothing saved.
 #[allow(clippy::too_many_arguments)]
 pub async fn save_import(
     team: &TeamPlan,
     opponent: &OpponentPlan,
     plan: &MatchPlan,
-    overwrite: bool,
     team_writer: &(impl TeamWriter + Sync + ?Sized),
     match_reader: &(impl MatchReader + Sync + ?Sized),
     match_writer: &(impl MatchWriter + Sync + ?Sized),
     set_writer: &(impl SetWriter + Sync + ?Sized),
     finished: &(impl FinishedMatches + ?Sized),
 ) -> Result<MatchEntry, AppError> {
-    let saved = saved_as(plan, match_reader).await?;
-    if saved.is_some() && !overwrite {
-        return Err(AppError::Match(MatchError::MatchAlreadyExists(
-            plan.entry.id.clone(),
-        )));
+    if let Some(saved) = imported_already(plan, opponent, match_reader).await? {
+        return Err(AppError::Match(MatchError::MatchAlreadyExists(saved.id)));
     }
     let saved_team = team_writer
         .save(TeamInput::Existing(team.team.clone()))
@@ -770,32 +875,37 @@ pub async fn save_import(
             .save(TeamInput::Existing(b.team.clone()))
             .await?;
     }
-    let m = match saved {
-        Some(id) => {
-            let entry = &MatchEntry {
-                id,
-                ..plan.entry.clone()
-            };
-            match_writer
-                .replace_details(entry, plan.input.clone())
-                .await?;
-            MatchEntry {
-                sets: vec![],
-                ..entry.clone()
-            }
-        }
-        None => {
-            let entry = &plan.entry;
-            let created = match_writer.create(&saved_team, plan.input.clone()).await?;
-            match_writer
-                .save_source(&created, entry.source, entry.video_clock)
-                .await?
-        }
+    let scouting = match plan.sides {
+        ImportedSides::Both(_) => ScoutingMode::Both,
+        ImportedSides::A(_) => ScoutingMode::A,
     };
+    let entry = &plan.entry;
+    let created = match_writer.create(&saved_team, plan.input.clone()).await?;
+    let m = match_writer
+        .save_source(&created, entry.source, entry.video_clock)
+        .await?;
+    match_writer.save_scouting(&m, scouting).await?;
     for set_number in 1..=5u8 {
-        match plan.entry.sets.iter().find(|s| s.set_number == set_number) {
-            Some(set) => set_writer.update(&m, set).await?,
-            None => set_writer.remove(&m, set_number).await?,
+        let set = plan.entry.sets.iter().find(|s| s.set_number == set_number);
+        let both = match &plan.sides {
+            ImportedSides::Both(sets) => sets.iter().find(|s| s.a.set_number == set_number),
+            ImportedSides::A(_) => None,
+        };
+        match (set, both) {
+            (_, Some(both)) => {
+                set_writer
+                    .update_sides(&m, &both.a, Some(&both.b), &both.touches)
+                    .await?
+            }
+            (Some(set), None) => {
+                let touches: Vec<_> = set
+                    .events
+                    .iter()
+                    .map(|e| (DomainSide::A, e.clone()))
+                    .collect();
+                set_writer.update_sides(&m, set, None, &touches).await?
+            }
+            (None, None) => {}
         }
     }
     if opponent.team().is_some() {
@@ -871,7 +981,7 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
         Issue::UnknownCode(code) => labels.dvw_unknown_code.replace("{code}", code),
         Issue::Ending { skill, evaluation } => labels
             .dvw_ending
-            .replace("{code}", &format!("{}{evaluation}", skill.code())),
+            .replace("{code}", &code((*skill, *evaluation))),
         Issue::Untranslatable(what) => untranslatable(what, labels),
         Issue::Refused { event, refusal } => labels
             .dvw_refused
@@ -883,6 +993,61 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
             .replace("{file}", &score(*file))
             .replace("{ours}", &score(*ours)),
         Issue::Unfinished => labels.dvw_set_unfinished.to_string(),
+        Issue::Sides(Incoherence::Serving) => labels.dvw_sides_serving.to_string(),
+        Issue::Sides(Incoherence::Points) => labels.dvw_sides_points.to_string(),
+        Issue::Sides(Incoherence::Refused { reason, .. }) => {
+            labels.dvw_event.replace("{detail}", reason)
+        }
+        Issue::Impossible(Impossible::TouchAfterOver {
+            over,
+            over_line,
+            touch,
+        }) => labels
+            .dvw_touch_after_over
+            .replace("{touch}", &code(*touch))
+            .replace("{over}", &code(*over))
+            .replace("{over_line}", &over_line.to_string()),
+        Issue::Impossible(Impossible::MissingAttack {
+            before,
+            before_line,
+            touch,
+        }) => labels
+            .dvw_missing_attack
+            .replace("{touch}", &code(*touch))
+            .replace("{before}", &code(*before))
+            .replace("{before_line}", &before_line.to_string()),
+        Issue::Answer {
+            answered,
+            answered_line,
+            answer,
+        } => {
+            let allowed = answer_evals(answered.0, answered.1, answer.0)
+                .iter()
+                .map(|eval| touch(labels, answer.0, Some(*eval)))
+                .collect::<Vec<_>>();
+            let template = match allowed.is_empty() {
+                true => labels.dvw_no_answer,
+                false => labels.dvw_answer,
+            };
+            template
+                .replace("{answer}", &touch(labels, answer.0, answer.1))
+                .replace("{answered}", &touch(labels, answered.0, answered.1))
+                .replace("{answered_line}", &answered_line.to_string())
+                .replace("{allowed}", &allowed.join(" / "))
+        }
+    }
+}
+
+// a touch of the file as DataVolley writes it, "R/"
+fn code((skill, evaluation): (Skill, char)) -> String {
+    format!("{}{evaluation}", skill.code())
+}
+
+// a touch as the messages tell it: the event and its evaluation, "Serve +"
+fn touch(labels: &Labels, event: EventTypeEnum, eval: Option<EvalEnum>) -> String {
+    match eval {
+        Some(eval) => format!("{} {eval}", event.friendly_name(labels)),
+        None => event.friendly_name(labels).to_string(),
     }
 }
 
@@ -905,10 +1070,6 @@ fn untranslatable(what: &Untranslatable, labels: &Labels) -> String {
                 .join(labels.dvw_or),
         ),
         OurTouchWithoutPlayer => labels.dvw_our_touch_without_player.to_string(),
-        TheirAttackBackWithoutOurBlock => labels.dvw_their_attack_back_without_block.to_string(),
-        TheirAttackBlockedWithoutOurBlock => {
-            labels.dvw_their_attack_blocked_without_block.to_string()
-        }
         UnknownEvaluation(code) => labels
             .dvw_unknown_evaluation
             .replace("{code}", &code.to_string()),

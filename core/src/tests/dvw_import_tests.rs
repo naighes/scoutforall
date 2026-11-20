@@ -6,7 +6,7 @@ mod tests {
     use crate::dvw::{
         import::{
             MatchDetails, OpponentChoice, TeamChoice, TeamIssue, match_details, normalized,
-            opponent_plan, season_year, similar_teams, team_plan,
+            opponent_plan, season_year, similar_teams, team_name, team_plan,
         },
         model::{DvwFile, DvwRole, MatchDate, MatchInfo, Player, Side, Team},
     };
@@ -166,6 +166,50 @@ mod tests {
             let f = file(season, match_date, vec![]);
             assert_eq!(season_year(&f), year, "{season:?} {match_date:?}");
         }
+    }
+
+    /// The name of a team without the year of the season at its end (the
+    /// lists add it): with it, without, with another year (kept), only the
+    /// year (kept). The same team from two files, with and without the
+    /// year, is one: similar by name, team B by name and new alike.
+    #[test]
+    fn the_year_of_the_season_out_of_the_name() {
+        let named = |home: &str| DvwFile {
+            home: team(home),
+            visiting: team("Ljubljana 2021"),
+            ..wien()
+        };
+        for (name, expected) in [
+            ("Volley Wien 2021", "Volley Wien"),
+            ("  Volley Wien   2021 ", "Volley Wien"),
+            ("Volley Wien", "Volley Wien"),
+            ("Volley Wien 2020", "Volley Wien 2020"),
+            ("Volley Wien2021", "Volley Wien2021"),
+            ("2021", "2021"),
+        ] {
+            assert_eq!(team_name(&named(name), Side::Home), expected, "{name:?}");
+        }
+        let no_season = DvwFile {
+            match_info: MatchInfo {
+                season: None,
+                date: MatchDate::Missing,
+                ..wien().match_info
+            },
+            ..named("Volley Wien 2021")
+        };
+        assert_eq!(team_name(&no_season, Side::Home), "Volley Wien 2021");
+        let file = named("VOLLEY WIEN 2021");
+        let plan = team_plan(&file, Side::Home, new_team()).expect("a plan");
+        assert_eq!(plan.team.name, "VOLLEY WIEN");
+        let saved = ours("Volley Wien", 2021, &[]);
+        let similar = similar_teams(&file, Side::Home, std::slice::from_ref(&saved));
+        assert!(similar.first().is_some_and(|s| s.same_name));
+        let by_name =
+            opponent_plan(&file, Side::Home, &plan.team, OpponentChoice::Name).expect("team B");
+        assert_eq!(by_name.name(), "Ljubljana");
+        let new =
+            opponent_plan(&file, Side::Home, &plan.team, OpponentChoice::New).expect("team B");
+        assert_eq!(new.name(), "Ljubljana");
     }
 
     /// The same season, and the same name or at least half of the players
@@ -708,6 +752,54 @@ mod tests {
             ]
         );
         assert_eq!(plan.team.players[0].role, None);
+    }
+
+    /// The two sides that don't agree tell the line and the cause in the
+    /// five languages, never the English of the replay.
+    #[test]
+    fn the_issues_of_the_two_sides_described_in_five_languages() {
+        use crate::domain::Side;
+        use crate::dvw::{
+            import::MatchIssue,
+            translate::{Issue, TranslateError},
+        };
+        use crate::localization::labels;
+        use crate::rally::Incoherence;
+        use crate::shapes::enums::LanguageEnum;
+        let sides = |line, e| {
+            MatchIssue::Set(TranslateError {
+                set_number: 2,
+                line,
+                issue: Issue::Sides(e),
+            })
+        };
+        let refused = Incoherence::Refused {
+            side: Side::B,
+            source: 4,
+            reason: "detail".to_string(),
+        };
+        for language in [
+            LanguageEnum::En,
+            LanguageEnum::It,
+            LanguageEnum::Pt,
+            LanguageEnum::Pl,
+            LanguageEnum::Ja,
+        ] {
+            let l = labels(language);
+            let at = sides(Some(90), refused.clone()).describe(l);
+            assert!(at.contains("90") && at.contains("detail"), "{at}");
+            assert!(!at.contains("touch 4"), "{at}");
+            for e in [Incoherence::Serving, Incoherence::Points] {
+                let told = sides(None, e).describe(l);
+                assert!(!told.contains("the two sides"), "{language:?}: {told}");
+            }
+            assert_ne!(l.dvw_sides_serving, l.dvw_sides_points);
+        }
+        let it = labels(LanguageEnum::It);
+        assert_eq!(
+            sides(None, Incoherence::Points).describe(it),
+            "set 2: le due squadre del file non concordano su chi vince uno scambio"
+        );
     }
 
     /// The issues as the user reads them, in the language chosen; the

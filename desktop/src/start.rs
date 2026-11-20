@@ -52,7 +52,13 @@ pub enum Outcome {
 }
 
 pub struct StartScreen {
+    /// what is chosen now: A's start, then B's when both sides are scouted
     start: Arc<SetStart>,
+    /// A's start
+    start_a: Arc<SetStart>,
+    /// B's start, scouting both sides: chosen after A's
+    start_b: Option<Arc<SetStart>>,
+    on_b: bool,
     /// the team and the match, to scout the set once started
     pub team_id: String,
     pub match_id: String,
@@ -74,13 +80,21 @@ const COURT: [[u8; 3]; 2] = [[4, 3, 2], [5, 6, 1]];
 const NAME_ROOM: usize = 22;
 
 impl StartScreen {
-    pub fn new(start: Arc<SetStart>, team_id: String, match_id: String) -> Self {
+    pub fn new(
+        start: Arc<SetStart>,
+        start_b: Option<Arc<SetStart>>,
+        team_id: String,
+        match_id: String,
+    ) -> Self {
         let lineup = start.lineup();
         let step = match lineup.chooses_serving_team {
             true => Step::Serving,
             false => Step::Position(1),
         };
         let mut screen = StartScreen {
+            start_a: start.clone(),
+            start_b,
+            on_b: false,
             start,
             team_id,
             match_id,
@@ -100,8 +114,42 @@ impl StartScreen {
         format!("{} – {}", self.lineup.team, self.lineup.opponent)
     }
 
+    /// The start of A.
     pub fn set_start(&self) -> Arc<SetStart> {
-        self.start.clone()
+        self.start_a.clone()
+    }
+
+    /// The start of B, scouting both sides.
+    pub fn set_start_of_b(&self) -> Option<Arc<SetStart>> {
+        self.start_b.clone()
+    }
+
+    /// The lineup of the team chosen is complete: A's, then B's, the set
+    /// can start; or it goes on to B's.
+    fn finished(&mut self) -> Outcome {
+        match (&self.start_b, self.on_b) {
+            (Some(b), false) => {
+                self.start = b.clone();
+                self.on_b = true;
+                self.go_to(Step::Position(1));
+                Outcome::Stay
+            }
+            _ => {
+                self.lineup = self.start.lineup();
+                Outcome::Start
+            }
+        }
+    }
+
+    /// Back from the first position of B to the last choice of A.
+    fn back_to_a(&mut self) {
+        self.start = self.start_a.clone();
+        self.on_b = false;
+        let step = match self.start.fallback_libero_choices().is_empty() {
+            true => Step::Libero,
+            false => Step::FallbackLibero,
+        };
+        self.go_to(step);
     }
 
     /// The set could not start: the core says why.
@@ -203,10 +251,7 @@ impl StartScreen {
                 self.go_to(step);
                 Outcome::Stay
             }
-            (true, None) => {
-                self.lineup = self.start.lineup();
-                Outcome::Start
-            }
+            (true, None) => self.finished(),
         }
     }
 
@@ -232,6 +277,10 @@ impl StartScreen {
             self.go_to(step);
             return Outcome::Stay;
         }
+        if self.on_b && self.step == Step::Position(1) {
+            self.back_to_a();
+            return Outcome::Stay;
+        }
         let undone = match (self.step, self.lineup.chooses_serving_team) {
             (Step::Serving, _) | (Step::Position(1), false) => return Outcome::Back,
             (Step::Position(1), true) => (Ok(()), Step::Serving),
@@ -252,7 +301,7 @@ impl StartScreen {
             Step::FallbackLibero => {
                 let skipped = self.start.choose_fallback_libero(None);
                 match self.done(skipped) {
-                    true => Outcome::Start,
+                    true => self.finished(),
                     false => Outcome::Stay,
                 }
             }
@@ -550,10 +599,17 @@ impl StartScreen {
             p.as_ref()
                 .map_or_else(|| "–".to_string(), |p| format!("{} {}", p.number, p.name))
         };
-        let serving = match l.serving_team {
-            Some(TeamSideEnum::Us) => l.team.clone(),
-            Some(TeamSideEnum::Them) => l.opponent.clone(),
-            None => "–".to_string(),
+        // B doesn't choose: it receives when A serves, and the other way round
+        let serving = match (
+            self.on_b,
+            l.serving_team,
+            self.start_a.lineup().serving_team,
+        ) {
+            (true, _, Some(TeamSideEnum::Us)) => l.opponent.clone(),
+            (true, _, Some(TeamSideEnum::Them)) => l.team.clone(),
+            (false, Some(TeamSideEnum::Us), _) => l.team.clone(),
+            (false, Some(TeamSideEnum::Them), _) => l.opponent.clone(),
+            _ => "–".to_string(),
         };
         let line = |label: &str, value: String, current: bool| {
             row![
@@ -577,8 +633,17 @@ impl StartScreen {
             .into(),
             false => space::vertical().height(0).into(),
         };
+        // scouting both sides, the team chosen now in its colour
+        let team_color = match (self.start_b.is_some(), self.on_b) {
+            (false, _) => c.text,
+            (true, false) => theme::TEAM_US,
+            (true, true) => theme::TEAM_THEM,
+        };
         let header = row![
-            text(l.team.clone()).size(SIZE_BODY).font(bold),
+            text(l.team.clone())
+                .size(SIZE_BODY)
+                .font(bold)
+                .color(team_color),
             text(format!("– {}", l.opponent))
                 .size(SIZE_BODY)
                 .color(c.muted),
@@ -624,11 +689,25 @@ mod tests {
 
     /// A team of seven, the seventh a libero, and a new match.
     fn new_match(app: &Scout4All) -> (String, String) {
+        let team = team_of_seven(app, "Cortona");
+        let form = MatchForm {
+            opponent: "Arezzo".into(),
+            date: DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").ok(),
+            home: true,
+            max_substitutions: "6".into(),
+            ..MatchForm::default()
+        };
+        let m = app.save_match(team.clone(), None, form).unwrap();
+        (team, m)
+    }
+
+    /// A team of seven, the seventh a libero.
+    fn team_of_seven(app: &Scout4All, name: &str) -> String {
         let team = app
             .save_team(
                 None,
                 TeamForm {
-                    name: "Cortona".into(),
+                    name: name.into(),
                     classification: Some(TeamClassificationEnum::Regional),
                     gender: Some(GenderEnum::Women),
                     country: CountryCode::known("IT"),
@@ -653,15 +732,7 @@ mod tests {
             };
             app.save_player(team.clone(), None, player, false).unwrap();
         }
-        let form = MatchForm {
-            opponent: "Arezzo".into(),
-            date: DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").ok(),
-            home: true,
-            max_substitutions: "6".into(),
-            ..MatchForm::default()
-        };
-        let m = app.save_match(team.clone(), None, form).unwrap();
-        (team, m)
+        team
     }
 
     fn press(screen: &mut StartScreen, ck: KeyCombination) -> Outcome {
@@ -674,7 +745,7 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = new_match(&app);
         let start = app.set_start(team.clone(), m.clone()).unwrap();
-        let mut screen = StartScreen::new(start, team.clone(), m.clone());
+        let mut screen = StartScreen::new(start, None, team.clone(), m.clone());
         // the first set: who serves first, Enter only once chosen
         assert_eq!(screen.step, Step::Serving);
         press(&mut screen, key!(enter));
@@ -718,7 +789,7 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = new_match(&app);
         let start = app.set_start(team.clone(), m.clone()).unwrap();
-        let mut screen = StartScreen::new(start, team, m);
+        let mut screen = StartScreen::new(start, None, team, m);
         press(&mut screen, key!(right));
         press(&mut screen, key!(enter));
         for _ in 1..=6 {
@@ -754,6 +825,7 @@ mod tests {
         let mut screen = StartScreen::new(
             app.set_start(screen.team_id.clone(), screen.match_id.clone())
                 .unwrap(),
+            None,
             screen.team_id.clone(),
             screen.match_id.clone(),
         );
@@ -767,12 +839,76 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = new_match(&app);
         let start = app.set_start(team.clone(), m.clone()).unwrap();
-        let mut screen = StartScreen::new(start, team, m);
+        let mut screen = StartScreen::new(start, None, team, m);
         press(&mut screen, key!(left));
         press(&mut screen, key!(enter));
         assert_eq!(screen.step, Step::Position(1));
         press(&mut screen, BACK_KEY);
         assert_eq!(screen.step, Step::Serving);
         assert!(matches!(press(&mut screen, BACK_KEY), Outcome::Back));
+    }
+
+    /// A match on both sides: the lineup of A, then the one of B, who
+    /// doesn't choose who serves; Esc goes back from B to A; the set starts
+    /// on both sides.
+    #[test]
+    fn both_sides_choose_the_lineup_of_b_after_the_one_of_a() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = team_of_seven(&app, "Cortona");
+        let b = team_of_seven(&app, "Arezzo");
+        let form = MatchForm {
+            opponent: "Arezzo".into(),
+            opponent_team: b.parse().ok(),
+            both: true,
+            date: DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").ok(),
+            home: true,
+            max_substitutions: "6".into(),
+            ..MatchForm::default()
+        };
+        let m = app.save_match(team.clone(), None, form).unwrap();
+        app.save_roster_of_b(team.clone(), m.clone(), MatchForm::default())
+            .unwrap();
+        let of_b = app.set_start_of_b(team.clone(), m.clone()).unwrap();
+        assert!(of_b.is_some());
+        let one_side = new_match(&app);
+        assert!(
+            app.set_start_of_b(one_side.0, one_side.1)
+                .unwrap()
+                .is_none()
+        );
+        let mut screen = StartScreen::new(
+            app.set_start(team.clone(), m.clone()).unwrap(),
+            of_b,
+            team.clone(),
+            m.clone(),
+        );
+        press(&mut screen, key!(right));
+        press(&mut screen, key!(enter));
+        // six positions, the setter, the libero of A: then B's
+        for _ in 1..=8 {
+            assert!(matches!(press(&mut screen, key!(enter)), Outcome::Stay));
+        }
+        assert!(screen.on_b);
+        assert_eq!(screen.step, Step::Position(1));
+        assert_eq!(screen.lineup.team, "Arezzo");
+        assert!(!screen.lineup.chooses_serving_team);
+        // Esc from B's first position goes back to A's libero
+        press(&mut screen, BACK_KEY);
+        assert!(!screen.on_b);
+        assert_eq!(screen.step, Step::Libero);
+        assert_eq!(screen.lineup.team, "Cortona");
+        press(&mut screen, key!(enter));
+        for _ in 1..=7 {
+            assert!(matches!(press(&mut screen, key!(enter)), Outcome::Stay));
+        }
+        assert!(matches!(press(&mut screen, key!(enter)), Outcome::Start));
+        assert!(screen.lineup.complete);
+        app.start_set_both(screen.set_start(), screen.set_start_of_b().unwrap())
+            .unwrap();
+        let details = app.match_details(team.clone(), m.clone()).unwrap();
+        assert_eq!(details.next, NextSetKind::Resume { set_number: 1 });
+        // scouted again on both sides
+        app.scouting(team, m).unwrap();
     }
 }

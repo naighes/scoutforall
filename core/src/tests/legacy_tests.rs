@@ -12,6 +12,7 @@ mod tests {
         legacy::{
             archive::{Archive, file_team_id, is_match_of, read_archive},
             folder::{LegacyTeam, NotRead, read_folder},
+            format::read_events,
             rows::{FolderRows, SharedTeams, folder_rows, match_rows, team_rows},
         },
         localization::Language,
@@ -26,7 +27,10 @@ mod tests {
             team_reader::TeamReader,
         },
         shapes::{
-            enums::LineupRulesEnum, r#match::MatchEntry, player::PlayerEntry, snapshot::EventEntry,
+            enums::{LineupRulesEnum, ScoutingRulesEnum},
+            r#match::MatchEntry,
+            player::PlayerEntry,
+            snapshot::EventEntry,
             team::TeamEntry,
         },
         storage::fs::FsStore,
@@ -540,6 +544,60 @@ mod tests {
             .unwrap();
         let scores = back.set_scores().unwrap();
         (back, scores)
+    }
+
+    /// The events of the versions before the database follow their
+    /// scouting rules (v1): read as the current rules tell them, the sets
+    /// say the current rules, also written and read back.
+    #[tokio::test]
+    async fn the_sets_before_the_database_follow_the_current_rules() {
+        let (team, m) = finished().await;
+        let rows = rows(&team, &m);
+        assert!(!rows.sets.is_empty());
+        let rules = |rows: &MatchRows| -> Vec<Option<ScoutingRulesEnum>> {
+            rows.sets.iter().map(|s| s.row.scouting_rules).collect()
+        };
+        assert_eq!(
+            rules(&rows),
+            vec![Some(ScoutingRulesEnum::CURRENT); rows.sets.len()]
+        );
+        let db = database();
+        let shared = team_rows(std::slice::from_ref(&team)).unwrap();
+        write(&db, &shared, &[&rows]);
+        let back = db
+            .read(|tx| crate::providers::sqlite::rows::match_rows(tx, rows.row.id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(rules(&back), rules(&rows));
+    }
+
+    /// The block `-` of the files is `!` now, the block `+` before their
+    /// freeball too; the block `+` of their freeball kept the ball, like a
+    /// freeball received, which isn't told: left out (scouting rules v4);
+    /// the rest as saved.
+    #[test]
+    fn the_events_of_the_files_are_read_with_the_current_rules() {
+        let player = Uuid::new_v4();
+        let at = "2025-10-04T10:00:00Z";
+        let csv = format!(
+            "{at},B,{player},-,,\n{at},OS,,,,\n{at},B,{player},+,,\n{at},OF,,,,\n{at},B,{player},+,,\n{at},A,{player},#,,\n"
+        );
+        let told: Vec<_> = read_events(csv.as_bytes())
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.event_type, e.eval))
+            .collect();
+        use crate::shapes::enums::{EvalEnum::*, EventTypeEnum::*};
+        assert_eq!(
+            told,
+            vec![
+                (B, Some(Exclamative)),
+                (OS, None),
+                (B, Some(Exclamative)),
+                (OF, None),
+                (A, Some(Perfect)),
+            ]
+        );
     }
 
     #[tokio::test]

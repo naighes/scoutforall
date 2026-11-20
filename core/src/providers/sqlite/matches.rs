@@ -1,6 +1,6 @@
 use crate::{
     domain::{
-        Competition, Home, Match, RosterEntry, ScoutingMode, Team, TeamRef, adapters::MatchRows,
+        Competition, Match, RosterEntry, ScoutingMode, Side, Team, TeamRef, adapters::MatchRows,
         sql::Sql,
     },
     errors::{AppError, IOError, MatchError},
@@ -8,19 +8,19 @@ use crate::{
     logging::logger::log_error,
     match_form::{CompetitionInput, MatchInput, Opponent, RosterNumber},
     providers::{
-        match_reader::MatchReader,
+        match_reader::{MatchReader, PlayedOn},
         match_writer::MatchWriter,
         sqlite::{
             Database,
             competitions::{competition_row, competition_rows, insert_competition},
             not_found,
             rows::{
-                insert_match, insert_roster_entry, match_ids, match_rows, matches_as_b, team_row,
-                write_team,
+                insert_match, insert_roster_entry, match_ids, match_rows, matches_as_b,
+                matches_both, team_row, write_team,
             },
             sets::numbered,
             sqlite,
-            summary::{cached, forget, refresh, save},
+            summary::{cached, competition_of, forget, refresh, save},
             teams::read_team,
             video::forget_video,
         },
@@ -32,9 +32,10 @@ use crate::{
     },
 };
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset};
-use rusqlite::{Transaction, params};
+use chrono::{DateTime, FixedOffset, NaiveDate};
+use rusqlite::{OptionalExtension, Transaction, params};
 use std::cmp::Ordering;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 /// The id of a match, its UUID as text.
@@ -69,6 +70,15 @@ pub(crate) fn replayed(
     Ok((entry, status))
 }
 
+/// A match scouted on both sides, as the analysis of its team B picks it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BothMatch {
+    pub id: String,
+    pub team_b: Uuid,
+    pub name_b: String,
+    pub home_b: bool,
+}
+
 pub struct SqliteMatchReader {
     db: Database,
     language: Language,
@@ -87,6 +97,107 @@ impl SqliteMatchReader {
         match_id: &str,
     ) -> Result<(MatchEntry, MatchStatus), AppError> {
         replayed(tx, team, match_id, &self.language)
+    }
+
+    /// The match of team A `team` from B's side, scouted on both sides
+    /// (`MatchRows::entry_of_b`): its sets first checked to replay alike
+    /// on both sides (`SetRows::sides`), an error naming the touch that
+    /// doesn't. `None` scouting only A.
+    pub fn read_of_b(
+        &self,
+        team: &TeamEntry,
+        match_id: &str,
+    ) -> Result<Option<MatchEntry>, AppError> {
+        let id = match_uuid(match_id)?;
+        self.db.read(|tx| {
+            let rows = match_rows(tx, id)?
+                .filter(|rows| rows.row.team_a == team.id)
+                .ok_or_else(|| not_found(&format!("match {match_id} of team {}", team.id)))?;
+            match (rows.row.scouting, &rows.row.team_b) {
+                (ScoutingMode::Both, TeamRef::Team(b)) => {
+                    rows.sets
+                        .iter()
+                        .filter(|s| !s.row.deleted)
+                        .try_for_each(|s| s.sides(rows.row.max_substitutions).map(|_| ()))?;
+                    let team_b = read_team(tx, b)?;
+                    rows.entry_of_b(team, &team_b)?
+                        .map(|entry| {
+                            numbered(entry.sets.clone(), &self.language, match_id)
+                                .map(|sets| MatchEntry { sets, ..entry })
+                        })
+                        .transpose()
+                }
+                _ => Ok(None),
+            }
+        })
+    }
+
+    /// The roster of B in the last match of team A `team` against the same
+    /// team B before the match `match_id` (by date) that has one, with the
+    /// numbers and roles of that match: matches scouting only A write none
+    /// and are skipped. `None` when there is no such match, or B is a name.
+    pub fn previous_roster_of_b(
+        &self,
+        team: &TeamEntry,
+        match_id: &str,
+    ) -> Result<Option<Vec<RosterNumber>>, AppError> {
+        let id = match_uuid(match_id)?;
+        self.db.read(|tx| {
+            let Some(rows) = match_rows(tx, id)?.filter(|rows| rows.row.team_a == team.id) else {
+                return Err(not_found(&format!("match {match_id} of team {}", team.id)));
+            };
+            let TeamRef::Team(b) = rows.row.team_b else {
+                return Ok(None);
+            };
+            let previous: Option<Uuid> = tx
+                .query_row(
+                    "SELECT m.id FROM matches m
+                     WHERE m.team_a = ?1 AND m.team_b = ?2 AND m.deleted = 0 AND m.id != ?3
+                       AND julianday(m.start) < julianday(?4)
+                       AND EXISTS (SELECT 1 FROM match_roster r
+                                   WHERE r.match_id = m.id AND r.team_id = ?2)
+                     ORDER BY julianday(m.start) DESC, m.id DESC LIMIT 1",
+                    params![Sql(team.id), Sql(b), Sql(id), Sql(rows.row.start)],
+                    |r| r.get::<_, Sql<Uuid>>(0).map(|s| s.0),
+                )
+                .optional()
+                .map_err(sqlite)?;
+            previous
+                .map(|previous| {
+                    Ok(match_rows(tx, previous)?
+                        .map(|rows| {
+                            rows.roster
+                                .iter()
+                                .filter(|r| r.team_id == b)
+                                .map(|r| RosterNumber {
+                                    player: r.person_id,
+                                    number: r.number,
+                                    role: r.role,
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default())
+                })
+                .transpose()
+        })
+    }
+
+    /// For each set of the match scouted on both sides, and each event of
+    /// B's side (`read_of_b`), the index of the event of A's side coming
+    /// from the same touch, if any (`MatchRows::origins_of_b`). Empty
+    /// scouting only A.
+    pub fn origins_of_b(
+        &self,
+        team: &TeamEntry,
+        match_id: &str,
+    ) -> Result<Vec<(u8, Vec<Option<usize>>)>, AppError> {
+        let id = match_uuid(match_id)?;
+        self.db.read(|tx| {
+            Ok(match_rows(tx, id)?
+                .filter(|rows| rows.row.team_a == team.id)
+                .ok_or_else(|| not_found(&format!("match {match_id} of team {}", team.id)))?
+                .origins_of_b())
+        })
     }
 
     /// The row of the match of team A `team`, for its form, with the
@@ -142,7 +253,10 @@ impl SqliteMatchReader {
                     .iter()
                     .map(|(team, id)| match self.listed(tx, team, id) {
                         Ok((m, status)) => {
-                            let summary = MatchSummary::of(&m, &status);
+                            let summary = MatchSummary {
+                                competition_id: competition_of(tx, match_uuid(id)?)?,
+                                ..MatchSummary::of(&m, &status)
+                            };
                             save(tx, match_uuid(id)?, &summary).map(|()| Ok(summary))
                         }
                         Err(unreadable) => Ok(Err(unreadable)),
@@ -195,6 +309,25 @@ impl SqliteMatchReader {
         let mut played: Vec<_> = as_a.chain(as_b).chain(unreadable).collect();
         played.sort_by(|a, b| recent_first(a, b, |m| m.summary.date));
         Ok(played)
+    }
+
+    /// The matches of team A `team` scouted on both sides, with the team B
+    /// of each and whether B plays at home, in order of date: B's side of
+    /// each is `read_of_b`. A team B that can't be read is left out.
+    pub fn both_matches(&self, team: &TeamEntry) -> Result<Vec<BothMatch>, AppError> {
+        self.db.read(|tx| {
+            Ok(matches_both(tx, team.id)?
+                .into_iter()
+                .filter_map(|(id, b, home)| {
+                    read_team(tx, &b).ok().map(|b| BothMatch {
+                        id,
+                        team_b: b.id,
+                        name_b: b.name,
+                        home_b: home.is_b(),
+                    })
+                })
+                .collect())
+        })
     }
 
     /// The match in which `team` is B, as B sees it: team A, and whether
@@ -292,38 +425,51 @@ impl MatchReader for SqliteMatchReader {
             .map(|(entry, _)| entry)
     }
 
-    /// A match of team A `team` not removed that was in that folder
-    /// (`legacy_id`, migrated or imported from an archive of then), or
-    /// whose opponent and day make that id now, the first by start.
-    async fn saved_as(&self, team: &TeamEntry, file_id: &str) -> Result<Option<String>, AppError> {
+    async fn played_on(&self, teams: &[Uuid], day: NaiveDate) -> Result<Vec<PlayedOn>, AppError> {
         self.db.read(|tx| {
             let mut statement = tx
                 .prepare(
-                    "SELECT m.id, m.legacy_id = ?2 AND m.legacy_team = ?1,
-                            coalesce(m.team_b_name, b.name), m.start
-                     FROM matches m LEFT JOIN teams b ON b.id = m.team_b
-                     WHERE m.team_a = ?1 AND m.deleted = 0
-                     ORDER BY m.start, m.id",
+                    "SELECT id, team_a, team_b, start FROM matches
+                     WHERE deleted = 0 AND (team_a = ?1 OR team_b = ?1)",
                 )
                 .map_err(sqlite)?;
-            let rows = statement
-                .query_map(params![Sql(team.id), file_id], |row| {
-                    Ok((
-                        row.get::<_, Sql<Uuid>>(0)?.0,
-                        row.get::<_, Option<bool>>(1)?.unwrap_or(false),
-                        row.get::<_, String>(2)?,
-                        row.get::<_, Sql<DateTime<FixedOffset>>>(3)?.0,
-                    ))
+            let mut rows = vec![];
+            for team in teams {
+                let of_team = statement
+                    .query_map(params![Sql(*team)], |row| {
+                        Ok((
+                            row.get::<_, Sql<Uuid>>(0)?.0,
+                            row.get::<_, Sql<Uuid>>(1)?.0,
+                            row.get::<_, Option<Sql<Uuid>>>(2)?.map(|b| b.0),
+                            row.get::<_, Sql<DateTime<FixedOffset>>>(3)?.0,
+                        ))
+                    })
+                    .map_err(sqlite)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sqlite)?;
+                rows.extend(of_team);
+            }
+            rows.sort_by_key(|(id, _, _, start)| (*start, *id));
+            rows.dedup_by_key(|(id, ..)| *id);
+            rows.into_iter()
+                .filter(|(.., start)| start.date_naive() == day)
+                .map(|(id, a, b, _)| {
+                    let team = read_team(tx, &a)?;
+                    Ok(self
+                        .entry(tx, &team, &id.to_string())
+                        .ok()
+                        .and_then(|(m, _)| {
+                            m.set_scores().ok().map(|scores| PlayedOn {
+                                id: m.id.clone(),
+                                team_a: a,
+                                team_b: b,
+                                names: (team.name.clone(), m.opponent.clone()),
+                                scores,
+                            })
+                        }))
                 })
-                .map_err(sqlite)?
-                .collect::<Result<Vec<_>, _>>()
-                .map_err(sqlite)?;
-            let was_there = rows.iter().find(|(_, legacy, _, _)| *legacy);
-            let same_now = || {
-                rows.iter()
-                    .find(|(_, _, opponent, start)| MatchEntry::id_of(opponent, start) == file_id)
-            };
-            Ok(was_there.or_else(same_now).map(|(id, ..)| id.to_string()))
+                .filter_map(Result::transpose)
+                .collect()
         })
     }
 
@@ -428,6 +574,23 @@ fn saved_competition(
     }
 }
 
+/// The match `id` without the lineups of B, its touches removed: scouted
+/// only on A's side.
+fn without_side_b(tx: &Transaction, id: Uuid) -> Result<(), AppError> {
+    tx.execute(
+        "DELETE FROM set_lineups WHERE match_id = ?1 AND side = ?2",
+        params![Sql(id), Side::B],
+    )
+    .and_then(|_| {
+        tx.execute(
+            "UPDATE events SET deleted = 1 WHERE match_id = ?1 AND side = ?2",
+            params![Sql(id), Side::B],
+        )
+    })
+    .map_err(sqlite)?;
+    refresh(tx, id)
+}
+
 /// Updates the match `id` with `input`: team B changes, unless both teams
 /// are scouted. The roster: the players left out go; number and role as in
 /// `numbers`, else the ones added copy them from the team (D9) and the
@@ -445,6 +608,8 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
         competition,
         stage,
         round,
+        // chosen at the creation, never changed
+        scouting: _,
     } = input;
     let rows = match_rows(tx, id)?.ok_or_else(|| not_found(&format!("match {id}")))?;
     let team = read_team(tx, &rows.row.team_a)?;
@@ -563,6 +728,7 @@ impl MatchWriter for SqliteMatchWriter {
                     competition_id,
                     stage: input.stage,
                     round: input.round,
+                    scouting: input.scouting,
                     ..rows.row
                 },
                 ..rows
@@ -579,35 +745,6 @@ impl MatchWriter for SqliteMatchWriter {
         self.0.write(|tx| update_match(tx, id, input))
     }
 
-    /// See `MatchWriter::replace_details`.
-    async fn replace_details(&self, m: &MatchEntry, input: MatchInput) -> Result<(), AppError> {
-        let id = match_uuid(&m.id)?;
-        self.0.write(|tx| {
-            let row = match_rows(tx, id)?
-                .ok_or_else(|| not_found(&format!("match {id}")))?
-                .row;
-            let input = MatchInput {
-                opponent: match (input.opponent, row.team_b) {
-                    (Opponent::Name(_), TeamRef::Team(b)) => Opponent::Team(b),
-                    (opponent, _) => opponent,
-                },
-                home: match (input.home, row.home) {
-                    (Home::B, Home::Neutral) => Home::Neutral,
-                    (home, _) => home,
-                },
-                notes: row.notes,
-                friendly: row.friendly,
-                competition: input
-                    .competition
-                    .or(row.competition_id.map(CompetitionInput::Existing)),
-                stage: input.stage.or(row.stage),
-                round: input.round.or(row.round),
-                ..input
-            };
-            update_match(tx, id, input)
-        })
-    }
-
     async fn save_roster_of_b(
         &self,
         m: &MatchEntry,
@@ -615,14 +752,48 @@ impl MatchWriter for SqliteMatchWriter {
     ) -> Result<(), AppError> {
         let id = match_uuid(&m.id)?;
         self.0.write(|tx| {
-            let row = match_rows(tx, id)?
-                .ok_or_else(|| not_found(&format!("match {id}")))?
-                .row;
-            let TeamRef::Team(b) = row.team_b else {
+            let rows = match_rows(tx, id)?.ok_or_else(|| not_found(&format!("match {id}")))?;
+            let TeamRef::Team(b) = rows.row.team_b else {
                 return Err(AppError::IO(IOError::Msg(format!(
                     "match {id}: team B is a name, without a roster"
                 ))));
             };
+            // whoever B has put on court, on the bench as libero or in a
+            // touch stays on the roster: the check is made here, in the
+            // transaction, whatever asks for it
+            let used: HashSet<Uuid> = rows
+                .sets
+                .iter()
+                .filter(|s| !s.row.deleted)
+                .flat_map(|s| {
+                    s.lineups
+                        .iter()
+                        .filter(|l| l.side == Side::B)
+                        .flat_map(|l| {
+                            l.positions
+                                .iter()
+                                .copied()
+                                .chain([l.libero, l.setter])
+                                .chain(l.fallback_libero)
+                        })
+                        .chain(
+                            s.events
+                                .iter()
+                                .filter(|e| e.side == Side::B && !e.deleted)
+                                .flat_map(|e| {
+                                    e.entry.player.into_iter().chain(e.entry.target_player)
+                                }),
+                        )
+                })
+                .collect();
+            if let Some(missing) = used
+                .iter()
+                .find(|p| !numbers.iter().any(|n| n.player == **p))
+            {
+                return Err(AppError::IO(IOError::Msg(format!(
+                    "match {id}: player {missing} of team B played, it stays on the roster"
+                ))));
+            }
             tx.execute(
                 "DELETE FROM match_roster WHERE match_id = ?1 AND team_id = ?2",
                 params![Sql(id), Sql(b)],
@@ -665,6 +836,23 @@ impl MatchWriter for SqliteMatchWriter {
                 ..m.clone()
             }),
         }
+    }
+
+    async fn save_scouting(&self, m: &MatchEntry, scouting: ScoutingMode) -> Result<(), AppError> {
+        let id = match_uuid(&m.id)?;
+        self.0.write(|tx| {
+            let changed = tx
+                .execute(
+                    "UPDATE matches SET scouting = ?2 WHERE id = ?1 AND deleted = 0",
+                    params![Sql(id), scouting],
+                )
+                .map_err(sqlite)?;
+            match (changed, scouting) {
+                (0, _) => Err(not_found(&format!("match {}", m.id))),
+                (_, ScoutingMode::A) => without_side_b(tx, id),
+                (_, ScoutingMode::Both) => Ok(()),
+            }
+        })
     }
 
     /// Marked removed, with what it has (D7), by either team: one match

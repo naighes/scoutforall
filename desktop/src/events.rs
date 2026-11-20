@@ -301,6 +301,30 @@ impl EventsScreen {
         Outcome::Stay
     }
 
+    /// The touches the one chosen is paired with, in a set of both sides:
+    /// the one it answers before it, the one answering it after it (a
+    /// block has both), as `touch_edit` moves them with it.
+    fn paired(&self) -> Vec<usize> {
+        let kind = |i: usize| {
+            self.set
+                .events
+                .get(i)
+                .filter(|_| self.set.both)
+                .map(|e| (e.event.side_b, e.event.event))
+        };
+        let Some(chosen) = kind(self.selected) else {
+            return vec![];
+        };
+        let before = self.selected.checked_sub(1);
+        let after = self.selected + 1;
+        let (answers, answered_by) =
+            scout4all_core::rally::paired(before.and_then(kind), chosen, kind(after));
+        [before.filter(|_| answers), answered_by.then_some(after)]
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.correcting {
             Some(_) => vec![
@@ -318,12 +342,13 @@ impl EventsScreen {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let paired = self.paired();
         let rows = self
             .set
             .events
             .iter()
             .enumerate()
-            .map(|(i, e)| event_row(e, i == self.selected, i, c));
+            .map(|(i, e)| event_row(e, i == self.selected, paired.contains(&i), i, c));
         let list: Element<'a, Message> = match self.set.events.is_empty() {
             true => ui::body(s.no_events).color(c.muted).into(),
             false => scrollable(Column::with_children(rows).spacing(2))
@@ -526,16 +551,26 @@ fn player_line<'a>(e: &SetEvent, c: Colors) -> Element<'a, Message> {
 
 /// An event: its place, the symbol of the evaluation, the event and the
 /// player, the score after it; the changes of the lineup dimmed.
-fn event_row<'a>(e: &SetEvent, chosen: bool, i: usize, c: Colors) -> Element<'a, Message> {
+fn event_row<'a>(
+    e: &SetEvent,
+    chosen: bool,
+    paired: bool,
+    i: usize,
+    c: Colors,
+) -> Element<'a, Message> {
     let color = match e.editable {
         true => c.text,
         false => c.muted,
     };
     let bold = theme::fonts().bold;
     let body = row![
+        // the touches of B, where both sides are scouted, in its colour
         text((e.index + 1).to_string())
             .size(SIZE_SMALL)
-            .color(c.muted)
+            .color(match e.event.side_b {
+                true => theme::TEAM_THEM,
+                false => c.muted,
+            })
             .width(Length::Fixed(36.0))
             .align_x(Alignment::End),
         text(e.event.symbol.clone().unwrap_or_default())
@@ -555,7 +590,30 @@ fn event_row<'a>(e: &SetEvent, chosen: bool, i: usize, c: Colors) -> Element<'a,
     ]
     .spacing(10)
     .align_y(Alignment::Center);
-    ui::list_row(body, chosen, Some(Message::Event(i)), c)
+    // the touch paired with the chosen one moves with it: a mark and a tint
+    let mark = text(match paired {
+        true => "↔",
+        false => " ",
+    })
+    .size(SIZE_BODY + 2.0)
+    .color(c.accent)
+    .width(Length::Fixed(18.0));
+    let tinted =
+        container(row![mark, body].align_y(Alignment::Center)).style(move |_| container::Style {
+            background: paired.then(|| {
+                iced::Color {
+                    a: 0.08,
+                    ..c.accent
+                }
+                .into()
+            }),
+            border: iced::Border {
+                radius: 4.0.into(),
+                ..iced::Border::default()
+            },
+            ..container::Style::default()
+        });
+    ui::list_row(tinted, chosen, Some(Message::Event(i)), c)
 }
 
 #[cfg(test)]
@@ -582,8 +640,122 @@ mod tests {
             gender: core.genders().first().map(|g| g.value),
             country: core.countries("Ital".into()).first().map(|c| c.value),
         };
-        let imported = core.import_dvw(bytes, choice, false).unwrap();
+        let imported = core.import_dvw(bytes, choice).unwrap();
         (core, imported.team_id, imported.match_id)
+    }
+
+    /// B serving, its point lost without a cause (`PL`, as ⇧W does for B):
+    /// A scores and serves.
+    #[test]
+    fn the_point_lost_by_b_without_a_cause_goes_to_a_who_serves() {
+        use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum::*, TeamSideEnum};
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team_id, match_id) = crate::scouting::tests::both_sides_started(&core);
+        let scouting = core
+            .scouting_in_order(
+                &team_id,
+                &match_id,
+                scout4all_core::scouting::ChoiceOrder::EventFirst,
+            )
+            .unwrap();
+        let player = |scouting: &scout4all_mobile::Scouting| {
+            scouting
+                .state()
+                .court
+                .iter()
+                .map(|p| p.id.clone())
+                .find(|id| scouting.choose_player(id.clone()).is_ok())
+                .unwrap()
+        };
+        // A serves, B receives and kills: B serving
+        scouting.choose_event_of(false, S).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event_of(true, P).unwrap();
+        player(&scouting);
+        scouting.choose_eval(EvalEnum::Negative).unwrap();
+        scouting.choose_event_of(true, A).unwrap();
+        player(&scouting);
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        let state = scouting.state();
+        assert_eq!(
+            (state.score_us, state.score_them, state.serving_team),
+            (1, 0, TeamSideEnum::Us) // B's view
+        );
+        // B tells a point lost: 1-1, A serving
+        scouting.choose_event_of(true, PL).unwrap();
+        let state = scouting.state();
+        assert_eq!(
+            (state.score_us, state.score_them, state.serving_team),
+            (1, 1, TeamSideEnum::Us)
+        );
+    }
+
+    /// A set of both sides: the touches of both in the list, a touch of
+    /// the pair corrected from the keys moves the other touch too, and
+    /// what is saved is read again as it was.
+    #[test]
+    fn a_pair_of_touches_of_both_sides_is_corrected_from_the_keys() {
+        use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum::*};
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team_id, match_id) = crate::scouting::tests::both_sides_started(&core);
+        let scouting = core
+            .scouting_in_order(
+                &team_id,
+                &match_id,
+                scout4all_core::scouting::ChoiceOrder::EventFirst,
+            )
+            .unwrap();
+        // A serves `+`, B receives `-`, in the order the ball goes
+        scouting.choose_event_of(false, S).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event_of(true, P).unwrap();
+        let receiver = scouting
+            .state()
+            .court
+            .iter()
+            .map(|p| p.id.clone())
+            .find(|id| scouting.choose_player(id.clone()).is_ok())
+            .unwrap();
+        assert!(!receiver.is_empty());
+        scouting.choose_eval(EvalEnum::Negative).unwrap();
+        drop(scouting);
+
+        let mut events =
+            EventsScreen::new(core.clone(), team_id.clone(), match_id.clone(), 1).unwrap();
+        let rows = &events.set.events;
+        assert_eq!(rows.len(), 2);
+        assert!(!rows[0].event.side_b && rows[1].event.side_b);
+        // the pair is shown from either touch: a mark on the other
+        events.selected = 0;
+        assert_eq!(events.paired(), [1]);
+        events.selected = 1;
+        assert_eq!(events.paired(), [0]);
+        // the reception: its evaluation can be `+` (the serve follows, to `-`)
+        events.update(Message::Event(1));
+        let Some(correcting) = &events.correcting else {
+            unreachable!("a reception is corrected")
+        };
+        assert!(correcting.state.event.side_b);
+        assert!(
+            correcting
+                .state
+                .evals
+                .iter()
+                .any(|e| e.value == EvalEnum::Positive)
+        );
+        events
+            .correcting
+            .as_ref()
+            .unwrap()
+            .correction
+            .choose_eval(EvalEnum::Positive);
+        events.key(key!(enter));
+        assert!(events.correcting.is_none(), "{:?}", events.error);
+        let reread = EventsScreen::new(core, team_id, match_id, 1).unwrap();
+        assert_eq!(reread.set.events[1].event.symbol.as_deref(), Some("+"));
+        assert_eq!(reread.set.events[0].event.symbol.as_deref(), Some("-"));
     }
 
     #[test]

@@ -15,6 +15,11 @@ import io.github.naighes.scout4all.core.ServeStartEnum
 import androidx.compose.ui.test.hasContentDescription
 import io.github.naighes.scout4all.core.EventTypeEnum
 import org.junit.Assert.assertEquals
+import io.github.naighes.scout4all.core.DetailFilter
+import io.github.naighes.scout4all.core.PhaseEnum
+import io.github.naighes.scout4all.core.MatchSide
+import io.github.naighes.scout4all.core.StatsScope
+import androidx.compose.foundation.layout.Column
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -242,5 +247,123 @@ class TrendTest {
         rule.waitForIdle()
         val moved = where()
         assertTrue("$moved", moved.first() > 0f && moved.all { it == moved.first() })
+    }
+}
+
+/** The digs counted in the detail of the defense: all of them, the digs
+ * that aren't covers, only the covers (our dig after our attack blocked
+ * back); the menu only on the defense. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+class DigsTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun theDefenseByDigs() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        core { c ->
+            c.scouting(team, match).use { s ->
+                // our serve, their attack dug, our attack blocked back and
+                // covered with difficulty, our kill
+                s.chooseEval(EvalEnum.POSITIVE)
+                listOf(
+                    EventTypeEnum.D to EvalEnum.POSITIVE,
+                    EventTypeEnum.A to EvalEnum.EXCLAMATIVE,
+                    EventTypeEnum.D to EvalEnum.NEGATIVE,
+                    EventTypeEnum.A to EvalEnum.PERFECT,
+                ).forEach { (event, eval) ->
+                    s.chooseEvent(event)
+                    s.choosePlayer(s.playerChoices().first().id)
+                    s.chooseEval(eval)
+                }
+            }
+        }
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText("Serve")
+        val digs = hasText(string(R.string.digs)) and hasClickAction()
+        rule.onNode(digs).assertDoesNotExist()
+        rule.onNode(hasText("Defense") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.digs))
+        // the tile of the total (the players have one too)
+        val total = { n: String ->
+            rule.onAllNodes(hasText(string(R.string.total)) and hasText(n)).fetchSemanticsNodes().isNotEmpty()
+        }
+        assertTrue(total("2"))
+        rule.onNode(digs).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.digs_all))
+        rule.onNode(hasText(string(R.string.digs_cover)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onNode(hasText(string(R.string.digs_cover)) and hasClickAction()).assertExists()
+        assertTrue(total("1") && !total("2"))
+        rule.onNode(hasText("Attack") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
+        rule.onNode(hasText(string(R.string.digs_cover)) and hasClickAction()).assertDoesNotExist()
+        rule.onNode(digs).assertDoesNotExist()
+    }
+}
+
+/** The summary, the distribution and the errors narrowed to a phase or a
+ * rotation as the detail is; the detail keeps the same choice. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+class NarrowedSummaryTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun thePhaseNarrowsEveryPage() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        // two aces: serves, so in break
+        serve(team, match, EvalEnum.PERFECT, EvalEnum.PERFECT)
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        val aces = { n: String -> rule.onAllNodes(hasText("$n – 0")).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitFor { aces("2") }
+        // the filters are on the three pages
+        listOf(R.string.stats_summary, R.string.stats_distribution, R.string.stats_errors).forEach { page ->
+            rule.onNode(hasText(string(page)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+            rule.waitForIdle()
+            rule.onNode(hasText(string(R.string.filter_rotation)) and hasClickAction()).assertExists()
+            rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).assertExists()
+        }
+        rule.onNode(hasText(string(R.string.stats_summary)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        // side out only: the aces are gone
+        rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText("side-out", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { aces("0") }
+        // the detail has the same phase
+        rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { rule.onAllNodes(hasText("side-out", ignoreCase = true) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).assertDoesNotExist()
+        // and back to all of them: the aces are there again
+        rule.onNode(hasText(string(R.string.stats_summary)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText("side-out", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText(string(R.string.filter_all)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { aces("2") }
+    }
+
+    /** The pages opened again on figures narrowed already (the sheet
+     * reopened while scouting, the comparison left): the detail has the
+     * same phase. */
+    @Test
+    fun theDetailOfNarrowedFiguresHasTheirPhase() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        serve(team, match, EvalEnum.PERFECT)
+        val narrowed = DetailFilter(PhaseEnum.SIDE_OUT)
+        val stats = core { it.matchStats(team, match, MatchSide.A, StatsScope.Match, narrowed) }
+        rule.setContent {
+            Scout4AllTheme {
+                Column {
+                    StatsPages(stats, onScope = {}, loadDetail = { scope, event, filter ->
+                        app.core { it.matchDetail(team, match, MatchSide.A, scope, event, filter) }
+                    })
+                }
+            }
+        }
+        rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { rule.onAllNodes(hasText(string(R.string.filter_rotation)) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).assertDoesNotExist()
     }
 }

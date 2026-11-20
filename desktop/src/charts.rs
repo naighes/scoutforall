@@ -5,7 +5,7 @@
 //! (chosen over iced_aksel and plotters-iced, 027).
 
 use {
-    crate::theme::{Colors, LOST, set_color},
+    crate::theme::{Colors, LOST, TEAM_THEM, TEAM_US, set_color},
     iced::{
         Color, Element, Length, Point, Rectangle, Renderer, Size, Theme, mouse,
         widget::canvas::{self, Frame, Geometry, LineDash, Path, Stroke, Text},
@@ -32,6 +32,16 @@ pub struct Trend {
     /// the direct errors of the figure along the sets, a red line across
     /// the chart: the rally and how many, of every set
     pub errors: Vec<(f64, u32)>,
+    /// the other team of a match scouted on both sides, on the same axes:
+    /// its sets dashed, its own line across
+    pub versus: Option<Versus>,
+}
+
+/// The lines of the other team, drawn on the chart of the first.
+#[derive(Debug, Clone)]
+pub struct Versus {
+    pub sets: Vec<(u8, Vec<Vec<(f64, f64)>>)>,
+    pub overall: Option<f64>,
 }
 
 /// The rallies of a set from the first: its columns.
@@ -85,6 +95,34 @@ impl Trend {
             high,
             points,
             errors: vec![],
+            versus: None,
+        }
+    }
+
+    /// With the lines of `other` on the same chart: the axes hold both, the
+    /// direct errors (of one team) left out.
+    pub fn against(self, other: Trend, hidden: &[u8]) -> Trend {
+        let sets: Vec<(u8, Vec<Vec<(f64, f64)>>)> = other
+            .sets
+            .into_iter()
+            .filter(|(set, _)| !hidden.contains(set))
+            .collect();
+        let known = sets
+            .iter()
+            .flat_map(|(_, runs)| runs.iter().flatten().map(|(_, v)| *v))
+            .chain(other.overall);
+        let low = known.clone().fold(self.low, f64::min);
+        let high = known.fold(self.high, f64::max);
+        Trend {
+            low,
+            high,
+            points: self.points.max(other.points),
+            errors: vec![],
+            versus: Some(Versus {
+                sets,
+                overall: other.overall,
+            }),
+            ..self
         }
     }
 
@@ -188,22 +226,37 @@ impl<M> canvas::Program<M> for CanvasTrend {
                 ..Text::default()
             });
         }
-        if let Some(overall) = t.overall {
-            frame.stroke(
-                &Path::line(
-                    Point::new(0.0, y(overall)),
-                    Point::new(plot.width, y(overall)),
-                ),
-                Stroke {
-                    line_dash: LineDash {
-                        segments: &[6.0, 6.0],
-                        offset: 0,
+        // the match so far across: in the colour of its team when two teams
+        // are on the chart
+        let mut across = |overall: Option<f64>, color: Color| {
+            if let Some(overall) = overall {
+                frame.stroke(
+                    &Path::line(
+                        Point::new(0.0, y(overall)),
+                        Point::new(plot.width, y(overall)),
+                    ),
+                    Stroke {
+                        line_dash: LineDash {
+                            segments: &[6.0, 6.0],
+                            offset: 0,
+                        },
+                        ..Stroke::default().with_color(color).with_width(1.5)
                     },
-                    ..Stroke::default()
-                        .with_color(Color { a: 0.6, ..c.text })
-                        .with_width(1.5)
-                },
-            );
+                );
+            }
+        };
+        match &t.versus {
+            Some(v) => {
+                across(t.overall, Color { a: 0.8, ..TEAM_US });
+                across(
+                    v.overall,
+                    Color {
+                        a: 0.8,
+                        ..TEAM_THEM
+                    },
+                );
+            }
+            None => across(t.overall, Color { a: 0.6, ..c.text }),
         }
         // the direct errors, a red line across the chart in the column of
         // their rally (from 1), under the lines of the sets
@@ -217,21 +270,47 @@ impl<M> canvas::Program<M> for CanvasTrend {
                 error,
             );
         }
-        for (set, runs) in &t.sets {
-            let color = set_color(*set);
-            for run in runs {
-                let path = Path::new(|b| {
-                    for (i, (px, v)) in run.iter().enumerate() {
-                        match i {
-                            0 => b.move_to(Point::new(x(*px), y(*v))),
-                            _ => b.line_to(Point::new(x(*px), y(*v))),
+        // the sets of the first team solid, the other's dashed, each set in
+        // its colour
+        let teams =
+            std::iter::once((&t.sets, false)).chain(t.versus.iter().map(|v| (&v.sets, true)));
+        for (sets, dashed) in teams {
+            for (set, runs) in sets {
+                let color = set_color(*set);
+                for run in runs {
+                    let path = Path::new(|b| {
+                        for (i, (px, v)) in run.iter().enumerate() {
+                            match i {
+                                0 => b.move_to(Point::new(x(*px), y(*v))),
+                                _ => b.line_to(Point::new(x(*px), y(*v))),
+                            }
                         }
+                    });
+                    let stroke = Stroke::default().with_color(color).with_width(2.0);
+                    frame.stroke(
+                        &path,
+                        match dashed {
+                            true => Stroke {
+                                line_dash: LineDash {
+                                    segments: &[3.0, 4.0],
+                                    offset: 0,
+                                },
+                                ..stroke
+                            },
+                            false => stroke,
+                        },
+                    );
+                }
+                if let Some((px, v)) = runs.iter().flatten().last() {
+                    let end = Point::new(x(*px), y(*v));
+                    match dashed {
+                        true => frame.stroke(
+                            &Path::circle(end, 3.0),
+                            Stroke::default().with_color(color).with_width(1.5),
+                        ),
+                        false => frame.fill(&Path::circle(end, 3.0), color),
                     }
-                });
-                frame.stroke(&path, Stroke::default().with_color(color).with_width(2.0));
-            }
-            if let Some((px, v)) = runs.iter().flatten().last() {
-                frame.fill(&Path::circle(Point::new(x(*px), y(*v)), 3.0), color);
+                }
             }
         }
         vec![frame.into_geometry()]

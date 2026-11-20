@@ -107,9 +107,8 @@ data class DvwState(
     val preview: DvwPreview? = null,
     /** the option of a list chosen */
     val selected: Int = 0,
-    val sides: List<DvwSide> = emptyList(),
-    /** the side being imported, of `sides` */
-    val current: Int = 0,
+    /** the side being imported, once chosen */
+    val side: DvwSide? = null,
     /** `YYYY-MM-DD` */
     val day: String? = null,
     val substitutions: String = "",
@@ -122,13 +121,12 @@ data class DvwState(
     val invalid: Pair<TeamField, String>? = null,
     /** why team B as chosen can't be: another one may do */
     val opponentError: String? = null,
-    val results: List<DvwResult> = emptyList(),
+    /** how the import went: imported, left as it is or why not */
+    val result: DvwResult? = null,
     val working: Boolean = false,
     /** the side like the team the import was chosen from, of the sides */
     val fromSide: Int = 0,
-) {
-    val side: DvwSide? get() = sides.getOrNull(current)
-}
+)
 
 class DvwImportViewModel(private val app: Scout4AllApplication, private val file: DvwOpened?) : ViewModel() {
     private val mutableState = MutableStateFlow(DvwState())
@@ -191,13 +189,9 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
     fun next() = work { s ->
         when (val step = s.step) {
             DvwStep.Sides -> {
-                val sides = when (s.selected) {
-                    0 -> listOf(DvwSide.HOME)
-                    1 -> listOf(DvwSide.VISITING)
-                    else -> listOf(DvwSide.HOME, DvwSide.VISITING)
-                }
+                val side = if (s.selected == 1) DvwSide.VISITING else DvwSide.HOME
                 val days = s.preview?.days.orEmpty()
-                mutableState.update { it.copy(sides = sides, current = 0, day = days.singleOrNull()) }
+                mutableState.update { it.copy(side = side, day = days.singleOrNull()) }
                 when (days.size) {
                     1 -> proposeSubstitutions(days[0])
                     else -> to(DvwStep.Day)
@@ -216,7 +210,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
             }
             DvwStep.Substitutions -> when (s.substitutions.toIntOrNull()?.takeIf { it > 0 }) {
                 null -> mutableState.update { it.copy(working = false) }
-                else -> team(s.copy(current = 0))
+                else -> team(s)
             }
             is DvwStep.Team -> when (val team = step.similar.getOrNull(s.selected)) {
                 null -> to(DvwStep.NewTeam(step.similar))
@@ -236,15 +230,15 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
                     mutableState.update { it.copy(opponentError = e.reason, working = false) }
                 }
             }
-            is DvwStep.Ready -> save(s, step, overwrite = step.ready.savedAlready)
+            is DvwStep.Ready -> save(step)
             DvwStep.Done, DvwStep.Loading, is DvwStep.Failed -> mutableState.update { it.copy(working = false) }
         }
     }
 
-    /** The side being imported left as it is: on to the next one. */
+    /** The side left as it is: done. */
     fun skip() = work { s ->
         val team = side(s)
-        nextSide(s, DvwResult(team, app.getString(R.string.dvw_skipped, team)))
+        done(DvwResult(team, app.getString(R.string.dvw_skipped, team)))
     }
 
     /** Back a step: false before the first one. */
@@ -275,18 +269,16 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
         null -> null
     }.orEmpty()
 
-    /** The team of the side being imported: a similar one or a new one;
-     * done after the last side. The team the import was chosen from comes
-     * first, until a side goes into it. */
+    /** The team of the side imported: a similar one or a new one, the
+     * team the import was chosen from first. */
     private suspend fun team(s: DvwState) {
         val side = s.side ?: return to(DvwStep.Done)
-        mutableState.update { it.copy(current = s.current, classification = null, gender = null, invalid = null) }
+        mutableState.update { it.copy(classification = null, gender = null, invalid = null) }
         try {
-            val first = file?.teamId?.takeIf { id -> s.results.none { it.teamId == id } }
-            val similar = app.core { it.dvwSimilarTeams(bytes, side, first) }
+            val similar = app.core { it.dvwSimilarTeams(bytes, side, file?.teamId) }
             to(if (similar.isEmpty()) DvwStep.NewTeam(similar) else DvwStep.Team(similar))
         } catch (e: MobileException) {
-            nextSide(s, DvwResult(side(s), app.getString(R.string.dvw_not_imported, side(s), e.reason)))
+            done(DvwResult(side(s), app.getString(R.string.dvw_not_imported, side(s), e.reason)))
         }
     }
 
@@ -302,41 +294,39 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
     )
 
     /** Team A as chosen, checked against B only a name: on to team B, ours
-     * like it (team A left out), the team of the side imported before
-     * first, else the one the import was chosen from. */
+     * like it (team A left out), the one the import was chosen from
+     * first. */
     private suspend fun plan(s: DvwState, teamId: String?) {
         val choice = choice(s, teamId)
         try {
             app.core { it.planDvw(bytes, choice) }
-            val first = (s.results.lastOrNull { it.teamId != null }?.teamId ?: file?.teamId)
-                ?.takeIf { it != teamId }
+            val first = file?.teamId?.takeIf { it != teamId }
             val similar = app.core { it.dvwSimilarOpponents(bytes, choice.side, teamId, first) }
             to(DvwStep.Opponent(similar, choice))
         } catch (e: MobileException.InvalidTeam) {
             // the new team still to fill in, as in the form
             mutableState.update { it.copy(invalid = e.field to e.reason, working = false) }
         } catch (e: MobileException) {
-            nextSide(s, DvwResult(side(s), app.getString(R.string.dvw_not_imported, side(s), e.reason)))
+            done(DvwResult(side(s), app.getString(R.string.dvw_not_imported, side(s), e.reason)))
         }
     }
 
-    private suspend fun save(s: DvwState, step: DvwStep.Ready, overwrite: Boolean) {
+    private suspend fun save(step: DvwStep.Ready) {
         val team = step.ready.team
         val result = try {
-            val imported = app.core { it.importDvw(bytes, step.choice, overwrite) }
+            val imported = app.core { it.importDvw(bytes, step.choice) }
             // queued for the statistics: sent now, not at the next start
             app.sendUploads(ExistingWorkPolicy.APPEND_OR_REPLACE)
             DvwResult(team, app.getString(R.string.dvw_imported, team), imported.teamId)
         } catch (e: MobileException) {
             DvwResult(team, app.getString(R.string.dvw_not_imported, team, e.reason))
         }
-        nextSide(s, result)
+        done(result)
     }
 
-    private suspend fun nextSide(s: DvwState, result: DvwResult) {
-        val next = s.copy(current = s.current + 1, results = s.results + result)
-        mutableState.update { it.copy(results = next.results, current = next.current) }
-        team(next)
+    private fun done(result: DvwResult) {
+        mutableState.update { it.copy(result = result) }
+        to(DvwStep.Done)
     }
 }
 
@@ -397,7 +387,6 @@ private fun DvwContent(
                     listOf(
                         stringResource(R.string.dvw_home, preview.home),
                         stringResource(R.string.dvw_visiting, preview.visiting),
-                        stringResource(R.string.dvw_both),
                     ),
                     state.selected,
                     model::select,
@@ -467,13 +456,13 @@ private fun DvwContent(
                     Text(stringResource(R.string.dvw_match_numbers, ready.matchNumbers.toInt()))
                 }
                 ready.competition?.let { Text(stringResource(R.string.dvw_competition, it)) }
-                if (ready.savedAlready) {
-                    Text(stringResource(R.string.dvw_already_saved, ready.team), color = MaterialTheme.colorScheme.error)
+                ready.oneSide?.let { why ->
+                    Text(why.replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.error)
                 }
             }
             DvwStep.Done -> {
                 Question(stringResource(R.string.dvw_done))
-                state.results.forEach { result ->
+                state.result?.let { result ->
                     when (val id = result.teamId) {
                         null -> Text(result.message)
                         else -> TextButton(onClick = { onTeam(id) }) { Text(result.message) }
@@ -488,7 +477,7 @@ private fun DvwContent(
     when (val step = state.step) {
         is DvwStep.Ready -> {
             Button(onClick = model::next, enabled = !state.working, modifier = button.padding(top = 16.dp)) {
-                Text(stringResource(if (step.ready.savedAlready) R.string.dvw_overwrite else R.string.save))
+                Text(stringResource(R.string.save))
             }
             OutlinedButton(onClick = { model.skip() }, enabled = !state.working, modifier = button.padding(bottom = 16.dp)) {
                 Text(stringResource(R.string.dvw_dont_import))

@@ -161,7 +161,7 @@ fn seed(dvw: &Path, dir: &Path) -> R<Seeds> {
                 gender: Some(GenderEnum::Women),
                 country: Some(country),
             };
-            match app.import_dvw(bytes.clone(), choice, false) {
+            match app.import_dvw(bytes.clone(), choice) {
                 Ok(imported) => seeds.push(Seed {
                     team: imported.team_id,
                     id: imported.match_id,
@@ -373,6 +373,7 @@ fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
         app.team_analysis(
             team.clone(),
             period,
+            None,
             EventTypeEnum::A,
             DetailFilter::default(),
         )
@@ -402,8 +403,8 @@ fn measure_reads(dir: &Path) -> R<Vec<(String, f64)>> {
         time("matches(team)", READS, || {
             app.matches(team.clone()).map(|_| ())
         })?,
-        time("opponents(team)", READS, || {
-            app.opponents(team.clone()).map(|_| ())
+        time("opponent_choices(team)", READS, || {
+            app.opponent_choices(team.clone()).map(|_| ())
         })?,
         time("team_analysis(last 10)", READS, || {
             analysis(AnalysisPeriod::LastMatches { count: 10 })
@@ -442,15 +443,18 @@ fn measure_scouting(dir: &Path) -> R<Vec<(String, f64)>> {
             Ok::<_, String>(sc.state()).map(|_| ())
         })?,
         time("stats(set)", ACTIONS, || {
-            sc.stats(StatsScope::Set { number: set }).map(|_| ())
+            sc.stats(StatsScope::Set { number: set }, DetailFilter::default())
+                .map(|_| ())
         })?,
         time("stats(match)", ACTIONS, || {
-            sc.stats(StatsScope::Match).map(|_| ())
+            sc.stats(StatsScope::Match, DetailFilter::default())
+                .map(|_| ())
         })?,
         // what the desktop reads after each key
         time("desktop refresh", ACTIONS, || {
             let _ = (sc.state(), sc.available_events(), sc.available_evals());
-            sc.stats(StatsScope::Set { number: set }).map(|_| ())
+            sc.stats(StatsScope::Set { number: set }, DetailFilter::default())
+                .map(|_| ())
         })?,
     ];
     // undo goes back to the evaluation of the last event, choosing it

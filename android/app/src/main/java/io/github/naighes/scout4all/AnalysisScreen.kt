@@ -66,8 +66,11 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.AnalysedMatch
 import io.github.naighes.scout4all.core.AnalysisPeriod
+import io.github.naighes.scout4all.core.CompetitionChoice
 import io.github.naighes.scout4all.core.MatchTrend
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.LiveStats
+import io.github.naighes.scout4all.core.ScoutedOpponent
 import io.github.naighes.scout4all.core.TeamAnalysis
 import java.time.DateTimeException
 import java.time.Instant
@@ -104,7 +107,22 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     var from by rememberSaveable { mutableStateOf("") }
     var to by rememberSaveable { mutableStateOf("") }
     var page by rememberSaveable { mutableIntStateOf(0) }
+    // the competition the matches are narrowed to, none for every one
+    var competition by rememberSaveable { mutableStateOf<String?>(null) }
     var query by remember { mutableStateOf(DetailQuery()) }
+    // the opponent the analysis is seen from, none for the team itself
+    var opponent by rememberSaveable { mutableStateOf<String?>(null) }
+    // the opponent and the team side by side, in their matches
+    var compare by rememberSaveable { mutableStateOf(false) }
+    var ours by remember { mutableStateOf("") }
+    var opponents by remember { mutableStateOf<List<ScoutedOpponent>>(emptyList()) }
+    LaunchedEffect(teamId) {
+        try {
+            ours = app.core { it.team(teamId).name }
+            opponents = app.core { it.analysisOpponents(teamId) }
+        } catch (_: MobileException) {
+        }
+    }
     // the period read: two days only once both are
     var period by remember { mutableStateOf<AnalysisPeriod>(AnalysisPeriod.LastMonth) }
     LaunchedEffect(kind, count, from, to) {
@@ -120,9 +138,17 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     // the last one read stays while the next is
     var analysis by remember { mutableStateOf<TeamAnalysis?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(period, query) {
+    // the team over the matches of the opponent, to put beside its own
+    var versus by remember { mutableStateOf<LiveStats?>(null) }
+    LaunchedEffect(period, competition, query, opponent, compare) {
         try {
-            analysis = app.core { it.teamAnalysis(teamId, period, query.event, query.filter) }
+            versus = opponent?.takeIf { compare }?.let { o ->
+                app.core { it.analysisAgainst(teamId, o, period, competition, query.event, query.filter).summary }
+            }
+            analysis = app.core {
+                opponent?.let { o -> it.opponentAnalysis(teamId, o, period, competition, query.event, query.filter) }
+                    ?: it.teamAnalysis(teamId, period, competition, query.event, query.filter)
+            }
             failed = null
         } catch (e: MobileException) {
             failed = e.reason
@@ -145,13 +171,31 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                 val pages = AnalysisPage.entries
                 PrimaryTabRow(selectedTabIndex = page) {
                     pages.forEachIndexed { i, p ->
-                        Tab(selected = page == i, onClick = { page = i }, text = { Text(stringResource(p.title)) })
+                        // only the summary compares the matches of two teams
+                        Tab(selected = page == i, onClick = { page = i; if (p != AnalysisPage.Summary) compare = false }, text = { Text(stringResource(p.title)) })
                     }
                 }
                 Column(
                     Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
+                    if (opponents.isNotEmpty()) {
+                        SeenFromChooser(
+                            ours,
+                            opponents,
+                            opponent,
+                            compare,
+                            comparable = pages[page] == AnalysisPage.Summary,
+                            onCompare = { compare = true },
+                        ) {
+                            opponent = it
+                            compare = false
+                        }
+                    }
+                    // offered with more than one, or while one is chosen
+                    if (a.competitions.size > 1 || competition != null) {
+                        CompetitionChooser(a.competitions, competition) { competition = it }
+                    }
                     PeriodChooser(
                         kind,
                         count,
@@ -176,9 +220,17 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                     if (a.matches.isEmpty()) {
                         Text(stringResource(R.string.no_matches_period), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
-                        DetailFilters(a.detail, a.situation, query.filter) { query = query.copy(filter = it) }
+                        DetailFilters(
+                            a.detail,
+                            a.situation,
+                            query.filter,
+                            query.event.takeIf { pages[page] == AnalysisPage.Detail },
+                        ) { query = query.copy(filter = it) }
                         when (pages[page]) {
-                            AnalysisPage.Summary -> {
+                            AnalysisPage.Summary -> if (compare) {
+                                versus?.let { Comparison(it, a.summary) }
+                                    ?: Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                            } else {
                                 Summary(a.summary)
                                 Distribution(a.summary)
                                 Errors(a.summary)
@@ -187,7 +239,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                                 TrendLegend(a.matches.size)
                                 a.trend.forEach { MatchTrendChart(it, a.matches) }
                             }
-                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = teamWatch(teamId, period, onWatch)) { query = it }
+                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = if (opponent == null) teamWatch(teamId, period, competition, onWatch) else null) { query = it }
                         }
                     }
                 }
@@ -219,6 +271,52 @@ internal object DayMask : VisualTransformation {
                     (offset - listOf(5, 8).count { offset >= it }).coerceIn(0, digits.length)
             },
         )
+    }
+}
+
+/** The team itself or an opponent scouted on both sides, to see the analysis from. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SeenFromChooser(
+    ours: String,
+    opponents: List<ScoutedOpponent>,
+    chosen: String?,
+    compare: Boolean,
+    comparable: Boolean,
+    onCompare: () -> Unit,
+    onChoose: (String?) -> Unit,
+) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(stringResource(R.string.seen_from), style = MaterialTheme.typography.labelLarge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(selected = chosen == null, onClick = { onChoose(null) }, label = { Text(ours) })
+        opponents.forEach {
+            FilterChip(selected = chosen == it.id && !compare, onClick = { onChoose(it.id) }, label = { Text(it.name) })
+        }
+        // the opponent chosen and the team side by side, on the summary
+        if (chosen != null && comparable) {
+            FilterChip(selected = compare, onClick = onCompare, label = { Text(stringResource(R.string.compare)) })
+        }
+    }
+}
+
+/** The competitions of the matches scouted, one to narrow them to. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CompetitionChooser(
+    competitions: List<CompetitionChoice>,
+    chosen: String?,
+    onChoose: (String?) -> Unit,
+) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(stringResource(R.string.competition), style = MaterialTheme.typography.labelLarge)
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = chosen == null,
+            onClick = { onChoose(null) },
+            label = { Text(stringResource(R.string.all_competitions)) },
+        )
+        competitions.forEach {
+            FilterChip(selected = chosen == it.id, onClick = { onChoose(it.id) }, label = { Text(it.name) })
+        }
     }
 }
 

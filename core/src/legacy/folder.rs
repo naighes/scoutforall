@@ -19,14 +19,19 @@
 use crate::{
     constants::TEAM_DESCRIPTOR_FILE_NAME,
     errors::{AppError, IOError, MatchError},
-    legacy::format::{fill_lineup_rules, read_descriptor, read_events, read_lineup, set_file},
+    legacy::format::{
+        event_places, fill_lineup_rules, read_descriptor, read_events, read_lineup, set_file,
+    },
     localization::Labels,
     shapes::{r#match::MatchEntry, set::SetEntry, team::TeamEntry},
     storage::{Store, StoreEntry, layout, read_json},
-    video::{StoredProfile, VIDEO_PROFILE_FILE_NAME, VIDEO_PROFILE_VERSION, VideoProfile},
+    video::{
+        EventRef, StoredProfile, VIDEO_PROFILE_FILE_NAME, VIDEO_PROFILE_VERSION, VideoProfile,
+    },
 };
 use futures::future::{join_all, try_join_all};
 use serde::Deserialize;
+use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 /// A team or a match that couldn't be read: its folder (the key in the
@@ -186,7 +191,10 @@ pub async fn read_profile(
 }
 
 /// The profile of the video of the match, if it has one: unless written
-/// by a newer version.
+/// by a newer version. Its events are referred to by their rows in the
+/// files (as those versions read them), here by their place among the
+/// events read (`format::event_places`): a reference to a row the current
+/// rules leave out, or to none, is left out.
 pub async fn read_video(
     store: &dyn Store,
     team_id: &Uuid,
@@ -194,7 +202,34 @@ pub async fn read_video(
 ) -> Result<Option<VideoProfile>, AppError> {
     match read_profile(store, team_id, match_id).await? {
         StoredProfile::Missing => Ok(None),
-        StoredProfile::Profile(profile) => Ok(Some(profile)),
+        StoredProfile::Profile(profile) => {
+            let folder = &layout::match_folder(team_id, match_id);
+            let numbers: BTreeSet<u8> = profile
+                .anchor
+                .iter()
+                .filter_map(|a| a.event)
+                .chain(profile.corrections.iter().map(|c| c.event))
+                .map(|e| e.set_number)
+                .collect();
+            let places: BTreeMap<u8, Vec<Option<usize>>> =
+                join_all(numbers.into_iter().map(|number| async move {
+                    let key = layout::child(folder, &layout::set_events_name(number));
+                    let places = match store.read(&key).await {
+                        Ok(Some(csv)) => event_places(&csv).unwrap_or_default(),
+                        _ => vec![],
+                    };
+                    (number, places)
+                }))
+                .await
+                .into_iter()
+                .collect();
+            Ok(Some(profile.with_events(|e| {
+                places
+                    .get(&e.set_number)
+                    .and_then(|rows| rows.get(e.index).copied().flatten())
+                    .map(|index| EventRef { index, ..e })
+            })))
+        }
         StoredProfile::Newer(version) => Err(AppError::IO(IOError::Msg(format!(
             "{VIDEO_PROFILE_FILE_NAME} written by a newer version ({version})"
         )))),

@@ -24,7 +24,7 @@ use scout4all_core::{
     shapes::enums::{EventTypeEnum, LanguageEnum},
     storage::layout,
 };
-use scout4all_mobile::{AnalysisPeriod, DetailFilter, Scout4All, StatsScope};
+use scout4all_mobile::{AnalysisPeriod, DetailFilter, MatchSide, Scout4All, StatsScope};
 use std::{fs, path::Path};
 
 /// The fundamentals of the analysis of a team.
@@ -79,7 +79,13 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
                     let json = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
                     names.write(&folder.join(format!("{name}.report.json")), &json)?;
                     let live = app
-                        .match_stats(id.clone(), m.id.clone(), StatsScope::Match)
+                        .match_stats(
+                            id.clone(),
+                            m.id.clone(),
+                            MatchSide::A,
+                            StatsScope::Match,
+                            DetailFilter::default(),
+                        )
                         .map_err(|e| e.to_string())?;
                     names.write(
                         &folder.join(format!("{name}.live.txt")),
@@ -97,7 +103,13 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
         names.write(&folder.join("matches.txt"), &format!("{listed:#?}"))?;
         for event in FUNDAMENTALS {
             let analysis = app
-                .team_analysis(id.clone(), all.clone(), event, DetailFilter::default())
+                .team_analysis(
+                    id.clone(),
+                    all.clone(),
+                    None,
+                    event,
+                    DetailFilter::default(),
+                )
                 .map_err(|e| e.to_string())?;
             names.write(
                 &folder.join(format!("analysis_{event}.txt")),
@@ -120,6 +132,7 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
                 .team_analysis(
                     id.clone(),
                     period,
+                    None,
                     EventTypeEnum::A,
                     DetailFilter::default(),
                 )

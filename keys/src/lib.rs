@@ -31,6 +31,9 @@ pub const STATS_KEY: KeyCombination = key!(f3);
 /// Opens the preview of the recording in a window of its own, and closes
 /// it: on every screen of the desktop app, while recording.
 pub const PREVIEW_KEY: KeyCombination = key!(f4);
+/// Scouting both teams, swaps the side the choices are for: the ball isn't
+/// where it seems.
+pub const SWAP_SIDE_KEY: KeyCombination = key!(f5);
 
 /// Move the cursor on the court where the ball went, while evaluating.
 pub const ZONE_CURSOR_KEYS: [KeyCombination; 4] = [key!(left), key!(up), key!(down), key!(right)];
@@ -50,6 +53,7 @@ pub fn is_reserved_key(ck: &KeyCombination) -> bool {
         BACK_KEY,
         STATS_KEY,
         PREVIEW_KEY,
+        SWAP_SIDE_KEY,
         ZONE_KEY,
         BLOCKERS_KEY,
     ]
@@ -63,6 +67,38 @@ pub fn is_reserved_key(ck: &KeyCombination) -> bool {
 /// digits: they're chosen along with the evaluation, once the player is.
 pub fn is_fixed_key(ck: &KeyCombination) -> bool {
     is_reserved_key(ck) || ck.as_letter().is_some_and(|c| c.is_ascii_digit())
+}
+
+/// The letter of a key without modifiers: `r` for `r`.
+fn plain_letter(ck: &KeyCombination) -> Option<char> {
+    match (ck.codes, ck.modifiers) {
+        (OneToThree::One(KeyCode::Char(c)), KeyModifiers::NONE) if c.is_alphabetic() => Some(c),
+        _ => None,
+    }
+}
+
+/// The key with shift: shift-r for `r`. It's the key of the same choice for
+/// the other side, when both sides scouted can make it.
+pub fn shifted(ck: &KeyCombination) -> Option<KeyCombination> {
+    plain_letter(ck).map(|c| {
+        KeyCombination::one_key(KeyCode::Char(c.to_ascii_uppercase()), KeyModifiers::SHIFT)
+    })
+}
+
+/// The key a shifted letter comes from: `r` for shift-r (or a capital R,
+/// as some terminals report it).
+pub fn unshifted(ck: &KeyCombination) -> Option<KeyCombination> {
+    match (ck.codes, ck.modifiers) {
+        (OneToThree::One(KeyCode::Char(c)), KeyModifiers::SHIFT | KeyModifiers::NONE)
+            if c.is_alphabetic() && (c.is_uppercase() || ck.modifiers == KeyModifiers::SHIFT) =>
+        {
+            Some(KeyCombination::one_key(
+                KeyCode::Char(c.to_ascii_lowercase()),
+                KeyModifiers::NONE,
+            ))
+        }
+        _ => None,
+    }
 }
 
 /// Some terminals report shift along with the symbols it produces (e.g.
@@ -558,6 +594,8 @@ impl Default for KeyBindings<EventTypeEnum> {
         bindings.set(EventTypeEnum::LR, key!(l));
         bindings.set(EventTypeEnum::LF, key!(k));
         bindings.set(EventTypeEnum::CS, key!(shift - c));
+        bindings.set(EventTypeEnum::PW, key!(w));
+        bindings.set(EventTypeEnum::PL, key!(shift - w));
         bindings
     }
 }
@@ -630,6 +668,25 @@ fn test_normalized_symbols() {
 }
 
 #[test]
+fn test_shifted_letters() {
+    use crokey::crossterm::event::{KeyCode::Char, KeyModifiers as M};
+    assert_eq!(shifted(&key!(r)), Some(key!(shift - r)));
+    assert_eq!(unshifted(&key!(shift - r)), Some(key!(r)));
+    // some terminals report the capital, with or without shift
+    let capital = KeyCombination::one_key(Char('R'), M::NONE);
+    assert_eq!(unshifted(&capital), Some(key!(r)));
+    assert_eq!(
+        unshifted(&KeyCombination::one_key(Char('R'), M::SHIFT)),
+        Some(key!(r))
+    );
+    // only letters, and only a plain one has a shifted key
+    assert_eq!(unshifted(&key!(r)), None);
+    assert_eq!(shifted(&key!(shift - r)), None);
+    assert_eq!(shifted(&key!('+')), None);
+    assert_eq!(unshifted(&key!(ctrl - r)), None);
+}
+
+#[test]
 fn test_fixed_keys() {
     for ck in [
         key!(shift - u),
@@ -637,12 +694,13 @@ fn test_fixed_keys() {
         key!(f2),
         key!(f3),
         key!(f4),
+        key!(f5),
         key!('0'),
         key!('9'),
     ] {
         assert!(is_fixed_key(&ck), "{ck}");
     }
-    for ck in [key!(a), key!(u), key!(f5), key!('+'), key!(ctrl - '1')] {
+    for ck in [key!(a), key!(u), key!(f6), key!('+'), key!(ctrl - '1')] {
         assert!(!is_fixed_key(&ck), "{ck}");
     }
 }
@@ -726,6 +784,7 @@ fn test_reserved_and_fixed_keys() {
         key!(shift - u),
         key!(esc),
         key!(f2),
+        key!(f5),
         key!(space),
         key!(up),
         key!(left),

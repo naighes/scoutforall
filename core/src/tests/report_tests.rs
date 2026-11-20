@@ -5,8 +5,8 @@
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::localization::labels;
-    use crate::reporting::model::{Cell, Point, Report, build_report};
-    use crate::reporting::pdf::{render_match_pdf, render_report_pdf};
+    use crate::reporting::model::{Cell, Point, Report, build_report, build_report_of_both};
+    use crate::reporting::pdf::{render_both_pdf, render_match_pdf, render_report_pdf};
     use crate::shapes::{
         enums::{EvalEnum, EventTypeEnum, LanguageEnum, LineupRulesEnum, PhaseEnum, TeamSideEnum},
         r#match::MatchEntry,
@@ -288,6 +288,27 @@ mod tests {
         assert_eq!(row_of(lost, labels.serve)[1], "1");
         assert_eq!(row_of(lost, labels.attack_blocked)[1], "1");
         assert_eq!(row_of(lost, labels.total)[1], "3");
+        // no point without a cause, no row for it
+        let no_cause = |rows: &[Vec<String>]| rows.iter().any(|r| r[0] == labels.no_cause);
+        assert!(!no_cause(won) && !no_cause(lost));
+    }
+
+    /// The points without a cause (`PW`, `PL`) have their row, so that the
+    /// points still add up to the score.
+    #[test]
+    fn the_points_without_a_cause() {
+        let labels = EN;
+        let t = Team::new();
+        let mut set = t.rallies();
+        set.events.extend([opp(PL), opp(PW)]);
+        let m = match_entry(t.team("us"), "them", false, vec![set]);
+        let report = build_report(&m, EN).expect("expected the report");
+        let won = &report.points_won.rows;
+        assert_eq!(row_of(won, labels.no_cause)[1..], ["1", "33", "1"]);
+        assert_eq!(row_of(won, labels.total)[1], "3");
+        let lost = &report.points_lost.rows;
+        assert_eq!(row_of(lost, labels.no_cause)[1..], ["1", "25", "1"]);
+        assert_eq!(row_of(lost, labels.total)[1], "4");
         assert!(report.points_lost.total);
     }
 
@@ -575,5 +596,31 @@ mod tests {
             render_match_pdf(&m, labels(language))
                 .unwrap_or_else(|e| panic!("expected the report in {language}: {e}"));
         }
+    }
+
+    /// A match scouted on both sides: ours, the two teams side by side and
+    /// the pages of the opponent; the match of one side has neither.
+    #[test]
+    fn a_match_of_both_sides_has_the_comparison_and_the_opponent() {
+        let t = Team::new();
+        let a = match_entry(t.team("us"), "them", true, vec![t.rallies()]);
+        let b = match_entry(t.team("them"), "us", false, vec![t.rallies()]);
+        let alone = build_report(&a, EN).expect("expected the report");
+        assert!(alone.versus.is_none() && alone.opponent.is_none());
+        let report = build_report_of_both(&a, &b, EN).expect("expected the report");
+        let versus = report.versus.as_ref().expect("expected the comparison");
+        assert_eq!(versus.fundamentals.groups, ["us", "them"]);
+        assert_eq!(versus.fundamentals.rows.len(), 3);
+        assert_eq!(versus.phases.rows.len(), 2);
+        // the figures are the ones of each team's own pages
+        let sideout = &versus.phases.rows[0];
+        assert_eq!(sideout.values[0][2], report.kpis[0].value);
+        let theirs = report.opponent.as_ref().expect("expected the opponent");
+        assert_eq!(sideout.values[1][2], theirs.kpis[0].value);
+        assert_eq!(theirs.header.teams[1].name, "them");
+        let pdf = render_both_pdf(&a, &b, EN).expect("expected the report");
+        let alone = render_match_pdf(&a, EN).expect("expected the report");
+        // longer than ours alone
+        assert!(pdf.len() > alone.len());
     }
 }

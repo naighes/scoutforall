@@ -4,9 +4,15 @@
 //! for what the older versions left out.
 
 use crate::{
+    domain::{Side, rules::translate_rows},
     errors::{AppError, IOError},
     logging::logger::log_error,
-    shapes::{enums::LineupRulesEnum, r#match::MatchEntry, set::SetEntry, snapshot::EventEntry},
+    shapes::{
+        enums::{LineupRulesEnum, ScoutingRulesEnum},
+        r#match::MatchEntry,
+        set::SetEntry,
+        snapshot::EventEntry,
+    },
 };
 use csv::ReaderBuilder;
 use serde_json::{Value, from_slice, from_value};
@@ -55,8 +61,30 @@ pub(crate) fn set_file(name: &str) -> Option<(Option<u8>, &str)> {
 /// The events saved in the blob. Rows with and without the technique may be
 /// mixed, e.g. when v0.4.3 or older adds events to a set scouted by a later
 /// version. A last row without its line end was cut while appended (the
-/// battery out): it's left out, the set stays readable.
+/// battery out): it's left out, the set stays readable. The events follow
+/// the scouting rules of those versions (v1): they're read as the current
+/// rules tell them (`rules::translate`), the files stay as they are.
 pub(crate) fn read_events(csv: &[u8]) -> Result<Vec<EventEntry>, AppError> {
+    read_rows(csv).map(|rows| rows.into_iter().flatten().collect())
+}
+
+/// The place among the events `read_events` reads of each row of the
+/// blob: `None` for a row the current rules leave out.
+pub(crate) fn event_places(csv: &[u8]) -> Result<Vec<Option<usize>>, AppError> {
+    read_rows(csv).map(|rows| {
+        rows.iter()
+            .scan(0, |next, row| {
+                let place = row.as_ref().map(|_| *next);
+                *next += usize::from(row.is_some());
+                Some(place)
+            })
+            .collect()
+    })
+}
+
+/// Each row of the blob as `read_events` reads it, in its place: `None`
+/// when the current rules leave it out.
+fn read_rows(csv: &[u8]) -> Result<Vec<Option<EventEntry>>, AppError> {
     let whole = whole_rows(csv);
     if whole.len() < csv.len() {
         log_error(&format!(
@@ -70,10 +98,15 @@ pub(crate) fn read_events(csv: &[u8]) -> Result<Vec<EventEntry>, AppError> {
         .from_reader(whole);
     // a row that can't be read makes the set unreadable: without it the set
     // would replay to something else
-    reader
+    let events = reader
         .deserialize()
         .collect::<Result<Vec<EventEntry>, csv::Error>>()
-        .map_err(|e| AppError::IO(IOError::from(e)))
+        .map_err(|e| AppError::IO(IOError::from(e)))?;
+    let touches: Vec<(Side, EventEntry)> = events.into_iter().map(|e| (Side::A, e)).collect();
+    Ok(translate_rows(Some(ScoutingRulesEnum::V1), &touches)
+        .into_iter()
+        .map(|told| told.map(|(_, e)| e))
+        .collect())
 }
 
 /// The rows that end with a line end: every event is saved with one.

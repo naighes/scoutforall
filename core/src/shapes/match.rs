@@ -43,6 +43,10 @@ pub struct MatchSummary {
     pub resume: Option<u8>,
     /// the set to start, when none is going on and the match isn't over
     pub next_set_number: Option<u8>,
+    /// the competition it's played in, none for a friendly or a match
+    /// without one; read from the match each time, not cached
+    #[serde(default)]
+    pub competition_id: Option<Uuid>,
 }
 
 impl MatchSummary {
@@ -58,6 +62,7 @@ impl MatchSummary {
             finished: status.match_finished,
             resume: status.last_incomplete_set.as_ref().map(|s| s.set_number),
             next_set_number: status.next_set_number,
+            competition_id: None,
         }
     }
 

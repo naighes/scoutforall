@@ -16,7 +16,7 @@
 use crate::{
     domain::{
         MatchVideo, MatchVideoFile, VideoAnchor, VideoCorrection,
-        adapters::{EventsOfA, VideoRows},
+        adapters::{EventRefs, VideoRows},
         sql::Sql,
     },
     errors::{AppError, IOError},
@@ -35,7 +35,7 @@ impl VideoProfiles for SqliteVideoProfiles {
     async fn read(&self, team_id: &Uuid, match_id: &str) -> Result<StoredProfile, AppError> {
         self.0.read(|tx| {
             let id = match_of(tx, team_id, match_id)?;
-            let events = EventsOfA::of(&set_rows(tx, id)?);
+            let events = EventRefs::of(&set_rows(tx, id)?);
             Ok(match video_rows(tx, id)? {
                 Some(rows) => StoredProfile::Profile(rows.profile(&events)),
                 None => StoredProfile::Missing,
@@ -51,7 +51,7 @@ impl VideoProfiles for SqliteVideoProfiles {
     ) -> Result<(), AppError> {
         self.0.write(|tx| {
             let id = match_of(tx, team_id, match_id)?;
-            let events = EventsOfA::of(&set_rows(tx, id)?);
+            let events = EventRefs::of(&set_rows(tx, id)?);
             write_video(tx, &VideoRows::of(profile, id, &events)?)
         })
     }

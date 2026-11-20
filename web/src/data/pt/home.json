@@ -9,6 +9,7 @@
   "highlights_title": "E também",
   "highlights": [
     { "title": "Zonas de jogo", "content": "Zonas de saque, recepção, ataque, defesa e bloqueio. Registro da composição do bloqueio." },
+    { "title": "As duas equipes", "content": "Faça o scouting da sua equipe e do adversário na mesma partida: os eventos dos dois lados, um +1 para os pontos sem causa e as estatísticas dos dois lados comparadas lado a lado." },
     { "title": "Relatório em PDF", "content": "O relatório da partida, no formato de súmula, pronto para imprimir ou compartilhar com a equipe." },
     { "title": "Suas teclas", "content": "Cada evento, avaliação e tipo de levantamento pode usar a tecla que você preferir." },
     { "title": "Cinco idiomas", "content": "Português, inglês, italiano, polonês e japonês." },

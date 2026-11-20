@@ -11,7 +11,7 @@ mod tests {
             queue::{PendingUpload, UploadQueue},
             queue_manager::QueueManager,
             upload::{
-                ToUpload, UploadSource, UploadStep, keys_request, match_archive, upload_next,
+                ToUpload, UploadSource, UploadStep, keys_request, match_archive_of, upload_next,
             },
         },
         constants::DEFAULT_MAX_SUBSTITUTIONS,
@@ -163,6 +163,8 @@ mod tests {
                 file_id: entry.id.clone(),
                 set_files,
                 entry,
+                neutral: false,
+                side_b: None,
             })
         }
     }
@@ -224,7 +226,14 @@ mod tests {
 
     /// The files of the archive of an upload, in their order.
     fn archive(upload: &ToUpload) -> Vec<(String, Vec<u8>)> {
-        let zip = match_archive(&upload.entry, upload.set_files.clone(), None).unwrap();
+        let zip = match_archive_of(
+            &upload.entry,
+            upload.set_files.clone(),
+            None,
+            upload.neutral,
+            upload.side_b.clone(),
+        )
+        .unwrap();
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(zip)).unwrap();
         (0..zip.len())
             .map(|i| {
@@ -270,7 +279,7 @@ mod tests {
 
     #[tokio::test]
     async fn every_migrated_match_uploads_what_its_files_uploaded() {
-        let (mut total, mut padded) = (0, 0);
+        let (mut total, mut translated) = (0, 0);
         for version in VERSIONS {
             let device = Device::of(version);
             let from_files = uploads_of_files(device.store()).await;
@@ -286,23 +295,23 @@ mod tests {
                 assert_eq!(upload.file_id, *folder, "{at}");
                 assert_eq!(upload.entry.team.id, *team, "{at}");
                 assert_eq!(
-                    format!("{:?}", keys_request(&upload.entry)),
-                    format!("{:?}", keys_request(&file.entry)),
+                    format!("{:?}", keys_request(&upload.entry, upload.neutral)),
+                    format!("{:?}", keys_request(&file.entry, file.neutral)),
                     "{at}"
                 );
                 let (ours, theirs) = (archive(&upload), archive(file));
                 assert_eq!(told(&ours), told(&theirs), "{at}");
                 // byte for byte, but the rows saved without the flags (up
-                // to v0.10.1): they get the column, empty
+                // to v0.10.1): they get the column, empty; and the events
+                // the current scouting rules tell otherwise (the same once
+                // read, as `told` says)
                 assert_eq!(ours.len(), theirs.len(), "{at}");
                 for ((name, ours), (_, theirs)) in ours.iter().zip(&theirs) {
-                    match (ours == theirs, without_flags(version)) {
+                    match (ours == theirs, name.ends_with(".csv")) {
                         (true, _) => {}
-                        (false, true) => {
-                            assert!(name.ends_with(".csv"), "{at} {name}");
-                            assert_eq!(*ours, with_empty_flags(theirs), "{at} {name}");
-                            padded += 1;
-                        }
+                        (false, true)
+                            if without_flags(version) && *ours == with_empty_flags(theirs) => {}
+                        (false, true) => translated += 1,
                         (false, false) => panic!("{at} {name}: not the same bytes"),
                     }
                 }
@@ -310,7 +319,8 @@ mod tests {
             }
         }
         assert_eq!(total, 33);
-        assert!(padded > 0);
+        // the old sets have blocks `-`, told `!` now
+        assert!(translated > 0);
     }
 
     #[tokio::test]
@@ -494,8 +504,12 @@ mod tests {
         let (db_requests, db_archives) =
             upload_all(&SqliteUploads::new(db.clone(), en()), &queue).await;
         // the same files, by name, in the same order, with the same content
+        // once read: the events as the current scouting rules tell them
         assert_eq!(db_requests, requests);
-        assert_eq!(db_archives, archives);
+        let told_all = |archives: &[Vec<(String, Vec<u8>)>]| {
+            archives.iter().map(|a| told(a)).collect::<Vec<_>>()
+        };
+        assert_eq!(told_all(&db_archives), told_all(&archives));
         assert_eq!(in_database(&db).await, vec![]);
     }
 
@@ -564,10 +578,12 @@ mod tests {
         assert_eq!(in_database(&db).await.len(), 1);
     }
 
-    /// Team B scouted too (`"both"`), and a neutral venue: the archive is
-    /// A's, as before; `home` is false.
+    /// Team B scouted too (`"both"`), and a neutral venue: A's files are
+    /// as before (B's touches leave A's stream as it was), `home` is false,
+    /// `neutral` true; B goes in files of its own, by its random id, with
+    /// no name.
     #[tokio::test]
-    async fn the_side_of_b_and_a_neutral_venue_dont_go() {
+    async fn the_side_of_b_and_a_neutral_venue_go() {
         let db = migrated_v018().await;
         let team = id(TEAM);
         let m = moved(&db, team, "2025-10-04_rivali_pisa");
@@ -612,8 +628,8 @@ mod tests {
                      SELECT lower(printf('%s-%s-%s-%s-%s', hex(randomblob(4)),
                                          hex(randomblob(2)), hex(randomblob(2)),
                                          hex(randomblob(2)), hex(randomblob(6)))),
-                            match_id, set_number, seq + 100000, 'b', timestamp, 'S', '{p0}',
-                            '#', 'F', 0
+                            match_id, set_number, seq + 100000, 'b', timestamp, 'P', '{p0}',
+                            '+', NULL, 0
                      FROM events WHERE match_id = '{m}';",
                 b = b.id,
                 p0 = p(0),
@@ -643,7 +659,49 @@ mod tests {
         let mut expected = metadata(&before);
         assert_eq!(expected["home"], true);
         expected["home"] = serde_json::Value::Bool(false);
+        expected["neutral"] = serde_json::Value::Bool(true);
+        expected["scouting"] = "both".into();
+        expected["team_id_b"] = b.id.to_string().into();
         assert_eq!(metadata(&after), expected);
-        assert_eq!(after[1..], before[1..]);
+        assert!(upload.neutral);
+        let a_files = before.len() - 1;
+        assert_eq!(after[1..=a_files], before[1..]);
+        let b_files = &after[1 + a_files..];
+        assert_eq!(b_files.len(), a_files);
+        assert!(b_files.iter().all(|(name, _)| name.contains("_b_")));
+        assert!(
+            b_files
+                .iter()
+                .any(|(name, data)| name.ends_with(".csv") && !data.is_empty())
+        );
+        assert!(
+            b_files
+                .iter()
+                .all(|(_, data)| !String::from_utf8_lossy(data).contains("Team B"))
+        );
+    }
+
+    /// The request of the keys tells the neutral ground only when true: the
+    /// older APIs ignore it, and a match not neutral asks as before.
+    #[test]
+    fn the_request_of_the_keys_tells_the_neutral_ground_when_true() {
+        use crate::analytics::upload::{KeysOpponent, KeysRequest, KeysTeam};
+        let request = |neutral| {
+            serde_json::to_value(KeysRequest {
+                team: KeysTeam {
+                    name: "A".into(),
+                    country: "IT".into(),
+                    gender: "women".into(),
+                    year: 2025,
+                },
+                opponent: KeysOpponent { name: "B".into() },
+                date: "2025-10-04".into(),
+                sets: vec![(25, 20)],
+                neutral,
+            })
+            .unwrap()
+        };
+        assert_eq!(request(true)["neutral"], true);
+        assert!(request(false).get("neutral").is_none());
     }
 }

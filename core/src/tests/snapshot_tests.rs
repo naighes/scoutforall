@@ -419,7 +419,8 @@ mod tests {
             (
                 EventEntry {
                     event_type: EventTypeEnum::B,
-                    eval: Some(EvalEnum::Negative),
+                    // touched, back to them, who score
+                    eval: Some(EvalEnum::Exclamative),
                     player: Some(mb2),
                     target_player: None,
                     technique: None,

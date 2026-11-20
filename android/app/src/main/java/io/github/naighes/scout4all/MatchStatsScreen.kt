@@ -11,13 +11,17 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import io.github.naighes.scout4all.core.DetailFilter
 import io.github.naighes.scout4all.core.LiveStats
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.StatsScope
 
@@ -28,18 +32,28 @@ private sealed interface MatchStatsState {
 }
 
 /** The statistics of a match, the same pages as while scouting: of a set,
- * `set` at first, or of the whole match with no `set`. */
+ * `set` at first, or of the whole match with no `set`; of the team of
+ * `side`, B for a match scouted on both sides. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> Unit, onWatch: (VideoRequest.Clips) -> Unit = {}) {
+fun MatchStatsScreen(
+    teamId: String,
+    matchId: String,
+    set: Int?,
+    side: MatchSide = MatchSide.A,
+    onBack: () -> Unit,
+    onWatch: (VideoRequest.Clips) -> Unit = {},
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     // the set shown, 0 for the match: saved as a number on rotation
     var shown by rememberSaveable { mutableIntStateOf(set ?: 0) }
     // the pages stay while the next scope is read
-    val state by produceState<MatchStatsState>(MatchStatsState.Loading, shown) {
+    // the rotation and the phase the figures are narrowed to
+    var filter by remember { mutableStateOf(DetailFilter(null)) }
+    val state by produceState<MatchStatsState>(MatchStatsState.Loading, shown, filter) {
         val scope = if (shown == 0) StatsScope.Match else StatsScope.Set(shown.toUByte())
         value = try {
-            MatchStatsState.Loaded(app.core { it.matchStats(teamId, matchId, scope) })
+            MatchStatsState.Loaded(app.core { it.matchStats(teamId, matchId, side, scope, filter) })
         } catch (e: MobileException) {
             MatchStatsState.Failed(e.reason)
         }
@@ -65,14 +79,15 @@ fun MatchStatsScreen(teamId: String, matchId: String, set: Int?, onBack: () -> U
                             StatsScope.Match -> 0
                         }
                     },
-                    loadDetail = { scope, event, filter ->
+                    onFilter = { _, narrowed -> filter = narrowed },
+                    loadDetail = { scope, event, asked ->
                         try {
-                            app.core { it.matchDetail(teamId, matchId, scope, event, filter) }
+                            app.core { it.matchDetail(teamId, matchId, side, scope, event, asked) }
                         } catch (e: MobileException) {
                             null
                         }
                     },
-                    watch = { scope -> matchWatch(teamId, matchId, scope, onWatch) },
+                    watch = { scope: StatsScope -> matchWatch(teamId, matchId, side, scope, onWatch) },
                 )
             }
         }

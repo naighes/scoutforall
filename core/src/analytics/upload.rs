@@ -1,5 +1,6 @@
 use crate::{
     analytics::queue_manager::QueueManager,
+    domain::Side,
     errors::{AppError, IOError},
     logging::logger::{log_error, log_info},
     providers::{queue_reader::QueueReader, queue_writer::QueueWriter},
@@ -44,6 +45,10 @@ pub struct KeysRequest {
     pub date: String,
     /// the score of each set, ours first
     pub sets: Vec<(u8, u8)>,
+    /// played on neutral ground, written only when true: the older APIs
+    /// ignore it
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub neutral: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -85,11 +90,30 @@ pub struct MatchMetadata {
     /// since v0.12, when the API gave them
     #[serde(default, flatten, skip_serializing_if = "Option::is_none")]
     pub keys: Option<MatchKeys>,
+    /// since v1.1, written only when true: played on neutral ground
+    /// (`home` is false then)
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub neutral: bool,
+    /// since v1.1, written only when both teams were scouted: the random
+    /// id of team B, its sets in `set_<n>_b_descriptor.json` and
+    /// `set_<n>_b_events.csv`. Missing: only A (the older clients)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scouting: Option<UploadScouting>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub team_id_b: Option<Uuid>,
+}
+
+/// Who is in an archive: only A, or both teams.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UploadScouting {
+    One,
+    Both,
 }
 
 /// The request of the keys of `m`: none when its team lacks gender or
 /// country, or a set doesn't replay.
-pub(crate) fn keys_request(m: &MatchEntry) -> Option<KeysRequest> {
+pub(crate) fn keys_request(m: &MatchEntry, neutral: bool) -> Option<KeysRequest> {
     let (country, gender) = (m.team.country?, m.team.gender?);
     let sets = m.set_scores().ok().filter(|s| !s.is_empty())?;
     Some(KeysRequest {
@@ -104,6 +128,7 @@ pub(crate) fn keys_request(m: &MatchEntry) -> Option<KeysRequest> {
         },
         date: m.date.format("%Y-%m-%d").to_string(),
         sets,
+        neutral,
     })
 }
 
@@ -120,12 +145,20 @@ fn generate_upload_id(team_id: Uuid, match_id: &str) -> Uuid {
 
 // the render free plan stops the API when idle: the first request can wait
 // for it to start again. The user agent tells the app version in the API log
+//
+// `SCOUT4ALL_NO_SYSTEM_PROXY` skips the look for the proxy of the system, which
+// on macOS takes ~8 s at the first client: set by `.cargo/config.toml` for
+// the tests and the runs of the developers, never in a build for users
 fn http_client() -> Result<Client, AppError> {
-    tls_roots(Client::builder())
-        .user_agent(concat!("scout4all/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| AppError::IO(IOError::from(e)))
+    let builder = tls_roots(Client::builder());
+    match std::env::var_os("SCOUT4ALL_NO_SYSTEM_PROXY") {
+        Some(_) => builder.no_proxy(),
+        None => builder,
+    }
+    .user_agent(concat!("scout4all/", env!("CARGO_PKG_VERSION")))
+    .timeout(Duration::from_secs(120))
+    .build()
+    .map_err(|e| AppError::IO(IOError::from(e)))
 }
 
 // the verifier of the platform: on Android it needs the context of the app
@@ -188,6 +221,19 @@ pub struct ToUpload {
     /// the lineup and the events of each set, in the format of the files:
     /// `set_<n>_descriptor.json`, `set_<n>_events.csv`
     pub set_files: Vec<(String, Vec<u8>)>,
+    /// played on neutral ground
+    pub neutral: bool,
+    /// team B, when both teams were scouted
+    pub side_b: Option<SideB>,
+}
+
+/// Team B of a match scouted on both sides: its random id and the files
+/// of its sets (`set_<n>_b_descriptor.json`, `set_<n>_b_events.csv`), with
+/// no names.
+#[derive(Clone)]
+pub struct SideB {
+    pub team_id: Uuid,
+    pub set_files: Vec<(String, Vec<u8>)>,
 }
 
 /// Where the matches to upload are read (`SqliteUploads`).
@@ -198,10 +244,14 @@ pub trait UploadSource: Sync {
 }
 
 /// The names of the files of a set in the archive.
-fn set_file_names(set_number: u8) -> (String, String) {
+fn set_file_names(set_number: u8, side: Side) -> (String, String) {
+    let side = match side {
+        Side::A => "",
+        Side::B => "_b",
+    };
     (
-        format!("set_{set_number}_descriptor.json"),
-        format!("set_{set_number}_events.csv"),
+        format!("set_{set_number}{side}_descriptor.json"),
+        format!("set_{set_number}{side}_events.csv"),
     )
 }
 
@@ -222,10 +272,19 @@ fn events_csv(events: &[EventEntry]) -> Result<Vec<u8>, AppError> {
 /// database saved them: the lineup as `set_<n>.json`, the events as
 /// `set_<n>.csv`.
 pub(crate) fn written_set_files(m: &MatchEntry) -> Result<Vec<(String, Vec<u8>)>, AppError> {
+    written_files(m, Side::A)
+}
+
+/// The same files of the sets of team B's side of a match (`SideB`).
+pub(crate) fn written_set_files_of_b(m: &MatchEntry) -> Result<Vec<(String, Vec<u8>)>, AppError> {
+    written_files(m, Side::B)
+}
+
+fn written_files(m: &MatchEntry, side: Side) -> Result<Vec<(String, Vec<u8>)>, AppError> {
     m.sets
         .iter()
         .map(|set| {
-            let (descriptor, events) = set_file_names(set.set_number);
+            let (descriptor, events) = set_file_names(set.set_number, side);
             let json = to_vec_pretty(set).map_err(|e| AppError::IO(IOError::from(e)))?;
             Ok([(descriptor, json), (events, events_csv(&set.events)?)])
         })
@@ -235,10 +294,23 @@ pub(crate) fn written_set_files(m: &MatchEntry) -> Result<Vec<(String, Vec<u8>)>
 
 /// The archive of an upload: `match.json` (`MatchMetadata`), then the
 /// files of the sets.
+#[cfg(test)]
 pub(crate) fn match_archive(
     m: &MatchEntry,
     set_files: Vec<(String, Vec<u8>)>,
     keys: Option<MatchKeys>,
+) -> Result<Vec<u8>, AppError> {
+    match_archive_of(m, set_files, keys, false, None)
+}
+
+/// The archive of an upload, with the neutral ground and team B when both
+/// were scouted.
+pub(crate) fn match_archive_of(
+    m: &MatchEntry,
+    set_files: Vec<(String, Vec<u8>)>,
+    keys: Option<MatchKeys>,
+    neutral: bool,
+    side_b: Option<SideB>,
 ) -> Result<Vec<u8>, AppError> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     let metadata = MatchMetadata {
@@ -252,10 +324,14 @@ pub(crate) fn match_archive(
         max_substitutions: m.max_substitutions,
         source: m.source,
         keys,
+        neutral,
+        scouting: side_b.as_ref().map(|_| UploadScouting::Both),
+        team_id_b: side_b.as_ref().map(|b| b.team_id),
     };
     let metadata_json = to_string_pretty(&metadata).map_err(|e| AppError::IO(IOError::from(e)))?;
-    let files =
-        std::iter::once(("match.json".to_string(), metadata_json.into_bytes())).chain(set_files);
+    let files = std::iter::once(("match.json".to_string(), metadata_json.into_bytes()))
+        .chain(set_files)
+        .chain(side_b.into_iter().flat_map(|b| b.set_files));
     for (name, contents) in files {
         zip.start_file::<_, ()>(
             name,
@@ -280,12 +356,13 @@ pub fn upload_url() -> Option<String> {
 // when asked
 async fn get_signed_url(
     m: &MatchEntry,
+    neutral: bool,
     file_id: &str,
     upload_url: &str,
 ) -> Result<(String, Option<MatchKeys>), AppError> {
     let client = http_client()?;
     let uuid = generate_upload_id(m.team.id, file_id);
-    let match_keys = keys_request(m);
+    let match_keys = keys_request(m, neutral);
     let asked = match_keys.is_some();
     let payload = UploadRequest {
         filename: format!("{}.zip", uuid),
@@ -406,6 +483,7 @@ pub async fn upload_next<QR: QueueReader + Send + Sync, QW: QueueWriter + Send +
 
 // process a single upload
 async fn process_single_upload(m: ToUpload, upload_url: &str) -> Result<(), AppError> {
-    let (signed_url, keys) = get_signed_url(&m.entry, &m.file_id, upload_url).await?;
-    upload_to_signed_url(&signed_url, match_archive(&m.entry, m.set_files, keys)?).await
+    let (signed_url, keys) = get_signed_url(&m.entry, m.neutral, &m.file_id, upload_url).await?;
+    let archive = match_archive_of(&m.entry, m.set_files, keys, m.neutral, m.side_b)?;
+    upload_to_signed_url(&signed_url, archive).await
 }

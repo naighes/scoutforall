@@ -5,9 +5,9 @@
 #[cfg(test)]
 mod tests {
     use crate::dvw::{
-        model::Side,
+        model::{Side, Skill},
         parse,
-        translate::{Issue, Untranslatable, Us, translate_set},
+        translate::{Impossible, Issue, Untranslatable, Us, translate_set},
     };
     use crate::shapes::court_zone::{CourtTarget, SubzoneEnum};
     use crate::shapes::enums::{EvalEnum, EventTypeEnum};
@@ -96,7 +96,9 @@ mod tests {
         /// Their serve received by `receiver`, and our kill of the outside
         /// hitter in the front row.
         fn received_by(&mut self, receiver: u8) {
-            let serve = format!("{}SM+", self.server());
+            // a good reception of a weak serve: the two agree (TODO/001,
+            // §4.2)
+            let serve = format!("{}SM-", self.server());
             let reception = format!("*{receiver:02}RM+");
             let hitter = self
                 .home
@@ -222,6 +224,16 @@ C5;4;R;U;Super in posto 4;;;;;
 V5;4;R;H;Alta in posto 4;;;;;
 VP;8;C;H;Pipe alta;;;;;
 PP;3;L;O;Pallonetto alzatore;;;;;";
+
+    /// The line in the file (from 1) of the line `index` of the scout.
+    fn line_of(file: &File, index: usize) -> usize {
+        let text = file.text();
+        let scout = text
+            .lines()
+            .position(|l| l == "[3SCOUT]")
+            .unwrap_or_default();
+        scout + 2 + index
+    }
 
     /// The set translated for the home team: the events, and the number of
     /// each player.
@@ -391,6 +403,50 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 .collect::<Vec<_>>()
         };
         assert_eq!(times(3600), times(0));
+    }
+
+    /// Both teams: their touches fused into one sequence, each side
+    /// replaying it from its point of view with the score of the file.
+    #[test]
+    fn both_teams_are_one_sequence_of_touches() {
+        use crate::domain::Side as Team;
+        use crate::dvw::both::translate_both;
+        use crate::rally::replay;
+        let mut file = File::new();
+        file.received_by(2);
+        file.ace();
+        let dvw = parse(file.finished().text().as_bytes()).expect("expected a DataVolley file");
+        let home: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
+        let visiting: HashMap<u8, Uuid> = (11..=18).map(|n| (n, Uuid::new_v4())).collect();
+        let a = Us {
+            side: Side::Home,
+            players: &home,
+            liberos: &[HOME_LIBERO],
+        };
+        let b = Us {
+            side: Side::Visiting,
+            players: &visiting,
+            liberos: &[17],
+        };
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
+        let (both, _) = translate_both(&dvw, &a, &b, 1, date, 6).expect("expected the set");
+        let first: Vec<(Team, EventTypeEnum)> = both
+            .touches
+            .iter()
+            .take(4)
+            .map(|(side, e)| (*side, e.event_type))
+            .collect();
+        assert_eq!(
+            first,
+            vec![(Team::B, S), (Team::A, P), (Team::A, A), (Team::A, S)]
+        );
+        let (ours, theirs) = replay(&both.a, &both.b, &both.touches, 6).expect("both sides");
+        assert_eq!((ours.score_us, ours.score_them), (25, 0));
+        assert_eq!((theirs.score_us, theirs.score_them), (0, 25));
     }
 
     /// The libero touching as it plays: nothing to change.
@@ -607,29 +663,29 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
     }
 
     /// Their attack blocked (`/`) with our point by nobody (`$$&`), as
-    /// files scouted without blocks write it: our block wants the player,
-    /// the set is refused.
+    /// files scouted without blocks write it: the block is optional
+    /// (TODO/001, §4), their attack blocked is their error (`OE`), as the
+    /// projection tells it to the side not scouting the block.
     #[test]
-    fn their_attack_blocked_without_our_block_is_refused() {
+    fn their_attack_blocked_without_our_block_is_their_error() {
         let mut file = File::new();
         file.rally(&["a11SM+", "*07RM+", "*02AH+", "a14AH/", "*$$&H#"], true);
+        let events = translated(&file.finished()).expect("expected the set");
         assert_eq!(
-            translated(&file.finished()),
-            Err(Issue::Untranslatable(
-                Untranslatable::TheirAttackBlockedWithoutOurBlock
-            ))
+            first(&events, 4),
+            vec![(P, Some(7)), (A, Some(2)), (OE, None), (S, Some(2))]
         );
     }
 
-    /// Their attack, then their freeball sent: the ball came back to them,
-    /// our touch not scouted (a dig over, a freeball): our freeball
-    /// (`FB`), then theirs (`OF`).
+    /// Their attack `-`, then their freeball sent: the ball came back to
+    /// them, our touch not scouted (a dig, then a freeball): our freeball
+    /// (`FB`), sent untold, then theirs (`OF`).
     #[test]
     fn their_freeball_right_after_their_attack_follows_ours() {
         let mut file = File::new();
         file.rally(
             &[
-                "a11SM+", "*07RM+", "*02AH+", "a14AH+", "a13FH+", "*01EH+", "*04AH#",
+                "a11SM+", "*07RM+", "*02AH+", "a14AH-", "a13FH+", "*01EH+", "*04AH#",
             ],
             true,
         );
@@ -1021,24 +1077,31 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         }
     }
 
-    /// Our serve, their reception and set, our block: they attacked, not
-    /// in the file; our serve keeps its evaluation.
+    /// Our serve, their reception and set, our block: their attack is
+    /// missing, an error of the scout (TODO/001, §10: the match doesn't
+    /// import), told at the line of the block with the set before it.
     #[test]
-    fn our_block_after_their_reception_tells_their_attack() {
+    fn our_block_after_their_reception_without_their_attack_is_refused() {
         let mut file = File::new();
         file.their_serve_error();
         let serve = format!("{}SM-", file.server());
         file.rally(&[&serve, "a11RM+", "a13EH+", "*03BH="], false);
+        // the set, before the block and the point
+        let set = file.lines.len() - 3;
         let file = file.finished();
-        let events = evaluated(&file).expect("expected the set");
         assert_eq!(
-            events.iter().skip(1).take(2).copied().collect::<Vec<_>>(),
-            vec![(S, Some(EvalEnum::Negative)), (B, Some(EvalEnum::Error))]
+            evaluated(&file),
+            Err(Issue::Impossible(Impossible::MissingAttack {
+                before: (Skill::Set, '+'),
+                before_line: line_of(&file, set),
+                touch: (Skill::Block, '='),
+            }))
         );
     }
 
-    /// Our attack `-` back from their block, our dig: no freeball of
-    /// theirs, the ball back to us without their attack (our `+`).
+    /// Our attack `-` back from their block `+`, our dig: we play next, so
+    /// their block is `!` and our attack `!` (blocked and covered), no
+    /// freeball of theirs; our dig is our cover, `+` rebuilding (`!`).
     #[test]
     fn our_attack_back_from_their_block_is_no_freeball() {
         let mut file = File::new();
@@ -1049,10 +1112,34 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         let file = file.finished();
         let events = evaluated(&file).expect("expected the set");
         assert_eq!(
-            events.iter().take(3).copied().collect::<Vec<_>>(),
+            events.iter().take(4).copied().collect::<Vec<_>>(),
             vec![
                 (P, Some(EvalEnum::Positive)),
-                (A, Some(EvalEnum::Positive)),
+                (A, Some(EvalEnum::Exclamative)),
+                (D, Some(EvalEnum::Exclamative)),
+                (A, Some(EvalEnum::Perfect))
+            ]
+        );
+    }
+
+    /// Our dig `!` of their attack: the dig `!` is only a cover, DataVolley's
+    /// `!` lets us build: our `+`.
+    #[test]
+    fn our_dig_exclamative_of_their_attack_is_positive() {
+        let mut file = File::new();
+        file.rally(
+            &[
+                "a11SM+", "*07RM+", "*02AH-", "a12DH+", "a13AH+", "*07DH!", "*04AH#",
+            ],
+            true,
+        );
+        let events = evaluated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            events.iter().take(4).copied().collect::<Vec<_>>(),
+            vec![
+                (P, Some(EvalEnum::Positive)),
+                (A, Some(EvalEnum::Negative)),
+                (D, Some(EvalEnum::Positive)),
                 (A, Some(EvalEnum::Perfect))
             ]
         );
@@ -1087,8 +1174,8 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         }
     }
 
-    /// Our cover after their block going over, their attack next: our
-    /// freeball.
+    /// Our cover after their block, their attack next: the cover (`!`),
+    /// then our freeball sent untold.
     #[test]
     fn our_cover_played_by_them_is_our_freeball() {
         let mut file = File::new();
@@ -1098,15 +1185,21 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         );
         let events = translated(&file.finished()).expect("expected the set");
         assert_eq!(
-            first(&events, 4),
-            vec![(P, Some(7)), (A, Some(2)), (FB, None), (OS, None)]
+            first(&events, 5),
+            vec![
+                (P, Some(7)),
+                (A, Some(2)),
+                (D, Some(7)),
+                (FB, None),
+                (OS, None)
+            ]
         );
     }
 
-    /// Our error and their point, both without a player, the ball ours:
-    /// our fault.
+    /// Our error and their point, both without a player (`$$&`), the ball
+    /// ours after our cover: their point without a cause (`PL`).
     #[test]
-    fn their_point_with_the_ball_ours_is_our_fault() {
+    fn their_point_without_a_touch_with_the_ball_ours() {
         let mut file = File::new();
         file.rally(
             &[
@@ -1116,13 +1209,14 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         );
         let events = translated(&file.finished()).expect("expected the set");
         assert_eq!(
-            first(&events, 3),
-            vec![(P, Some(7)), (A, Some(2)), (F, None)]
+            first(&events, 4),
+            vec![(P, Some(7)), (A, Some(2)), (D, Some(7)), (PL, None)]
         );
     }
 
     /// Our block on their reception straight over and on their freeball:
-    /// a block, as the file tells, not an attack.
+    /// the block answers an attack (scouting rules v4), so the point is an
+    /// attack point, the error an attack error.
     #[test]
     fn our_block_on_a_ball_not_attacked() {
         let mut file = File::new();
@@ -1138,10 +1232,36 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             vec![
                 (OE, None),
                 (S, Some(EvalEnum::Over)),
-                (B, Some(EvalEnum::Perfect)),
+                (A, Some(EvalEnum::Perfect)),
                 (S, Some(EvalEnum::Negative)),
                 (OF, None),
-                (B, Some(EvalEnum::Error))
+                (A, Some(EvalEnum::Error))
+            ]
+        );
+    }
+
+    /// Our block `+` of their freeball and our dig after it: the ball
+    /// kept, like a freeball received, which isn't told (scouting rules
+    /// v4): both left out, our attack after their freeball.
+    #[test]
+    fn our_block_kept_on_their_freeball_is_left_out_with_our_dig() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM-", file.server());
+        file.rally(
+            &[
+                &serve, "a11RM+", "a13EH+", "a14FH+", "*03BH+", "*05DH+", "*04AH#",
+            ],
+            true,
+        );
+        let events = evaluated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            events.iter().take(4).copied().collect::<Vec<_>>(),
+            vec![
+                (OE, None),
+                (S, Some(EvalEnum::Negative)),
+                (OF, None),
+                (A, Some(EvalEnum::Perfect)),
             ]
         );
     }
@@ -1312,19 +1432,19 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
     }
 
     /// Their attack `!`, back from our block, then their freeball: our
-    /// block wants the player, the set is refused.
+    /// block is optional (TODO/001, §4), the ball theirs after their attack
+    /// `!`: their freeball (`OF`), nothing of ours.
     #[test]
-    fn their_freeball_after_their_attack_back_from_our_block_is_refused() {
+    fn their_freeball_after_their_attack_back_from_our_block_untold() {
         let mut file = File::new();
         file.rally(
             &["a11SM+", "*07RM+", "*02AH+", "a14AH!", "a13FH+", "*04AH#"],
             true,
         );
+        let events = translated(&file.finished()).expect("expected the set");
         assert_eq!(
-            translated(&file.finished()),
-            Err(Issue::Untranslatable(
-                Untranslatable::TheirAttackBackWithoutOurBlock
-            ))
+            first(&events, 4),
+            vec![(P, Some(7)), (A, Some(2)), (OF, None), (A, Some(4))]
         );
     }
 
@@ -1467,6 +1587,541 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         )
         .expect("a match");
         (team, b, plan)
+    }
+
+    // the rules of the import (TODO/001, §10, phase 2), on both sides:
+    // the touches saved replay on both, so the two translations agree
+
+    /// The players of the visiting team, 11 to 18, the libero 17.
+    const VISITING_LIBERO: u8 = 17;
+
+    /// A touch saved on both sides: the team (A home, B visiting), the
+    /// event, the evaluation.
+    type Saved = (Team, EventTypeEnum, Option<EvalEnum>);
+
+    /// The first set on both sides, A the home team: the touches saved,
+    /// without the changes of the lineup, or why not.
+    fn both(file: &File) -> Result<Vec<Saved>, Issue> {
+        use crate::dvw::both::translate_both;
+        let dvw = parse(file.text().as_bytes()).expect("expected a DataVolley file");
+        let home: HashMap<u8, Uuid> = (1..=8).map(|n| (n, Uuid::new_v4())).collect();
+        let visiting: HashMap<u8, Uuid> = (11..=18).map(|n| (n, Uuid::new_v4())).collect();
+        let a = Us {
+            side: Side::Home,
+            players: &home,
+            liberos: &[HOME_LIBERO],
+        };
+        let b = Us {
+            side: Side::Visiting,
+            players: &visiting,
+            liberos: &[VISITING_LIBERO],
+        };
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
+        translate_both(&dvw, &a, &b, 1, date, 6)
+            .map(|(set, _)| {
+                set.touches
+                    .iter()
+                    .filter(|(_, e)| !matches!(e.event_type, R | CL | LR | LF | CS))
+                    .map(|(side, e)| (*side, e.event_type, e.eval))
+                    .collect()
+            })
+            .map_err(|e| e.issue)
+    }
+
+    /// The first set translated for the visiting team alone: the events by
+    /// type and evaluation, without the changes of the lineup.
+    fn evaluated_for_visiting(
+        file: &File,
+    ) -> Result<Vec<(EventTypeEnum, Option<EvalEnum>)>, Issue> {
+        let dvw = parse(file.text().as_bytes()).expect("expected a DataVolley file");
+        let players: HashMap<u8, Uuid> = (11..=18).map(|n| (n, Uuid::new_v4())).collect();
+        let us = Us {
+            side: Side::Visiting,
+            players: &players,
+            liberos: &[VISITING_LIBERO],
+        };
+        let date = NaiveDate::from_ymd_opt(2015, 1, 25)
+            .expect("a date")
+            .and_time(NaiveTime::MIN)
+            .and_utc()
+            .fixed_offset();
+        translate_set(&dvw, &us, 1, date, 6)
+            .map(|(set, _)| {
+                set.events
+                    .iter()
+                    .filter(|e| !matches!(e.event_type, R | CL | LR | LF | CS))
+                    .map(|e| (e.event_type, e.eval))
+                    .collect()
+            })
+            .map_err(|e| e.issue)
+    }
+
+    /// The touches of the first rally of a file written with `rally`, on
+    /// both sides, up to `count`.
+    fn first_rally(touches: &[&str], home_wins: bool, count: usize) -> Result<Vec<Saved>, Issue> {
+        let mut file = File::new();
+        file.rally(touches, home_wins);
+        both(&file.finished()).map(|t| t.into_iter().take(count).collect())
+    }
+
+    /// The events of the first rally of a file written with `rally`, for
+    /// one team alone (the home team, then the visiting one), up to
+    /// `count` each.
+    fn first_rally_alone(
+        touches: &[&str],
+        home_wins: bool,
+        count: usize,
+    ) -> Result<
+        (
+            Vec<(EventTypeEnum, Option<EvalEnum>)>,
+            Vec<(EventTypeEnum, Option<EvalEnum>)>,
+        ),
+        Issue,
+    > {
+        let mut file = File::new();
+        file.rally(touches, home_wins);
+        let file = file.finished();
+        let take = |events: Vec<(EventTypeEnum, Option<EvalEnum>)>| -> Vec<_> {
+            events
+                .into_iter()
+                .filter(|(e, _)| !matches!(e, R | CL | LR | LF | CS))
+                .take(count)
+                .collect()
+        };
+        Ok((
+            take(evaluated(&file)?),
+            take(evaluated_for_visiting(&file)?),
+        ))
+    }
+
+    use crate::domain::Side as Team;
+    use EvalEnum::{
+        Error as E, Exclamative as X, Negative as M, Over as O, Perfect as H, Positive as G,
+    };
+
+    /// The reception decides the serve: `S! R+` is `S-` (the visitors'),
+    /// `R+` (ours), on both sides and for each team alone.
+    #[test]
+    fn the_reception_decides_the_serve_on_both_sides() {
+        let rally = ["a11SM!", "*07RM+", "*02AH#"];
+        assert_eq!(
+            first_rally(&rally, true, 3),
+            Ok(vec![
+                (Team::B, S, Some(M)),
+                (Team::A, P, Some(G)),
+                (Team::A, A, Some(H))
+            ])
+        );
+        assert_eq!(
+            first_rally_alone(&rally, true, 3),
+            Ok((
+                vec![(P, Some(G)), (A, Some(H)), (S, Some(H))],
+                // their serve `-`, our kill, our ace
+                vec![(S, Some(M)), (OS, None), (OS, None)]
+            ))
+        );
+    }
+
+    /// The dig decides the attack: `A+ D+` is `A-`; a dig `!` of the
+    /// attack is `+`.
+    #[test]
+    fn the_dig_decides_the_attack_on_both_sides() {
+        for dig in ["a13DH+", "a13DH!"] {
+            assert_eq!(
+                first_rally(&["a11SM-", "*07RM+", "*02AH+", dig, "a14AH#"], false, 5),
+                Ok(vec![
+                    (Team::B, S, Some(M)),
+                    (Team::A, P, Some(G)),
+                    (Team::A, A, Some(M)),
+                    (Team::B, D, Some(G)),
+                    (Team::B, A, Some(H))
+                ]),
+                "{dig}"
+            );
+        }
+    }
+
+    /// The block decides the attack: its error is the attack point ("mani
+    /// fuori"), told by both teams.
+    #[test]
+    fn the_block_error_is_the_attack_point_on_both_sides() {
+        assert_eq!(
+            first_rally(&["a11SM-", "*07RM+", "*02AH+", "a13BH="], true, 4),
+            Ok(vec![
+                (Team::B, S, Some(M)),
+                (Team::A, P, Some(G)),
+                (Team::A, A, Some(H)),
+                (Team::B, B, Some(E))
+            ])
+        );
+    }
+
+    /// After the invasion the attack is left out (163 times in the files,
+    /// `A# B/`, `A+ B/`): only the invasion, a fault of B.
+    #[test]
+    fn the_invasion_leaves_out_the_attack_on_both_sides() {
+        for attack in ["*02AH#", "*02AH+"] {
+            assert_eq!(
+                first_rally(&["a11SM-", "*07RM+", attack, "a13BH/"], true, 3),
+                Ok(vec![
+                    (Team::B, S, Some(M)),
+                    (Team::A, P, Some(G)),
+                    (Team::B, B, Some(O))
+                ]),
+                "{attack}"
+            );
+        }
+    }
+
+    /// Who plays after the block decides it: we, the attackers, play next,
+    /// their block `!`, our attack `!` and our cover; they play next with
+    /// their dig, which decides it (`-`: their block `-`, our attack `+`).
+    #[test]
+    fn who_plays_after_the_block_decides_it_on_both_sides() {
+        assert_eq!(
+            first_rally(
+                &["a11SM-", "*07RM+", "*02AH-", "a13BH+", "*07DH+", "*04AH#"],
+                true,
+                6
+            ),
+            Ok(vec![
+                (Team::B, S, Some(M)),
+                (Team::A, P, Some(G)),
+                (Team::A, A, Some(X)),
+                (Team::B, B, Some(X)),
+                (Team::A, D, Some(X)),
+                (Team::A, A, Some(H))
+            ])
+        );
+        assert_eq!(
+            first_rally(
+                &["a11SM-", "*07RM+", "*02AH-", "a13BH+", "a15DH-", "a14AH#"],
+                false,
+                6
+            ),
+            Ok(vec![
+                (Team::B, S, Some(M)),
+                (Team::A, P, Some(G)),
+                (Team::A, A, Some(G)),
+                (Team::B, B, Some(M)),
+                (Team::B, D, Some(M)),
+                (Team::B, A, Some(H))
+            ])
+        );
+    }
+
+    /// A freeball received is the freeball the other team sends
+    /// (`&WIL-23.dvw` `*07AH- a07BH- *12FH+`): our attack `-`, their block
+    /// `+` (they played next), their freeball; ours received is told by
+    /// it, never saved.
+    #[test]
+    fn the_freeball_received_is_the_freeball_sent_on_both_sides() {
+        assert_eq!(
+            first_rally(
+                &["a11SM-", "*07RM+", "*02AH-", "a13BH-", "*05FH+", "*04AH#"],
+                true,
+                6
+            ),
+            Ok(vec![
+                (Team::B, S, Some(M)),
+                (Team::A, P, Some(G)),
+                (Team::A, A, Some(M)),
+                (Team::B, B, Some(G)),
+                (Team::B, FB, None),
+                (Team::A, A, Some(H))
+            ])
+        );
+    }
+
+    /// The reception keeping the ball, then the team who served plays
+    /// (`&MIL-11.dvw` `*08SM+ a16RM- *06FH#`, `&MIL-23.dvw` `*09SQ+ a02RQ-
+    /// *13EH+`): the freeball the receivers sent, untold; the reception
+    /// keeps its evaluation (not "over" any more).
+    #[test]
+    fn the_freeball_after_the_reception_on_both_sides() {
+        for then in ["a12FH#", "a13EH+"] {
+            assert_eq!(
+                first_rally(&["a11SM+", "*07RM-", then, "a14AH#"], false, 4),
+                Ok(vec![
+                    (Team::B, S, Some(G)),
+                    (Team::A, P, Some(M)),
+                    (Team::A, FB, None),
+                    (Team::B, A, Some(H))
+                ]),
+                "{then}"
+            );
+            assert_eq!(
+                first_rally_alone(&["a11SM+", "*07RM-", then, "a14AH#"], false, 3),
+                Ok((
+                    vec![(P, Some(M)), (FB, None), (OS, None)],
+                    vec![(S, Some(G)), (OF, None), (A, Some(H))]
+                )),
+                "{then}"
+            );
+        }
+    }
+
+    /// The freeball B sends untold is at the line of our touch after it,
+    /// before it on both sides: our serve, their reception keeping the
+    /// ball, our kill.
+    #[test]
+    fn the_freeball_untold_comes_before_the_touch_at_its_line() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM+", file.server());
+        file.rally(&[&serve, "a12RM-", "*04AH#"], true);
+        let touches = both(&file.finished()).expect("the set on both sides");
+        assert_eq!(
+            touches.get(1..5),
+            Some(
+                &[
+                    (Team::A, S, Some(G)),
+                    (Team::B, P, Some(M)),
+                    (Team::B, FB, None),
+                    (Team::A, A, Some(H))
+                ][..]
+            ),
+            "{touches:?}"
+        );
+    }
+
+    /// Their freeball received with an error after their own attack `+`
+    /// (`&WIL-16.dvw` `a07AH+ a14FH= *$$&H#`): our freeball sent untold,
+    /// their error; the point without a touch after it tells nothing more,
+    /// and our freeball isn't told twice.
+    #[test]
+    fn a_freeball_received_with_an_error_on_both_sides() {
+        assert_eq!(
+            first_rally(
+                &["a11SM-", "*07RM+", "*02AH+", "*05FH=", "a$$&H#"],
+                false,
+                5
+            ),
+            Ok(vec![
+                (Team::B, S, Some(M)),
+                (Team::A, P, Some(G)),
+                (Team::A, A, Some(G)),
+                (Team::B, FB, None),
+                (Team::A, F, None)
+            ])
+        );
+    }
+
+    /// Our freeball sent untold, then our invasion (`&WIL-15.dvw`): their
+    /// freeball received is told by ours, never once more after the end.
+    #[test]
+    fn the_freeball_untold_then_an_invasion_on_both_sides() {
+        assert_eq!(
+            first_rally(&["a11SM-", "*07RM#", "a13EH+", "*03BH/"], false, 5),
+            Ok(vec![
+                (Team::B, S, Some(M)),
+                (Team::A, P, Some(H)),
+                (Team::A, FB, None),
+                (Team::A, B, Some(O)),
+                // their next serve, an error of `finished`
+                (Team::B, S, Some(E))
+            ])
+        );
+    }
+
+    /// Our reception over, then our freeball with an error at the end
+    /// (`&MIL-27.dvw` `a11SQ/ *18RQ/ *20FH= a$$&H#`): they sent it back,
+    /// untold, and we missed it: no touch after our reception over.
+    #[test]
+    fn our_freeball_error_after_our_reception_over_on_both_sides() {
+        assert_eq!(
+            first_rally(&["a11SM/", "*07RM/", "*05FH=", "a$$&H#"], false, 4),
+            Ok(vec![
+                (Team::B, S, Some(O)),
+                (Team::A, P, Some(O)),
+                (Team::B, FB, None),
+                (Team::A, F, None)
+            ])
+        );
+    }
+
+    /// Our set over the net (`/`, `&MIL-30.dvw` `a17EH/ *09FH+`): our
+    /// freeball; their freeball received tells nothing more.
+    #[test]
+    fn our_set_over_is_our_freeball() {
+        assert_eq!(
+            first_rally_alone(
+                &["a11SM-", "*07RM+", "*01EH/", "a12FH+", "a14AH#"],
+                false,
+                3
+            ),
+            Ok((
+                vec![(P, Some(G)), (FB, None), (OS, None)],
+                vec![(S, Some(M)), (OF, None), (A, Some(H))]
+            ))
+        );
+    }
+
+    /// Our invasion with the ball ours (`&MIL-29.dvw` `a05AT+ *01DT-
+    /// *06BH/`): no block now, our fault.
+    #[test]
+    fn our_invasion_with_the_ball_ours_is_our_fault() {
+        let mut file = File::new();
+        file.rally(
+            &[
+                "a11SM-", "*07RM+", "*02AH-", "a13DH+", "a14AH+", "*05DH-", "*04BH/",
+            ],
+            false,
+        );
+        let events = translated(&file.finished()).expect("expected the set");
+        assert_eq!(
+            first(&events, 4),
+            vec![(P, Some(7)), (A, Some(2)), (D, Some(5)), (F, Some(4))]
+        );
+    }
+
+    /// Our dig of their reception back over after our serve `/`
+    /// (`&MIL-33.dvw` `*02SQ/ a05RQ/ *11DT+ *06AQ#`): no attack, our first
+    /// touch isn't scouted: in the serve.
+    #[test]
+    fn our_dig_after_our_serve_over_is_in_it() {
+        let mut file = File::new();
+        file.their_serve_error();
+        let serve = format!("{}SM/", file.server());
+        file.rally(&[&serve, "a12RM/", "*01DH+", "*04AH#"], true);
+        let events = evaluated(&file.finished()).expect("expected the set");
+        assert_eq!(events.get(1..3), Some(&[(S, Some(O)), (A, Some(H))][..]));
+    }
+
+    /// The serve `/`, the reception `/` and the freeball the servers
+    /// receive (`&MIL-10.dvw` `*11SQ/ a04RQ/ *04FH+`): `S/`, `P/`, no
+    /// freeball of its own.
+    #[test]
+    fn the_reception_over_and_the_freeball_back_on_both_sides() {
+        assert_eq!(
+            first_rally(&["a11SM/", "*07RM/", "a12FH+", "a14AH#"], false, 3),
+            Ok(vec![
+                (Team::B, S, Some(O)),
+                (Team::A, P, Some(O)),
+                (Team::B, A, Some(H))
+            ])
+        );
+    }
+
+    /// A point without a touch (`$$&`) is the point without a cause, one
+    /// touch saved (the other team's told by the projection): `PL` ours
+    /// after our error, `PW` after theirs; for each team alone its own.
+    #[test]
+    fn a_point_without_a_touch_is_one_point_without_a_cause() {
+        assert_eq!(
+            first_rally(&["a11SM-", "*07RM+", "*$$&H="], false, 3),
+            Ok(vec![
+                (Team::B, S, Some(M)),
+                (Team::A, P, Some(G)),
+                (Team::A, PL, None)
+            ])
+        );
+        let after_their_error =
+            first_rally(&["a11SM-", "*07RM+", "a$$&H="], true, 4).expect("the set on both sides");
+        assert_eq!(
+            after_their_error.get(..3),
+            Some(
+                &[
+                    (Team::B, S, Some(M)),
+                    (Team::A, P, Some(G)),
+                    (Team::A, PW, None)
+                ][..]
+            )
+        );
+        assert!(
+            !after_their_error.contains(&(Team::B, PL, None)),
+            "{after_their_error:?}"
+        );
+        assert_eq!(
+            first_rally_alone(&["a11SM-", "*07RM+", "*$$&H="], false, 2),
+            Ok((
+                vec![(P, Some(G)), (PL, None)],
+                vec![(S, Some(M)), (PW, None)]
+            ))
+        );
+    }
+
+    /// The errors of the scout stop the set on both sides and for each team
+    /// alone, at the line of the touch: a touch after the team's own
+    /// reception over, a block without an attack after the reception.
+    #[test]
+    fn the_errors_of_the_scout_stop_the_set_for_both_teams() {
+        for rally in [
+            vec!["a11SM/", "*07RM/", "*02AH#"],
+            vec!["a11SM+", "*07RM!", "a14BH="],
+        ] {
+            let mut file = File::new();
+            file.rally(&rally, true);
+            let file = file.finished();
+            let issue = both(&file).expect_err("refused on both sides");
+            assert!(
+                matches!(issue, Issue::Impossible(_)),
+                "{rally:?}: {issue:?}"
+            );
+            assert_eq!(evaluated(&file).err(), Some(issue.clone()), "{rally:?}");
+            assert_eq!(
+                evaluated_for_visiting(&file).err(),
+                Some(issue),
+                "{rally:?}"
+            );
+        }
+    }
+
+    /// An error of the scout keeps the whole match out, not even one team's
+    /// side imported, with the line, the codes of the file and the advice
+    /// to correct it, in every language.
+    #[test]
+    fn an_error_of_the_scout_keeps_the_match_out() {
+        use crate::dvw::import::MatchIssue;
+        use crate::shapes::enums::LanguageEnum;
+        let mut file = File::new();
+        file.rally(&["a11SM/", "*07RM/", "*02AH#"], true);
+        // the reception, the attack after it
+        let reception = line_of(&file, 3);
+        let attack = line_of(&file, 4);
+        let text = file
+            .finished()
+            .next_set()
+            .finished()
+            .next_set()
+            .finished()
+            .text();
+        for side in [Side::Home, Side::Visiting] {
+            let issue = match planned(&text, side) {
+                Err(MatchIssue::Set(e)) => e,
+                other => panic!("{side:?}: {:?}", other.map(|p| p.sides)),
+            };
+            assert_eq!(
+                (issue.set_number, issue.line, issue.issue.clone()),
+                (
+                    1,
+                    Some(attack),
+                    Issue::Impossible(Impossible::TouchAfterOver {
+                        over: (Skill::Reception, '/'),
+                        over_line: reception,
+                        touch: (Skill::Attack, '#'),
+                    })
+                )
+            );
+            for language in [
+                LanguageEnum::En,
+                LanguageEnum::It,
+                LanguageEnum::Pt,
+                LanguageEnum::Pl,
+                LanguageEnum::Ja,
+            ] {
+                let message =
+                    MatchIssue::Set(issue.clone()).describe(crate::localization::labels(language));
+                for part in ["R/", "A#", &reception.to_string(), &attack.to_string()] {
+                    assert!(message.contains(part), "{language:?}: {message}");
+                }
+                assert!(!message.contains('{'), "{language:?}: {message}");
+            }
+        }
     }
 
     fn three_sets_won() -> File {
@@ -1645,7 +2300,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
         use crate::{
             analytics::finished::FinishedMatches,
             dvw::import::{
-                MatchPlan, OpponentPlan, TeamChoice, TeamPlan, match_exists, save_import,
+                MatchPlan, OpponentPlan, TeamChoice, TeamPlan, imported_already, save_import,
             },
             errors::{AppError, MatchError},
             localization::Language,
@@ -1703,7 +2358,6 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 &self,
                 team: &TeamPlan,
                 plan: &MatchPlan,
-                overwrite: bool,
             ) -> Result<MatchEntry, AppError> {
                 let opponent = match plan.input.opponent {
                     crate::match_form::Opponent::Name(ref name) => OpponentPlan::Name(name.clone()),
@@ -1713,7 +2367,6 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                     team,
                     &opponent,
                     plan,
-                    overwrite,
                     &self.team_writer,
                     &self.match_reader,
                     &self.match_writer,
@@ -1728,13 +2381,11 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 team: &TeamPlan,
                 opponent: &OpponentPlan,
                 plan: &MatchPlan,
-                overwrite: bool,
             ) -> Result<MatchEntry, AppError> {
                 save_import(
                     team,
                     opponent,
                     plan,
-                    overwrite,
                     &self.team_writer,
                     &self.match_reader,
                     &self.match_writer,
@@ -1742,6 +2393,18 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                     &self.queued,
                 )
                 .await
+            }
+
+            /// The id of the match the import tells again, if any.
+            async fn imported_already(
+                &self,
+                opponent: &OpponentPlan,
+                plan: &MatchPlan,
+            ) -> Option<String> {
+                imported_already(plan, opponent, &self.match_reader)
+                    .await
+                    .expect("an answer")
+                    .map(|m| m.id)
             }
 
             fn text(&self, sql: &str) -> Option<String> {
@@ -1803,7 +2466,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             let p = Providers::new();
             let (team, plan) =
                 planned_for(&three_sets_won().text(), Side::Home, new_team()).expect("a match");
-            let saved = p.save(&team, &plan, false).await.expect("saved");
+            let saved = p.save(&team, &plan).await.expect("saved");
             let read_team = p.team(&team.team.id).await;
             assert_eq!(read_team.players.len(), 8);
             let read = p
@@ -1829,7 +2492,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             let p = Providers::new();
             let (team, plan) =
                 planned_for(&three_sets_won().text(), Side::Home, new_team()).expect("a match");
-            let saved = p.save(&team, &plan, false).await.expect("saved");
+            let saved = p.save(&team, &plan).await.expect("saved");
             let id = Uuid::parse_str(&saved.id).expect("a UUID");
             let archive = crate::providers::sqlite::archive::export(
                 &p.db,
@@ -1847,14 +2510,14 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             assert_eq!(read.source, MatchSource::Dvw);
         }
 
-        /// The match saved already and the user not confirming: the team
-        /// isn't saved either.
+        /// The match imported already: refused, the team isn't saved
+        /// either.
         #[tokio::test]
-        async fn a_match_saved_already_keeps_its_team_unless_confirmed() {
+        async fn a_match_imported_already_keeps_its_team() {
             let p = Providers::new();
             let text = three_sets_won().text();
             let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
-            p.save(&team, &plan, false).await.expect("saved");
+            p.save(&team, &plan).await.expect("saved");
             let saved_team = p.team(&team.team.id).await;
             let dvw = parse(text.as_bytes()).expect("a file");
             let again =
@@ -1867,52 +2530,55 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 ..Default::default()
             });
             assert!(matches!(
-                p.save(&more, &plan, false).await,
+                p.save(&more, &plan).await,
                 Err(AppError::Match(MatchError::MatchAlreadyExists(_)))
             ));
             assert_eq!(p.team(&team.team.id).await.players.len(), 8);
             assert_eq!(p.queued().len(), 1);
         }
 
-        /// The same file again: told as saved, refused unless confirmed,
-        /// nothing saved twice.
+        /// The same file again: told as imported, refused, nothing saved
+        /// twice; deleted, it's imported again.
         #[tokio::test]
-        async fn the_same_file_again_is_saved_already() {
+        async fn the_same_file_again_is_imported_already() {
             let p = Providers::new();
             let text = three_sets_won().text();
+            let name = OpponentPlan::Name("Visiting".to_string());
             let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
-            assert!(
-                !match_exists(&plan, &p.match_reader)
-                    .await
-                    .expect("an answer")
-            );
-            let saved = p.save(&team, &plan, false).await.expect("saved");
+            assert_eq!(p.imported_already(&name, &plan).await, None);
+            let saved = p.save(&team, &plan).await.expect("saved");
             assert!(Uuid::parse_str(&saved.id).is_ok(), "{}", saved.id);
             assert_ne!(saved.id, plan.entry.id);
             let saved_team = p.team(&team.team.id).await;
             let (again, plan) =
                 planned_for(&text, Side::Home, TeamChoice::Existing(&saved_team)).expect("a match");
-            assert!(
-                match_exists(&plan, &p.match_reader)
-                    .await
-                    .expect("an answer")
+            assert_eq!(
+                p.imported_already(&name, &plan).await,
+                Some(saved.id.clone())
             );
             assert!(matches!(
-                p.save(&again, &plan, false).await,
+                p.save(&again, &plan).await,
                 Err(AppError::Match(MatchError::MatchAlreadyExists(_)))
             ));
             assert_eq!(p.matches(), 1);
-            assert_eq!(p.queued(), vec![(team.team.id, saved.id)]);
+            assert_eq!(p.queued(), vec![(team.team.id, saved.id.clone())]);
+            p.execute(&format!(
+                "UPDATE matches SET deleted = 1 WHERE id = '{}'",
+                saved.id
+            ));
+            assert_eq!(p.imported_already(&name, &plan).await, None);
+            p.save(&again, &plan).await.expect("saved again");
         }
 
-        /// Confirmed: the saved match takes the import, the same UUID, its
-        /// sets beyond the imported ones removed.
+        /// Another match of the same day (other scores): not the same, a
+        /// second match; nor the same match on another day.
         #[tokio::test]
-        async fn a_match_overwritten_when_confirmed_keeps_its_id() {
+        async fn other_scores_or_another_day_another_match() {
             let p = Providers::new();
+            let name = OpponentPlan::Name("Visiting".to_string());
             let (team, five) =
                 planned_for(&five_sets().text(), Side::Home, new_team()).expect("a match");
-            let saved = p.save(&team, &five, false).await.expect("saved");
+            p.save(&team, &five).await.expect("saved");
             let saved_team = p.team(&team.team.id).await;
             let (again, three) = planned_for(
                 &three_sets_won().text(),
@@ -1920,84 +2586,22 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 TeamChoice::Existing(&saved_team),
             )
             .expect("a match");
-            let overwritten = p.save(&again, &three, true).await.expect("overwritten");
-            assert_eq!(overwritten.id, saved.id);
-            assert_eq!(p.matches(), 1);
-            let read = p
-                .match_reader
-                .read_single(&p.team(&team.team.id).await, &saved.id)
-                .await
-                .expect("the match");
-            assert_eq!(read.sets.len(), 3);
-            let status = read.get_status().expect("a status");
-            assert_eq!((status.us_wins, status.them_wins), (3, 0));
-            assert_eq!(read.source, MatchSource::Dvw);
-            assert_eq!(p.sql("SELECT count(*) FROM sets WHERE deleted = 0"), 3);
             assert_eq!(
-                p.queued(),
-                vec![(team.team.id, saved.id.clone()), (team.team.id, saved.id)]
+                five.entry.date.date_naive(),
+                three.entry.date.date_naive(),
+                "the same day"
             );
-        }
-
-        /// A match moved from the files keeps where it was (`legacy_id`):
-        /// the same, also when its opponent was renamed since; removed, it
-        /// isn't there.
-        #[tokio::test]
-        async fn a_match_is_found_where_the_files_kept_it() {
-            let p = Providers::new();
-            let text = three_sets_won().text();
-            let (team, plan) = planned_for(&text, Side::Home, new_team()).expect("a match");
-            let saved = p.save(&team, &plan, false).await.expect("saved");
-            p.execute(&format!(
-                "UPDATE matches SET team_b_name = 'Renamed', legacy_id = '{}',
-                     legacy_team = team_a WHERE id = '{}'",
-                plan.entry.id, saved.id
-            ));
-            let saved_team = p.team(&team.team.id).await;
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&saved_team, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                Some(saved.id.clone())
-            );
-            // in another folder, renamed: no longer the same
-            p.execute("UPDATE matches SET legacy_id = 'elsewhere'");
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&saved_team, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                None
-            );
-            p.execute("UPDATE matches SET team_b_name = 'Visiting'");
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&saved_team, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                Some(saved.id.clone())
-            );
-            // of another team: not this one's
-            let other = crate::shapes::team::TeamEntry {
-                id: Uuid::new_v4(),
-                ..saved_team.clone()
+            assert_eq!(p.imported_already(&name, &three).await, None);
+            p.save(&again, &three).await.expect("saved");
+            assert_eq!(p.matches(), 2);
+            let later = MatchPlan {
+                entry: MatchEntry {
+                    date: three.entry.date + chrono::Duration::days(1),
+                    ..three.entry.clone()
+                },
+                ..three.clone()
             };
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&other, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                None
-            );
-            p.execute("UPDATE matches SET deleted = 1");
-            assert_eq!(
-                p.match_reader
-                    .saved_as(&saved_team, &plan.entry.id)
-                    .await
-                    .expect("an answer"),
-                None
-            );
+            assert_eq!(p.imported_already(&name, &later).await, None);
         }
 
         /// Team B a new team (D3): saved with the players of the other team
@@ -2015,7 +2619,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 new_team(),
                 OpponentChoice::New,
             );
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&team, &b, &plan).await.expect("saved");
             let b_id = b.team().expect("a team").team.id;
             let read_b = p.team(&b_id).await;
             assert_eq!((read_b.name.as_str(), read_b.year), ("Visiting", 2014));
@@ -2076,17 +2680,18 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             assert_eq!(read.roster, team.roster);
         }
 
-        /// The other side of the same file into team B of the first: a
-        /// second match (no "both" yet), B the team of the first side, the
-        /// competition the same.
+        /// The other side of the same file, into team B of the first and
+        /// against team A: the same match, refused; against another team B
+        /// too (a team doesn't play the same match twice in a day); a new
+        /// team against a name, nothing in common: imported.
         #[tokio::test]
-        async fn the_other_side_against_the_team_of_the_first() {
+        async fn the_other_side_is_the_same_match() {
             use crate::dvw::import::OpponentChoice;
             let p = Providers::new();
             let text = three_sets_won().text();
             let (home, b, plan) =
                 planned_against(&text, Side::Home, new_team(), OpponentChoice::New);
-            p.save_with(&home, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&home, &b, &plan).await.expect("saved");
             let visiting = p.team(&b.team().expect("a team").team.id).await;
             let first = p.team(&home.team.id).await;
             let (team, b, plan) = planned_against(
@@ -2095,20 +2700,35 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 TeamChoice::Existing(&visiting),
                 OpponentChoice::Existing(&first),
             );
-            assert!(team.new_players.is_empty());
-            assert!(b.team().expect("a team").new_players.is_empty());
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
-            assert_eq!(p.matches(), 2);
-            assert_eq!(p.sql("SELECT count(*) FROM teams"), 2);
-            assert_eq!(p.sql("SELECT count(*) FROM competitions"), 1);
-            assert_eq!(p.sql("SELECT count(*) FROM persons"), 16);
-            assert_eq!(
-                p.text(&format!(
-                    "SELECT team_b FROM matches WHERE id = '{}'",
-                    saved.id
-                )),
-                Some(first.id.to_string())
+            assert_eq!(p.imported_already(&b, &plan).await, Some(saved.id.clone()));
+            assert!(matches!(
+                p.save_with(&team, &b, &plan).await,
+                Err(AppError::Match(MatchError::MatchAlreadyExists(_)))
+            ));
+            // B a new team: team A of the side, B of the first, plays it
+            let (_, other, plan) = planned_against(
+                &text,
+                Side::Visiting,
+                TeamChoice::Existing(&visiting),
+                OpponentChoice::New,
             );
+            assert_eq!(
+                p.imported_already(&other, &plan).await,
+                Some(saved.id.clone())
+            );
+            // the home side into team A, against another team B
+            let (_, other, plan) = planned_against(
+                &text,
+                Side::Home,
+                TeamChoice::Existing(&first),
+                OpponentChoice::New,
+            );
+            assert_eq!(p.imported_already(&other, &plan).await, Some(saved.id));
+            let (team, name, plan) =
+                planned_against(&text, Side::Visiting, new_team(), OpponentChoice::Name);
+            assert_eq!(p.imported_already(&name, &plan).await, None);
+            p.save_with(&team, &name, &plan).await.expect("saved");
+            assert_eq!(p.matches(), 2);
         }
 
         /// A player of A with another number in the file: the number of the
@@ -2135,7 +2755,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 TeamChoice::Existing(&ours),
                 OpponentChoice::Name,
             );
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&team, &b, &plan).await.expect("saved");
             let read_team = p.team(&ours.id).await;
             assert_eq!(read_team.find_player(three.id).map(|p| p.number), Some(30));
             assert_eq!(
@@ -2155,64 +2775,15 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             assert_eq!(p.sql("SELECT count(DISTINCT team_id) FROM match_roster"), 1);
         }
 
-        /// Overwritten with only the name of B and the same file: what the
-        /// user changed and the file doesn't tell stays (B a team, the
-        /// neutral court, the notes); the competition of the file again.
-        #[tokio::test]
-        async fn overwritten_keeps_what_the_file_doesnt_tell() {
-            use crate::dvw::import::OpponentChoice;
-            let p = Providers::new();
-            let text = five_sets().text();
-            let (team, b, plan) =
-                planned_against(&text, Side::Visiting, new_team(), OpponentChoice::New);
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
-            let b_id = b.team().expect("a team").team.id;
-            p.execute(&format!(
-                "UPDATE matches SET home = NULL, notes = 'mine', stage = 'playoff',
-                     round = NULL WHERE id = '{}'",
-                saved.id
-            ));
-            let saved_team = p.team(&team.team.id).await;
-            let (again, name, plan) = planned_against(
-                &text,
-                Side::Visiting,
-                TeamChoice::Existing(&saved_team),
-                OpponentChoice::Name,
-            );
-            assert_eq!(plan.entry.opponent, "Home");
-            assert!(
-                match_exists(&plan, &p.match_reader)
-                    .await
-                    .expect("an answer")
-            );
-            let overwritten = p
-                .save_with(&again, &name, &plan, true)
-                .await
-                .expect("overwritten");
-            assert_eq!(overwritten.id, saved.id);
-            assert_eq!(
-                p.text(&format!(
-                    "SELECT team_b || '|' || coalesce(home, 'neutral') || '|' || notes || '|' || stage || '|' || round
-                     FROM matches WHERE id = '{}'",
-                    saved.id
-                )),
-                Some(format!("{b_id}|neutral|mine|regular|Andata – giornata 1"))
-            );
-            // the roster of B stays as it was
-            assert_eq!(
-                p.sql(&format!(
-                    "SELECT count(*) FROM match_roster WHERE match_id = '{}' AND team_id = '{b_id}'",
-                    saved.id
-                )),
-                8
-            );
-        }
-
-        /// Team B changed by the form to a name: its roster of the match
-        /// goes with it, the one of A stays.
+        /// Team B changed by the form to a name, the match scouted only on
+        /// A's side: its roster of the match goes with it, the one of A
+        /// stays.
         #[tokio::test]
         async fn the_roster_of_b_goes_with_it() {
-            use crate::{dvw::import::OpponentChoice, providers::match_writer::MatchWriter};
+            use crate::{
+                domain::ScoutingMode, dvw::import::OpponentChoice,
+                providers::match_writer::MatchWriter,
+            };
             let p = Providers::new();
             let (team, b, plan) = planned_against(
                 &three_sets_won().text(),
@@ -2220,8 +2791,12 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 new_team(),
                 OpponentChoice::New,
             );
-            let saved = p.save_with(&team, &b, &plan, false).await.expect("saved");
+            let saved = p.save_with(&team, &b, &plan).await.expect("saved");
             assert_eq!(p.sql("SELECT count(DISTINCT team_id) FROM match_roster"), 2);
+            p.match_writer
+                .save_scouting(&saved, ScoutingMode::A)
+                .await
+                .expect("only A");
             p.match_writer
                 .update(
                     &saved,
@@ -2237,6 +2812,134 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                 Some(team.team.id.to_string())
             );
             assert_eq!(p.sql("SELECT count(*) FROM match_roster"), 8);
+        }
+
+        /// Team B a team and every set translating on both sides: one
+        /// match on both sides (TODO/001, phase 2), B's lineups and touches
+        /// saved, A read as the plan has it, each side with the score of
+        /// the file.
+        #[tokio::test]
+        async fn both_teams_in_one_match() {
+            use crate::{
+                dvw::import::{ImportedSides, OpponentChoice},
+                providers::sqlite::sets::SqliteSetReader,
+            };
+            let p = Providers::new();
+            let (team, b, plan) = planned_against(
+                &three_sets_won().text(),
+                Side::Home,
+                new_team(),
+                OpponentChoice::New,
+            );
+            assert!(matches!(&plan.sides, ImportedSides::Both(sets) if sets.len() == 3));
+            let saved = p.save_with(&team, &b, &plan).await.expect("saved");
+            let m = format!("'{}'", saved.id);
+            assert_eq!(
+                p.text(&format!("SELECT scouting FROM matches WHERE id = {m}")),
+                Some("both".to_string())
+            );
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM set_lineups WHERE match_id = {m} AND side = 'b'"
+                )),
+                3
+            );
+            assert!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM events WHERE match_id = {m} AND side = 'b'"
+                )) > 0
+            );
+            let read_team = p.team(&team.team.id).await;
+            let read = p
+                .match_reader
+                .read_single(&read_team, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.sets, plan.entry.sets);
+            let sides = SqliteSetReader::new(p.db.clone(), Language::default())
+                .read_sides(&read)
+                .expect("both sides");
+            let scores: Vec<_> = sides
+                .iter()
+                .map(|s| {
+                    (
+                        (s.a.score_us, s.a.score_them),
+                        s.b.as_ref().map(|b| (b.score_them, b.score_us)),
+                    )
+                })
+                .collect();
+            assert_eq!(scores, vec![((25, 0), Some((25, 0))); 3]);
+            // B's side: B's team against A, losing every set, B's
+            // statistics the ones its side replays to
+            let of_b = p
+                .match_reader
+                .read_of_b(&read_team, &saved.id)
+                .expect("readable")
+                .expect("B's side");
+            assert_eq!(
+                (Some(of_b.team.id.to_string()), of_b.opponent.as_str()),
+                (
+                    p.text(&format!("SELECT team_b FROM matches WHERE id = {m}")),
+                    read_team.name.as_str()
+                )
+            );
+            let snapshots: Vec<_> = of_b
+                .sets
+                .iter()
+                .map(|s| s.compute_snapshot(of_b.max_substitutions).expect("replays"))
+                .collect();
+            let set_scores: Vec<_> = snapshots
+                .iter()
+                .map(|s| (s.score_us, s.score_them))
+                .collect();
+            assert_eq!(set_scores, vec![(0, 25); 3]);
+            let mut of_sides = crate::shapes::stats::Stats::new();
+            sides
+                .iter()
+                .filter_map(|s| s.b.as_ref())
+                .for_each(|b| of_sides.merge(&b.stats));
+            assert_ne!(of_sides, crate::shapes::stats::Stats::new());
+            assert_eq!(
+                crate::analysis::match_stats(&of_b).expect("stats"),
+                of_sides
+            );
+        }
+
+        /// Team B only a name: only A's side, nothing to tell why; no
+        /// lineup nor touch of B.
+        #[tokio::test]
+        async fn against_a_name_only_a_side() {
+            use crate::dvw::import::{ImportedSides, OpponentChoice};
+            let p = Providers::new();
+            let text = three_sets_won().text();
+            let (team, name, plan) =
+                planned_against(&text, Side::Home, new_team(), OpponentChoice::Name);
+            assert!(matches!(plan.sides, ImportedSides::A(None)));
+            let saved = p.save_with(&team, &name, &plan).await.expect("saved");
+            let m = format!("'{}'", saved.id);
+            assert_eq!(
+                p.text(&format!("SELECT scouting FROM matches WHERE id = {m}")),
+                Some("a".to_string())
+            );
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM set_lineups WHERE match_id = {m} AND side = 'b'"
+                )),
+                0
+            );
+            assert_eq!(
+                p.sql(&format!(
+                    "SELECT count(*) FROM events
+                     WHERE match_id = {m} AND side = 'b' AND deleted = 0"
+                )),
+                0
+            );
+            let read = p
+                .match_reader
+                .read_single(&p.team(&team.team.id).await, &saved.id)
+                .await
+                .expect("the match");
+            assert_eq!(read.sets, plan.entry.sets);
         }
     }
 }

@@ -32,6 +32,7 @@ use {
         shapes::{
             enums::{EvalEnum, EventTypeEnum, PhaseEnum, RoleEnum},
             flags::ReceptionSchemeEnum,
+            stats::DigsEnum,
             technique::SetTypeEnum,
         },
         video::StoredProfile,
@@ -39,8 +40,8 @@ use {
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         AnalysisPeriod, ClipPick, DetailFilter, DetailStats, ErrorCount, FundamentalDetail,
-        LiveStats, MatchClips, MobileError, PhaseStats, Scout4All, SituationChoices, StatsScope,
-        TargetStats, TeamAnalysis,
+        LiveStats, MatchClips, MatchSide, MobileError, PhaseStats, Scout4All, ScoutedOpponent,
+        SituationChoices, StatsScope, TargetStats, TeamAnalysis,
     },
     std::sync::Arc,
 };
@@ -57,6 +58,12 @@ const PAGES: [Page; 3] = [Page::Summary, Page::Trend, Page::Detail];
 /// What ← → change on a page, a row each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Filter {
+    /// the team of a match scouted on both sides
+    Side,
+    /// the team of the analysis: ours, or an opponent scouted on both sides
+    Opponent,
+    /// the competition the matches of a team are narrowed to
+    Competition,
     Scope,
     Period,
     Series,
@@ -73,6 +80,9 @@ enum Filter {
     InvertedP1,
     Late,
     Close,
+    /// in the detail of the defense, the digs counted: all, the digs that
+    /// aren't covers, only the covers
+    Digs,
     Zones,
 }
 
@@ -112,7 +122,15 @@ pub enum Source {
 #[derive(Debug, Clone)]
 pub enum Message {
     Page(usize),
+    /// the statistics of a team of a match scouted on both sides, or of
+    /// both side by side (none)
+    Side(Option<MatchSide>),
     Scope(StatsScope),
+    Competition(Option<uuid::Uuid>),
+    /// the analysis of the team, or of an opponent scouted on both sides
+    Opponent(Option<uuid::Uuid>),
+    /// the opponent chosen and the team side by side, in their matches
+    Versus,
     Series(usize),
     Recent(bool),
     /// a set of the trend of a match shown or hidden
@@ -143,6 +161,8 @@ pub enum Message {
     Late(Option<bool>),
     /// a close score or not
     Close(Option<bool>),
+    /// the digs counted in the defense: none, all of them
+    Digs(Option<DigsEnum>),
     /// an evaluation of the detail, to watch only those (or all again)
     ClipEval(EvalEnum),
     /// a zone of the net of the attacks, to watch only those
@@ -251,6 +271,19 @@ pub struct StatsScreen {
     title: String,
     page: usize,
     scope: StatsScope,
+    /// the team of the match whose statistics are shown
+    side: MatchSide,
+    /// of a match scouted on both sides, the names of team A and team B:
+    /// the statistics of either can be shown
+    sides: Option<(String, String)>,
+    /// the two sides side by side (the default of such a match), not one
+    compare: bool,
+    /// B's statistics, to compare with `live`
+    versus: Option<LiveStats>,
+    /// the detail of the other side, to compare
+    versus_detail: Option<DetailStats>,
+    /// team B, when opened from its page: its side first, back to it
+    pub of_b: Option<String>,
     live: Option<LiveStats>,
     detail: Option<DetailStats>,
     series: usize,
@@ -274,6 +307,14 @@ pub struct StatsScreen {
     // the team
     analysis: Option<TeamAnalysis>,
     period: AnalysisPeriod,
+    /// of the team, the competition the matches are narrowed to
+    competition: Option<uuid::Uuid>,
+    /// the name of the team, for its choice among the opponents
+    team_name: String,
+    /// the opponents scouted on both sides, to analyse from their side
+    opponents: Vec<ScoutedOpponent>,
+    /// the opponent analysed, none for the team
+    opponent: Option<uuid::Uuid>,
     kind: Kind,
     last: u32,
     days: Days,
@@ -664,10 +705,15 @@ impl StatsScreen {
         match_id: String,
     ) -> Result<StatsScreen, MobileError> {
         let team = core.team(team_id.clone())?.name;
-        let opponent = core
-            .match_details(team_id.clone(), match_id.clone())?
-            .opponent;
-        let live = core.match_stats(team_id.clone(), match_id.clone(), StatsScope::Match)?;
+        let details = core.match_details(team_id.clone(), match_id.clone())?;
+        let opponent = details.opponent;
+        let live = core.match_stats(
+            team_id.clone(),
+            match_id.clone(),
+            MatchSide::A,
+            StatsScope::Match,
+            DetailFilter::default(),
+        )?;
         // the files of its video, to watch the actions
         let has_video = core
             .video(&team_id, &match_id)
@@ -683,6 +729,8 @@ impl StatsScreen {
         );
         screen.live = Some(live);
         screen.has_video = has_video;
+        screen.sides = details.both_sides.then_some((team, opponent));
+        screen.compare = screen.sides.is_some();
         screen.load();
         Ok(screen)
     }
@@ -696,6 +744,11 @@ impl StatsScreen {
         let team = core.team(team_id.clone())?.name;
         let title = format!("{team} – {}", s.analysis);
         let mut screen = StatsScreen::with(core, team_id, Source::Team, title);
+        screen.team_name = team;
+        screen.opponents = screen
+            .core
+            .analysis_opponents(screen.team_id.clone())
+            .unwrap_or_default();
         screen.load();
         match &screen.error {
             Some(e) if screen.analysis.is_none() => Err(MobileError::Failed { reason: e.clone() }),
@@ -713,6 +766,12 @@ impl StatsScreen {
             title,
             page: 0,
             scope: StatsScope::Match,
+            side: MatchSide::A,
+            sides: None,
+            compare: false,
+            versus: None,
+            versus_detail: None,
+            of_b: None,
             live: None,
             detail: None,
             series: 0,
@@ -729,6 +788,10 @@ impl StatsScreen {
             choices,
             analysis: None,
             period: AnalysisPeriod::LastMonth,
+            competition: None,
+            team_name: String::new(),
+            opponents: vec![],
+            opponent: None,
             kind: Kind::LastMonth,
             last: LAST_MATCHES,
             days: Days {
@@ -752,6 +815,35 @@ impl StatsScreen {
         self.title.clone()
     }
 
+    /// Opened from the page of team B `team_b`: the statistics of B.
+    pub fn of_b(mut self, team_b: String) -> Self {
+        self.of_b = Some(team_b);
+        self.sided(MatchSide::B, false);
+        self
+    }
+
+    fn sided(&mut self, side: MatchSide, compare: bool) {
+        self.side = side;
+        self.compare = compare;
+        self.forget_picks();
+        self.title = self.titled();
+        self.load();
+    }
+
+    /// The players and the actions picked forgotten, for another team
+    /// whose they aren't.
+    fn forget_picks(&mut self) {
+        self.filter.players.clear();
+        self.clip_evals.clear();
+        self.clip_zone = None;
+        self.clip_target = None;
+    }
+
+    /// The team of the match the statistics are of.
+    pub fn side(&self) -> MatchSide {
+        self.side
+    }
+
     /// The match the statistics are of, if of a match.
     pub fn match_id(&self) -> Option<String> {
         match &self.source {
@@ -764,6 +856,15 @@ impl StatsScreen {
         self.source == Source::Team
     }
 
+    /// The title of a match, the team shown first; of a team, as it is.
+    fn titled(&self) -> String {
+        match (&self.sides, self.side) {
+            (Some((a, b)), MatchSide::A) => format!("{a} – {b}"),
+            (Some((a, b)), MatchSide::B) => format!("{b} – {a}"),
+            (None, _) => self.title.clone(),
+        }
+    }
+
     /// Reads the statistics again, for the scope (or period) and the
     /// filter chosen.
     fn load(&mut self) {
@@ -771,10 +872,37 @@ impl StatsScreen {
         let team = self.team_id.clone();
         match self.source.clone() {
             Source::Match(m) => {
-                let live = self.core.match_stats(team.clone(), m.clone(), self.scope);
-                let detail =
-                    self.core
-                        .match_detail(team, m, self.scope, self.event, self.filter.clone());
+                // the figures and the detail of a team of the match
+                let read = |side| {
+                    (
+                        self.core.match_stats(
+                            team.clone(),
+                            m.clone(),
+                            side,
+                            self.scope,
+                            self.filter.clone(),
+                        ),
+                        self.core.match_detail(
+                            team.clone(),
+                            m.clone(),
+                            side,
+                            self.scope,
+                            self.event,
+                            self.filter.clone(),
+                        ),
+                    )
+                };
+                let (live, detail) = read(self.side);
+                // B's beside them, to compare
+                let (versus, versus_detail) = match self.compare {
+                    true => {
+                        let (live, detail) = read(MatchSide::B);
+                        (live.ok(), detail.ok())
+                    }
+                    false => (None, None),
+                };
+                self.versus = versus;
+                self.versus_detail = versus_detail;
                 match live {
                     Ok(live) => self.live = Some(live),
                     Err(e) => self.error = Some(e.to_string()),
@@ -785,12 +913,39 @@ impl StatsScreen {
                 }
             }
             Source::Team => {
-                let analysis = self.core.team_analysis(
-                    team,
-                    self.period.clone(),
-                    self.event,
-                    self.filter.clone(),
-                );
+                let analysis = match self.opponent {
+                    Some(opponent) => self.core.opponent_analysis(
+                        team,
+                        opponent,
+                        self.period.clone(),
+                        self.competition,
+                        self.event,
+                        self.filter.clone(),
+                    ),
+                    None => self.core.team_analysis(
+                        team,
+                        self.period.clone(),
+                        self.competition,
+                        self.event,
+                        self.filter.clone(),
+                    ),
+                };
+                let against = match (self.compare, self.opponent) {
+                    (true, Some(opponent)) => self
+                        .core
+                        .analysis_against(
+                            self.team_id.clone(),
+                            opponent,
+                            self.period.clone(),
+                            self.competition,
+                            self.event,
+                            self.filter.clone(),
+                        )
+                        .ok(),
+                    _ => None,
+                };
+                self.versus_detail = against.as_ref().map(|a| a.detail.clone());
+                self.versus = against.map(|a| a.summary);
                 match analysis {
                     Ok(a) => {
                         self.live = Some(a.summary.clone());
@@ -828,14 +983,18 @@ impl StatsScreen {
         self.clips = match &self.source {
             Source::Match(m) => self
                 .core
-                .match_clips(&self.team_id, m, &self.pick())
+                .match_clips_of(&self.team_id, m, self.side, &self.pick())
                 .ok()
                 .map(|clips| clips.len()),
             Source::Team => {
-                self.tour = self
-                    .core
-                    .team_clips(&self.team_id, &self.period, &self.pick())
-                    .unwrap_or_default();
+                // the actions are in the video of our side: none of an opponent
+                self.tour = match self.opponent {
+                    Some(_) => vec![],
+                    None => self
+                        .core
+                        .team_clips(&self.team_id, &self.period, self.competition, &self.pick())
+                        .unwrap_or_default(),
+                };
                 self.has_video = self.tour.iter().any(|m| m.has_video);
                 Some(self.watched().map(|m| m.events.len()).sum())
             }
@@ -956,8 +1115,15 @@ impl StatsScreen {
                 .map(|z| ui::fill(s.serve_from, &[z.to_string()])),
             _ => None,
         };
+        // the digs asked, of the defense only
+        let digs = match (self.event, self.filter.digs) {
+            (EventTypeEnum::D, Some(DigsEnum::Defense)) => Some(s.digs_defense.to_string()),
+            (EventTypeEnum::D, Some(DigsEnum::Cover)) => Some(s.digs_cover.to_string()),
+            _ => None,
+        };
         [
             fundamental,
+            digs,
             evals,
             player,
             zone,
@@ -989,6 +1155,11 @@ impl StatsScreen {
             None => trend,
         }
         .without_sets(&self.hidden_sets);
+        // the other team of a match scouted on both sides, on the same chart
+        if let (true, Some(versus)) = (self.compare, self.versus.as_ref()) {
+            let other = Trend::of_stats(Some(versus), self.series, self.recent);
+            self.trend = self.trend.clone().against(other, &self.hidden_sets);
+        }
         self.points = self
             .live
             .iter()
@@ -1024,30 +1195,60 @@ impl StatsScreen {
             .unwrap_or_default()
     }
 
+    /// Whether the team has competitions to choose from: more than one, or
+    /// one chosen, to go back from.
+    fn has_competitions(&self) -> bool {
+        self.analysis
+            .as_ref()
+            .is_some_and(|a| a.competitions.len() > 1 || self.competition.is_some())
+    }
+
+    /// Few filters: a bar over the page. The team of a match doesn't
+    /// count, so a match of both sides lays out as one of a side.
+    fn filters_on_top(&self) -> bool {
+        self.page_filters().len() <= FILTERS_ON_TOP
+    }
+
     fn current(&self) -> Page {
         PAGES.get(self.page).copied().unwrap_or(Page::Summary)
     }
 
     fn filters(&self) -> Vec<Filter> {
+        let side = self.sides.as_ref().map(|_| Filter::Side);
+        side.into_iter().chain(self.page_filters()).collect()
+    }
+
+    /// The filters of the page, the team of the match left out.
+    fn page_filters(&self) -> Vec<Filter> {
         let zones = self
             .detail
             .as_ref()
             .and_then(|d| d.fundamental.as_ref())
             .is_some_and(|f| !f.targets.is_empty());
         let narrow = [Filter::Player, Filter::Rotation, Filter::Phase];
+        let competition = self.has_competitions().then_some(Filter::Competition);
+        let opponent = (self.is_team() && !self.opponents.is_empty()).then_some(Filter::Opponent);
         let first: Vec<Filter> = match (self.is_team(), self.current()) {
-            (false, Page::Summary) => return vec![Filter::Scope],
+            (false, Page::Summary) => return vec![Filter::Scope, Filter::Rotation, Filter::Phase],
             (false, Page::Trend) => return vec![Filter::Series, Filter::Mode],
             (false, Page::Detail) => vec![Filter::Scope, Filter::Event],
             (true, Page::Summary) => vec![Filter::Period],
             (true, Page::Trend) => vec![Filter::Period, Filter::Series],
             (true, Page::Detail) => vec![Filter::Period, Filter::Event],
         };
-        let zones = (self.current() == Page::Detail && zones).then_some(Filter::Zones);
+        let first: Vec<Filter> = opponent
+            .into_iter()
+            .chain(competition)
+            .chain(first)
+            .collect();
+        let detail = self.current() == Page::Detail;
+        let digs = (detail && self.event == EventTypeEnum::D).then_some(Filter::Digs);
+        let zones = (detail && zones).then_some(Filter::Zones);
         first
             .into_iter()
             .chain(narrow)
             .chain(SITUATION)
+            .chain(digs)
             .chain(zones)
             .collect()
     }
@@ -1087,8 +1288,42 @@ impl StatsScreen {
                 .collect()
         };
         match filter {
+            Filter::Side => {
+                let now = (!self.compare).then_some(self.side);
+                let all: &[Option<MatchSide>] = &[None, Some(MatchSide::A), Some(MatchSide::B)];
+                ui::cycle(all, &now, forward).map(Message::Side)
+            }
             Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
             Filter::Period => ui::cycle(&KINDS, &self.kind, forward).map(Message::Kind),
+            Filter::Opponent => {
+                // each opponent, then the comparison with it (the summary)
+                let comparable = self.current() != Page::Trend;
+                let ids: Vec<(Option<uuid::Uuid>, bool)> = [(None, false)]
+                    .into_iter()
+                    .chain(self.opponents.iter().flat_map(|o| {
+                        [(Some(o.id), false), (Some(o.id), true)]
+                            .into_iter()
+                            .filter(move |(_, versus)| comparable || !versus)
+                    }))
+                    .collect();
+                ui::cycle(&ids, &(self.opponent, self.compare), forward).map(|(o, versus)| {
+                    match versus {
+                        true => Message::Versus,
+                        false => Message::Opponent(o),
+                    }
+                })
+            }
+            Filter::Competition => {
+                let ids: Vec<Option<uuid::Uuid>> = [None]
+                    .into_iter()
+                    .chain(
+                        self.analysis
+                            .iter()
+                            .flat_map(|a| a.competitions.iter().map(|c| Some(c.id))),
+                    )
+                    .collect();
+                ui::cycle(&ids, &self.competition, forward).map(Message::Competition)
+            }
             Filter::Series => {
                 let series: Vec<usize> = (0..self.series_count()).collect();
                 ui::cycle(&series, &self.series, forward).map(Message::Series)
@@ -1174,6 +1409,12 @@ impl StatsScreen {
                 forward,
             )
             .map(Message::Close),
+            Filter::Digs => ui::cycle(
+                &[None, Some(DigsEnum::Defense), Some(DigsEnum::Cover)],
+                &self.filter.digs,
+                forward,
+            )
+            .map(Message::Digs),
         }
     }
 
@@ -1198,11 +1439,37 @@ impl StatsScreen {
     pub fn update(&mut self, message: Message) -> Outcome {
         match message {
             Message::Page(page) => {
+                match (self.is_team(), PAGES.get(page)) {
+                    // only the summary and the detail compare the matches of two teams
+                    (true, Some(Page::Trend)) if self.compare => {
+                        self.compare = false;
+                        self.load();
+                    }
+                    _ => (),
+                }
                 self.page = page.min(PAGES.len() - 1);
                 self.row = 0;
             }
+            Message::Side(Some(side)) => self.sided(side, false),
+            Message::Side(None) => self.sided(MatchSide::A, true),
             Message::Scope(scope) => {
                 self.scope = scope;
+                self.load();
+            }
+            Message::Competition(competition) => {
+                self.competition = competition;
+                self.load();
+            }
+            Message::Opponent(opponent) => {
+                // the competitions are of the other team too
+                self.opponent = opponent;
+                self.compare = false;
+                self.competition = None;
+                self.forget_picks();
+                self.load();
+            }
+            Message::Versus => {
+                self.compare = self.opponent.is_some();
                 self.load();
             }
             Message::Series(series) => {
@@ -1300,6 +1567,10 @@ impl StatsScreen {
             }
             Message::Close(close) => {
                 self.filter.close = close;
+                self.load();
+            }
+            Message::Digs(digs) => {
+                self.filter.digs = digs;
                 self.load();
             }
             Message::ClipEval(eval) => {
@@ -1482,7 +1753,7 @@ impl StatsScreen {
         .spacing(6);
         let filters = self.filters();
         // a few filters: a bar over the page, the page as wide as the screen
-        let few = filters.len() <= FILTERS_ON_TOP;
+        let few = self.filters_on_top();
         let filters: Vec<Element<'a, Message>> = filters
             .into_iter()
             .enumerate()
@@ -1499,9 +1770,16 @@ impl StatsScreen {
         let page: Element<'a, Message> = match (self.current(), &self.live, empty) {
             (_, _, true) => ui::panel(None, small(s.no_matches_period, c), c),
             (_, None, _) => space::vertical().into(),
-            (Page::Summary, Some(live), _) => {
-                responsive(move |size| summary(live, s, c, size.height >= SUMMARY_TALL)).into()
-            }
+            (Page::Summary, Some(live), _) => match self.versus.as_ref().filter(|_| self.compare) {
+                Some(versus) => {
+                    iced::widget::scrollable(crate::compare::comparison(live, versus, s, c))
+                        .height(Length::Fill)
+                        .into()
+                }
+                None => {
+                    responsive(move |size| summary(live, s, c, size.height >= SUMMARY_TALL)).into()
+                }
+            },
             (Page::Trend, Some(live), _) => match &self.analysis {
                 Some(a) if self.is_team() => self.matches_page(a, s, c),
                 _ => self.trend_page(live, s, c),
@@ -1539,10 +1817,13 @@ impl StatsScreen {
                 ))
                 .height(Length::Fill)
                 .width(Length::Fixed(FILTERS_WIDTH));
-                let right = column![tabs, error, container(page).height(Length::Fill)]
+                let right = column![error, container(page).height(Length::Fill)]
                     .spacing(12)
                     .width(Length::Fill);
-                row![left, right].spacing(14).into()
+                // the tabs where they are on the other pages: over everything
+                column![tabs, row![left, right].spacing(14).height(Length::Fill)]
+                    .spacing(12)
+                    .into()
             }
         }
     }
@@ -1602,6 +1883,76 @@ impl StatsScreen {
         };
         let (name, pills): (&str, Vec<Element<'a, Message>>) = match filter {
             Filter::Period => return self.period_row(on, s, c),
+            // no name, no marker: the teams speak for themselves; every
+            // page compares them
+            Filter::Side => {
+                let pills: Vec<Element<'a, Message>> = self
+                    .sides
+                    .iter()
+                    .flat_map(|(a, b)| {
+                        [
+                            (s.compare.to_string(), None),
+                            (a.clone(), Some(MatchSide::A)),
+                            (b.clone(), Some(MatchSide::B)),
+                        ]
+                    })
+                    .map(|(name, side)| {
+                        let chosen = match side {
+                            None => self.compare,
+                            Some(side) => !self.compare && side == self.side,
+                        };
+                        pill(name, chosen, Message::Side(side))
+                    })
+                    .collect();
+                return iced::widget::Row::with_children(pills)
+                    .spacing(4)
+                    .wrap()
+                    .vertical_spacing(4)
+                    .into();
+            }
+            Filter::Opponent => (
+                s.stats_team,
+                [pill(
+                    self.team_name.clone(),
+                    self.opponent.is_none(),
+                    Message::Opponent(None),
+                )]
+                .into_iter()
+                .chain(self.opponents.iter().map(|o| {
+                    pill(
+                        o.name.clone(),
+                        self.opponent == Some(o.id) && !self.compare,
+                        Message::Opponent(Some(o.id)),
+                    )
+                }))
+                .chain(
+                    (self.opponent.is_some() && self.current() == Page::Summary)
+                        .then(|| pill(s.compare.to_string(), self.compare, Message::Versus)),
+                )
+                .collect(),
+            ),
+            Filter::Competition => (
+                s.competition,
+                [all(self.competition.is_none(), Message::Competition(None))]
+                    .into_iter()
+                    .chain(
+                        self.analysis
+                            .iter()
+                            .flat_map(|a| a.competitions.iter())
+                            .map(|c| {
+                                let label = match &c.season {
+                                    Some(season) => format!("{} {season}", c.name),
+                                    None => c.name.clone(),
+                                };
+                                pill(
+                                    label,
+                                    self.competition == Some(c.id),
+                                    Message::Competition(Some(c.id)),
+                                )
+                            }),
+                    )
+                    .collect(),
+            ),
             Filter::Scope => (
                 s.sets,
                 self.scopes()
@@ -1827,10 +2178,33 @@ impl StatsScreen {
                     ),
                 ],
             ),
+            Filter::Digs => (
+                s.digs,
+                [
+                    (s.digs_all, None),
+                    (s.digs_defense, Some(DigsEnum::Defense)),
+                    (s.digs_cover, Some(DigsEnum::Cover)),
+                ]
+                .into_iter()
+                .map(|(label, digs)| {
+                    pill(
+                        label.to_string(),
+                        self.filter.digs == digs,
+                        Message::Digs(digs),
+                    )
+                })
+                .collect(),
+            ),
         };
-        match top {
-            true => ui::choice_inline(name, on, pills, c),
-            false => ui::choice_line(name, on, pills, c),
+        match (filter, top) {
+            // the grouping says what they are: no name
+            (Filter::Series | Filter::Mode, _) => iced::widget::Row::with_children(pills)
+                .spacing(4)
+                .wrap()
+                .vertical_spacing(4)
+                .into(),
+            (_, true) => ui::choice_inline(name, on, pills, c),
+            (_, false) => ui::choice_line(name, on, pills, c),
         }
     }
 
@@ -1988,12 +2362,27 @@ impl StatsScreen {
             .into_iter()
             .map(|n| set_toggle(n, !self.hidden_sets.contains(&n), s, c)))
         .push(small(format!("- - {}", s.whole_match), c))
-        .push(
-            text(format!("│ {}", s.direct_errors))
-                .size(SIZE_SMALL)
-                .color(theme::LOST),
-        )
         .spacing(14);
+        // two teams: the solid lines are the first's, the dashed the other's,
+        // the match across in their colours; else the direct errors
+        let legend = match self.versus.as_ref().filter(|_| self.compare) {
+            Some(versus) => legend
+                .push(
+                    text(format!("── {}", live.team_name))
+                        .size(SIZE_SMALL)
+                        .color(theme::TEAM_US),
+                )
+                .push(
+                    text(format!("╌╌ {}", versus.team_name))
+                        .size(SIZE_SMALL)
+                        .color(theme::TEAM_THEM),
+                ),
+            None => legend.push(
+                text(format!("│ {}", s.direct_errors))
+                    .size(SIZE_SMALL)
+                    .color(theme::LOST),
+            ),
+        };
         let name = live
             .trend
             .get(self.series)
@@ -2119,7 +2508,8 @@ impl StatsScreen {
 
     fn detail_page<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let page = self.detail_figures(s, c);
-        match self.clips {
+        // the actions to watch are of one team
+        match self.clips.filter(|_| !self.compare) {
             Some(_) => column![self.watch_bar(s, c), page].spacing(10).into(),
             None => page,
         }
@@ -2177,6 +2567,24 @@ impl StatsScreen {
         let Some(detail) = &self.detail else {
             return space::vertical().into();
         };
+        // side by side: the figures of the fundamental, no zones or players
+        let both = self.versus_detail.as_ref().filter(|_| self.compare);
+        if let (Some(fa), Some(fb), Some(live), Some(versus)) = (
+            detail.fundamental.as_ref().filter(|f| f.total > 0),
+            both.and_then(|d| d.fundamental.as_ref()),
+            self.live.as_ref(),
+            self.versus.as_ref(),
+        ) {
+            return iced::widget::scrollable(crate::compare::detail(
+                fa,
+                fb,
+                (&live.team_name, &versus.team_name),
+                s,
+                c,
+            ))
+            .height(Length::Fill)
+            .into();
+        }
         match (&detail.fundamental, &detail.freeballs) {
             (Some(f), _) if f.total == 0 => ui::panel(None, small(s.no_events, c), c),
             (Some(f), _) => self.fundamental(f, s, c),
@@ -2756,11 +3164,11 @@ impl StatsScreen {
         };
         ui::panel(
             Some(s.distribution),
-            column![
+            ui::court_frame(
                 row![cell(4), cell(3), cell(2)],
                 row![space::horizontal(), cell(8), cell(9)],
-            ]
-            .spacing(10),
+                c,
+            ),
             c,
         )
     }
@@ -3032,13 +3440,14 @@ fn summary<'a>(
     };
     let distribution: Element<'a, Message> = match live.distribution.is_empty() {
         true => small(s.no_attacks, c).into(),
-        false => column![
-            share(row![zone(4), zone(3), zone(2)], tall),
-            share(row![space::horizontal(), zone(8), zone(9)], tall),
-        ]
-        .spacing(10)
-        .height(height(tall))
-        .into(),
+        false => share(
+            ui::court_frame(
+                row![zone(4), zone(3), zone(2)],
+                row![space::horizontal(), zone(8), zone(9)],
+                c,
+            ),
+            tall,
+        ),
     };
     let third = ui::panel(Some(s.distribution), distribution, c);
     let most = live
@@ -3199,6 +3608,11 @@ pub(crate) mod tests {
     /// A team of seven and two matches played, a set each with our serves:
     /// three aces on 24/10, an ace and an error on 31/10.
     pub(crate) fn team_with_two_matches(core: &Scout4All) -> String {
+        team_with_matches(core, ["", ""])
+    }
+
+    /// As `team_with_two_matches`, each match of its competition (a cup).
+    fn team_with_matches(core: &Scout4All, competitions: [&str; 2]) -> String {
         let team = core
             .save_team(
                 None,
@@ -3235,7 +3649,7 @@ pub(crate) mod tests {
             .into_iter()
             .map(|p| p.id)
             .collect();
-        for (opponent, date, serves) in [
+        for ((opponent, date, serves), competition) in [
             (
                 "Arezzo",
                 "2026-10-24T18:00:00+02:00",
@@ -3246,7 +3660,10 @@ pub(crate) mod tests {
                 "2026-10-31T18:00:00+01:00",
                 vec![EvalEnum::Perfect, EvalEnum::Error],
             ),
-        ] {
+        ]
+        .into_iter()
+        .zip(competitions)
+        {
             let m = core
                 .save_match(
                     team.clone(),
@@ -3256,6 +3673,9 @@ pub(crate) mod tests {
                         date: chrono::DateTime::parse_from_rfc3339(date).ok(),
                         home: true,
                         max_substitutions: "6".into(),
+                        competition: competition.into(),
+                        competition_format: (!competition.is_empty())
+                            .then_some(scout4all_core::domain::CompetitionFormat::Cup),
                         ..MatchForm::default()
                     },
                 )
@@ -3532,8 +3952,127 @@ pub(crate) mod tests {
         }
     }
 
+    /// The team of the analysis, or an opponent scouted on both sides: the
+    /// row is there only with one, by keys; the figures are those of B in
+    /// the match, and going back to ours restores them.
+    #[test]
+    fn the_analysis_of_an_opponent_scouted_on_both_sides() {
+        use scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide};
+        let s = strings(LanguageEnum::En);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let none = team_with_two_matches(&core);
+        let screen = StatsScreen::team(core.clone(), none, s).unwrap();
+        assert!(!screen.filters().contains(&Filter::Opponent));
+        let imported = core
+            .import_dvw(
+                include_bytes!("../../core/src/tests/fixtures/three_sets.dvw").to_vec(),
+                DvwChoice {
+                    opponent: DvwOpponent::NewTeam,
+                    side: DvwSide::Home,
+                    day: "2015-01-25".into(),
+                    max_substitutions: 6,
+                    team_id: None,
+                    classification: core.classifications().first().map(|c| c.value),
+                    gender: core.genders().first().map(|g| g.value),
+                    country: core.countries("Ital".into()).first().map(|c| c.value),
+                },
+            )
+            .unwrap();
+        let a = core
+            .match_stats(
+                imported.team_id.clone(),
+                imported.match_id.clone(),
+                MatchSide::A,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        let b = core
+            .match_stats(
+                imported.team_id.clone(),
+                imported.match_id,
+                MatchSide::B,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        let mut screen = StatsScreen::team(core, imported.team_id, s).unwrap();
+        screen.update(Message::Kind(Kind::LastMatches));
+        assert_eq!(screen.filters().first(), Some(&Filter::Opponent));
+        let ours = aces(&screen);
+        let opponent = screen.opponents.first().map(|o| o.id);
+        assert!(opponent.is_some());
+        // → on the row: the opponent
+        assert_eq!(
+            screen
+                .changed(Filter::Opponent, true)
+                .map(|m| matches!(m, Message::Opponent(o) if o == opponent)),
+            Some(true)
+        );
+        screen.update(Message::Opponent(opponent));
+        assert_eq!(aces(&screen), b.aces);
+        screen.update(Message::Opponent(None));
+        assert_eq!(aces(&screen), ours);
+        // the comparison with the opponent: its matches, side by side, only
+        // in the summary; → goes from the opponent to it
+        screen.update(Message::Opponent(opponent));
+        assert!(matches!(
+            screen.changed(Filter::Opponent, true),
+            Some(Message::Versus)
+        ));
+        screen.update(Message::Versus);
+        assert!(screen.compare);
+        assert_eq!(aces(&screen), b.aces);
+        assert_eq!(screen.versus.as_ref().map(|v| v.aces), Some(a.aces));
+        screen.update(Message::Page(1));
+        assert!(!screen.compare && screen.versus.is_none());
+        assert_eq!(aces(&screen), b.aces);
+        screen.update(Message::Page(0));
+        screen.update(Message::Opponent(None));
+        assert!(screen.versus.is_none());
+    }
+
     fn aces(screen: &StatsScreen) -> u32 {
         screen.live.as_ref().map_or(0, |l| l.aces)
+    }
+
+    /// The competition of a team narrows the analysis and the clips: the
+    /// row is there only with more than one, by keys and by pill, and
+    /// `all` goes back to the whole.
+    #[test]
+    fn the_competition_of_a_team() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let none = team_with_two_matches(&core);
+        let screen = StatsScreen::team(core.clone(), none, s).unwrap();
+        assert_eq!(screen.filters().first(), Some(&Filter::Period));
+        let team = team_with_matches(&core, ["Coppa", "Lega"]);
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        assert_eq!(screen.filters().first(), Some(&Filter::Competition));
+        assert_eq!(screen.competition, None);
+        screen.update(Message::Kind(Kind::LastMatches));
+        assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
+        // right: the first competition, by name (Coppa)
+        screen.key(key!(right));
+        let coppa = screen.competition;
+        assert!(coppa.is_some());
+        assert_eq!(opponents(&screen), ["Arezzo"]);
+        assert_eq!(screen.tour.len(), 1);
+        screen.key(key!(right));
+        assert_eq!(opponents(&screen), ["Siena"]);
+        assert_ne!(screen.competition, coppa);
+        // one past the last: all of them again
+        screen.key(key!(right));
+        assert_eq!(screen.competition, None);
+        assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
+        assert_eq!(screen.tour.len(), 2);
+        // and back by the pill
+        screen.update(Message::Competition(coppa));
+        assert_eq!(opponents(&screen), ["Arezzo"]);
+        screen.update(Message::Competition(None));
+        assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
     }
 
     fn opponents(screen: &StatsScreen) -> Vec<String> {
@@ -3757,7 +4296,18 @@ pub(crate) mod tests {
             None => unreachable!("the match of Arezzo"),
         };
         let mut screen = StatsScreen::new(core, team, first).unwrap();
-        assert_eq!(screen.filters(), [Filter::Scope]);
+        assert_eq!(
+            screen.filters(),
+            [Filter::Scope, Filter::Rotation, Filter::Phase]
+        );
+        // the summary narrowed to a phase: the other one is left empty,
+        // and the detail keeps the choice
+        screen.update(Message::Phase(Some(PhaseEnum::SideOut)));
+        let live = screen.live.as_ref().unwrap();
+        assert_eq!(live.filter.phase, Some(PhaseEnum::SideOut));
+        assert!(live.break_points.is_none());
+        screen.update(Message::Phase(None));
+        assert!(screen.live.as_ref().unwrap().break_points.is_some());
         screen.update(Message::Page(2));
         assert!(screen.filters().contains(&Filter::Reception));
         let total = |screen: &StatsScreen| {
@@ -3811,6 +4361,38 @@ pub(crate) mod tests {
             .unwrap_or_else(|| unreachable!("a scroll"));
         assert!((y - screen.row as f32 / last).abs() < f32::EPSILON);
         assert_eq!(screen.take_scroll(), None, "once");
+    }
+
+    /// The digs, only in the detail of the defense: all of them first, then
+    /// the digs that aren't covers and the covers, by the arrows too.
+    #[test]
+    fn the_digs_only_in_the_detail_of_the_defense() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let s = strings(LanguageEnum::It);
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        screen.update(Message::Page(2));
+        assert!(!screen.filters().contains(&Filter::Digs));
+        screen.update(Message::Event(EventTypeEnum::D));
+        assert!(screen.filters().contains(&Filter::Digs));
+        assert_eq!(screen.filter.digs, None);
+        screen.row = screen
+            .filters()
+            .iter()
+            .position(|f| *f == Filter::Digs)
+            .unwrap_or_default();
+        screen.key(key!(right));
+        assert_eq!(screen.filter.digs, Some(DigsEnum::Defense));
+        screen.key(key!(right));
+        assert_eq!(screen.filter.digs, Some(DigsEnum::Cover));
+        screen.key(key!(right));
+        assert_eq!(screen.filter.digs, None);
+        screen.update(Message::Digs(Some(DigsEnum::Cover)));
+        assert_eq!(screen.filter.digs, Some(DigsEnum::Cover));
+        assert!(screen.clips_title(s).starts_with("Difesa · Copertura"));
+        screen.update(Message::Event(EventTypeEnum::A));
+        assert!(!screen.filters().contains(&Filter::Digs));
     }
 
     /// The players, the rotations and the roles: more than one at a time,
@@ -3893,5 +4475,155 @@ pub(crate) mod tests {
         assert_eq!(screen.filter.rotations, Vec::<u8>::new());
         screen.key(key!(right));
         assert_eq!(screen.filter.rotations, vec![0]);
+    }
+
+    /// A match scouted on both sides (imported, B a new team): the team
+    /// is the first row, ← → show B's statistics (its players, A's aces as
+    /// aces against) and the title starts from B; no video of B.
+    #[test]
+    fn the_statistics_of_either_team_of_a_match_on_both_sides() {
+        use scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide};
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let import = |opponent| {
+            let choice = DvwChoice {
+                opponent,
+                side: DvwSide::Home,
+                day: "2015-01-25".into(),
+                max_substitutions: 6,
+                team_id: None,
+                classification: core.classifications().first().map(|c| c.value),
+                gender: core.genders().first().map(|g| g.value),
+                country: core.countries("Ital".into()).first().map(|c| c.value),
+            };
+            let bytes = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw").to_vec();
+            core.import_dvw(bytes, choice).unwrap()
+        };
+        let one = import(DvwOpponent::Name);
+        let screen = StatsScreen::new(core.clone(), one.team_id, one.match_id).unwrap();
+        assert_eq!(
+            screen.filters(),
+            [Filter::Scope, Filter::Rotation, Filter::Phase]
+        );
+
+        let both = import(DvwOpponent::NewTeam);
+        let mut screen =
+            StatsScreen::new(core.clone(), both.team_id.clone(), both.match_id.clone()).unwrap();
+        assert_eq!(
+            screen.filters(),
+            [Filter::Side, Filter::Scope, Filter::Rotation, Filter::Phase]
+        );
+        assert_eq!(screen.title(), "Home – Visiting");
+        let aces = |screen: &StatsScreen| screen.live.as_ref().map(|l| (l.aces, l.aces_against));
+        let (a_aces, a_against) = aces(&screen).unwrap_or_default();
+        // the two sides side by side first, B's figures the mirror of A's
+        assert!(screen.compare);
+        assert_eq!(
+            screen.versus.as_ref().map(|v| (v.aces, v.aces_against)),
+            Some((a_against, a_aces))
+        );
+        // ← from the first row goes round to B, → on to the comparison
+        screen.key(key!(left));
+        assert_eq!((screen.compare, screen.side), (false, MatchSide::B));
+        screen.key(key!(right));
+        assert!(screen.compare && screen.versus.is_some());
+        // the detail compares the two sides too: the same fundamental, B's
+        // figures from B's events
+        screen.update(Message::Page(2));
+        assert!(screen.compare && screen.side == MatchSide::A);
+        let total = |d: &Option<DetailStats>| {
+            d.as_ref()
+                .and_then(|d| d.fundamental.as_ref())
+                .map(|f| f.total)
+        };
+        assert!(total(&screen.detail).is_some_and(|n| n > 0));
+        assert!(total(&screen.versus_detail).is_some_and(|n| n > 0));
+        assert_ne!(screen.versus_detail, screen.detail);
+        // and a side alone drops it
+        screen.update(Message::Side(Some(MatchSide::B)));
+        assert!(screen.versus_detail.is_none() && screen.versus.is_none());
+        screen.update(Message::Side(Some(MatchSide::A)));
+        assert_eq!((screen.compare, screen.side), (false, MatchSide::A));
+        assert_eq!(screen.filters().first(), Some(&Filter::Side));
+        // the trend: the bar over the page as in a match of one side, the
+        // two teams on the one chart for "compare", B's own trend and names
+        screen.update(Message::Page(1));
+        assert!(screen.filters_on_top());
+        assert_eq!(
+            screen.filters(),
+            [Filter::Side, Filter::Series, Filter::Mode]
+        );
+        assert!(screen.trend.versus.is_none());
+        screen.update(Message::Side(None));
+        assert!(screen.compare && screen.trend.versus.is_some());
+        let name_a = screen.live.as_ref().map(|l| l.team_name.clone());
+        screen.key(key!(left));
+        assert_eq!((screen.compare, screen.side), (false, MatchSide::B));
+        assert_ne!(screen.live.as_ref().map(|l| l.team_name.clone()), name_a);
+        assert!(screen.trend.versus.is_none());
+        screen.key(key!(right));
+        assert!(screen.compare && screen.trend.versus.is_some());
+        screen.key(key!(right));
+        assert_eq!((screen.compare, screen.side), (false, MatchSide::A));
+        screen.key(key!(left));
+        screen.update(Message::Page(2));
+        screen.update(Message::Side(Some(MatchSide::A)));
+        screen.update(Message::Event(EventTypeEnum::S));
+        let players = |screen: &StatsScreen| -> Vec<String> {
+            screen
+                .detail
+                .iter()
+                .flat_map(|d| d.players.iter().map(|p| p.id.clone()))
+                .collect()
+        };
+        let of_a = players(&screen);
+        screen.update(Message::Players(of_a.clone()));
+        assert_eq!(screen.row, 0);
+        screen.key(key!(right));
+        assert_eq!(screen.side, MatchSide::B);
+        assert_eq!(screen.title(), "Visiting – Home");
+        assert_eq!(aces(&screen), Some((a_against, a_aces)));
+        assert!(screen.filter.players.is_empty(), "A's players left");
+        let of_b = players(&screen);
+        assert!(!of_b.is_empty() && of_b.iter().all(|p| !of_a.contains(p)));
+        // the actions of B too, to watch
+        assert!(screen.clips.is_some_and(|n| n > 0), "{:?}", screen.clips);
+        screen.key(key!(left));
+        assert_eq!(
+            (screen.side, screen.title().as_str()),
+            (MatchSide::A, "Home – Visiting")
+        );
+
+        // from the page of B: Statistics opens B's side, back to B
+        let b = core
+            .teams()
+            .unwrap()
+            .into_iter()
+            .find_map(|t| match t {
+                scout4all_mobile::TeamListing::Team { id, name, .. } if name == "Visiting" => {
+                    Some(id)
+                }
+                _ => None,
+            })
+            .unwrap_or_default();
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let mut page =
+            crate::game::MatchScreen::new(core.clone(), b.clone(), both.match_id.clone()).unwrap();
+        assert!(matches!(
+            page.key(s, key!(s)),
+            crate::game::Outcome::StatsOfB(a) if a == both.team_id
+        ));
+        assert!(matches!(
+            page.update(s, crate::game::Message::Stats),
+            crate::game::Outcome::StatsOfB(a) if a == both.team_id
+        ));
+        let screen = StatsScreen::new(core.clone(), both.team_id, both.match_id)
+            .unwrap()
+            .of_b(b.clone());
+        assert_eq!(
+            (screen.side, screen.title().as_str(), screen.of_b.as_deref()),
+            (MatchSide::B, "Visiting – Home", Some(b.as_str()))
+        );
+        assert_eq!(aces(&screen), Some((a_against, a_aces)));
     }
 }

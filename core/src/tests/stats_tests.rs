@@ -1020,7 +1020,7 @@ mod tests {
         assert_eq!(fundamental(overview.reception), (6, 1, 1));
         assert_eq!(fundamental(overview.attack), (6, 1, 2));
         assert_eq!(fundamental(overview.dig), (6, 1, 1));
-        assert_eq!(fundamental(overview.block), (5, 1, 2));
+        assert_eq!(fundamental(overview.block), (6, 1, 2));
     }
 
     /// With no events: nothing to show, every count 0, the errors still by
@@ -1307,7 +1307,7 @@ mod tests {
         assert_eq!(tones(S), "#Excellent /Excellent +Good !Fair -Poor =Bad");
         assert_eq!(tones(P), "#Excellent +Good !Fair -Poor /Poor =Bad");
         assert_eq!(tones(D), tones(P));
-        assert_eq!(tones(B), "#Excellent +Good -Poor =Bad /Bad");
+        assert_eq!(tones(B), "#Excellent +Good -Fair !Poor =Bad /Bad");
         assert_eq!(tones(A), "#Excellent +Good !Good -Poor /Bad =Bad");
         assert!(evaluations(FB).is_empty());
     }
@@ -2637,6 +2637,39 @@ mod tests {
                 ],
                 [(1, 0), (1, 0), (1, 1)],
             ),
+            // our block `-` keeps the ball too (the blockers struggle):
+            // the second one, also with the dig of the blockers after it
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(B, t.mb2, Negative),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(B, t.mb2, Negative),
+                    act(D, t.libero, Negative),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
+            // our block `!` sends it back to them, who attacked: our dig
+            // of their attack again, the second one
+            (
+                vec![
+                    act(P, t.libero, Positive),
+                    act(A, t.oh1, Negative),
+                    act(B, t.mb2, Exclamative),
+                    act(D, t.libero, Positive),
+                    act(A, t.opposite, Perfect),
+                ],
+                [(1, 0), (1, 1), (0, 0)],
+            ),
             // the fourth one counts with the third
             (
                 vec![
@@ -2908,7 +2941,8 @@ mod tests {
         };
         let snapshot = set.compute_snapshot(DEFAULT_MAX_SUBSTITUTIONS).unwrap();
         let options = snapshot.get_available_options();
-        assert_eq!(options, vec![OE, F, A, FB]);
+        // our cover after it optional
+        assert_eq!(options, vec![OE, F, A, D, FB, PW, PL]);
         let snapshot = t.serving(vec![
             act(S, t.setter, Negative),
             act(D, t.oh2, Positive),
@@ -2938,15 +2972,21 @@ mod tests {
     fn every_evaluation_has_a_follow_up() {
         let t = Team::new();
         // the events before each action, so that it's available
-        let before = |event_type| match event_type {
-            S => vec![],
-            P => vec![opp(OE), act(S, t.setter, Error)],
-            A | D | B => vec![act(S, t.setter, Negative)],
+        let before = |event_type, eval| match (event_type, eval) {
+            (S, _) => vec![],
+            (P, _) => vec![opp(OE), act(S, t.setter, Error)],
+            // the dig `!`, a cover: after our attack `!`
+            (D, Exclamative) => vec![
+                act(S, t.setter, Negative),
+                act(D, t.oh2, Positive),
+                act(A, t.opposite, Exclamative),
+            ],
+            (A | D | B, _) => vec![act(S, t.setter, Negative)],
             _ => unreachable!(),
         };
         for event_type in [S, P, A, D, B] {
             for eval in event_type.available_evals() {
-                let mut events = before(event_type);
+                let mut events = before(event_type, eval);
                 // the attacker after a serve: a dig first
                 if event_type == A {
                     events.push(act(D, t.oh2, Positive));

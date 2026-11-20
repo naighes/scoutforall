@@ -6,6 +6,7 @@
 use crate::{
     localization::Labels,
     providers::set_writer::SetWriter,
+    rally::Touches,
     scouting::ScoutingSession,
     shapes::{
         enums::TeamSideEnum,
@@ -73,6 +74,17 @@ pub struct SetStartInput {
     pub setter: Uuid,
     pub libero: Uuid,
     pub fallback_libero: Option<Uuid>,
+    /// the start of B, for a match scouted on both sides
+    pub opponent: Option<SideInput>,
+}
+
+/// The valid start of one team: lineup, setter and liberos.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SideInput {
+    pub positions: [Uuid; 6],
+    pub setter: Uuid,
+    pub libero: Uuid,
+    pub fallback_libero: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,9 +123,8 @@ impl SetStartForm {
     /// didn't serve first in the previous one serves.
     pub fn new(set_number: u8, last_serving_team: Option<TeamSideEnum>) -> Self {
         let serving_team = match (set_number, last_serving_team) {
-            (1 | 5, _) | (_, None) => None,
-            (_, Some(TeamSideEnum::Us)) => Some(TeamSideEnum::Them),
-            (_, Some(TeamSideEnum::Them)) => Some(TeamSideEnum::Us),
+            (1 | 5, _) => None,
+            (_, last) => last.map(TeamSideEnum::other),
         };
         Self {
             set_number,
@@ -212,6 +223,37 @@ impl SetStartForm {
     /// What starts the set. The first error, in the order of the fields,
     /// when the form isn't valid.
     pub fn validate(self, team: &TeamEntry) -> Result<SetStartInput, SetStartError> {
+        self.validate_both(team, None)
+    }
+
+    /// What starts the set scouted on both sides: this form is the one of
+    /// A, `opponent` the form and the team of B. Who serves is the one of
+    /// this form (B's own is ignored: who doesn't serve receives). The
+    /// errors of A come first, then those of B.
+    pub fn validate_both(
+        self,
+        team: &TeamEntry,
+        opponent: Option<(&SetStartForm, &TeamEntry)>,
+    ) -> Result<SetStartInput, SetStartError> {
+        let serving_team = self.serving_team.ok_or(SetStartError::MissingServingTeam)?;
+        let ours = self.validate_side(team)?;
+        let theirs = opponent
+            .map(|(form, team)| form.validate_side(team))
+            .transpose()?;
+        Ok(SetStartInput {
+            set_number: self.set_number,
+            serving_team,
+            positions: ours.positions,
+            setter: ours.setter,
+            libero: ours.libero,
+            fallback_libero: ours.fallback_libero,
+            opponent: theirs,
+        })
+    }
+
+    /// The lineup of one team: the first error, in the order of the
+    /// fields, when it isn't valid. Who serves isn't checked.
+    pub fn validate_side(&self, team: &TeamEntry) -> Result<SideInput, SetStartError> {
         use SetStartError::*;
         let active: HashSet<Uuid> = team.active_players().iter().map(|p| p.id).collect();
         let on_court = self.on_court();
@@ -229,30 +271,19 @@ impl SetStartForm {
             && self
                 .fallback_libero
                 .is_none_or(|f| self.fallback_libero_choices(team).iter().any(|p| p.id == f));
-        match (
-            self.serving_team,
-            missing,
-            positions,
-            self.setter,
-            self.libero,
-        ) {
-            (None, _, _, _, _) => Err(MissingServingTeam),
-            (_, Some(i), _, _, _) => Err(MissingPlayer(i as u8 + 1)),
+        match (missing, positions, self.setter, self.libero) {
+            (Some(i), _, _, _) => Err(MissingPlayer(i as u8 + 1)),
             _ if !lineup_valid => Err(InvalidPlayer),
-            (_, _, _, None, _) => Err(MissingSetter),
-            (_, _, _, Some(setter), _) if !on_court.contains(&setter) => Err(InvalidPlayer),
-            (_, _, _, _, None) => Err(MissingLibero),
+            (_, _, None, _) => Err(MissingSetter),
+            (_, _, Some(setter), _) if !on_court.contains(&setter) => Err(InvalidPlayer),
+            (_, _, _, None) => Err(MissingLibero),
             _ if !liberos_valid => Err(InvalidPlayer),
-            (Some(serving_team), None, Some(positions), Some(setter), Some(libero)) => {
-                Ok(SetStartInput {
-                    set_number: self.set_number,
-                    serving_team,
-                    positions,
-                    setter,
-                    libero,
-                    fallback_libero: self.fallback_libero,
-                })
-            }
+            (None, Some(positions), Some(setter), Some(libero)) => Ok(SideInput {
+                positions,
+                setter,
+                libero,
+                fallback_libero: self.fallback_libero,
+            }),
             _ => Err(InvalidPlayer),
         }
     }
@@ -275,26 +306,82 @@ impl SetStartForm {
     }
 }
 
-/// Saves the set that `input` starts, and scouts it.
+/// Saves the set that `input` starts, and scouts it. With the start of B
+/// the set is scouted on both sides, `opponent` the team of B: B's serving
+/// team is the other one. The start of B without its team, nothing saved.
 pub async fn start(
     current_match: MatchEntry,
     input: SetStartInput,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
+    opponent: Option<TeamEntry>,
 ) -> Result<ScoutingSession, SetStartError> {
-    let set = set_writer
-        .create(
-            &current_match,
-            input.set_number,
-            input.serving_team,
-            input.positions,
-            input.libero,
-            input.fallback_libero,
-            input.setter,
-            vec![], // no events at the start of the set
-        )
-        .await
-        .map_err(|_| SetStartError::CouldNotStartSet)?;
-    resume(current_match, set, set_writer)
+    let (set, theirs) = match (&input.opponent, opponent) {
+        (Some(_), None) => Err(SetStartError::CouldNotStartSet),
+        (None, _) => set_writer
+            .create(
+                &current_match,
+                input.set_number,
+                input.serving_team,
+                input.positions,
+                input.libero,
+                input.fallback_libero,
+                input.setter,
+                vec![], // no events at the start of the set
+            )
+            .await
+            .map(|set| (set, None))
+            .map_err(|_| SetStartError::CouldNotStartSet),
+        (Some(b), Some(team_b)) => {
+            let a = SetEntry::new(
+                input.set_number,
+                input.serving_team,
+                input.positions,
+                input.libero,
+                input.fallback_libero,
+                input.setter,
+            )
+            .map_err(|_| SetStartError::CouldNotStartSet)?;
+            let b_start = SetEntry::new(
+                input.set_number,
+                input.serving_team.other(),
+                b.positions,
+                b.libero,
+                b.fallback_libero,
+                b.setter,
+            )
+            .map_err(|_| SetStartError::CouldNotStartSet)?;
+            set_writer
+                .create_both(&current_match, &a, &b_start)
+                .await
+                .map_err(|_| SetStartError::CouldNotStartSet)?;
+            let touches = Touches {
+                a: a.clone(),
+                b: b_start,
+                touches: vec![],
+            };
+            Ok((a, Some((team_b, touches))))
+        }
+    }?;
+    match theirs {
+        None => resume(current_match, set, set_writer),
+        Some((team_b, touches)) => resume_both(current_match, set, touches, team_b, set_writer),
+    }
+}
+
+/// Scouts the set again, from its saved touches: `set` from A's side,
+/// `touches` both sides as saved, `team_b` the team of B.
+pub fn resume_both(
+    current_match: MatchEntry,
+    set: SetEntry,
+    touches: Touches,
+    team_b: TeamEntry,
+    set_writer: Arc<dyn SetWriter + Send + Sync>,
+) -> Result<ScoutingSession, SetStartError> {
+    resume(current_match, set, set_writer).and_then(|session| {
+        session
+            .with_theirs(team_b, touches)
+            .map_err(|_| SetStartError::CouldNotComputeSnapshot)
+    })
 }
 
 /// Scouts `set` again, from its saved events.

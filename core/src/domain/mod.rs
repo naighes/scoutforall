@@ -12,12 +12,16 @@
 //! those.
 
 pub mod adapters;
+pub mod rules;
 pub mod sql;
 
 use crate::localization::Labels;
 use crate::shapes::{
     country::CountryCode,
-    enums::{GenderEnum, LineupRulesEnum, RoleEnum, TeamClassificationEnum, TeamSideEnum},
+    enums::{
+        GenderEnum, LineupRulesEnum, RoleEnum, ScoutingRulesEnum, TeamClassificationEnum,
+        TeamSideEnum,
+    },
     r#match::MatchSource,
     snapshot::EventEntry,
 };
@@ -143,8 +147,21 @@ impl Stage {
 }
 
 /// One of the two teams of a match: A, the team one starts from, or B.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub enum Side {
+    #[default]
     A,
     B,
 }
@@ -152,11 +169,24 @@ pub enum Side {
 impl Side {
     pub const ALL: [Side; 2] = [Side::A, Side::B];
 
+    /// The team across the net.
+    pub fn other(self) -> Self {
+        match self {
+            Side::A => Side::B,
+            Side::B => Side::A,
+        }
+    }
+
     /// The side of a team as A sees it: we are A.
-    pub fn from_a(side: TeamSideEnum) -> Self {
-        match side {
-            TeamSideEnum::Us => Side::A,
-            TeamSideEnum::Them => Side::B,
+    pub fn from_a(team: TeamSideEnum) -> Self {
+        Side::of(Side::A, team)
+    }
+
+    /// The side of a team as `side` sees it: we are `side`.
+    pub fn of(side: Side, team: TeamSideEnum) -> Self {
+        match team {
+            TeamSideEnum::Us => side,
+            TeamSideEnum::Them => side.other(),
         }
     }
 
@@ -211,8 +241,9 @@ impl Home {
 
 /// Who is scouted in a match (D3): team A, or both teams (only when B is a
 /// team, with its players).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum ScoutingMode {
+    #[default]
     A,
     Both,
 }
@@ -272,6 +303,9 @@ pub struct MatchSet {
     pub serving: Side,
     /// none: v1, the sets saved before the rules were
     pub lineup_rules: Option<LineupRulesEnum>,
+    /// the scouting rules its events were saved with; none: v1, the sets
+    /// saved before they were
+    pub scouting_rules: Option<ScoutingRulesEnum>,
     pub deleted: bool,
 }
 

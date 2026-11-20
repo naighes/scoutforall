@@ -42,11 +42,11 @@ class ScoutingBackTest {
     fun backTakesBackTheChoiceInTheMiddleOfAnEvent() {
         show()
         touch("+")
-        rule.waitForText(string(R.string.touch_the_player))
+        rule.waitForTheRally()
         touch("Paola Egonu")
         rule.waitForText("18 · Paola Egonu")
         pressBack()
-        rule.waitForText(string(R.string.touch_the_player))
+        rule.waitForTheRally()
         // the serve stays
         rule.waitForText("serve +", substring = true)
         assertEquals(0, back)

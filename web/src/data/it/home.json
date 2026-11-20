@@ -9,6 +9,7 @@
   "highlights_title": "E poi",
   "highlights": [
     { "title": "Zone di gioco", "content": "Zone di battuta, ricezione, attacco, difesa e muro. Rilevazione della composizione del muro." },
+    { "title": "Entrambe le squadre", "content": "Fai lo scouting della tua squadra e dell'avversario nella stessa partita: gli eventi di entrambi i lati, un +1 per i punti senza causa e le statistiche dei due lati a confronto, affiancate." },
     { "title": "Report in PDF", "content": "Il report della partita, impaginato come un tabellino, pronto da stampare o condividere con la squadra." },
     { "title": "I tuoi tasti", "content": "Ogni evento, valutazione e tipo di alzata si può associare al tasto che preferisci." },
     { "title": "Cinque lingue", "content": "Italiano, inglese, portoghese, polacco e giapponese." },

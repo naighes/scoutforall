@@ -7,6 +7,21 @@ use crate::{
     },
 };
 use async_trait::async_trait;
+use chrono::NaiveDate;
+use uuid::Uuid;
+
+/// A match saved, as an import may tell it again (`MatchReader::played_on`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlayedOn {
+    pub id: String,
+    pub team_a: Uuid,
+    /// none when B is only a name
+    pub team_b: Option<Uuid>,
+    /// team A and B as the lists name them
+    pub names: (String, String),
+    /// the score of each set, from A's side
+    pub scores: Vec<(u8, u8)>,
+}
 
 #[async_trait]
 pub trait MatchReader {
@@ -29,13 +44,8 @@ pub trait MatchReader {
     #[allow(dead_code)]
     async fn read_single(&self, team: &TeamEntry, match_id: &str) -> Result<MatchEntry, AppError>;
     async fn exists(&self, team: &TeamEntry, match_id: &str) -> Result<bool, AppError>;
-    /// The id of the match of the team saved where the files would keep
-    /// it, `file_id` (`MatchEntry::id_of`, opponent and day): an import
-    /// telling the same match again (DataVolley). The files keep it there.
-    async fn saved_as(&self, team: &TeamEntry, file_id: &str) -> Result<Option<String>, AppError> {
-        Ok(self
-            .exists(team, file_id)
-            .await?
-            .then(|| file_id.to_string()))
-    }
+    /// The matches not removed started on `day` (in their own offset) in
+    /// which one of `teams` plays, as A or as B; those whose sets don't
+    /// replay left out.
+    async fn played_on(&self, teams: &[Uuid], day: NaiveDate) -> Result<Vec<PlayedOn>, AppError>;
 }

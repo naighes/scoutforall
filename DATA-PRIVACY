@@ -1,6 +1,6 @@
 Scout4all - Data collection and privacy
 
-Last updated: 2026-11-03
+Last updated: 2026-11-20
 
 Data controller: Nicola Baldi, nic.baldi@gmail.com
 
@@ -20,6 +20,10 @@ archive with:
   of the team, maximum number of substitutions, where the events come from
   (scouted, or imported from a DataVolley file);
 - each set: the lineup and the scouted events (time, type, evaluation);
+- when you scout both teams of a match, the same for the opposing team:
+  its identifier, the lineup and the events of each of its sets, again as
+  random identifiers with no names;
+- whether the match was played on neutral ground;
 - the identifier of the team;
 - the keys of the team, of the opponent and of the match (see below).
 

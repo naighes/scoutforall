@@ -4,7 +4,7 @@
 
 use crate::{
     constants::{DEFAULT_MAX_SUBSTITUTIONS, MAX_ROSTER, MAX_ROSTER_WITHOUT_LIBERO, MIN_ROSTER},
-    domain::{Competition, CompetitionFormat, Home, Match, Stage, TeamRef},
+    domain::{Competition, CompetitionFormat, Home, Match, ScoutingMode, Stage, TeamRef},
     localization::Labels,
     player_form::parse_number,
     shapes::{
@@ -51,6 +51,9 @@ pub struct MatchForm {
     pub stage: Option<Stage>,
     pub round: String,
     pub numbers: Vec<RosterNumber>,
+    /// scouting both teams, not only A: chosen when the match is created,
+    /// never changed
+    pub both: bool,
 }
 
 /// The number and the role of a player on the score sheet of a match:
@@ -108,6 +111,8 @@ pub struct MatchInput {
     pub competition: Option<CompetitionInput>,
     pub stage: Option<Stage>,
     pub round: Option<String>,
+    /// `Both` only against a team: B has a roster to scout
+    pub scouting: ScoutingMode,
 }
 
 impl MatchInput {
@@ -133,6 +138,7 @@ impl MatchInput {
             competition: None,
             stage: None,
             round: None,
+            scouting: ScoutingMode::A,
         }
     }
 }
@@ -142,6 +148,8 @@ pub enum MatchFormError {
     EmptyOpponent,
     /// team B is team A
     OpponentIsTeamA,
+    /// both teams scouted against a name, which has no players
+    ScoutingBothNeedsTeam,
     InvalidDate,
     /// not a number from 1 to 99
     InvalidMaxSubstitutions,
@@ -181,6 +189,7 @@ impl MatchFormError {
         match self {
             EmptyOpponent => labels.opponent_cannot_be_empty,
             OpponentIsTeamA => labels.opponent_is_team_a,
+            ScoutingBothNeedsTeam => labels.scouting_both_needs_team,
             InvalidDate => labels.invalid_date,
             InvalidMaxSubstitutions => labels.invalid_max_substitutions,
             MaxSubstitutionsBelowUsed => labels.max_substitutions_below_existing_substitutions,
@@ -228,6 +237,7 @@ impl MatchForm {
             stage: row.stage,
             round: row.round.clone().unwrap_or_default(),
             numbers: vec![],
+            both: row.scouting == ScoutingMode::Both,
         }
     }
 
@@ -387,6 +397,62 @@ impl MatchForm {
         }
     }
 
+    /// Starts the roster of team B from `previous`, the one of the last
+    /// match against it that had one: only those players are chosen, with
+    /// the numbers and roles of that match, and whoever played in
+    /// `existing`. Nothing changes when the form has a roster already, or
+    /// none of `previous` is a known player of B: the active players stay.
+    pub fn start_from(
+        &mut self,
+        previous: &[RosterNumber],
+        team: &TeamEntry,
+        existing: Option<&MatchEntry>,
+    ) {
+        if self.roster.is_some() {
+            return;
+        }
+        let known: HashSet<Uuid> = self
+            .roster_choices(team, existing)
+            .iter()
+            .map(|c| c.player.id)
+            .collect();
+        let numbers: Vec<RosterNumber> = previous
+            .iter()
+            .filter(|n| known.contains(&n.player))
+            .copied()
+            .collect();
+        if numbers.is_empty() {
+            return;
+        }
+        let played = existing.map(MatchEntry::played).unwrap_or_default();
+        let mut roster: Vec<Uuid> = numbers.iter().map(|n| n.player).collect();
+        let others: Vec<Uuid> = played.into_iter().filter(|p| !roster.contains(p)).collect();
+        roster.extend(others);
+        self.roster = Some(roster);
+        self.numbers
+            .retain(|n| !numbers.iter().any(|p| p.player == n.player));
+        self.numbers.extend(numbers);
+    }
+
+    /// The numbers of the roster of team B, as chosen: every player with a
+    /// roster the form hasn't one for yet, and the same rules as for A.
+    pub fn roster_of_b_numbers(
+        &self,
+        team: &TeamEntry,
+        existing: Option<&MatchEntry>,
+    ) -> Result<Vec<RosterNumber>, MatchFormError> {
+        let mut form = self.clone();
+        form.roster.get_or_insert_with(|| {
+            self.roster_choices(team, existing)
+                .iter()
+                .filter(|c| c.chosen)
+                .map(|c| c.player.id)
+                .collect()
+        });
+        form.valid_roster(team, existing)
+            .map(|(_, numbers)| numbers)
+    }
+
     /// The players chosen, by `roster_choices`.
     fn chosen(&self, team: &TeamEntry, existing: Option<&MatchEntry>) -> HashSet<Uuid> {
         match (&self.roster, existing) {
@@ -419,6 +485,9 @@ impl MatchForm {
             (Some(Opponent::Team(b)), _, _, _) if b == team.id => {
                 Err(MatchFormError::OpponentIsTeamA)
             }
+            (Some(Opponent::Name(_)), _, _, _) if self.both => {
+                Err(MatchFormError::ScoutingBothNeedsTeam)
+            }
             (_, None, _, _) => Err(MatchFormError::InvalidDate),
             (_, _, None, _) => Err(MatchFormError::InvalidMaxSubstitutions),
             (_, _, Some(max), _) if max < used => Err(MatchFormError::MaxSubstitutionsBelowUsed),
@@ -436,6 +505,10 @@ impl MatchForm {
                     competition: self.competition_input(),
                     stage: self.stage,
                     round: Some(self.round.trim().to_string()).filter(|r| !r.is_empty()),
+                    scouting: match self.both {
+                        true => ScoutingMode::Both,
+                        false => ScoutingMode::A,
+                    },
                 })
             }
         }

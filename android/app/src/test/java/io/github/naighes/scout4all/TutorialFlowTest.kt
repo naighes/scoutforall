@@ -78,7 +78,7 @@ class TutorialFlowTest {
         touch(string(R.string.tutorial_next))
         caption(R.string.tutorial_start_set)
         touch(string(R.string.start_set))
-        rule.waitForText(string(R.string.touch_the_player))
+        rule.waitForTheRally()
         caption(R.string.tutorial_score)
     }
 
