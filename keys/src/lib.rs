@@ -694,12 +694,13 @@ fn test_fixed_keys() {
         key!(f2),
         key!(f3),
         key!(f4),
+        key!(f5),
         key!('0'),
         key!('9'),
     ] {
         assert!(is_fixed_key(&ck), "{ck}");
     }
-    for ck in [key!(a), key!(u), key!(f5), key!('+'), key!(ctrl - '1')] {
+    for ck in [key!(a), key!(u), key!(f6), key!('+'), key!(ctrl - '1')] {
         assert!(!is_fixed_key(&ck), "{ck}");
     }
 }

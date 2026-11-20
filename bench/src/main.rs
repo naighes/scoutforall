@@ -161,7 +161,7 @@ fn seed(dvw: &Path, dir: &Path) -> R<Seeds> {
                 gender: Some(GenderEnum::Women),
                 country: Some(country),
             };
-            match app.import_dvw(bytes.clone(), choice, false) {
+            match app.import_dvw(bytes.clone(), choice) {
                 Ok(imported) => seeds.push(Seed {
                     team: imported.team_id,
                     id: imported.match_id,
