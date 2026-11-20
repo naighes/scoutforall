@@ -2570,22 +2570,19 @@ impl Scouting {
         filter: DetailFilter,
     ) -> Result<Option<LiveStats>, MobileError> {
         let session = self.session();
-        let Some(sets) = session.sets_of_b() else {
-            return Ok(None);
-        };
         let current_match = session.current_match();
-        let team = session.team_of(ScoutSide::B);
-        let Some(team) = team else { return Ok(None) };
-        let sets: Vec<&SetEntry> = sets.iter().collect();
-        live_stats(
-            &sets,
-            scope,
-            current_match.max_substitutions,
-            (team, &current_match.team.name),
-            self.labels,
-            filter,
-        )
-        .map(Some)
+        side_b(&session)
+            .map(|(sets, team)| {
+                live_stats(
+                    &sets.iter().collect::<Vec<_>>(),
+                    scope,
+                    current_match.max_substitutions,
+                    (team, &current_match.team.name),
+                    self.labels,
+                    filter,
+                )
+            })
+            .transpose()
     }
 
     /// A fundamental of a set of the match so far, or of all of them,
@@ -2617,24 +2614,25 @@ impl Scouting {
         filter: DetailFilter,
     ) -> Result<Option<DetailStats>, MobileError> {
         let session = self.session();
-        let Some(sets) = session.sets_of_b() else {
-            return Ok(None);
-        };
-        let Some(team) = session.team_of(ScoutSide::B) else {
-            return Ok(None);
-        };
-        let sets: Vec<&SetEntry> = sets.iter().collect();
-        detail_stats(
-            &sets,
-            session.current_match().max_substitutions,
-            team,
-            self.labels,
-            scope,
-            event,
-            filter,
-        )
-        .map(Some)
+        side_b(&session)
+            .map(|(sets, team)| {
+                detail_stats(
+                    &sets.iter().collect::<Vec<_>>(),
+                    session.current_match().max_substitutions,
+                    team,
+                    self.labels,
+                    scope,
+                    event,
+                    filter,
+                )
+            })
+            .transpose()
     }
+}
+
+/// B's sets so far and its team, scouting both sides; `None` scouting A.
+fn side_b(session: &ScoutingSession) -> Option<(Vec<SetEntry>, &TeamEntry)> {
+    session.sets_of_b().zip(session.team_of(ScoutSide::B))
 }
 
 /// The statistics of a set of the match, or of all of them, with their
@@ -7766,6 +7764,44 @@ mod tests {
         place(&of_b, &ids(&other));
         app.start_set_both(start, of_b).unwrap();
         (team, m)
+    }
+
+    /// While scouting both sides, the statistics of B are of B's team; none
+    /// scouting A only.
+    #[test]
+    fn the_statistics_of_b_while_scouting() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, m) = set_started_on_both_sides(&app);
+        let scouting = app.scouting(team.clone(), m).unwrap();
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        let filter = DetailFilter::default();
+        let b = scouting
+            .stats_of_b(StatsScope::Match, filter.clone())
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            (b.team_name.as_str(), b.opponent.as_str()),
+            ("Livorno", "Cortona")
+        );
+        assert_eq!((b.sets.clone(), b.aces_against), (vec![1], 1));
+        let detail = scouting
+            .detail_of_b(StatsScope::Match, EventTypeEnum::R, filter.clone())
+            .unwrap()
+            .unwrap();
+        assert!(detail.players.iter().all(|p| p.name.starts_with('L')));
+        let (one, single) = match_with_a_set(&app);
+        let alone = started_set(&app, &one, &single);
+        assert_eq!(
+            alone.stats_of_b(StatsScope::Match, filter.clone()).unwrap(),
+            None
+        );
+        assert_eq!(
+            alone
+                .detail_of_b(StatsScope::Match, EventTypeEnum::S, filter)
+                .unwrap(),
+            None
+        );
     }
 
     /// The set in progress of a match on both sides scouted again on both;
