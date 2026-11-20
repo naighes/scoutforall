@@ -688,12 +688,12 @@ pub struct Sides {
 /// `EventRef` and by id: an event B's touch tells A by the id of that
 /// touch.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct EventsOfA {
+pub struct EventRefs {
     by_ref: BTreeMap<(Side, u8, usize), Uuid>,
     by_id: BTreeMap<Uuid, EventRef>,
 }
 
-impl EventsOfA {
+impl EventRefs {
     pub fn of(sets: &[SetRows]) -> Self {
         let played = || sets.iter().filter(|s| !s.row.deleted);
         let of_a: Vec<(EventRef, Uuid)> = played()
@@ -714,7 +714,7 @@ impl EventsOfA {
                     .collect::<Vec<_>>()
             })
             .collect();
-        EventsOfA {
+        EventRefs {
             by_ref: of_a
                 .iter()
                 .chain(&of_b)
@@ -754,7 +754,7 @@ impl VideoRows {
     pub fn of(
         profile: &VideoProfile,
         match_id: Uuid,
-        events: &EventsOfA,
+        events: &EventRefs,
     ) -> Result<Self, AppError> {
         let id_of = |event: EventRef| {
             events.id(event).ok_or_else(|| {
@@ -810,7 +810,7 @@ impl VideoRows {
 
     /// The profile from A's side, its events those of `events`: the
     /// corrections in the order of their events.
-    pub fn profile(&self, events: &EventsOfA) -> VideoProfile {
+    pub fn profile(&self, events: &EventRefs) -> VideoProfile {
         let mut files: Vec<&MatchVideoFile> = self.files.iter().collect();
         files.sort_by_key(|f| f.position);
         let mut corrections: Vec<Correction> = self

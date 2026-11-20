@@ -1,5 +1,6 @@
 use crate::{
     analytics::queue_manager::QueueManager,
+    domain::Side,
     errors::{AppError, IOError},
     logging::logger::{log_error, log_info},
     providers::{queue_reader::QueueReader, queue_writer::QueueWriter},
@@ -243,8 +244,11 @@ pub trait UploadSource: Sync {
 }
 
 /// The names of the files of a set in the archive.
-fn set_file_names(set_number: u8, side_b: bool) -> (String, String) {
-    let side = if side_b { "_b" } else { "" };
+fn set_file_names(set_number: u8, side: Side) -> (String, String) {
+    let side = match side {
+        Side::A => "",
+        Side::B => "_b",
+    };
     (
         format!("set_{set_number}{side}_descriptor.json"),
         format!("set_{set_number}{side}_events.csv"),
@@ -268,19 +272,19 @@ fn events_csv(events: &[EventEntry]) -> Result<Vec<u8>, AppError> {
 /// database saved them: the lineup as `set_<n>.json`, the events as
 /// `set_<n>.csv`.
 pub(crate) fn written_set_files(m: &MatchEntry) -> Result<Vec<(String, Vec<u8>)>, AppError> {
-    written_files(m, false)
+    written_files(m, Side::A)
 }
 
 /// The same files of the sets of team B's side of a match (`SideB`).
 pub(crate) fn written_set_files_of_b(m: &MatchEntry) -> Result<Vec<(String, Vec<u8>)>, AppError> {
-    written_files(m, true)
+    written_files(m, Side::B)
 }
 
-fn written_files(m: &MatchEntry, side_b: bool) -> Result<Vec<(String, Vec<u8>)>, AppError> {
+fn written_files(m: &MatchEntry, side: Side) -> Result<Vec<(String, Vec<u8>)>, AppError> {
     m.sets
         .iter()
         .map(|set| {
-            let (descriptor, events) = set_file_names(set.set_number, side_b);
+            let (descriptor, events) = set_file_names(set.set_number, side);
             let json = to_vec_pretty(set).map_err(|e| AppError::IO(IOError::from(e)))?;
             Ok([(descriptor, json), (events, events_csv(&set.events)?)])
         })

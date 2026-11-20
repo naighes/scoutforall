@@ -30,7 +30,7 @@
 use crate::{
     domain::{
         LegacyId, Person, TeamRef,
-        adapters::{EventsOfA, MatchRows, TeamRows, VideoRows},
+        adapters::{EventRefs, MatchRows, TeamRows, VideoRows},
     },
     errors::{AppError, IOError},
     legacy::folder::{LegacyTeam, NotRead},
@@ -173,7 +173,7 @@ fn roster(team: &TeamEntry, m: &MatchEntry) -> Vec<Uuid> {
 /// The rows of the video of match `m`, its profile `profile` (see the
 /// module).
 pub fn video_rows(profile: &VideoProfile, m: &MatchRows) -> Result<VideoRows, AppError> {
-    let events = EventsOfA::of(&m.sets);
+    let events = EventRefs::of(&m.sets);
     let anchor = profile.anchor.as_ref().map(|a| Anchor {
         event: a.event.filter(|e| events.id(*e).is_some()),
         ..a.clone()

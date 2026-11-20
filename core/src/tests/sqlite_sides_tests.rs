@@ -8,7 +8,7 @@ mod tests {
     use crate::{
         analysis::match_stats,
         constants::DEFAULT_MAX_SUBSTITUTIONS,
-        domain::{Event, ScoutingMode, Side, adapters::EventsOfA, sql::Sql},
+        domain::{Event, ScoutingMode, Side, adapters::EventRefs, sql::Sql},
         localization::Language,
         match_form::{MatchInput, Opponent},
         providers::{
@@ -1259,7 +1259,7 @@ mod tests {
         assert_eq!(types, vec![S, OS, OE]);
         assert_eq!(read.sets[0].events, stream);
         let saved = ids(&p);
-        let events = EventsOfA::of(
+        let events = EventRefs::of(
             &p.db
                 .read(|tx| set_rows(tx, Uuid::parse_str(&m.id).unwrap()))
                 .unwrap(),
@@ -1293,7 +1293,7 @@ mod tests {
         let rows =
             p.db.read(|tx| set_rows(tx, Uuid::parse_str(&m.id).unwrap()))
                 .unwrap();
-        let events = EventsOfA::of(&rows);
+        let events = EventRefs::of(&rows);
         let of_b = project(&touches).b.len();
         assert!(of_b > 0);
         let ids_of_a: Vec<_> = (0..3)

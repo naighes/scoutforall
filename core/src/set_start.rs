@@ -123,9 +123,8 @@ impl SetStartForm {
     /// didn't serve first in the previous one serves.
     pub fn new(set_number: u8, last_serving_team: Option<TeamSideEnum>) -> Self {
         let serving_team = match (set_number, last_serving_team) {
-            (1 | 5, _) | (_, None) => None,
-            (_, Some(TeamSideEnum::Us)) => Some(TeamSideEnum::Them),
-            (_, Some(TeamSideEnum::Them)) => Some(TeamSideEnum::Us),
+            (1 | 5, _) => None,
+            (_, last) => last.map(TeamSideEnum::other),
         };
         Self {
             set_number,
@@ -344,10 +343,7 @@ pub async fn start(
             .map_err(|_| SetStartError::CouldNotStartSet)?;
             let b_start = SetEntry::new(
                 input.set_number,
-                match input.serving_team {
-                    TeamSideEnum::Us => TeamSideEnum::Them,
-                    TeamSideEnum::Them => TeamSideEnum::Us,
-                },
+                input.serving_team.other(),
                 b.positions,
                 b.libero,
                 b.fallback_libero,

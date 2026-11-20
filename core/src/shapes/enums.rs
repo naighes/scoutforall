@@ -81,6 +81,16 @@ pub enum TeamSideEnum {
     Them,
 }
 
+impl TeamSideEnum {
+    /// The team across the net.
+    pub fn other(self) -> Self {
+        match self {
+            TeamSideEnum::Us => TeamSideEnum::Them,
+            TeamSideEnum::Them => TeamSideEnum::Us,
+        }
+    }
+}
+
 /// The rules moving the lineup when the events of a set are replayed: a set
 /// is replayed with the rules it was scouted with, or the lineup could differ
 /// from the one the events were chosen on.

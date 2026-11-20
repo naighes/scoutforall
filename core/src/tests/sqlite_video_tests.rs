@@ -8,7 +8,7 @@
 mod tests {
     use crate::{
         constants::DEFAULT_MAX_SUBSTITUTIONS,
-        domain::adapters::{EventsOfA, SetRows, VideoRows},
+        domain::adapters::{EventRefs, SetRows, VideoRows},
         legacy::migrate::unzip,
         localization::Language,
         providers::{
@@ -521,7 +521,7 @@ mod tests {
         let (_, m) = scouted_match(&p).await;
         let id = Uuid::new_v4();
         let set = SetRows::of(&m.sets[0], id).unwrap();
-        let events = EventsOfA::of(std::slice::from_ref(&set));
+        let events = EventRefs::of(std::slice::from_ref(&set));
         let mut rows = VideoRows::of(&profile(), id, &events).unwrap();
         assert_eq!(rows.profile(&events), profile());
 
@@ -530,7 +530,7 @@ mod tests {
 
         let mut removed = set;
         removed.row.deleted = true;
-        let none = EventsOfA::of(&[removed]);
+        let none = EventRefs::of(&[removed]);
         assert_eq!(none.id(event(0)), None);
         assert!(VideoRows::of(&profile(), id, &none).is_err());
     }
