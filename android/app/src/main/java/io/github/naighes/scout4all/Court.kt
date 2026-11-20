@@ -115,6 +115,9 @@ data class CourtBall(
  * the 3 meters before the attack line, the back row in the 6 behind it. */
 private val zones = listOf(7.5f to 6f, 7.5f to 1.5f, 4.5f to 1.5f, 1.5f to 1.5f, 1.5f to 6f, 4.5f to 6f)
 
+/** The widest the court gets: 1.4 times as wide as deep. */
+private const val WidestCourt = 1.4f
+
 /** The half court of the team seen from the bench, the net at the top: the
  * attack line at 3 of the 9 meters, the front row 4 3 2 before it, the back
  * row 5 6 1 behind it. `slot` tells what position 1 to 6 shows, and where:
@@ -139,6 +142,9 @@ fun Court(
      * their court: 5 7 6 9 1 from the left, as our server sees them */
     starts: List<ServeStartChoice> = emptyList(),
     onStart: (ServeStartChoice) -> Unit = {},
+    /** the court takes the height it's given, up to a square, instead of
+     * keeping its width-to-depth */
+    grow: Boolean = false,
 ) = BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp), contentAlignment = Alignment.TopCenter) {
     // the zones where the ball went (our serve on theirs, our reception on
     // ours) on a square court (its true proportions), to leave them room to
@@ -147,15 +153,24 @@ fun Court(
     val zone = when {
         aiming && starts.isNotEmpty() -> StartZones
         aiming -> 0.dp
+        // the strip of the server is for the server: without him it only
+        // shows the end line, the court takes the rest
+        serveZone && grow && !slot(1).serving -> IdleServeZone
         serveZone -> ServeZone
         else -> 0.dp
     }
-    val aspect = if (aiming) 1f else 1.4f
-    val width = when {
-        constraints.hasBoundedHeight -> minOf(maxWidth, (maxHeight - zone).coerceAtLeast(0.dp) * aspect)
-        else -> maxWidth
+    // wider than deep to leave room to the choices, but the room left
+    // under the court is the court's: it grows toward the square (its true
+    // proportions) as long as it has the height
+    val room = if (constraints.hasBoundedHeight) (maxHeight - zone).coerceAtLeast(0.dp) else null
+    val aspect = when {
+        aiming -> 1f
+        !grow -> WidestCourt
+        room == null || room <= 0.dp -> WidestCourt
+        else -> (maxWidth / room).coerceIn(1f, WidestCourt)
     }
-    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, targetsName, onTarget, starts, onStart, Modifier.width(width))
+    val width = if (room != null) minOf(maxWidth, room * aspect) else maxWidth
+    CourtColumn(slot, onPosition, showPositions, serveZone, ball, targets, targetsOurs, targetsName, onTarget, starts, onStart, Modifier.width(width), aspect, zone)
 }
 
 @Composable
@@ -172,13 +187,15 @@ private fun CourtColumn(
     starts: List<ServeStartChoice>,
     onStart: (ServeStartChoice) -> Unit,
     modifier: Modifier,
+    aspect: Float,
+    serveHeight: Dp,
 ) = Column(modifier) {
     val floor = MaterialTheme.colorScheme.surfaceVariant
     val lines = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
     val net = MaterialTheme.colorScheme.onSurface
     val server = slot(1).takeIf { serveZone && it.serving }
     val aiming = targets.isNotEmpty()
-    Box(Modifier.fillMaxWidth().aspectRatio(if (aiming) 1f else 1.4f)) {
+    Box(Modifier.fillMaxWidth().aspectRatio(aspect)) {
         Canvas(Modifier.fillMaxSize()) {
             val line = 2.dp.toPx()
             drawRect(floor)
@@ -267,7 +284,7 @@ private fun CourtColumn(
     }
     if (serveZone && !aiming) {
         // behind the end line, under position 1
-        Row(Modifier.fillMaxWidth().height(ServeZone)) {
+        Row(Modifier.fillMaxWidth().height(serveHeight)) {
             Box(Modifier.weight(2f))
             when (server) {
                 null -> Box(Modifier.weight(1f))
@@ -278,6 +295,9 @@ private fun CourtColumn(
 }
 
 private val ServeZone = 72.dp
+
+/** The strip behind the end line while nobody serves from it. */
+private val IdleServeZone = 16.dp
 
 /** Under their court, the zones our serve starts from: as high as a cell
  * to touch, apart from the net. */

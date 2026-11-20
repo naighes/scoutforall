@@ -587,9 +587,9 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
         // where there's room: under the court they'd make it too low
         val landscape = maxWidth > maxHeight
         val court = @Composable { m: Modifier ->
-            Column(m.padding(vertical = if (aiming) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (aiming) 4.dp else 16.dp)) {
+            Column(m.padding(vertical = if (aiming) 0.dp else 8.dp), verticalArrangement = Arrangement.spacedBy(if (aiming) (if (view.state.both) 0.dp else 4.dp) else 16.dp)) {
                 if (!low) when (view.state.both) {
-                    true -> BothScore(view.state, server = aiming, told = view.targetTold, onSwap = model::swapSide)
+                    true -> BothScore(view.state, server = aiming, told = view.targetTold, onSwap = model::swapSide, compact = aiming || landscape)
                     false -> Score(view.state, server = aiming, phase = !aiming, told = view.targetTold)
                 }
                 // where they stand: spread to receive, then where they
@@ -642,6 +642,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     onTarget = model::target,
                     starts = view.starts.takeIf { !landscape }.orEmpty(),
                     onStart = model::start,
+                    grow = true,
                     ball = CourtBall(
                         ours = view.state.ball == TeamSideEnum.US,
                         position = players.indexOfFirst { it.id == touched }.takeIf { it >= 0 }?.plus(1),
@@ -842,14 +843,16 @@ private fun Score(state: ScoutingState, server: Boolean = false, phase: Boolean 
  * on the desktop), and the swap between them gives the choices to the
  * other, while an event isn't chosen. */
 @Composable
-private fun BothScore(state: ScoutingState, server: Boolean, told: String?, onSwap: () -> Unit) {
+private fun BothScore(state: ScoutingState, server: Boolean, told: String?, onSwap: () -> Unit, compact: Boolean) {
     val weServe = state.servingTeam == TeamSideEnum.US
     val onScreen = Triple(state.team, state.scoreUs.toInt(), state.rotation)
     val other = Triple(state.opponent, state.scoreThem.toInt(), state.otherRotation)
     // B is on screen: the colors and the places of the sides don't move
     val colors = if (state.sideB) TeamThem to TeamUs else TeamUs to TeamThem
     val chip = @Composable { (name, points, rotation): Triple<String, Int, String>, serving: Boolean, turn: Boolean, color: Color ->
-        SideChip(Side(name, points, serving, Won), rotation, turn, color)
+        // choosing where the serve went, or in landscape, the court
+        // needs the room
+        SideChip(Side(name, points, serving, Won), rotation, turn, color, compact)
     }
     val haptic = LocalHapticFeedback.current
     val total = state.scoreUs.toInt() + state.scoreThem.toInt()
@@ -882,30 +885,36 @@ private fun BothScore(state: ScoutingState, server: Boolean, told: String?, onSw
 /** A side in the line of the two: its name, its points big and its rotation,
  * the ball when it serves; the side the choices are for in its color. */
 @Composable
-private fun SideChip(side: Side, rotation: String, turn: Boolean, color: Color) = Surface(
-    // each side read as one: its name, points and rotation, whether the
-    // choices are for it; the swap between them stays apart
-    modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
-        selected = turn
-        liveRegion = LiveRegionMode.Polite
-    },
-    shape = MaterialTheme.shapes.medium,
-    color = if (turn) color.copy(alpha = 0.22f) else Color.Transparent,
-    border = BorderStroke(if (turn) 2.dp else 1.dp, if (turn) color else MaterialTheme.colorScheme.outlineVariant),
-) {
-    Column(Modifier.padding(horizontal = 8.dp, vertical = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(side.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (side.serving) {
-                Icon(
-                    painterResource(R.drawable.ic_ball),
-                    contentDescription = stringResource(R.string.serving),
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
+private fun SideChip(side: Side, rotation: String, turn: Boolean, color: Color, compact: Boolean) {
+    val serving = stringResource(R.string.serving)
+    Surface(
+        // each side read as one: its name, points and rotation, whether the
+        // choices are for it; the swap between them stays apart
+        modifier = Modifier.fillMaxWidth().semantics(mergeDescendants = true) {
+            selected = turn
+            // told on the row, not by the ball in it: a description inside
+            // would hide the name and the points
+            if (side.serving) stateDescription = serving
+            liveRegion = LiveRegionMode.Polite
+        },
+        shape = MaterialTheme.shapes.medium,
+        color = if (turn) color.copy(alpha = 0.22f) else Color.Transparent,
+        border = BorderStroke(if (turn) 2.dp else 1.dp, if (turn) color else MaterialTheme.colorScheme.outlineVariant),
+    ) {
+        Column(Modifier.padding(horizontal = 8.dp, vertical = 0.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(side.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (side.serving) {
+                    Icon(
+                        painterResource(R.drawable.ic_ball),
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                Points(side, compact, snug = true)
+                Text(rotation, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
             }
-            Points(side)
-            Text(rotation, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -1015,7 +1024,7 @@ private data class Side(val name: String, val points: Int, val serving: Boolean,
 /** The points of a team: a new one comes in from below and flashes in the
  * color of who scored; an undone one goes back. */
 @Composable
-private fun Points(side: Side) {
+private fun Points(side: Side, compact: Boolean = false, snug: Boolean = false) {
     val base = MaterialTheme.colorScheme.onSurface
     val color = remember { Animatable(base) }
     val scale = remember { Animatable(1f) }
@@ -1043,7 +1052,11 @@ private fun Points(side: Side) {
         Text(
             points.toString(),
             modifier = Modifier.scale(scale.value),
-            style = MaterialTheme.typography.displaySmall,
+            style = when {
+                compact -> MaterialTheme.typography.titleLarge
+                snug -> MaterialTheme.typography.headlineMedium
+                else -> MaterialTheme.typography.displaySmall
+            },
             fontWeight = FontWeight.Bold,
             color = color.value,
         )
