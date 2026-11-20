@@ -296,9 +296,10 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
 
     /** Where the video starts: a little before the first event of the match
      * once lined up (the warm-up left out), unless the whole video is
-     * asked for, to tie the events again. */
+     * asked for, to tie the events again, or the first event falls past
+     * the end of the video (a video of another day): then its start. */
     private fun start(): Long = when {
-        !whole && firstMs != null -> (firstMs!! - lead()).coerceAtLeast(0)
+        !whole && firstMs != null && firstMs!! <= total -> (firstMs!! - lead()).coerceAtLeast(0)
         else -> 0
     }
 

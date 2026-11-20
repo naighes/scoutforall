@@ -289,6 +289,25 @@ class VideoTest {
         assertTrue("${shown.position}", shown.position in 70_000L..110_000L)
     }
 
+    /** A video of another day (its name says when it starts): the events
+     * fall far past its end, and the screen opens at its start all the
+     * same, with no error. */
+    @Test
+    fun aVideoOfAnotherDayDoesNotCloseTheApp() {
+        val (team, match) = servedMatch()
+        videoOf(team, match, "20200101 100000.mp4", readable = true)
+        var model: VideoModel? = null
+        rule.setContent {
+            Scout4AllTheme {
+                VideoScreen(VideoRequest.Match(team, match), onBack = {})
+                model = viewModel<VideoModel>()
+            }
+        }
+        rule.waitFor { model?.total == 600_000L }
+        rule.waitForIdle()
+        assertEquals(0L, model!!.position)
+    }
+
     /** The video of the aces of the team: summed up before making it, the
      * matches in the video each after its card, the aces counted across
      * them; the others left out, said why. */
