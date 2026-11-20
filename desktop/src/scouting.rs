@@ -774,18 +774,18 @@ impl Trend {
 
 // --- view ----------------------------------------------------------------
 
-/// The colour of a side where both are scouted: A's light blue, B's pink.
-/// The choice of the event for the side that isn't the first to offer it:
-/// the one the shift key of the event makes.
 /// The points without a cause: apart from the events, big.
 const NO_CAUSE: [EventTypeEnum; 2] = [EventTypeEnum::PW, EventTypeEnum::PL];
 
+/// The choice of the event for the side that isn't the first to offer it:
+/// the one the shift key of the event makes.
 fn other_side_choice(events: &[EventChoice], event: EventTypeEnum) -> Option<&EventChoice> {
     let mut of_event = events.iter().filter(|c| c.value == event);
     let first = of_event.next()?;
     of_event.find(|c| c.side_b != first.side_b)
 }
 
+/// The colour of a side where both are scouted: A's light blue, B's pink.
 fn side_color(side_b: bool) -> Color {
     match side_b {
         true => theme::TEAM_THEM,
@@ -1282,9 +1282,6 @@ impl ScoutingScreen {
         )
     }
 
-    /// The evaluations in a row, by their symbol, as in the app: a click
-    /// or the key saves the event; the key under the symbol when it's
-    /// another, the name under the mouse.
     /// The key that chooses an event: the first choice of an event has the
     /// key of the event, the same event of the other side its shift.
     fn event_key_label(&self, e: &EventChoice, s: &Strings) -> Option<String> {
@@ -1389,6 +1386,9 @@ impl ScoutingScreen {
             .into()
     }
 
+    /// The evaluations in a row, by their symbol, as in the app: a click
+    /// or the key saves the event; the key under the symbol when it's
+    /// another, the name under the mouse.
     fn evals<'a>(&'a self, s: &Strings, c: Colors) -> Element<'a, Message> {
         let bold = theme::fonts().bold;
         iced::widget::Row::with_children(self.snapshot.evals.iter().map(|e| {

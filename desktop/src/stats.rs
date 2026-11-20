@@ -815,7 +815,6 @@ impl StatsScreen {
         self.title.clone()
     }
 
-    /// The match the statistics are of, if of a match.
     /// Opened from the page of team B `team_b`: the statistics of B.
     pub fn of_b(mut self, team_b: String) -> Self {
         self.of_b = Some(team_b);
@@ -840,6 +839,7 @@ impl StatsScreen {
         self.side
     }
 
+    /// The match the statistics are of, if of a match.
     pub fn match_id(&self) -> Option<String> {
         match &self.source {
             Source::Match(m) => Some(m.clone()),
