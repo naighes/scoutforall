@@ -117,6 +117,12 @@ class BothSidesScoutingTest {
         rule.waitFor { rule.onAllNodes(hasText("╌╌ Arezzo"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         assertTrue(rule.onAllNodes(hasText("── Italia"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
         assertTrue(rule.onAllNodes(hasText("│ " + string(R.string.trend_direct)), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        // a fundamental in detail of both: the figures of each in one row
+        rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performClick()
+        val efficiency = string(R.string.efficiency).replaceFirstChar { it.uppercase() }
+        rule.waitFor { rule.onAllNodes(hasText(efficiency)).fetchSemanticsNodes().isNotEmpty() }
+        assertTrue(rule.onAllNodes(hasText("Arezzo") and !hasClickAction()).fetchSemanticsNodes().isNotEmpty())
+        assertTrue(rule.onAllNodes(hasText(string(R.string.rallies_per_point))).fetchSemanticsNodes().isNotEmpty())
         // a team's chip leaves the comparison
         rule.onNode(hasText("Italia") and hasClickAction()).performClick()
         rule.waitFor { runCatching { compare().assertIsNotSelected() }.isSuccess }

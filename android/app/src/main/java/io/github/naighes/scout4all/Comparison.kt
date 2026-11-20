@@ -13,6 +13,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -22,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.FundamentalDetail
 import io.github.naighes.scout4all.core.FundamentalStats
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.PhaseStats
@@ -181,3 +183,62 @@ private fun Zones(stats: LiveStats, modifier: Modifier) = Column(modifier, verti
         }
     }
 }
+
+/** A fundamental in detail, the figures of the two sides side by side: the
+ * evaluations given (from the best), efficiency and positiveness, and the
+ * counts. The zones and the players stay each team's. */
+@Composable
+fun ComparisonDetail(a: FundamentalDetail, b: FundamentalDetail, names: Pair<String, String>) =
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(names.first, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TeamUs, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(LABEL_WIDTH)
+            Text(names.second, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TeamThem, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        // the evaluations of A from the best, then those only B gave
+        val evals = a.evals + b.evals.filter { e -> a.evals.none { it.eval == e.eval } }
+        val most = (a.evals + b.evals).maxOfOrNull { it.share }?.coerceAtLeast(1.0) ?: 1.0
+        evals.forEach { e ->
+            Line(
+                "${e.symbol} ${e.name.replaceFirstChar { it.uppercase() }}",
+                {
+                    val x = a.evals.firstOrNull { it.eval == e.eval }
+                    Cell((x?.count ?: 0u).toString(), null, x?.share ?: 0.0, most, TeamUs, leftward = true, small = x?.let { "${Math.round(it.share)}%" }.orEmpty())
+                },
+                {
+                    val y = b.evals.firstOrNull { it.eval == e.eval }
+                    Cell((y?.count ?: 0u).toString(), null, y?.share ?: 0.0, most, TeamThem, leftward = false, small = y?.let { "${Math.round(it.share)}%" }.orEmpty())
+                },
+            )
+        }
+        PercentRow(
+            stringResource(R.string.efficiency).replaceFirstChar { it.uppercase() },
+            Figure(a.efficiency, a.grade, ""),
+            Figure(b.efficiency, b.grade, ""),
+        )
+        PercentRow(
+            stringResource(R.string.positiveness).replaceFirstChar { it.uppercase() },
+            Figure(a.positiveness, null, ""),
+            Figure(b.positiveness, null, ""),
+        )
+        listOf(
+            Triple(R.string.total, a.total, b.total),
+            Triple(R.string.stats_errors, a.errors, b.errors),
+            Triple(R.string.unforced_errors, a.unforcedErrors, b.unforcedErrors),
+            Triple(R.string.points, a.points ?: 0u, b.points ?: 0u),
+            Triple(R.string.error_fault, a.faults, b.faults),
+        ).forEach { (name, x, y) ->
+            // each row has its own scale: the longer side fills the bar
+            val scale = maxOf(x, y, 1u).toDouble()
+            Line(
+                stringResourceOf(name),
+                { Cell(x.toString(), null, x.toDouble(), scale, TeamUs, leftward = true) },
+                { Cell(y.toString(), null, y.toDouble(), scale, TeamThem, leftward = false) },
+            )
+        }
+        Line(
+            stringResourceOf(R.string.rallies_per_point),
+            { Text(a.phasesPerPoint?.let { "%.2f".format(it.perPoint) } ?: "–", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold) },
+            { Text(b.phasesPerPoint?.let { "%.2f".format(it.perPoint) } ?: "–", Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.End) },
+        )
+    }

@@ -164,6 +164,9 @@ private enum class StatsPage(val title: Int) {
  * when it can't. */
 typealias LoadDetail = suspend (StatsScope, EventTypeEnum, DetailFilter) -> DetailStats?
 
+/** The same of A and B. */
+typealias LoadDetails = suspend (StatsScope, EventTypeEnum, DetailFilter) -> Pair<DetailStats, DetailStats>?
+
 /** The statistics while scouting, from below: the set being played at
  * first, any other set or the whole match on a chip; the essentials first,
  * the details a swipe aside. */
@@ -185,6 +188,8 @@ fun StatsSheet(
     onCompare: (StatsScope) -> Unit = {},
     // the rotation and the phase the figures are narrowed to
     onFilter: (StatsScope, DetailFilter) -> Unit = { _, _ -> },
+    // a fundamental in detail of both sides
+    loadDetails: LoadDetails = { _, _, _ -> null },
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(Unit) { onScope(StatsScope.Set(currentSet.toUByte())) }
@@ -224,7 +229,7 @@ fun StatsSheet(
                         }
                     }
                     when {
-                        compare -> Compared(stats, statsOfB, onScope, onFilter)
+                        compare -> Compared(stats, statsOfB, onScope, onFilter, loadDetails)
                         else -> StatsPages(stats, onScope, loadDetail, side = sideB, onFilter = onFilter)
                     }
                 }
@@ -241,28 +246,72 @@ private fun Compared(
     b: LiveStats?,
     onScope: (StatsScope) -> Unit,
     onFilter: (StatsScope, DetailFilter) -> Unit,
+    loadDetails: LoadDetails,
 ) {
-    // the figures side by side, or the trend of both on one chart
-    var trend by remember { mutableStateOf(false) }
+    // the figures side by side, the trend of both on one chart, or a
+    // fundamental in detail
+    var page by remember { mutableStateOf(ComparedPage.Summary) }
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        listOf(false to R.string.stats_summary, true to R.string.stats_trend).forEach { (isTrend, label) ->
+        ComparedPage.entries.forEach { p ->
             FilterChip(
-                selected = trend == isTrend,
-                onClick = { trend = isTrend },
-                label = { Text(stringResource(label), maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                selected = page == p,
+                onClick = { page = p },
+                label = { Text(stringResource(p.title), maxLines = 1, overflow = TextOverflow.Ellipsis) },
             )
         }
     }
     // the trend shows every set
-    if (!trend) Scopes(a, onScope)
-    if (!trend) Box(Modifier.padding(horizontal = 16.dp)) { Narrowing(a) { onFilter(a.scope, it) } }
+    if (page != ComparedPage.Trend) Scopes(a, onScope)
+    if (page == ComparedPage.Summary) Box(Modifier.padding(horizontal = 16.dp)) { Narrowing(a) { onFilter(a.scope, it) } }
     // B's of another scope are the previous ones: not shown
     when (val shown = b?.takeIf { it.scope == a.scope }) {
         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        else -> Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) { if (trend) Trend(a, shown) else Comparison(a, shown) }
+        else -> when (page) {
+            ComparedPage.Detail -> ComparedDetail(a.teamName to shown.teamName, a.scope, loadDetails)
+            else -> Column(
+                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) { if (page == ComparedPage.Trend) Trend(a, shown) else Comparison(a, shown) }
+        }
+    }
+}
+
+private enum class ComparedPage(val title: Int) {
+    Summary(R.string.stats_summary),
+    Trend(R.string.stats_trend),
+    Detail(R.string.stats_detail),
+}
+
+/** A fundamental on a chip, as it went for each side. */
+@Composable
+private fun ComparedDetail(names: Pair<String, String>, scope: StatsScope, loadDetails: LoadDetails) {
+    var event by remember { mutableStateOf(EventTypeEnum.S) }
+    val both by produceState<Pair<DetailStats, DetailStats>?>(null, scope, event) {
+        value = loadDetails(scope, event, DetailFilter(null))
+    }
+    val shown = both
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (shown == null) {
+            Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+            return@Column
+        }
+        val (da, db) = shown
+        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            da.fundamentals.forEach { f ->
+                FilterChip(
+                    selected = f.value == event,
+                    onClick = { event = f.value },
+                    label = { Text(f.name.replaceFirstChar { it.uppercase() }) },
+                )
+            }
+        }
+        val fa = da.fundamental
+        val fb = db.fundamental
+        when {
+            fa == null || fb == null -> Unit
+            fa.total == 0u && fb.total == 0u -> Text(stringResource(R.string.no_events), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            else -> ComparisonDetail(fa, fb, names)
+        }
     }
 }
 

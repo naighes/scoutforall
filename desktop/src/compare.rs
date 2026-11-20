@@ -13,7 +13,7 @@ use {
         Alignment, Color, Element, Length,
         widget::{Column, column, container, row, space, text},
     },
-    scout4all_mobile::{LiveStats, PhaseStats},
+    scout4all_mobile::{EvalStats, FundamentalDetail, LiveStats, PhaseStats},
 };
 
 /// How wide the name of a row stands between the sides.
@@ -277,6 +277,133 @@ pub fn comparison<'a, M: 'a>(
         zones,
         ui::section(s.rotations, c),
         Column::with_children(rotations).spacing(8),
+    ]
+    .spacing(12);
+    ui::panel(Some(s.compare), content, c)
+}
+
+/// A fundamental in detail, the figures of the two sides side by side: the
+/// evaluations given (from the best), efficiency and positiveness, and the
+/// counts. The zones and the players stay each team's.
+pub fn detail<'a, M: 'a>(
+    a: &FundamentalDetail,
+    b: &FundamentalDetail,
+    names: (&str, &str),
+    s: &'static Strings,
+    c: Colors,
+) -> Element<'a, M> {
+    let title = |name: &str, color| {
+        text(name.to_string())
+            .size(SIZE_BODY)
+            .font(theme::fonts().bold)
+            .color(color)
+    };
+    let head = row![
+        container(title(names.0, TEAM_US))
+            .width(Length::Fill)
+            .align_x(Alignment::Center),
+        space::horizontal().width(Length::Fixed(LABEL_WIDTH)),
+        container(title(names.1, TEAM_THEM))
+            .width(Length::Fill)
+            .align_x(Alignment::Center),
+    ]
+    .spacing(10);
+    // the evaluations of A from the best, then those only B gave
+    let evals: Vec<&EvalStats> = a
+        .evals
+        .iter()
+        .chain(
+            b.evals
+                .iter()
+                .filter(|e| !a.evals.iter().any(|x| x.eval == e.eval)),
+        )
+        .collect();
+    let most = a
+        .evals
+        .iter()
+        .chain(&b.evals)
+        .map(|e| e.share)
+        .fold(1.0, f64::max);
+    let rows = evals.into_iter().map(|e| {
+        let side = |d: &FundamentalDetail, color, leftward| {
+            let found = d.evals.iter().find(|x| x.eval == e.eval);
+            cell(
+                text(found.map_or(0, |x| x.count).to_string())
+                    .size(SIZE_BODY)
+                    .font(theme::fonts().bold)
+                    .into(),
+                bar(found.map_or(0.0, |x| x.share), most, color, leftward, c),
+                found.map_or_else(String::new, |x| format!("{:.0}%", x.share)),
+                leftward,
+                c,
+            )
+        };
+        line(
+            format!("{} {}", e.symbol, ui::capitalized(&e.name)),
+            side(a, TEAM_US, true),
+            side(b, TEAM_THEM, false),
+            c,
+        )
+    });
+    let figure = |d: &FundamentalDetail| (d.efficiency, d.grade, String::new());
+    let positive = |d: &FundamentalDetail| (d.positiveness, None, String::new());
+    // each row has its own scale: the longer side fills the bar
+    let counted = |name: &str, x: Option<u32>, y: Option<u32>| {
+        let most = f64::from(x.unwrap_or(0).max(y.unwrap_or(0)).max(1));
+        let side = |n: Option<u32>, color, leftward| {
+            cell(
+                text(n.map_or_else(|| "–".to_string(), |n| n.to_string()))
+                    .size(SIZE_BODY)
+                    .font(theme::fonts().bold)
+                    .into(),
+                bar(f64::from(n.unwrap_or(0)), most, color, leftward, c),
+                String::new(),
+                leftward,
+                c,
+            )
+        };
+        line(
+            name.to_string(),
+            side(x, TEAM_US, true),
+            side(y, TEAM_THEM, false),
+            c,
+        )
+    };
+    let per_point = |d: &FundamentalDetail| {
+        d.phases_per_point
+            .as_ref()
+            .map_or_else(|| "–".to_string(), |r| format!("{:.2}", r.per_point))
+    };
+    let counts_rows = [
+        counted(s.total, Some(a.total), Some(b.total)),
+        counted(s.errors, Some(a.errors), Some(b.errors)),
+        counted(
+            s.unforced_errors,
+            Some(a.unforced_errors),
+            Some(b.unforced_errors),
+        ),
+        counted(s.points, a.points, b.points),
+        counted(s.faults, Some(a.faults), Some(b.faults)),
+    ];
+    let rallies = line(
+        s.rallies_per_point.to_string(),
+        text(per_point(a))
+            .size(SIZE_BODY)
+            .font(theme::fonts().bold)
+            .into(),
+        text(per_point(b))
+            .size(SIZE_BODY)
+            .font(theme::fonts().bold)
+            .into(),
+        c,
+    );
+    let content = column![
+        head,
+        Column::with_children(rows).spacing(8),
+        percent_line(ui::capitalized(s.efficiency), figure(a), figure(b), c),
+        percent_line(s.positiveness.to_string(), positive(a), positive(b), c),
+        Column::with_children(counts_rows).spacing(8),
+        rallies,
     ]
     .spacing(12);
     ui::panel(Some(s.compare), content, c)

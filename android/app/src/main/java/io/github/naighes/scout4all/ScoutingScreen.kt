@@ -360,6 +360,18 @@ class ScoutingViewModel(
         }
     }
 
+    /** A fundamental in detail of each side, for the comparison: A's and B's. */
+    suspend fun detailsCompared(scope: StatsScope, event: EventTypeEnum, filter: DetailFilter): Pair<DetailStats, DetailStats>? {
+        val s = scouting ?: return null
+        return app.onCore {
+            try {
+                s.detailOfB(scope, event, filter)?.let { s.detail(scope, event, filter) to it }
+            } catch (e: MobileException) {
+                null
+            }
+        }
+    }
+
     fun errorShown() {
         val choosing = mutableState.value as? ScoutingUi.Choosing ?: return
         mutableState.value = choosing.copy(error = null)
@@ -581,6 +593,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     statsOfB = model.statsOfBCompared.collectAsState().value,
                     onCompare = model::statsComparison,
                     onFilter = model::statsNarrowed,
+                    loadDetails = model::detailsCompared,
                     onDismiss = { statsOpen = false },
                 )
             }
