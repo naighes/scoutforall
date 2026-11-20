@@ -130,10 +130,10 @@ fn http_client() -> Result<Client, AppError> {
         Some(_) => builder.no_proxy(),
         None => builder,
     }
-        .user_agent(concat!("scout4all/", env!("CARGO_PKG_VERSION")))
-        .timeout(Duration::from_secs(120))
-        .build()
-        .map_err(|e| AppError::IO(IOError::from(e)))
+    .user_agent(concat!("scout4all/", env!("CARGO_PKG_VERSION")))
+    .timeout(Duration::from_secs(120))
+    .build()
+    .map_err(|e| AppError::IO(IOError::from(e)))
 }
 
 // the verifier of the platform: on Android it needs the context of the app
