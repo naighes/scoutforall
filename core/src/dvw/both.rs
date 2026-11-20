@@ -13,7 +13,7 @@ use crate::{
         model::DvwFile,
         translate::{At, Issue, Mappings, TranslateError, Us, translate_lined},
     },
-    rally::{answer_evals, answers, replay},
+    rally::{Incoherence, answer_evals, answers, replay},
     shapes::{
         enums::{EvalEnum, EventTypeEnum, TeamSideEnum},
         set::SetEntry,
@@ -357,13 +357,18 @@ pub fn translate_both(
         }),
         None => Ok(()),
     }?;
+    let lines: Vec<usize> = lined.iter().map(|(_, _, (line, _))| *line).collect();
     let touches: Vec<(Side, EventEntry)> = lined
         .into_iter()
         .map(|(side, entry, _)| (side, entry))
         .collect();
     replay(&set_a, &set_b, &touches, max_substitutions).map_err(|e| TranslateError {
         set_number,
-        line: None,
+        // the line of the touch the side refuses, when there's one
+        line: match &e {
+            Incoherence::Refused { source, .. } => lines.get(*source).copied(),
+            Incoherence::Serving | Incoherence::Points => None,
+        },
         issue: Issue::Sides(e),
     })?;
     for (name, count) in used_b {

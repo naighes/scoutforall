@@ -754,6 +754,54 @@ mod tests {
         assert_eq!(plan.team.players[0].role, None);
     }
 
+    /// The two sides that don't agree tell the line and the cause in the
+    /// five languages, never the English of the replay.
+    #[test]
+    fn the_issues_of_the_two_sides_described_in_five_languages() {
+        use crate::domain::Side;
+        use crate::dvw::{
+            import::MatchIssue,
+            translate::{Issue, TranslateError},
+        };
+        use crate::localization::labels;
+        use crate::rally::Incoherence;
+        use crate::shapes::enums::LanguageEnum;
+        let sides = |line, e| {
+            MatchIssue::Set(TranslateError {
+                set_number: 2,
+                line,
+                issue: Issue::Sides(e),
+            })
+        };
+        let refused = Incoherence::Refused {
+            side: Side::B,
+            source: 4,
+            reason: "detail".to_string(),
+        };
+        for language in [
+            LanguageEnum::En,
+            LanguageEnum::It,
+            LanguageEnum::Pt,
+            LanguageEnum::Pl,
+            LanguageEnum::Ja,
+        ] {
+            let l = labels(language);
+            let at = sides(Some(90), refused.clone()).describe(l);
+            assert!(at.contains("90") && at.contains("detail"), "{at}");
+            assert!(!at.contains("touch 4"), "{at}");
+            for e in [Incoherence::Serving, Incoherence::Points] {
+                let told = sides(None, e).describe(l);
+                assert!(!told.contains("the two sides"), "{language:?}: {told}");
+            }
+            assert_ne!(l.dvw_sides_serving, l.dvw_sides_points);
+        }
+        let it = labels(LanguageEnum::It);
+        assert_eq!(
+            sides(None, Incoherence::Points).describe(it),
+            "set 2: le due squadre del file non concordano su chi vince uno scambio"
+        );
+    }
+
     /// The issues as the user reads them, in the language chosen; the
     /// detail of the translator kept as it is.
     #[test]

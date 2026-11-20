@@ -24,7 +24,7 @@ use crate::{
         set_writer::SetWriter,
         team_writer::{TeamInput, TeamWriter},
     },
-    rally::{answer_evals, project},
+    rally::{Incoherence, answer_evals, project},
     shapes::{
         country::CountryCode,
         enums::{
@@ -997,9 +997,11 @@ fn reason(issue: &Issue, labels: &Labels) -> String {
             .replace("{file}", &score(*file))
             .replace("{ours}", &score(*ours)),
         Issue::Unfinished => labels.dvw_set_unfinished.to_string(),
-        Issue::Sides(incoherence) => labels
-            .dvw_event
-            .replace("{detail}", &incoherence.to_string()),
+        Issue::Sides(Incoherence::Serving) => labels.dvw_sides_serving.to_string(),
+        Issue::Sides(Incoherence::Points) => labels.dvw_sides_points.to_string(),
+        Issue::Sides(Incoherence::Refused { reason, .. }) => {
+            labels.dvw_event.replace("{detail}", reason)
+        }
         Issue::Impossible(Impossible::TouchAfterOver {
             over,
             over_line,
