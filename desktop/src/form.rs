@@ -1266,6 +1266,39 @@ impl Form {
     }
 }
 
+/// Longest label shown in a drop-down, in characters.
+const CHOICE_LABEL_MAX: usize = 48;
+
+/// An option of a drop-down: compared by position, shown cut when long.
+#[derive(Clone)]
+struct ChoiceItem {
+    index: usize,
+    label: String,
+}
+
+impl ChoiceItem {
+    fn new(index: usize, option: &str) -> Self {
+        Self {
+            index,
+            label: scout4all_core::names::cut(option, CHOICE_LABEL_MAX, '…'),
+        }
+    }
+}
+
+impl PartialEq for ChoiceItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
+}
+
+impl Eq for ChoiceItem {}
+
+impl std::fmt::Display for ChoiceItem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.label)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1530,43 +1563,5 @@ mod tests {
         assert_eq!(f.index(0), 1);
         f.update(Message::Choose(0, 0));
         assert_eq!(f.index(0), 0);
-    }
-}
-
-/// Longest label shown in a drop-down, in characters.
-const CHOICE_LABEL_MAX: usize = 48;
-
-/// An option of a drop-down: compared by position, shown cut when long.
-#[derive(Clone)]
-struct ChoiceItem {
-    index: usize,
-    label: String,
-}
-
-impl ChoiceItem {
-    fn new(index: usize, option: &str) -> Self {
-        let label = match option.chars().count() > CHOICE_LABEL_MAX {
-            true => option
-                .chars()
-                .take(CHOICE_LABEL_MAX - 1)
-                .chain(std::iter::once('…'))
-                .collect(),
-            false => option.to_string(),
-        };
-        Self { index, label }
-    }
-}
-
-impl PartialEq for ChoiceItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.index == other.index
-    }
-}
-
-impl Eq for ChoiceItem {}
-
-impl std::fmt::Display for ChoiceItem {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.label)
     }
 }

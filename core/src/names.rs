@@ -29,6 +29,19 @@ pub fn fitted(name: &str, room: usize) -> String {
     }
 }
 
+/// `text` in at most `room` characters: when longer, the first ones and
+/// `mark` in place of the rest.
+pub fn cut(text: &str, room: usize, mark: char) -> String {
+    match text.chars().count() > room {
+        true => text
+            .chars()
+            .take(room.saturating_sub(1))
+            .chain(std::iter::once(mark))
+            .collect(),
+        false => text.to_string(),
+    }
+}
+
 /// The names offered as `written` is written, as a search engine does:
 /// the ones that begin with it first, then the ones with a word that does,
 /// then the ones that have it inside; none for nothing written, nor the
@@ -80,6 +93,14 @@ mod tests {
     fn a_name_that_fits_stays_whole() {
         assert_eq!(fitted("Anna Rossi", 12), "Anna Rossi");
         assert_eq!(fitted("Alessandro Magrini", 12), "Ale. Mag.");
+    }
+
+    #[test]
+    fn a_long_text_is_cut_to_the_room_with_its_mark() {
+        assert_eq!(cut("Anna Rossi", 10, '…'), "Anna Rossi");
+        assert_eq!(cut("Anna Rossi", 6, '…'), "Anna …");
+        assert_eq!(cut("佐藤 花子", 3, '.'), "佐藤.");
+        assert_eq!(cut("Anna", 0, '.'), ".");
     }
 
     #[test]

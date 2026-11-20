@@ -2474,10 +2474,19 @@ pub(crate) mod screen_tests {
     /// The match of the tests of the TUI, three sets, imported: the file
     /// has no video column, the events are on the clock.
     pub(crate) fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
+        imported_with(dir, DvwOpponent::Name)
+    }
+
+    /// The same match, with the opponent of the file as `opponent` says:
+    /// `NewTeam` scouts it on both sides.
+    fn imported_with(
+        dir: &tempfile::TempDir,
+        opponent: DvwOpponent,
+    ) -> (Arc<Scout4All>, String, String) {
         let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
-            opponent: DvwOpponent::Name,
+            opponent,
             side: DvwSide::Home,
             day: "2015-01-25".into(),
             max_substitutions: 6,
@@ -2495,20 +2504,7 @@ pub(crate) mod screen_tests {
     #[test]
     fn the_actions_of_b_open_in_the_video() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
-        let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
-        let choice = DvwChoice {
-            opponent: DvwOpponent::NewTeam,
-            side: DvwSide::Home,
-            day: "2015-01-25".into(),
-            max_substitutions: 6,
-            team_id: None,
-            classification: core.classifications().first().map(|c| c.value),
-            gender: core.genders().first().map(|g| g.value),
-            country: core.countries("Ital".into()).first().map(|c| c.value),
-        };
-        let done = core.import_dvw(bytes, choice).unwrap();
-        let (team, m) = (done.team_id, done.match_id);
+        let (core, team, m) = imported_with(&dir, DvwOpponent::NewTeam);
         let (the_match, _) = core.video(&team, &m).unwrap();
         let path = dir.path().join("a.mp4");
         let profile = VideoProfile {
@@ -2548,20 +2544,7 @@ pub(crate) mod screen_tests {
     #[test]
     fn the_video_from_b_saves_the_profile_of_a() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
-        let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
-        let choice = DvwChoice {
-            opponent: DvwOpponent::NewTeam,
-            side: DvwSide::Home,
-            day: "2015-01-25".into(),
-            max_substitutions: 6,
-            team_id: None,
-            classification: core.classifications().first().map(|c| c.value),
-            gender: core.genders().first().map(|g| g.value),
-            country: core.countries("Ital".into()).first().map(|c| c.value),
-        };
-        let done = core.import_dvw(bytes, choice).unwrap();
-        let (team, m) = (done.team_id, done.match_id);
+        let (core, team, m) = imported_with(&dir, DvwOpponent::NewTeam);
         let mut screen = VideoScreen::new(
             core.clone(),
             dir.path().to_path_buf(),

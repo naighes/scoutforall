@@ -325,14 +325,7 @@ impl Court {
             let short = scout4all_core::names::fitted(&p.name, room);
             // still too long, as on a small window: cut, never over the
             // name beside it
-            let short = match short.chars().count() > room {
-                true => short
-                    .chars()
-                    .take(room.saturating_sub(1))
-                    .chain(std::iter::once('.'))
-                    .collect(),
-                false => short,
-            };
+            let short = scout4all_core::names::cut(&short, room, '.');
             let name = match p.setter {
                 true => format!("▲ {short}"),
                 false => short,
