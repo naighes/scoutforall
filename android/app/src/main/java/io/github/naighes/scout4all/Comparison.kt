@@ -39,35 +39,23 @@ private val BAR_HEIGHT = 8.dp
  * the phases, the errors, the distribution and the rotations. */
 @Composable
 fun Comparison(a: LiveStats, b: LiveStats) = Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(a.teamName, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TeamUs, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        Spacer(LABEL_WIDTH)
-        Text(b.teamName, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TeamThem, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-    }
+    Names(a.teamName to b.teamName)
     a.fundamentals.zip(b.fundamentals).forEach { (fa, fb) ->
         PercentRow(fa.name.replaceFirstChar { it.uppercase() }, fundamentalCell(fa), fundamentalCell(fb))
     }
-    PercentRow(stringResourceOf(R.string.side_out), phaseCell(a.sideOut), phaseCell(b.sideOut))
-    PercentRow(stringResourceOf(R.string.break_points), phaseCell(a.breakPoints), phaseCell(b.breakPoints))
+    PercentRow(stringResource(R.string.side_out), phaseCell(a.sideOut), phaseCell(b.sideOut))
+    PercentRow(stringResource(R.string.break_points), phaseCell(a.breakPoints), phaseCell(b.breakPoints))
     Section(R.string.stats_errors)
     listOf(
         Triple(R.string.unforced_errors, a.unforcedErrors, b.unforcedErrors),
         Triple(R.string.forced_errors, a.forcedErrors, b.forcedErrors),
         Triple(R.string.aces, a.aces, b.aces),
         Triple(R.string.opponent_errors, a.opponentErrors, b.opponentErrors),
-    ).forEach { (name, x, y) ->
-        // each row has its own scale: the longer side fills the bar
-        val most = maxOf(x, y, 1u).toDouble()
-        Line(
-            stringResourceOf(name),
-            { Cell(x.toString(), null, x.toDouble(), most, TeamUs, leftward = true) },
-            { Cell(y.toString(), null, y.toDouble(), most, TeamThem, leftward = false) },
-        )
-    }
+    ).forEach { (name, x, y) -> CountLine(name, x, y) }
     Section(R.string.stats_distribution)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Zones(a, Modifier.weight(1f))
-        Spacer(LABEL_WIDTH)
+        Box(Modifier.width(LABEL_WIDTH))
         Zones(b, Modifier.weight(1f))
     }
     Section(R.string.rotations)
@@ -86,15 +74,40 @@ private fun fundamentalCell(f: FundamentalStats) =
 
 private fun phaseCell(p: PhaseStats?) = Figure(p?.percentage, p?.grade, p?.let { "${it.won}/${it.rallies}" }.orEmpty())
 
+/** The names of the two sides over their columns, in their colors. */
 @Composable
-private fun stringResourceOf(id: Int) = androidx.compose.ui.res.stringResource(id)
+private fun Names(names: Pair<String, String>) = Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+    listOf(names.first to TeamUs, null, names.second to TeamThem).forEach { name ->
+        when (name) {
+            null -> Box(Modifier.width(LABEL_WIDTH))
+            else -> Text(
+                name.first,
+                Modifier.weight(1f),
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Bold,
+                color = name.second,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
 
+/** A count of each side: its own scale, the longer side fills the bar. */
 @Composable
-private fun Spacer(width: androidx.compose.ui.unit.Dp) = Box(Modifier.width(width))
+private fun CountLine(name: Int, a: UInt, b: UInt) {
+    val most = maxOf(a, b, 1u).toDouble()
+    Line(
+        stringResource(name),
+        { Cell(a.toString(), null, a.toDouble(), most, TeamUs, leftward = true) },
+        { Cell(b.toString(), null, b.toDouble(), most, TeamThem, leftward = false) },
+    )
+}
 
 @Composable
 private fun Section(title: Int) = Text(
-    stringResourceOf(title),
+    stringResource(title),
     Modifier.title().padding(top = 4.dp),
     style = MaterialTheme.typography.titleMedium,
 )
@@ -190,11 +203,7 @@ private fun Zones(stats: LiveStats, modifier: Modifier) = Column(modifier, verti
 @Composable
 fun ComparisonDetail(a: FundamentalDetail, b: FundamentalDetail, names: Pair<String, String>) =
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(names.first, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TeamUs, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(LABEL_WIDTH)
-            Text(names.second, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = TeamThem, textAlign = TextAlign.Center, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        }
+        Names(names)
         // the evaluations of A from the best, then those only B gave
         val evals = a.evals + b.evals.filter { e -> a.evals.none { it.eval == e.eval } }
         val most = (a.evals + b.evals).maxOfOrNull { it.share }?.coerceAtLeast(1.0) ?: 1.0
@@ -227,17 +236,9 @@ fun ComparisonDetail(a: FundamentalDetail, b: FundamentalDetail, names: Pair<Str
             Triple(R.string.unforced_errors, a.unforcedErrors, b.unforcedErrors),
             Triple(R.string.points, a.points ?: 0u, b.points ?: 0u),
             Triple(R.string.error_fault, a.faults, b.faults),
-        ).forEach { (name, x, y) ->
-            // each row has its own scale: the longer side fills the bar
-            val scale = maxOf(x, y, 1u).toDouble()
-            Line(
-                stringResourceOf(name),
-                { Cell(x.toString(), null, x.toDouble(), scale, TeamUs, leftward = true) },
-                { Cell(y.toString(), null, y.toDouble(), scale, TeamThem, leftward = false) },
-            )
-        }
+        ).forEach { (name, x, y) -> CountLine(name, x, y) }
         Line(
-            stringResourceOf(R.string.rallies_per_point),
+            stringResource(R.string.rallies_per_point),
             { Text(a.phasesPerPoint?.let { "%.2f".format(it.perPoint) } ?: "–", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold) },
             { Text(b.phasesPerPoint?.let { "%.2f".format(it.perPoint) } ?: "–", Modifier.fillMaxWidth(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.End) },
         )
