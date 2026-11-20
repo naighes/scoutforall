@@ -391,10 +391,15 @@ pub fn detail<'a, M: 'a>(
             .size(SIZE_BODY)
             .font(theme::fonts().bold)
             .into(),
-        text(per_point(b))
-            .size(SIZE_BODY)
-            .font(theme::fonts().bold)
-            .into(),
+        // the side B ends at the right edge, as its figures above
+        container(
+            text(per_point(b))
+                .size(SIZE_BODY)
+                .font(theme::fonts().bold),
+        )
+        .width(Length::Fill)
+        .align_x(Alignment::End)
+        .into(),
         c,
     );
     let content = column![
