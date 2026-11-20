@@ -963,7 +963,13 @@ impl ScoutingScreen {
             .spacing(10)
             .align_y(Alignment::Center),
         )
-        .padding(Padding::from([if compact { 5 } else { 10 }, 14]))
+        .padding(Padding::from([
+            match compact {
+                true => 5,
+                false => 10,
+            },
+            14,
+        ]))
         .width(Length::Fill)
         .style(move |_| container::Style {
             background: Some(color.into()),
@@ -1337,19 +1343,13 @@ impl ScoutingScreen {
                 .padding(Padding::from([2, 8]))
                 .on_press_maybe(value.map(|v| Message::Event(st.side_b, v)))
                 .style(move |_, status| {
-                    let hovered = matches!(
-                        status,
+                    let alpha = match status {
                         iced::widget::button::Status::Hovered
-                            | iced::widget::button::Status::Pressed
-                    );
+                        | iced::widget::button::Status::Pressed => 0.32,
+                        _ => 0.18,
+                    };
                     iced::widget::button::Style {
-                        background: Some(
-                            Color {
-                                a: if hovered { 0.32 } else { 0.18 },
-                                ..color
-                            }
-                            .into(),
-                        ),
+                        background: Some(Color { a: alpha, ..color }.into()),
                         text_color: color,
                         border: iced::Border {
                             color,

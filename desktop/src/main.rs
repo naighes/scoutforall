@@ -738,13 +738,15 @@ impl App {
             return Go::Stay;
         };
         let (team_id, match_id) = (screen.team_id.clone(), screen.match_id.clone());
+        // the set started on the side of A, or on both
+        let start = |screen: &start::StartScreen| match screen.set_start_of_b() {
+            Some(of_b) => self.core.start_set_both(screen.set_start(), of_b),
+            None => self.core.start_set(screen.set_start()),
+        };
         match outcome {
             start::Outcome::Stay => Go::Stay,
             start::Outcome::Back => Go::Match(team_id, match_id),
-            start::Outcome::Start => match match screen.set_start_of_b() {
-                Some(of_b) => self.core.start_set_both(screen.set_start(), of_b),
-                None => self.core.start_set(screen.set_start()),
-            } {
+            start::Outcome::Start => match start(screen) {
                 Ok(()) => Go::Scout(home::Open {
                     team_id,
                     match_id,
