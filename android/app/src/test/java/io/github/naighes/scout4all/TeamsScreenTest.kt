@@ -1,5 +1,9 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
@@ -16,6 +20,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 
 @RunWith(RobolectricTestRunner::class)
 class TeamsScreenTest {
@@ -83,6 +88,30 @@ class TeamsScreenTest {
         )
         rule.onNodeWithText("Arezzo").performClick()
         assertEquals(listOf(new), matches)
+    }
+
+    /** The team of the tutorial comes after the matches: off screen, and
+     * the step has to bring it in sight (a real installation has matches). */
+    @Test
+    fun theTutorialScrollsToItsTeamBelowTheMatches() {
+        val team = saveNationalTeam()
+        repeat(8) { winMatch(team, "Rival $it") }
+        // a small screen: the five recent matches fill it
+        RuntimeEnvironment.setQualifiers("w360dp-h400dp")
+        val tutorial = Tutorial().apply {
+            start(listOf(TutorialStep.Touch("team:$team", R.string.tutorial_team)), onEnd = {})
+        }
+        rule.setContent {
+            Scout4AllTheme {
+                CompositionLocalProvider(LocalTutorial provides tutorial) {
+                    Box(Modifier.fillMaxSize()) {
+                        TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
+                        TutorialOverlay(tutorial)
+                    }
+                }
+            }
+        }
+        rule.waitFor({ "team:$team not shown" }) { "team:$team" in tutorial.targets }
     }
 
     @Test

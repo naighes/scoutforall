@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -26,6 +27,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -136,7 +139,19 @@ fun TeamsScreen(
             is TeamsState.Loaded -> when {
                 s.home.teams.isEmpty() -> Centered(modifier) { Text(stringResource(R.string.no_teams)) }
                 // room at the bottom: the button doesn't cover the last team
-                else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
+                else -> {
+                    val list = rememberLazyListState()
+                    // the tutorial asks for a team: the teams come after
+                    // the matches, off screen and not composed
+                    val target = LocalTutorial.current?.step?.target
+                    LaunchedEffect(target) {
+                        if (target?.startsWith("team:") == true) {
+                            // once the list is measured
+                            val count = snapshotFlow { list.layoutInfo.totalItemsCount }.first { it > 0 }
+                            list.animateScrollToItem(count - 1)
+                        }
+                    }
+                    LazyColumn(modifier, list, contentPadding = PaddingValues(bottom = 88.dp)) {
                     // a section only with something in it
                     section(R.string.home_in_progress, s.home.inProgress) {
                         InProgressRow(it, { onMatch(it.teamId, it.id) }) { onResume(it.teamId, it.id, it.next) }
@@ -146,6 +161,7 @@ fun TeamsScreen(
                     }
                     item { SectionTitle(R.string.teams) }
                     items(s.home.teams) { TeamRow(it, onTeam, teams::setPinned) }
+                    }
                 }
             }
         }
