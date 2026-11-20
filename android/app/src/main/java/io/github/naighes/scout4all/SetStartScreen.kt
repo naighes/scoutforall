@@ -105,9 +105,11 @@ class SetStartViewModel(
     private var setStart: SetStart? = null
     /** the start of B, scouting both sides */
     private var setStartOfB: SetStart? = null
-    private var onB = false
-    /** the start the choices are for now */
-    private val current get() = if (onB) setStartOfB else setStart
+    /** the start the choices are for now: B's while its lineup is shown */
+    private val current get() = when ((mutableState.value as? SetStartState.Choosing)?.onB) {
+        true -> setStartOfB
+        else -> setStart
+    }
 
     init {
         viewModelScope.launch {
@@ -178,7 +180,6 @@ class SetStartViewModel(
      * the lineup of B opens its first empty choice when it has players. */
     fun side(b: Boolean) {
         val start = (if (b) setStartOfB else setStart) ?: return
-        onB = b
         mutableState.update { s ->
             when (s) {
                 is SetStartState.Choosing -> {

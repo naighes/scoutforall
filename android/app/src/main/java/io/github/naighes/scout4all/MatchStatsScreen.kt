@@ -41,7 +41,8 @@ fun MatchStatsScreen(
     matchId: String,
     set: Int?,
     side: MatchSide = MatchSide.A,
-    onBack: () -> Unit, onWatch: (VideoRequest.Clips) -> Unit = {},
+    onBack: () -> Unit,
+    onWatch: (VideoRequest.Clips) -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     // the set shown, 0 for the match: saved as a number on rotation
