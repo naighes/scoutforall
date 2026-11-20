@@ -19,15 +19,15 @@ use {
 /// How wide the name of a row stands between the sides.
 const LABEL_WIDTH: f32 = 96.0;
 
-fn pct(v: Option<f64>) -> String {
-    v.map_or_else(|| "–".to_string(), |v| format!("{v:.0}%"))
-}
-
 /// How wide the figure stands beside its bar.
 const FIGURE_WIDTH: f32 = 40.0;
 
 /// How thick a bar is.
 const BAR_HEIGHT: f32 = 8.0;
+
+fn pct(v: Option<f64>) -> String {
+    v.map_or_else(|| "–".to_string(), |v| format!("{v:.0}%"))
+}
 
 /// A figure, graded when the team has a level.
 fn graded<'a, M: 'a>(v: Option<f64>, g: Option<f64>, c: Colors) -> Element<'a, M> {
@@ -42,8 +42,8 @@ fn counts<'a, M: 'a>(label: String, c: Colors) -> Element<'a, M> {
     text(label).size(SIZE_SMALL).color(c.muted).into()
 }
 
-/// A bar of `share` parts of `of`, growing from the name (`inward`) toward
-/// the figure: the two sides read as one back-to-back chart.
+/// A bar of `share` parts of `of`, growing from the name toward the figure
+/// (`leftward` on side A): the two sides read as one back-to-back chart.
 fn bar<'a, M: 'a>(share: f64, of: f64, color: Color, leftward: bool, c: Colors) -> Element<'a, M> {
     let parts = |v: f64| (v.clamp(0.0, of) / of * 1000.0).round() as u16;
     let full = parts(share);
@@ -82,25 +82,20 @@ fn cell<'a, M: 'a>(
     leftward: bool,
     c: Colors,
 ) -> Element<'a, M> {
-    let fixed = |e| container(e).width(Length::Fixed(FIGURE_WIDTH));
-    let figure = fixed(figure).align_x(if leftward {
-        Alignment::Start
-    } else {
-        Alignment::End
-    });
+    let outer = match leftward {
+        true => Alignment::Start,
+        false => Alignment::End,
+    };
+    let figure = container(figure)
+        .width(Length::Fixed(FIGURE_WIDTH))
+        .align_x(outer);
     let top = match leftward {
         true => row![figure, bar],
         false => row![bar, figure],
     }
     .spacing(6)
     .align_y(Alignment::Center);
-    column![top, counts(small, c)]
-        .align_x(if leftward {
-            Alignment::Start
-        } else {
-            Alignment::End
-        })
-        .into()
+    column![top, counts(small, c)].align_x(outer).into()
 }
 
 /// One row: the side A (leftward), the name, the side B.
@@ -122,8 +117,51 @@ fn line<'a, M: 'a>(
     .into()
 }
 
+/// The names of the two teams, each over its column.
+fn head<'a, M: 'a>(a: &str, b: &str) -> Element<'a, M> {
+    let title = |name: &str, color| {
+        container(
+            text(name.to_string())
+                .size(SIZE_BODY)
+                .font(theme::fonts().bold)
+                .color(color),
+        )
+        .width(Length::Fill)
+        .align_x(Alignment::Center)
+    };
+    row![
+        title(a, TEAM_US),
+        space::horizontal().width(Length::Fixed(LABEL_WIDTH)),
+        title(b, TEAM_THEM),
+    ]
+    .spacing(10)
+    .into()
+}
+
+/// A row of two counts, as bars: the larger side fills its bar.
+fn count_line<'a, M: 'a>(name: &str, a: Option<u32>, b: Option<u32>, c: Colors) -> Element<'a, M> {
+    let most = f64::from(a.unwrap_or(0).max(b.unwrap_or(0)).max(1));
+    let side = |n: Option<u32>, color, leftward| {
+        cell(
+            text(n.map_or_else(|| "–".to_string(), |n| n.to_string()))
+                .size(SIZE_BODY)
+                .font(theme::fonts().bold)
+                .into(),
+            bar(f64::from(n.unwrap_or(0)), most, color, leftward, c),
+            String::new(),
+            leftward,
+            c,
+        )
+    };
+    line(
+        name.to_string(),
+        side(a, TEAM_US, true),
+        side(b, TEAM_THEM, false),
+        c,
+    )
+}
+
 /// A row of two percentages, 0 to 100, as bars.
-#[allow(clippy::too_many_arguments)]
 fn percent_line<'a, M: 'a>(
     name: String,
     a: (Option<f64>, Option<f64>, String),
@@ -168,22 +206,6 @@ pub fn comparison<'a, M: 'a>(
     s: &'static Strings,
     c: Colors,
 ) -> Element<'a, M> {
-    let title = |name: String, color| {
-        text(name)
-            .size(SIZE_BODY)
-            .font(theme::fonts().bold)
-            .color(color)
-    };
-    let head = row![
-        container(title(a.team_name.clone(), TEAM_US))
-            .width(Length::Fill)
-            .align_x(Alignment::Center),
-        space::horizontal().width(Length::Fixed(LABEL_WIDTH)),
-        container(title(b.team_name.clone(), TEAM_THEM))
-            .width(Length::Fill)
-            .align_x(Alignment::Center),
-    ]
-    .spacing(10);
     let of = |f: &scout4all_mobile::FundamentalStats| {
         (
             f.efficiency,
@@ -202,28 +224,9 @@ pub fn comparison<'a, M: 'a>(
         (s.aces, a.aces, b.aces),
         (s.opponent_errors, a.opponent_errors, b.opponent_errors),
     ];
-    // each row has its own scale: the longer side fills the bar
-    let errors = rows.into_iter().map(|(name, x, y)| {
-        let most = f64::from(x.max(y).max(1));
-        let side = |n: u32, color, leftward| {
-            cell(
-                text(n.to_string())
-                    .size(SIZE_BODY)
-                    .font(theme::fonts().bold)
-                    .into(),
-                bar(f64::from(n), most, color, leftward, c),
-                String::new(),
-                leftward,
-                c,
-            )
-        };
-        line(
-            name.to_string(),
-            side(x, TEAM_US, true),
-            side(y, TEAM_THEM, false),
-            c,
-        )
-    });
+    let errors = rows
+        .into_iter()
+        .map(|(name, x, y)| count_line(name, Some(x), Some(y), c));
     // the zones of the setter on the court, as the two sides have them
     let grid = |stats: &LiveStats| -> Element<'a, M> {
         let zone = |zone: u8| -> Element<'a, M> {
@@ -262,7 +265,7 @@ pub fn comparison<'a, M: 'a>(
         )
     });
     let content = column![
-        head,
+        head(&a.team_name, &b.team_name),
         Column::with_children(fundamentals).spacing(8),
         phase_line(s.side_out.to_string(), &a.side_out, &b.side_out, c),
         phase_line(
@@ -292,22 +295,6 @@ pub fn detail<'a, M: 'a>(
     s: &'static Strings,
     c: Colors,
 ) -> Element<'a, M> {
-    let title = |name: &str, color| {
-        text(name.to_string())
-            .size(SIZE_BODY)
-            .font(theme::fonts().bold)
-            .color(color)
-    };
-    let head = row![
-        container(title(names.0, TEAM_US))
-            .width(Length::Fill)
-            .align_x(Alignment::Center),
-        space::horizontal().width(Length::Fixed(LABEL_WIDTH)),
-        container(title(names.1, TEAM_THEM))
-            .width(Length::Fill)
-            .align_x(Alignment::Center),
-    ]
-    .spacing(10);
     // the evaluations of A from the best, then those only B gave
     let evals: Vec<&EvalStats> = a
         .evals
@@ -348,27 +335,7 @@ pub fn detail<'a, M: 'a>(
     let figure = |d: &FundamentalDetail| (d.efficiency, d.grade, String::new());
     let positive = |d: &FundamentalDetail| (d.positiveness, None, String::new());
     // each row has its own scale: the longer side fills the bar
-    let counted = |name: &str, x: Option<u32>, y: Option<u32>| {
-        let most = f64::from(x.unwrap_or(0).max(y.unwrap_or(0)).max(1));
-        let side = |n: Option<u32>, color, leftward| {
-            cell(
-                text(n.map_or_else(|| "–".to_string(), |n| n.to_string()))
-                    .size(SIZE_BODY)
-                    .font(theme::fonts().bold)
-                    .into(),
-                bar(f64::from(n.unwrap_or(0)), most, color, leftward, c),
-                String::new(),
-                leftward,
-                c,
-            )
-        };
-        line(
-            name.to_string(),
-            side(x, TEAM_US, true),
-            side(y, TEAM_THEM, false),
-            c,
-        )
-    };
+    let counted = |name: &str, x: Option<u32>, y: Option<u32>| count_line(name, x, y, c);
     let per_point = |d: &FundamentalDetail| {
         d.phases_per_point
             .as_ref()
@@ -399,7 +366,7 @@ pub fn detail<'a, M: 'a>(
         c,
     );
     let content = column![
-        head,
+        head(names.0, names.1),
         Column::with_children(rows).spacing(8),
         percent_line(ui::capitalized(s.efficiency), figure(a), figure(b), c),
         percent_line(s.positiveness.to_string(), positive(a), positive(b), c),
