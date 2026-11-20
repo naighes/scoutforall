@@ -298,62 +298,38 @@ fn evaluations<'a>(
     let mut touches = touches;
     // a dig `!` of the other team's attack, or after the team's own block:
     // a `+` (it lets them build)
-    let digs: Vec<usize> = (0..touches.len())
-        .filter(|i| {
-            let previous = touches
-                .get(..*i)
-                .unwrap_or_default()
-                .iter()
-                .rev()
-                .find_map(|(_, t)| played(t));
-            match (touches.get(*i).and_then(|(_, t)| played(t)), previous) {
-                (Some((side, code, false)), Some((before, answered, false))) => {
-                    code.skill == Skill::Dig
-                        && code.evaluation == '!'
-                        && matches!(
-                            (before == side, answered.skill),
-                            (false, Skill::Attack) | (true, Skill::Block)
-                        )
-                }
-                _ => false,
-            }
-        })
-        .collect();
-    for i in digs {
-        if let Some((_, t)) = touches.get_mut(i) {
-            *t = with(t, None, Some('+'));
-            mapped.push("D! of an attack or after a block: D+");
-        }
-    }
+    let digs = following(&touches, |(side, code), (before, answered)| {
+        code.skill == Skill::Dig
+            && code.evaluation == '!'
+            && matches!(
+                (before == side, answered.skill),
+                (false, Skill::Attack) | (true, Skill::Block)
+            )
+    });
+    reevaluate(
+        &mut touches,
+        digs,
+        '+',
+        "D! of an attack or after a block: D+",
+        &mut mapped,
+    );
     // a block touching the other team's kill (`A# B-`, the ball down all
     // the same: DataVolley credits the kill) is a block `=`: the kill
     // stays, the dig after it is the blockers' own
-    let touching: Vec<usize> = (0..touches.len())
-        .filter(|i| {
-            let previous = touches
-                .get(..*i)
-                .unwrap_or_default()
-                .iter()
-                .rev()
-                .find_map(|(_, t)| played(t));
-            match (touches.get(*i).and_then(|(_, t)| played(t)), previous) {
-                (Some((side, block, false)), Some((before, attack, false))) => {
-                    block.skill == Skill::Block
-                        && matches!(block.evaluation, '+' | '-')
-                        && before != side
-                        && attack.skill == Skill::Attack
-                        && symbols.winning(Skill::Attack).contains(&attack.evaluation)
-                }
-                _ => false,
-            }
-        })
-        .collect();
-    for i in touching {
-        if let Some((_, t)) = touches.get_mut(i) {
-            *t = with(t, None, Some('='));
-            mapped.push("B touching a kill: B=");
-        }
-    }
+    let touching = following(&touches, |(side, block), (before, attack)| {
+        block.skill == Skill::Block
+            && matches!(block.evaluation, '+' | '-')
+            && before != side
+            && attack.skill == Skill::Attack
+            && symbols.winning(Skill::Attack).contains(&attack.evaluation)
+    });
+    reevaluate(
+        &mut touches,
+        touching,
+        '=',
+        "B touching a kill: B=",
+        &mut mapped,
+    );
     let blocks = changes(&touches, |touch, next| match (touch, next) {
         (Touch::Skill(side, block), next)
             if block.skill == Skill::Block && !ending(symbols, block) =>
@@ -424,6 +400,47 @@ fn evaluations<'a>(
     });
     let touches = apply(touches, attacks, &mut mapped);
     (touches, mapped)
+}
+
+/// The touches of a player that `picks` keeps, each told with the touch of
+/// a player before it (both by side and code, neither of them sent over).
+fn following(
+    touches: &[Lined],
+    picks: impl Fn((Side, &SkillCode), (Side, &SkillCode)) -> bool,
+) -> Vec<usize> {
+    touches
+        .iter()
+        .scan(None, |previous, (_, touch)| {
+            let current = played(touch);
+            let pair = (current, *previous);
+            *previous = current.or(*previous);
+            Some(pair)
+        })
+        .enumerate()
+        .filter_map(|(i, pair)| match pair {
+            (Some((side, code, false)), Some((before, answered, false))) => {
+                picks((side, code), (before, answered)).then_some(i)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The touches at `indices` with the evaluation `evaluation`, each change
+/// counted by `name`.
+fn reevaluate(
+    touches: &mut [Lined],
+    indices: Vec<usize>,
+    evaluation: char,
+    name: &'static str,
+    mapped: &mut Vec<&'static str>,
+) {
+    for i in indices {
+        if let Some((_, t)) = touches.get_mut(i) {
+            *t = with(t, None, Some(evaluation));
+            mapped.push(name);
+        }
+    }
 }
 
 /// The changes of the touches of a player, each told by the touch and the

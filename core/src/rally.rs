@@ -279,15 +279,20 @@ pub fn replay(
 /// team's (as `a`, the snapshot of A, tells it) before the serve and once a
 /// point is over.
 pub fn ball_side(touches: &[(Side, EventEntry)], a: &Snapshot) -> Side {
-    touches
-        .iter()
-        .rev()
-        .find(|(_, e)| !e.event_type.changes_lineup())
+    last_touch(touches)
         .and_then(|(s, e)| ball_after(*s, e))
         .unwrap_or(match a.get_ball_side() {
             TeamSideEnum::Us => Side::A,
             TeamSideEnum::Them => Side::B,
         })
+}
+
+/// The last touch of the ball in `touches` (changes of the lineup aside).
+fn last_touch(touches: &[(Side, EventEntry)]) -> Option<&(Side, EventEntry)> {
+    touches
+        .iter()
+        .rev()
+        .find(|(_, e)| !e.event_type.changes_lineup())
 }
 
 /// The side of the net the touch of the side leaves the ball on, while
@@ -397,29 +402,22 @@ pub fn admits(
         Side::B => b,
     };
     // the last touch of the ball, and where it left it
-    let last = touches
-        .iter()
-        .rev()
-        .find(|(_, e)| !e.event_type.changes_lineup());
+    let touch = last_touch(touches);
     let ball = ball_side(touches, a);
-    let last = last.filter(|(s, _)| *s != side);
+    let last = touch.filter(|(s, _)| *s != side);
     let after = ball_after(side, entry);
     // a serve still in play: the reception of the other side comes next
     let serve_in_play = matches!(
-        touches.iter().rev().find(|(_, e)| !e.event_type.changes_lineup()),
+        touch,
         Some((_, e)) if e.event_type == S && ball_after(side, e).is_some()
     );
     // on the side's half, or answering in play where the last touch left
     // the ball
     let in_play = ball == side || after == Some(ball);
     // the side's own attack `+`, the roads open: back to it
-    let open_roads = touches
-        .iter()
-        .rev()
-        .find(|(_, e)| !e.event_type.changes_lineup())
-        .is_some_and(|(s, e)| {
-            *s == side && e.event_type == A && e.eval == Some(EvalEnum::Positive)
-        });
+    let open_roads = touch.is_some_and(|(s, e)| {
+        *s == side && e.event_type == A && e.eval == Some(EvalEnum::Positive)
+    });
     let touch_admitted = |event_type: EventTypeEnum| match (serve_in_play, last) {
         (true, Some(_)) => event_type == P && in_play,
         (true, None) => false,
