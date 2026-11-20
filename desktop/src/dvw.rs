@@ -46,7 +46,7 @@ pub enum Message {
     Form(form::Message),
     Save,
     Skip,
-    Open(usize),
+    Open,
     Close,
 }
 
@@ -81,9 +81,8 @@ pub struct DvwScreen {
     preview: DvwPreview,
     step: Step,
     form: Form,
-    sides: Vec<DvwSide>,
-    /// the side being imported, of `sides`
-    current: usize,
+    /// the side of the file imported
+    side: DvwSide,
     /// `YYYY-MM-DD`
     day: String,
     substitutions: u8,
@@ -91,8 +90,8 @@ pub struct DvwScreen {
     genders: Vec<GenderChoice>,
     /// the countries the search finds; the one of the settings to start
     countries: Vec<(CountryCode, String)>,
-    results: Vec<TeamResult>,
-    selected: usize,
+    /// what happened to the team of the side, once done
+    result: Option<TeamResult>,
 }
 
 impl DvwScreen {
@@ -120,12 +119,10 @@ impl DvwScreen {
             preview,
             step: Step::Sides,
             form: Form::new("", vec![]),
-            sides: vec![],
-            current: 0,
+            side: DvwSide::Home,
             substitutions: 0,
             countries: country.into_iter().collect(),
-            results: vec![],
-            selected: 0,
+            result: None,
         };
         screen.to(s, Step::Sides);
         Ok(screen)
@@ -139,19 +136,17 @@ impl DvwScreen {
     }
 
     fn team_name(&self) -> String {
-        match self.sides.get(self.current) {
-            Some(DvwSide::Home) => self.preview.home.clone(),
-            Some(DvwSide::Visiting) => self.preview.visiting.clone(),
-            None => String::new(),
+        match self.side {
+            DvwSide::Home => self.preview.home.clone(),
+            DvwSide::Visiting => self.preview.visiting.clone(),
         }
     }
 
-    /// The other team of the file: team B of the side being imported.
+    /// The other team of the file: team B of the side imported.
     fn opponent_name(&self) -> String {
-        match self.sides.get(self.current) {
-            Some(DvwSide::Home) => self.preview.visiting.clone(),
-            Some(DvwSide::Visiting) => self.preview.home.clone(),
-            None => String::new(),
+        match self.side {
+            DvwSide::Home => self.preview.visiting.clone(),
+            DvwSide::Visiting => self.preview.home.clone(),
         }
     }
 
@@ -261,7 +256,6 @@ impl DvwScreen {
         ));
         self.form = form;
         self.step = step;
-        self.selected = 0;
         self.offer_countries(s);
     }
 
@@ -294,11 +288,7 @@ impl DvwScreen {
         let f = &self.form;
         DvwChoice {
             opponent: DvwOpponent::Name,
-            side: self
-                .sides
-                .get(self.current)
-                .copied()
-                .unwrap_or(DvwSide::Home),
+            side: self.side,
             day: self.day.clone(),
             max_substitutions: self.substitutions,
             team_id,
@@ -325,12 +315,11 @@ impl DvwScreen {
         let step = std::mem::replace(&mut self.step, Step::Done);
         match step {
             Step::Sides => {
-                self.sides = match self.form.index(0) {
-                    1 => vec![DvwSide::Visiting],
-                    _ => vec![DvwSide::Home],
+                self.side = match self.form.index(0) {
+                    1 => DvwSide::Visiting,
+                    _ => DvwSide::Home,
                 };
-                self.current = 0;
-                self.results = vec![];
+                self.result = None;
                 match self.preview.days.as_slice() {
                     [day] => {
                         self.day = day.clone();
@@ -423,7 +412,7 @@ impl DvwScreen {
             Step::Opponent(..) => self.team(s),
             Step::Ready(ready, _) => {
                 let message = ui::fill(s.dvw_skipped, &[ready.team]);
-                self.next_side(s, message, None);
+                self.done(s, message, None);
             }
         }
         true
@@ -450,28 +439,18 @@ impl DvwScreen {
         }
     }
 
-    /// The team of the side being imported: a similar one or a new one;
-    /// done after the last side. The team the import was asked from comes
-    /// first, until a side goes into it.
+    /// The team of the side imported: a similar one or a new one, the
+    /// team the import was asked from first.
     fn team(&mut self, s: &Strings) {
-        let Some(side) = self.sides.get(self.current).copied() else {
-            return self.to(s, Step::Done);
-        };
-        let first = self.from.clone().filter(|from| {
-            !self
-                .results
-                .iter()
-                .any(|r| r.team_id.as_ref() == Some(from))
-        });
         match self
             .core
-            .dvw_similar_teams(self.bytes.to_vec(), side, first)
+            .dvw_similar_teams(self.bytes.to_vec(), self.side, self.from.clone())
         {
             Ok(similar) if similar.is_empty() => self.to(s, Step::NewTeam(similar)),
             Ok(similar) => self.to(s, Step::Team(similar)),
             Err(e) => {
                 let message = ui::fill(s.dvw_not_imported, &[self.team_name(), e.to_string()]);
-                self.next_side(s, message, None);
+                self.done(s, message, None);
             }
         }
     }
@@ -492,7 +471,7 @@ impl DvwScreen {
             }
             Err(e) => {
                 let message = ui::fill(s.dvw_not_imported, &[self.team_name(), e.to_string()]);
-                self.next_side(s, message, None);
+                self.done(s, message, None);
             }
         }
     }
@@ -520,10 +499,8 @@ impl DvwScreen {
         let imported = self.core.import_dvw(self.bytes.to_vec(), choice.clone());
         let team = ready.team.clone();
         match imported {
-            Ok(imported) => {
-                self.next_side(s, ui::fill(s.dvw_imported, &[team]), Some(imported.team_id))
-            }
-            Err(e) => self.next_side(
+            Ok(imported) => self.done(s, ui::fill(s.dvw_imported, &[team]), Some(imported.team_id)),
+            Err(e) => self.done(
                 s,
                 ui::fill(s.dvw_not_imported, &[team, e.to_string()]),
                 None,
@@ -531,16 +508,16 @@ impl DvwScreen {
         }
     }
 
-    fn next_side(&mut self, s: &Strings, message: String, team_id: Option<String>) {
-        self.results.push(TeamResult { message, team_id });
-        self.current += 1;
-        self.team(s);
+    /// The side imported or not: why, and its team.
+    fn done(&mut self, s: &Strings, message: String, team_id: Option<String>) {
+        self.result = Some(TeamResult { message, team_id });
+        self.to(s, Step::Done);
     }
 
     /// The team of the result, once imported.
-    fn open(&self, index: usize) -> Outcome {
-        self.results
-            .get(index)
+    fn open(&self) -> Outcome {
+        self.result
+            .as_ref()
             .and_then(|r| r.team_id.clone())
             .map_or(Outcome::Stay, Outcome::Team)
     }
@@ -564,7 +541,6 @@ impl DvwScreen {
     }
 
     pub fn key(&mut self, s: &Strings, ck: KeyCombination) -> Outcome {
-        let count = self.results.len();
         match (&self.step, ck) {
             (Step::Ready(..), k) if k == key!(enter) => {
                 self.next(s);
@@ -576,15 +552,7 @@ impl DvwScreen {
             }
             (Step::Ready(..), _) => Outcome::Stay,
             (Step::Done, k) if k == BACK_KEY => Outcome::Back,
-            (Step::Done, k) if k == key!(enter) => self.open(self.selected),
-            (Step::Done, k) if k == key!(down) && count > 0 => {
-                self.selected = (self.selected + 1) % count;
-                Outcome::Stay
-            }
-            (Step::Done, k) if k == key!(up) && count > 0 => {
-                self.selected = (self.selected + count - 1) % count;
-                Outcome::Stay
-            }
+            (Step::Done, k) if k == key!(enter) => self.open(),
             (Step::Done, _) => Outcome::Stay,
             (_, ck) => {
                 let outcome = self.form.key(ck);
@@ -607,10 +575,7 @@ impl DvwScreen {
                 self.back(s);
                 Outcome::Stay
             }
-            Message::Open(i) => {
-                self.selected = i;
-                self.open(i)
-            }
+            Message::Open => self.open(),
             Message::Close => Outcome::Back,
         }
     }
@@ -678,11 +643,11 @@ impl DvwScreen {
                 )
             }
             Step::Done => {
-                let rows = self.results.iter().enumerate().map(|(i, r)| {
+                let rows = self.result.iter().map(|r| {
                     ui::list_row(
                         ui::body(r.message.clone()),
-                        i == self.selected,
-                        r.team_id.as_ref().map(|_| Message::Open(i)),
+                        true,
+                        r.team_id.as_ref().map(|_| Message::Open),
                         c,
                     )
                 });
@@ -884,7 +849,7 @@ mod tests {
         dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Done));
         assert_eq!(
-            dvw.results
+            dvw.result
                 .iter()
                 .map(|r| r.message.as_str())
                 .collect::<Vec<_>>(),
@@ -1074,7 +1039,7 @@ mod tests {
         dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Done));
         assert_eq!(
-            dvw.results
+            dvw.result
                 .iter()
                 .map(|r| r.message.as_str())
                 .collect::<Vec<_>>(),
