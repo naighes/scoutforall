@@ -825,4 +825,102 @@ mod tests {
             }
         }
     }
+    /// The touches that may be skipped in the flow of the two sides (TODO/001,
+    /// §4): after a serve, an attack or a block, the touch of the side that
+    /// answers it is mandatory (`answers`) unless the ball can go on without
+    /// it. The list is fixed: a new optional touch fails here, and must be
+    /// decided before it is admitted.
+    ///
+    /// Optional: the dig or block after an attack `+`, `-` or `!` (for the
+    /// attack `!` the cover of its own side too), the dig or cover after a
+    /// block `+`, `-` or `!`. Mandatory: the reception of a serve in play,
+    /// whatever the serve; nothing else.
+    #[test]
+    fn only_the_dig_the_block_and_the_cover_can_be_skipped() {
+        let (a, b) = (Team::new(), Team::new());
+        let serve = |eval| by(Side::A, S, a.setter(), eval, 0);
+        let reception = by(Side::B, P, b.libero, Negative, 1);
+        let attack = |eval| by(Side::B, A, b.outside_hitter(), eval, 2);
+        let block = |eval| by(Side::A, B, a.outside_hitter(), eval, 3);
+        // every move of either side, with the evaluations it can have
+        let moves = |n: u32| {
+            let mut all = vec![];
+            for side in [Side::A, Side::B] {
+                let team = if side == Side::A { &a } else { &b };
+                for event_type in [P, A, D, B] {
+                    let player = if matches!(event_type, P | D) {
+                        team.libero
+                    } else {
+                        team.outside_hitter()
+                    };
+                    all.extend(
+                        EvalEnum::ALL
+                            .into_iter()
+                            .map(|eval| by(side, event_type, player, eval, n)),
+                    );
+                }
+                all.push(touch(side, FB, None, n));
+            }
+            all
+        };
+        // the touches of a rally, each one with the ball still being played
+        let mut rallies = vec![];
+        for eval in EvalEnum::ALL {
+            rallies.push(vec![serve(eval)]);
+        }
+        for eval in EvalEnum::ALL {
+            let attacked = vec![serve(Positive), reception.clone(), attack(eval)];
+            if replayed(&a, &b, &attacked).is_ok() {
+                for blocked in EvalEnum::ALL {
+                    let mut rally = attacked.clone();
+                    rally.push(block(blocked));
+                    rallies.push(rally);
+                }
+                rallies.push(attacked);
+            }
+        }
+        let mut skippable = vec![];
+        for rally in rallies {
+            let Some((_, last)) = rally.last() else {
+                continue;
+            };
+            let (last_type, last_eval) = (last.event_type, last.eval);
+            // a rally the replay refuses is no rally, nor one the point
+            // closed
+            let Ok((sa, _)) = replayed(&a, &b, &rally) else {
+                continue;
+            };
+            if sa.score_us + sa.score_them > 0 {
+                continue;
+            }
+            let n = u32::try_from(rally.len()).unwrap_or_default();
+            let skipped = moves(n)
+                .into_iter()
+                .filter(|(_, e)| {
+                    // the block `/` is a fault, not a touch of the flow
+                    !answers(e.event_type, last_type)
+                        && !(e.event_type == B && e.eval == Some(Over))
+                })
+                .any(|next| {
+                    // the touch isn't an answer, it goes on without one
+                    admitted(&a, &b, &rally, next)
+                });
+            if skipped {
+                skippable.push((last_type, last_eval));
+            }
+        }
+        skippable.sort_by_key(|(t, e)| (format!("{t}"), format!("{e:?}")));
+        skippable.dedup();
+        assert_eq!(
+            skippable,
+            vec![
+                (A, Some(Exclamative)),
+                (A, Some(Negative)),
+                (A, Some(Positive)),
+                (B, Some(Exclamative)),
+                (B, Some(Negative)),
+                (B, Some(Positive)),
+            ]
+        );
+    }
 }
