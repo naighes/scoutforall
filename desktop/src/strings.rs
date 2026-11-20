@@ -1684,7 +1684,7 @@ const PT: Strings = Strings {
     target_block: "Zona do bloqueio",
     last_events: "Últimos eventos",
     stats: "Estatísticas",
-    swap_side: "Outra equipa",
+    swap_side: "Outra equipe",
     this_set: "Este set",
     whole_match: "Partida",
     side_out: "Side out",
