@@ -21,3 +21,9 @@ rustflags = ["-C", "target-feature=+crt-static"]
 
 [env]
 CXXSTDLIB_x86_64_pc_windows_gnu = ""
+
+# The first HTTP client of reqwest takes ~8 s on macOS looking for the proxy
+# of the system: the tests of the background upload (`mobile`) went over their
+# 10 s with the workspace under load. The variable skips that look (see
+# `http_client`); builds for users don't read this file's `[env]`.
+SCOUT4ALL_NO_SYSTEM_PROXY = "1"

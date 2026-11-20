@@ -120,8 +120,16 @@ fn generate_upload_id(team_id: Uuid, match_id: &str) -> Uuid {
 
 // the render free plan stops the API when idle: the first request can wait
 // for it to start again. The user agent tells the app version in the API log
+//
+// `SCOUT4ALL_NO_SYSTEM_PROXY` skips the look for the proxy of the system, which
+// on macOS takes ~8 s at the first client: set by `.cargo/config.toml` for
+// the tests and the runs of the developers, never in a build for users
 fn http_client() -> Result<Client, AppError> {
-    tls_roots(Client::builder())
+    let builder = tls_roots(Client::builder());
+    match std::env::var_os("SCOUT4ALL_NO_SYSTEM_PROXY") {
+        Some(_) => builder.no_proxy(),
+        None => builder,
+    }
         .user_agent(concat!("scout4all/", env!("CARGO_PKG_VERSION")))
         .timeout(Duration::from_secs(120))
         .build()
