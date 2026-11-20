@@ -443,15 +443,18 @@ fn measure_scouting(dir: &Path) -> R<Vec<(String, f64)>> {
             Ok::<_, String>(sc.state()).map(|_| ())
         })?,
         time("stats(set)", ACTIONS, || {
-            sc.stats(StatsScope::Set { number: set }).map(|_| ())
+            sc.stats(StatsScope::Set { number: set }, DetailFilter::default())
+                .map(|_| ())
         })?,
         time("stats(match)", ACTIONS, || {
-            sc.stats(StatsScope::Match).map(|_| ())
+            sc.stats(StatsScope::Match, DetailFilter::default())
+                .map(|_| ())
         })?,
         // what the desktop reads after each key
         time("desktop refresh", ACTIONS, || {
             let _ = (sc.state(), sc.available_events(), sc.available_evals());
-            sc.stats(StatsScope::Set { number: set }).map(|_| ())
+            sc.stats(StatsScope::Set { number: set }, DetailFilter::default())
+                .map(|_| ())
         })?,
     ];
     // undo goes back to the evaluation of the last event, choosing it

@@ -1801,6 +1801,12 @@ pub struct LiveStats {
     pub opponent: String,
     /// the six rotations, in order, played or not
     pub rotations: Vec<RotationStats>,
+    /// what the figures above are narrowed to (not the trend, nor the
+    /// points: those are of every rally)
+    pub filter: DetailFilter,
+    /// the rotations and the phases to narrow them to
+    pub rotation_choices: Vec<RotationChoice>,
+    pub phase_choices: Vec<PhaseChoice>,
 }
 
 /// The phases won in a rotation, and all its rallies.
@@ -2542,8 +2548,8 @@ impl Scouting {
     }
 
     /// The statistics of a set of the match so far, or of all of them,
-    /// with their trend rally by rally.
-    pub fn stats(&self, scope: StatsScope) -> Result<LiveStats, MobileError> {
+    /// with their trend rally by rally, the figures narrowed by the filter.
+    pub fn stats(&self, scope: StatsScope, filter: DetailFilter) -> Result<LiveStats, MobileError> {
         let session = self.session();
         let current_match = session.current_match();
         live_stats(
@@ -2552,12 +2558,17 @@ impl Scouting {
             current_match.max_substitutions,
             (&current_match.team, &current_match.opponent),
             self.labels,
+            filter,
         )
     }
 
     /// The same for B of a match scouted on both sides: its sets as B sees
     /// them, B's team first. `None` scouting only A.
-    pub fn stats_of_b(&self, scope: StatsScope) -> Result<Option<LiveStats>, MobileError> {
+    pub fn stats_of_b(
+        &self,
+        scope: StatsScope,
+        filter: DetailFilter,
+    ) -> Result<Option<LiveStats>, MobileError> {
         let session = self.session();
         let Some(sets) = session.sets_of_b() else {
             return Ok(None);
@@ -2572,6 +2583,7 @@ impl Scouting {
             current_match.max_substitutions,
             (team, &current_match.team.name),
             self.labels,
+            filter,
         )
         .map(Some)
     }
@@ -2633,17 +2645,19 @@ fn live_stats(
     max_substitutions: u8,
     (team, opponent): (&TeamEntry, &str),
     labels: &Labels,
+    filter: DetailFilter,
 ) -> Result<LiveStats, MobileError> {
     let stats = stats_of(&in_scope(all, scope), max_substitutions)?;
     let (trend, points) = trend_lines(all, max_substitutions, team, labels)?;
     Ok(LiveStats {
         scope,
+        filter: filter.clone(),
         sets: all.iter().map(|s| s.set_number).collect(),
         trend,
         points,
         team_name: team.name.clone(),
         opponent: opponent.to_string(),
-        ..summary(&stats, &StatsFilter::default(), team, labels)
+        ..summary(&stats, &narrowed(&filter)?, team, labels)
     })
 }
 
@@ -2750,7 +2764,31 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
                 break_points: phase(r.break_points, Some(Measure::BreakPoint)),
             })
             .collect(),
+        filter: DetailFilter::default(),
+        rotation_choices: rotation_choices(labels),
+        phase_choices: phase_choices(labels),
     }
+}
+
+/// The rotations to narrow the figures to, the six of them.
+fn rotation_choices(labels: &Labels) -> Vec<RotationChoice> {
+    (0..6)
+        .map(|r| RotationChoice {
+            value: r,
+            name: rotation_name(r, labels),
+        })
+        .collect()
+}
+
+/// The phases to narrow the figures to.
+fn phase_choices(labels: &Labels) -> Vec<PhaseChoice> {
+    [PhaseEnum::SideOut, PhaseEnum::Break]
+        .into_iter()
+        .map(|p| PhaseChoice {
+            value: p,
+            name: p.friendly_name(labels).to_string(),
+        })
+        .collect()
 }
 
 /// The sets of the scope, among the sets of the match so far.
@@ -2972,19 +3010,8 @@ fn detail_of(
             })
             .collect(),
         players,
-        rotations: (0..6)
-            .map(|r| RotationChoice {
-                value: r,
-                name: rotation_name(r, labels),
-            })
-            .collect(),
-        phases: [PhaseEnum::SideOut, PhaseEnum::Break]
-            .into_iter()
-            .map(|p| PhaseChoice {
-                value: p,
-                name: p.friendly_name(labels).to_string(),
-            })
-            .collect(),
+        rotations: rotation_choices(labels),
+        phases: phase_choices(labels),
         fundamental,
         freeballs,
     })
@@ -4059,6 +4086,7 @@ impl Scout4All {
         match_id: String,
         side: MatchSide,
         scope: StatsScope,
+        filter: DetailFilter,
     ) -> Result<LiveStats, MobileError> {
         let m = self.read_match_of(&team_id, &match_id, side)?;
         let mut sets: Vec<&SetEntry> = m.sets.iter().collect();
@@ -4069,6 +4097,7 @@ impl Scout4All {
             m.max_substitutions,
             (&m.team, &m.opponent),
             self.language.labels(),
+            filter,
         )
     }
 
@@ -8661,7 +8690,9 @@ mod tests {
                 .unwrap()
         };
 
-        let set = scouting.stats(StatsScope::Set { number: 2 }).unwrap();
+        let set = scouting
+            .stats(StatsScope::Set { number: 2 }, DetailFilter::default())
+            .unwrap();
         assert_eq!(set.scope, StatsScope::Set { number: 2 });
         assert_eq!(set.sets, vec![1, 2]);
         assert_eq!(
@@ -8788,7 +8819,9 @@ mod tests {
         );
         assert_eq!(line(&set, Series::SideOut).sets[0].values, vec![None; 25]);
 
-        let first = scouting.stats(StatsScope::Set { number: 1 }).unwrap();
+        let first = scouting
+            .stats(StatsScope::Set { number: 1 }, DetailFilter::default())
+            .unwrap();
         assert_eq!(serve(&first), ("battuta".into(), 25, Some(100.0), 25, 0));
         assert_eq!(first.aces, 25);
         assert_eq!(phase(&first.break_points), Some((25, 25)));
@@ -8799,7 +8832,9 @@ mod tests {
         assert_eq!(first.points, set.points);
 
         // the match: the trend goes on across the sets
-        let all = scouting.stats(StatsScope::Match).unwrap();
+        let all = scouting
+            .stats(StatsScope::Match, DetailFilter::default())
+            .unwrap();
         assert_eq!(serve(&all).1, 27);
         assert_eq!(serve(&all).3, 25);
         assert_eq!(all.aces, 25);
@@ -8807,7 +8842,9 @@ mod tests {
         assert_eq!(all.trend, set.trend);
 
         // a set not played yet: nothing
-        let none = scouting.stats(StatsScope::Set { number: 3 }).unwrap();
+        let none = scouting
+            .stats(StatsScope::Set { number: 3 }, DetailFilter::default())
+            .unwrap();
         assert!(
             none.fundamentals
                 .iter()
@@ -8818,8 +8855,14 @@ mod tests {
 
         // from the page of the match, the same as while scouting
         let saved = |scope| {
-            app.match_stats(team.clone(), m.clone(), MatchSide::A, scope)
-                .unwrap()
+            app.match_stats(
+                team.clone(),
+                m.clone(),
+                MatchSide::A,
+                scope,
+                DetailFilter::default(),
+            )
+            .unwrap()
         };
         assert_eq!(saved(StatsScope::Set { number: 2 }), set);
         assert_eq!(saved(StatsScope::Set { number: 1 }), first);
@@ -9248,7 +9291,10 @@ mod tests {
         // the phases of each rotation: the 25 aces and the first error in
         // break in the first, their error in side out; the next serve
         // error in break in the rotation after
-        let rotations = scouting.stats(StatsScope::Match).unwrap().rotations;
+        let rotations = scouting
+            .stats(StatsScope::Match, DetailFilter::default())
+            .unwrap()
+            .rotations;
         let won = |p: &Option<PhaseStats>| p.as_ref().map(|p| (p.won, p.rallies));
         let played: Vec<_> = rotations
             .iter()
@@ -9284,6 +9330,67 @@ mod tests {
                 .iter()
                 .all(|r| r.total.as_ref().is_none_or(|t| t.grade.is_none()))
         );
+
+        // the summary narrowed by the phase and the rotation agrees with
+        // the detail of the fundamental, and says what it is narrowed to
+        let serves = |live: &LiveStats| {
+            live.fundamentals
+                .iter()
+                .find(|f| f.event == EventTypeEnum::S)
+                .map(|f| f.total)
+        };
+        let filters = [
+            DetailFilter {
+                phase: Some(PhaseEnum::Break),
+                ..DetailFilter::default()
+            },
+            DetailFilter {
+                phase: Some(PhaseEnum::SideOut),
+                ..DetailFilter::default()
+            },
+            DetailFilter {
+                rotations: vec![0],
+                ..DetailFilter::default()
+            },
+            DetailFilter {
+                rotations: vec![1],
+                phase: Some(PhaseEnum::Break),
+                ..DetailFilter::default()
+            },
+        ];
+        let everything = scouting
+            .stats(StatsScope::Match, DetailFilter::default())
+            .unwrap();
+        assert_eq!(everything.filter, DetailFilter::default());
+        assert_eq!(
+            (
+                everything.rotation_choices.len(),
+                everything.phase_choices.len()
+            ),
+            (6, 2)
+        );
+        for filter in filters.clone() {
+            let live = scouting.stats(StatsScope::Match, filter.clone()).unwrap();
+            let detail = scouting
+                .detail(StatsScope::Match, EventTypeEnum::S, filter.clone())
+                .unwrap();
+            assert_eq!(live.filter, filter);
+            assert_eq!(
+                serves(&live),
+                detail.fundamental.as_ref().map(|f| f.total),
+                "{filter:?}"
+            );
+        }
+        let side_out = scouting
+            .stats(StatsScope::Match, filters[1].clone())
+            .unwrap();
+        assert!(side_out.break_points.is_none() && side_out.side_out.is_some());
+        let first = scouting
+            .stats(StatsScope::Match, filters[2].clone())
+            .unwrap();
+        // the table of the rotations stays the one of every rotation
+        assert_eq!(first.rotations, everything.rotations);
+        assert!(serves(&first) < serves(&everything));
     }
 
     #[test]
@@ -9393,7 +9500,13 @@ mod tests {
         let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let stats = app
-            .match_stats(team, m, MatchSide::A, StatsScope::Match)
+            .match_stats(
+                team,
+                m,
+                MatchSide::A,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
             .unwrap();
         assert!(stats.sets.is_empty());
         assert!(stats.fundamentals.iter().all(|f| f.total == 0));
@@ -9974,8 +10087,14 @@ mod tests {
                 .both_sides
         );
         let stats = |side| {
-            app.match_stats(team.clone(), m.clone(), side, StatsScope::Match)
-                .unwrap()
+            app.match_stats(
+                team.clone(),
+                m.clone(),
+                side,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
+            .unwrap()
         };
         let (a, b) = (stats(MatchSide::A), stats(MatchSide::B));
         assert_eq!(b.sets, a.sets);
@@ -10073,6 +10192,7 @@ mod tests {
                 imported.match_id.clone(),
                 MatchSide::A,
                 StatsScope::Match,
+                DetailFilter::default(),
             )
             .unwrap();
         assert_eq!(ours.summary.aces, a.aces);
@@ -10089,7 +10209,13 @@ mod tests {
         assert_eq!(of_b.matches.len(), 1);
         assert_eq!(of_b.matches[0].id, imported.match_id);
         let b = app
-            .match_stats(team, imported.match_id, MatchSide::B, StatsScope::Match)
+            .match_stats(
+                team,
+                imported.match_id,
+                MatchSide::B,
+                StatsScope::Match,
+                DetailFilter::default(),
+            )
             .unwrap();
         assert_eq!(of_b.summary.aces, b.aces);
         assert_eq!(of_b.summary.aces_against, b.aces_against);
@@ -10111,7 +10237,13 @@ mod tests {
                 .unwrap()
                 .both_sides
         );
-        let read = app.match_stats(team, m, MatchSide::B, StatsScope::Match);
+        let read = app.match_stats(
+            team,
+            m,
+            MatchSide::B,
+            StatsScope::Match,
+            DetailFilter::default(),
+        );
         assert!(
             matches!(&read, Err(MobileError::Failed { reason }) if reason == "this match is scouted on one side only"),
             "{read:?}"

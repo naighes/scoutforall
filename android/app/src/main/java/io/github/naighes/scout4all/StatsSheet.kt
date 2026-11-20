@@ -183,6 +183,8 @@ fun StatsSheet(
     compare: Boolean = false,
     statsOfB: LiveStats? = null,
     onCompare: (StatsScope) -> Unit = {},
+    // the rotation and the phase the figures are narrowed to
+    onFilter: (StatsScope, DetailFilter) -> Unit = { _, _ -> },
 ) {
     val sheet = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     LaunchedEffect(Unit) { onScope(StatsScope.Set(currentSet.toUByte())) }
@@ -222,8 +224,8 @@ fun StatsSheet(
                         }
                     }
                     when {
-                        compare -> Compared(stats, statsOfB, onScope)
-                        else -> StatsPages(stats, onScope, loadDetail, side = sideB)
+                        compare -> Compared(stats, statsOfB, onScope, onFilter)
+                        else -> StatsPages(stats, onScope, loadDetail, side = sideB, onFilter = onFilter)
                     }
                 }
             }
@@ -234,7 +236,12 @@ fun StatsSheet(
 /** The two sides side by side, the scope on top: B's figures are read
  * after A's. */
 @Composable
-private fun Compared(a: LiveStats, b: LiveStats?, onScope: (StatsScope) -> Unit) {
+private fun Compared(
+    a: LiveStats,
+    b: LiveStats?,
+    onScope: (StatsScope) -> Unit,
+    onFilter: (StatsScope, DetailFilter) -> Unit,
+) {
     // the figures side by side, or the trend of both on one chart
     var trend by remember { mutableStateOf(false) }
     Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -248,6 +255,7 @@ private fun Compared(a: LiveStats, b: LiveStats?, onScope: (StatsScope) -> Unit)
     }
     // the trend shows every set
     if (!trend) Scopes(a, onScope)
+    if (!trend) Box(Modifier.padding(horizontal = 16.dp)) { Narrowing(a) { onFilter(a.scope, it) } }
     // B's of another scope are the previous ones: not shown
     when (val shown = b?.takeIf { it.scope == a.scope }) {
         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
@@ -290,6 +298,9 @@ fun StatsPages(
     watch: ((StatsScope) -> Watch)? = null,
     // the side the pages are of: what is read again when it changes
     side: Boolean = false,
+    // the rotation and the phase the figures are narrowed to: the detail
+    // has the same
+    onFilter: (StatsScope, DetailFilter) -> Unit = { _, _ -> },
 ) {
     val pages = StatsPage.entries
     val pager = rememberPagerState(pageCount = { pages.size })
@@ -303,6 +314,10 @@ fun StatsPages(
     // the choices of the filters on the situation of the game
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val situation by produceState<SituationChoices?>(null) { value = app.core { it.situationChoices() } }
+    val narrow = { f: DetailFilter ->
+        query = query.copy(filter = query.filter.copy(phase = f.phase, rotations = f.rotations))
+        onFilter(stats.scope, f)
+    }
     if (pages[pager.currentPage] != StatsPage.Trend) Scopes(stats, onScope)
     PrimaryScrollableTabRow(selectedTabIndex = pager.currentPage, edgePadding = 0.dp) {
         pages.forEachIndexed { i, page ->
@@ -319,11 +334,27 @@ fun StatsPages(
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             when (pages[i]) {
-                StatsPage.Summary -> Summary(stats)
-                StatsPage.Distribution -> Distribution(stats)
-                StatsPage.Errors -> Errors(stats)
+                StatsPage.Summary -> {
+                    Narrowing(stats, narrow)
+                    Summary(stats)
+                }
+                StatsPage.Distribution -> {
+                    Narrowing(stats, narrow)
+                    Distribution(stats)
+                }
+                StatsPage.Errors -> {
+                    Narrowing(stats, narrow)
+                    Errors(stats)
+                }
                 StatsPage.Trend -> Trend(stats)
-                StatsPage.Detail -> Detail(detail, query, situation, watch = watch?.invoke(stats.scope)) { query = it }
+                StatsPage.Detail -> Detail(detail, query, situation, watch = watch?.invoke(stats.scope)) { asked ->
+                    val f = asked.filter
+                    // the same rotation and phase on every page
+                    if (f.phase != query.filter.phase || !f.rotations.contentEquals(query.filter.rotations)) {
+                        onFilter(stats.scope, DetailFilter(phase = f.phase, rotations = f.rotations))
+                    }
+                    query = asked
+                }
             }
         }
     }

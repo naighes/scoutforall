@@ -294,10 +294,11 @@ class ScoutingViewModel(
         val s = scouting ?: return
         val ofB = statsOfB
         val compare = statsCompare
+        val filter = statsFilter
         viewModelScope.launch {
             mutableStats.value = app.onCore {
                 try {
-                    if (ofB && !compare) s.statsOfB(scope) else s.stats(scope)
+                    if (ofB && !compare) s.statsOfB(scope, filter) else s.stats(scope, filter)
                 } catch (e: MobileException) {
                     null
                 }
@@ -306,7 +307,7 @@ class ScoutingViewModel(
             mutableStatsOfB.value = when {
                 compare -> app.onCore {
                     try {
-                        s.statsOfB(scope)
+                        s.statsOfB(scope, filter)
                     } catch (e: MobileException) {
                         null
                     }
@@ -314,6 +315,14 @@ class ScoutingViewModel(
                 else -> null
             }
         }
+    }
+
+    /** The rotation and the phase the figures are narrowed to. */
+    private var statsFilter = DetailFilter(null)
+
+    fun statsNarrowed(scope: StatsScope, filter: DetailFilter) {
+        statsFilter = filter
+        stats(scope)
     }
 
     /** The statistics of B, only while the comparison is shown. */
@@ -571,6 +580,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                     compare = model.statsCompare,
                     statsOfB = model.statsOfBCompared.collectAsState().value,
                     onCompare = model::statsComparison,
+                    onFilter = model::statsNarrowed,
                     onDismiss = { statsOpen = false },
                 )
             }

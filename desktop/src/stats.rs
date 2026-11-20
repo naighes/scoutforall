@@ -710,6 +710,7 @@ impl StatsScreen {
             match_id.clone(),
             MatchSide::A,
             StatsScope::Match,
+            DetailFilter::default(),
         )?;
         // the files of its video, to watch the actions
         let has_video = core
@@ -863,9 +864,13 @@ impl StatsScreen {
         let team = self.team_id.clone();
         match self.source.clone() {
             Source::Match(m) => {
-                let live = self
-                    .core
-                    .match_stats(team.clone(), m.clone(), self.side, self.scope);
+                let live = self.core.match_stats(
+                    team.clone(),
+                    m.clone(),
+                    self.side,
+                    self.scope,
+                    self.filter.clone(),
+                );
                 let m_id = m.clone();
                 let detail = self.core.match_detail(
                     team,
@@ -882,7 +887,13 @@ impl StatsScreen {
                 self.versus = match self.compare {
                     true => self
                         .core
-                        .match_stats(self.team_id.clone(), m_id, MatchSide::B, self.scope)
+                        .match_stats(
+                            self.team_id.clone(),
+                            m_id,
+                            MatchSide::B,
+                            self.scope,
+                            self.filter.clone(),
+                        )
                         .ok(),
                     false => None,
                 };
@@ -1207,7 +1218,7 @@ impl StatsScreen {
         let competition = self.has_competitions().then_some(Filter::Competition);
         let opponent = (self.is_team() && !self.opponents.is_empty()).then_some(Filter::Opponent);
         let first: Vec<Filter> = match (self.is_team(), self.current()) {
-            (false, Page::Summary) => return vec![Filter::Scope],
+            (false, Page::Summary) => return vec![Filter::Scope, Filter::Rotation, Filter::Phase],
             (false, Page::Trend) => return vec![Filter::Series, Filter::Mode],
             (false, Page::Detail) => vec![Filter::Scope, Filter::Event],
             (true, Page::Summary) => vec![Filter::Period],
@@ -3958,6 +3969,7 @@ pub(crate) mod tests {
                 imported.match_id.clone(),
                 MatchSide::A,
                 StatsScope::Match,
+                DetailFilter::default(),
             )
             .unwrap();
         let b = core
@@ -3966,6 +3978,7 @@ pub(crate) mod tests {
                 imported.match_id,
                 MatchSide::B,
                 StatsScope::Match,
+                DetailFilter::default(),
             )
             .unwrap();
         let mut screen = StatsScreen::team(core, imported.team_id, s).unwrap();
@@ -4267,7 +4280,18 @@ pub(crate) mod tests {
             None => unreachable!("the match of Arezzo"),
         };
         let mut screen = StatsScreen::new(core, team, first).unwrap();
-        assert_eq!(screen.filters(), [Filter::Scope]);
+        assert_eq!(
+            screen.filters(),
+            [Filter::Scope, Filter::Rotation, Filter::Phase]
+        );
+        // the summary narrowed to a phase: the other one is left empty,
+        // and the detail keeps the choice
+        screen.update(Message::Phase(Some(PhaseEnum::SideOut)));
+        let live = screen.live.as_ref().unwrap();
+        assert_eq!(live.filter.phase, Some(PhaseEnum::SideOut));
+        assert!(live.break_points.is_none());
+        screen.update(Message::Phase(None));
+        assert!(screen.live.as_ref().unwrap().break_points.is_some());
         screen.update(Message::Page(2));
         assert!(screen.filters().contains(&Filter::Reception));
         let total = |screen: &StatsScreen| {
@@ -4461,12 +4485,18 @@ pub(crate) mod tests {
         };
         let one = import(DvwOpponent::Name);
         let screen = StatsScreen::new(core.clone(), one.team_id, one.match_id).unwrap();
-        assert_eq!(screen.filters(), [Filter::Scope]);
+        assert_eq!(
+            screen.filters(),
+            [Filter::Scope, Filter::Rotation, Filter::Phase]
+        );
 
         let both = import(DvwOpponent::NewTeam);
         let mut screen =
             StatsScreen::new(core.clone(), both.team_id.clone(), both.match_id.clone()).unwrap();
-        assert_eq!(screen.filters(), [Filter::Side, Filter::Scope]);
+        assert_eq!(
+            screen.filters(),
+            [Filter::Side, Filter::Scope, Filter::Rotation, Filter::Phase]
+        );
         assert_eq!(screen.title(), "Home – Visiting");
         let aces = |screen: &StatsScreen| screen.live.as_ref().map(|l| (l.aces, l.aces_against));
         let (a_aces, a_against) = aces(&screen).unwrap_or_default();

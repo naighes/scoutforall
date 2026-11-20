@@ -24,7 +24,7 @@ use {
                 CELLS, CourtCell, CourtSide, CourtTarget, CourtZoneEnum, Direction, ServeStartEnum,
                 TargetKind,
             },
-            enums::{EvalEnum, EventTypeEnum, TeamSideEnum},
+            enums::{EvalEnum, EventTypeEnum, PhaseEnum, TeamSideEnum},
             flags::BlockersEnum,
             technique::TechniqueEnum,
         },
@@ -35,8 +35,8 @@ use {
         shirt::{self, Pick},
     },
     scout4all_mobile::{
-        BlockersChoice, EvalChoice, EventChoice, LiveStats, MobileError, Scouting, ScoutingState,
-        ServeStartChoice, StatsScope, TechniqueChoice,
+        BlockersChoice, DetailFilter, EvalChoice, EventChoice, LiveStats, MobileError, Scouting,
+        ScoutingState, ServeStartChoice, StatsScope, TechniqueChoice,
     },
     std::sync::Arc,
     tokio::runtime::Runtime,
@@ -66,6 +66,10 @@ pub enum Message {
     Court(Touch),
     Undo,
     Scope(bool),
+    /// the statistics narrowed to the rotations, none for all of them
+    Rotations(Vec<u8>),
+    /// the statistics narrowed to a phase, none for both
+    Phase(Option<PhaseEnum>),
     /// the statistics of both sides side by side, or of one
     StatsView(StatsView),
     Recent(bool),
@@ -132,6 +136,8 @@ pub struct ScoutingScreen {
     set_over: bool,
     show_stats: bool,
     match_scope: bool,
+    /// what the statistics are narrowed to
+    filter: DetailFilter,
     stats_view: StatsView,
     recent: bool,
     series: usize,
@@ -152,7 +158,7 @@ impl ScoutingScreen {
             true => StatsView::Compare,
             false => StatsView::A,
         };
-        let snapshot = read(&scouting, false, stats_view);
+        let snapshot = read(&scouting, false, stats_view, DetailFilter::default());
         let trend = Trend::of_stats(snapshot.stats.as_ref(), 0, false);
         Self {
             team_id,
@@ -168,6 +174,7 @@ impl ScoutingScreen {
             set_over: false,
             show_stats: true,
             match_scope: false,
+            filter: DetailFilter::default(),
             stats_view,
             recent: false,
             series: 0,
@@ -183,7 +190,12 @@ impl ScoutingScreen {
 
     fn refresh(&mut self) {
         let started = std::time::Instant::now();
-        self.snapshot = read(&self.scouting, self.match_scope, self.stats_view);
+        self.snapshot = read(
+            &self.scouting,
+            self.match_scope,
+            self.stats_view,
+            self.filter.clone(),
+        );
         // the digits typed are for the players of this step only
         if !matches!(
             self.snapshot.state.step,
@@ -305,6 +317,14 @@ impl ScoutingScreen {
             }
             Message::Scope(m) => {
                 self.match_scope = m;
+                Outcome::Stay
+            }
+            Message::Rotations(rotations) => {
+                self.filter.rotations = rotations;
+                Outcome::Stay
+            }
+            Message::Phase(phase) => {
+                self.filter.phase = phase;
                 Outcome::Stay
             }
             Message::StatsView(v) => {
@@ -701,7 +721,7 @@ fn replacement_key(index: u8) -> String {
     }
 }
 
-fn read(scouting: &Scouting, match_scope: bool, view: StatsView) -> Snapshot {
+fn read(scouting: &Scouting, match_scope: bool, view: StatsView, filter: DetailFilter) -> Snapshot {
     let state = scouting.state();
     let (players, replacements) =
         scouting.with_session(|s, _| (s.player_choices(), s.replacement_choices()));
@@ -723,11 +743,11 @@ fn read(scouting: &Scouting, match_scope: bool, view: StatsView) -> Snapshot {
         target_told: scouting.target_told(),
         starts: scouting.serve_starts(),
         stats: match view {
-            StatsView::B => scouting.stats_of_b(scope).ok().flatten(),
-            StatsView::Compare | StatsView::A => scouting.stats(scope).ok(),
+            StatsView::B => scouting.stats_of_b(scope, filter.clone()).ok().flatten(),
+            StatsView::Compare | StatsView::A => scouting.stats(scope, filter.clone()).ok(),
         },
         versus: match view {
-            StatsView::Compare => scouting.stats_of_b(scope).ok().flatten(),
+            StatsView::Compare => scouting.stats_of_b(scope, filter).ok().flatten(),
             StatsView::A | StatsView::B => None,
         },
         state,
@@ -1660,6 +1680,65 @@ impl ScoutingScreen {
         .into()
     }
 
+    /// The phase and the rotations the statistics are narrowed to.
+    fn narrowing<'a>(
+        &'a self,
+        stats: &'a LiveStats,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let rotations = &self.filter.rotations;
+        let pills = |name: &'static str, pills: Vec<Element<'a, Message>>| {
+            row![small(name, c)]
+                .extend(pills)
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .wrap()
+                .vertical_spacing(4)
+        };
+        let phases = pills(
+            s.phase,
+            [ui::pill(
+                s.filter_all,
+                self.filter.phase.is_none(),
+                Some(Message::Phase(None)),
+                c,
+            )]
+            .into_iter()
+            .chain(stats.phase_choices.iter().map(|p| {
+                ui::pill(
+                    &ui::capitalized(&p.name),
+                    self.filter.phase == Some(p.value),
+                    Some(Message::Phase(Some(p.value))),
+                    c,
+                )
+            }))
+            .collect(),
+        );
+        let turns = pills(
+            s.rotation,
+            [ui::pill(
+                s.filter_all,
+                rotations.is_empty(),
+                Some(Message::Rotations(vec![])),
+                c,
+            )]
+            .into_iter()
+            .chain(stats.rotation_choices.iter().map(|r| {
+                let chosen = rotations.contains(&r.value);
+                let next = rotations
+                    .iter()
+                    .copied()
+                    .filter(|x| *x != r.value)
+                    .chain((!chosen).then_some(r.value))
+                    .collect();
+                ui::pill(&r.name, chosen, Some(Message::Rotations(next)), c)
+            }))
+            .collect(),
+        );
+        column![phases, turns].spacing(4).into()
+    }
+
     fn stats<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let scopes = container(
             row![
@@ -1683,6 +1762,12 @@ impl ScoutingScreen {
         let scopes: Element<'a, Message> = match self.snapshot.state.both {
             true => column![scopes, self.views(s, c)].spacing(6).into(),
             false => scopes.into(),
+        };
+        let scopes: Element<'a, Message> = match &self.snapshot.stats {
+            Some(stats) => column![scopes, self.narrowing(stats, s, c)]
+                .spacing(6)
+                .into(),
+            None => scopes,
         };
         let Some(stats) = &self.snapshot.stats else {
             return ui::panel(Some(s.stats), scopes, c);
@@ -2083,6 +2168,31 @@ pub(crate) mod tests {
         }
         core.start_set_both(start, of_b).unwrap();
         (team, m)
+    }
+
+    /// The statistics narrowed to a phase and to rotations, as the
+    /// detail is: the figures of the side on screen and of the other.
+    #[test]
+    fn the_statistics_are_narrowed_to_a_phase_and_a_rotation() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = both_sides_started(&core);
+        let scouting = core
+            .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
+            .unwrap();
+        let mut screen = ScoutingScreen::new(scouting, ScoutingKeys::default(), team, m);
+        let stats = |screen: &ScoutingScreen| screen.snapshot.stats.clone().unwrap();
+        assert_eq!(stats(&screen).filter, DetailFilter::default());
+        screen.update(Message::Phase(Some(PhaseEnum::SideOut)));
+        for live in [stats(&screen), screen.snapshot.versus.clone().unwrap()] {
+            assert_eq!(live.filter.phase, Some(PhaseEnum::SideOut));
+            assert!(live.break_points.is_none());
+        }
+        screen.update(Message::Rotations(vec![2, 3]));
+        assert_eq!(stats(&screen).filter.rotations, vec![2, 3]);
+        screen.update(Message::Phase(None));
+        screen.update(Message::Rotations(vec![]));
+        assert_eq!(stats(&screen).filter, DetailFilter::default());
     }
 
     /// Both sides scouted: one side on screen, F5 swaps it, the choices

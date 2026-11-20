@@ -79,7 +79,13 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
                     let json = serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?;
                     names.write(&folder.join(format!("{name}.report.json")), &json)?;
                     let live = app
-                        .match_stats(id.clone(), m.id.clone(), MatchSide::A, StatsScope::Match)
+                        .match_stats(
+                            id.clone(),
+                            m.id.clone(),
+                            MatchSide::A,
+                            StatsScope::Match,
+                            DetailFilter::default(),
+                        )
                         .map_err(|e| e.to_string())?;
                     names.write(
                         &folder.join(format!("{name}.live.txt")),

@@ -46,6 +46,9 @@ import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.DetailFilter
 import io.github.naighes.scout4all.core.DigsEnum
 import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.LiveStats
+import io.github.naighes.scout4all.core.PhaseChoice
+import io.github.naighes.scout4all.core.RotationChoice
 import io.github.naighes.scout4all.core.SituationChoices
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -171,19 +174,7 @@ fun DetailFilters(
             detail.players.map { "${it.number} ${it.name}" to it.id },
             { chosen -> detail.players.filter { it.id in chosen }.joinToString(", ") { it.number.toString() } },
         ) { onFilter(filter.copy(players = it)) }
-        ManyFilterMenu(
-            stringResource(R.string.filter_rotation),
-            // a byte array in the core's record: the rotations 0 to 5
-            filter.rotations.map { it.toUByte() },
-            emptyList(),
-            detail.rotations.map { it.name to it.value },
-            { chosen -> detail.rotations.filter { it.value in chosen }.joinToString(" ") { it.name } },
-        ) { onFilter(filter.copy(rotations = it.map(UByte::toByte).toByteArray())) }
-        FilterMenu(
-            stringResource(R.string.filter_phase),
-            detail.phases.find { it.value == filter.phase }?.name,
-            detail.phases.map { it.name to it.value },
-        ) { onFilter(filter.copy(phase = it)) }
+        NarrowMenus(detail.rotations, detail.phases, filter, onFilter)
         if (event == EventTypeEnum.D) {
             // all of them, the digs that aren't covers, the covers
             val digs = listOf(stringResource(R.string.digs_defense) to DigsEnum.DEFENSE, stringResource(R.string.digs_cover) to DigsEnum.COVER)
@@ -259,6 +250,39 @@ private fun evalGroups(situation: SituationChoices): List<Pair<String, List<Eval
 /** The symbols of the evaluations chosen, in their order. */
 private fun symbolsOf(situation: SituationChoices, chosen: List<EvalEnum>): String =
     situation.symbols.filter { it.value in chosen }.joinToString("") { it.symbol }
+
+/** The rotation and the phase the figures are narrowed to, as two chips:
+ * to put in the line of the filters. */
+@Composable
+fun NarrowMenus(
+    rotations: List<RotationChoice>,
+    phases: List<PhaseChoice>,
+    filter: DetailFilter,
+    onFilter: (DetailFilter) -> Unit,
+) {
+    ManyFilterMenu(
+        stringResource(R.string.filter_rotation),
+        // a byte array in the core's record: the rotations 0 to 5
+        filter.rotations.map { it.toUByte() },
+        emptyList(),
+        rotations.map { it.name to it.value },
+        { chosen -> rotations.filter { it.value in chosen }.joinToString(" ") { it.name } },
+    ) { onFilter(filter.copy(rotations = it.map(UByte::toByte).toByteArray())) }
+    FilterMenu(
+        stringResource(R.string.filter_phase),
+        phases.find { it.value == filter.phase }?.name,
+        phases.map { it.name to it.value },
+    ) { onFilter(filter.copy(phase = it)) }
+}
+
+/** What the pages of the summary, the distribution and the errors are
+ * narrowed to: the rotation and the phase, as on the detail. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun Narrowing(stats: LiveStats, onFilter: (DetailFilter) -> Unit) =
+    FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        NarrowMenus(stats.rotationChoices, stats.phaseChoices, stats.filter, onFilter)
+    }
 
 /** A chip naming the filter, or what's chosen; a menu to choose more of
  * them: "all", the groups (just them), each one on or off. */

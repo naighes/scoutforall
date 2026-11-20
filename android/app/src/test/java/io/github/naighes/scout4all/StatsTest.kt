@@ -298,3 +298,43 @@ class DigsTest {
         rule.onNode(digs).assertDoesNotExist()
     }
 }
+
+/** The summary, the distribution and the errors narrowed to a phase or a
+ * rotation as the detail is; the detail keeps the same choice. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+class NarrowedSummaryTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun thePhaseNarrowsEveryPage() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        // two aces: serves, so in break
+        serve(team, match, EvalEnum.PERFECT, EvalEnum.PERFECT)
+        rule.setContent { Scout4AllTheme { MatchStatsScreen(team, match, null, onBack = {}) } }
+        rule.waitForText(string(R.string.stats_summary))
+        val aces = { n: String -> rule.onAllNodes(hasText("$n – 0")).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitFor { aces("2") }
+        // the filters are on the three pages
+        listOf(R.string.stats_summary, R.string.stats_distribution, R.string.stats_errors).forEach { page ->
+            rule.onNode(hasText(string(page)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+            rule.waitForIdle()
+            rule.onNode(hasText(string(R.string.filter_rotation)) and hasClickAction()).assertExists()
+            rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).assertExists()
+        }
+        rule.onNode(hasText(string(R.string.stats_summary)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        // side out only: the aces are gone
+        rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText("side-out", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { aces("0") }
+        // the detail has the same phase
+        rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { rule.onAllNodes(hasText("side-out", ignoreCase = true) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).assertDoesNotExist()
+        // and back to all of them: the aces are there again
+        rule.onNode(hasText(string(R.string.stats_summary)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText("side-out", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText(string(R.string.filter_all)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { aces("2") }
+    }
+}
