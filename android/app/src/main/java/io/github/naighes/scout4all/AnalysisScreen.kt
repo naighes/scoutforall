@@ -69,6 +69,7 @@ import io.github.naighes.scout4all.core.AnalysisPeriod
 import io.github.naighes.scout4all.core.CompetitionChoice
 import io.github.naighes.scout4all.core.MatchTrend
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.ScoutedOpponent
 import io.github.naighes.scout4all.core.TeamAnalysis
 import java.time.DateTimeException
@@ -111,6 +112,8 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     var query by remember { mutableStateOf(DetailQuery()) }
     // the opponent the analysis is seen from, none for the team itself
     var opponent by rememberSaveable { mutableStateOf<String?>(null) }
+    // the opponent and the team side by side, in their matches
+    var compare by rememberSaveable { mutableStateOf(false) }
     var ours by remember { mutableStateOf("") }
     var opponents by remember { mutableStateOf<List<ScoutedOpponent>>(emptyList()) }
     LaunchedEffect(teamId) {
@@ -135,8 +138,13 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     // the last one read stays while the next is
     var analysis by remember { mutableStateOf<TeamAnalysis?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(period, competition, query, opponent) {
+    // the team over the matches of the opponent, to put beside its own
+    var versus by remember { mutableStateOf<LiveStats?>(null) }
+    LaunchedEffect(period, competition, query, opponent, compare) {
         try {
+            versus = opponent?.takeIf { compare }?.let { o ->
+                app.core { it.analysisAgainst(teamId, o, period, competition, query.event, query.filter).summary }
+            }
             analysis = app.core {
                 opponent?.let { o -> it.opponentAnalysis(teamId, o, period, competition, query.event, query.filter) }
                     ?: it.teamAnalysis(teamId, period, competition, query.event, query.filter)
@@ -163,7 +171,8 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                 val pages = AnalysisPage.entries
                 PrimaryTabRow(selectedTabIndex = page) {
                     pages.forEachIndexed { i, p ->
-                        Tab(selected = page == i, onClick = { page = i }, text = { Text(stringResource(p.title)) })
+                        // only the summary compares the matches of two teams
+                        Tab(selected = page == i, onClick = { page = i; if (p != AnalysisPage.Summary) compare = false }, text = { Text(stringResource(p.title)) })
                     }
                 }
                 Column(
@@ -171,7 +180,17 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                 ) {
                     if (opponents.isNotEmpty()) {
-                        SeenFromChooser(ours, opponents, opponent) { opponent = it }
+                        SeenFromChooser(
+                            ours,
+                            opponents,
+                            opponent,
+                            compare,
+                            comparable = pages[page] == AnalysisPage.Summary,
+                            onCompare = { compare = true },
+                        ) {
+                            opponent = it
+                            compare = false
+                        }
                     }
                     // offered with more than one, or while one is chosen
                     if (a.competitions.size > 1 || competition != null) {
@@ -208,7 +227,10 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                             query.event.takeIf { pages[page] == AnalysisPage.Detail },
                         ) { query = query.copy(filter = it) }
                         when (pages[page]) {
-                            AnalysisPage.Summary -> {
+                            AnalysisPage.Summary -> if (compare) {
+                                versus?.let { Comparison(it, a.summary) }
+                                    ?: Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+                            } else {
                                 Summary(a.summary)
                                 Distribution(a.summary)
                                 Errors(a.summary)
@@ -259,13 +281,20 @@ private fun SeenFromChooser(
     ours: String,
     opponents: List<ScoutedOpponent>,
     chosen: String?,
+    compare: Boolean,
+    comparable: Boolean,
+    onCompare: () -> Unit,
     onChoose: (String?) -> Unit,
 ) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Text(stringResource(R.string.seen_from), style = MaterialTheme.typography.labelLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         FilterChip(selected = chosen == null, onClick = { onChoose(null) }, label = { Text(ours) })
         opponents.forEach {
-            FilterChip(selected = chosen == it.id, onClick = { onChoose(it.id) }, label = { Text(it.name) })
+            FilterChip(selected = chosen == it.id && !compare, onClick = { onChoose(it.id) }, label = { Text(it.name) })
+        }
+        // the opponent chosen and the team side by side, on the summary
+        if (chosen != null && comparable) {
+            FilterChip(selected = compare, onClick = onCompare, label = { Text(stringResource(R.string.compare)) })
         }
     }
 }

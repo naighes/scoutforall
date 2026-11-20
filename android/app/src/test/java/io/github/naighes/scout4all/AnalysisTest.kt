@@ -127,6 +127,27 @@ class AnalysisTest {
         rule.waitForText(string(R.string.matches_count, 1), substring = true)
     }
 
+    /** The opponent beside the team, in their matches: the chip is offered
+     * on the summary once an opponent is chosen, and shows both sides. */
+    @Test
+    fun theTeamAndTheOpponentSideBySide() {
+        val both = saveNationalTeam()
+        serve(both, startFirstSetBoth(both), EvalEnum.PERFECT)
+        rule.setContent { Scout4AllTheme { AnalysisScreen(both, onBack = {}) } }
+        rule.waitForText(string(R.string.seen_from))
+        // none until an opponent is chosen
+        rule.onAllNodesWithText(string(R.string.compare)).assertCountEquals(0)
+        val chip = { name: String -> rule.onNode(hasText(name) and hasClickAction()) }
+        chip("Arezzo").performClick()
+        rule.waitForText(string(R.string.compare))
+        chip(string(R.string.compare)).performClick()
+        rule.waitFor { runCatching { chip(string(R.string.compare)).assertIsSelected() }.isSuccess }
+        rule.waitForText(string(R.string.stats_errors))
+        // another page leaves the comparison
+        rule.onNode(hasText(string(R.string.stats_trend)) and hasClickAction()).performClick()
+        rule.waitFor { rule.onAllNodesWithText(string(R.string.compare)).fetchSemanticsNodes().isEmpty() }
+    }
+
     /** One competition alone: nothing to choose. */
     @Test
     fun oneCompetitionIsNotOffered() {
