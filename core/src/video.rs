@@ -100,6 +100,28 @@ impl VideoProfile {
             .map(|c| c.by_ms)
     }
 
+    /// The profile with its events as `moved` tells them: a reference
+    /// moved to `None` is left out, the anchor keeping its time.
+    pub fn with_events(&self, moved: impl Fn(EventRef) -> Option<EventRef>) -> VideoProfile {
+        VideoProfile {
+            anchor: self.anchor.as_ref().map(|a| Anchor {
+                event: a.event.and_then(&moved),
+                ..a.clone()
+            }),
+            corrections: self
+                .corrections
+                .iter()
+                .filter_map(|c| {
+                    moved(c.event).map(|event| Correction {
+                        event,
+                        by_ms: c.by_ms,
+                    })
+                })
+                .collect(),
+            ..self.clone()
+        }
+    }
+
     /// The event at `at_ms` in the video (`TimeEffect::of`): it alone put
     /// there, `placed_ms` being where the anchor puts it; none (not lined
     /// up): the video tied to it.

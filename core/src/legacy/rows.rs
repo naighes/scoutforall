@@ -21,9 +21,11 @@
 //!   number of the team, as for a player out of the roster.
 //! - Every player the match tells of (lineups, events) must be of the
 //!   team: the rows of the events refer to the persons.
-//! - The video of a match refers to its events by set and index: one not
-//!   among the events of the match (undone after the profile was saved)
-//!   didn't count there and isn't moved; the anchor keeps its time.
+//! - The video of a match refers to its events by set and index, read
+//!   as places among the translated events (`folder::read_video`): one
+//!   not among the events of the match (undone after the profile was
+//!   saved, or left out by the current rules) isn't moved; the anchor
+//!   keeps its time.
 
 use crate::{
     domain::{

@@ -4,7 +4,7 @@
 //! for what the older versions left out.
 
 use crate::{
-    domain::{Side, rules::translate},
+    domain::{Side, rules::translate_rows},
     errors::{AppError, IOError},
     logging::logger::log_error,
     shapes::{
@@ -65,6 +65,26 @@ pub(crate) fn set_file(name: &str) -> Option<(Option<u8>, &str)> {
 /// the scouting rules of those versions (v1): they're read as the current
 /// rules tell them (`rules::translate`), the files stay as they are.
 pub(crate) fn read_events(csv: &[u8]) -> Result<Vec<EventEntry>, AppError> {
+    read_rows(csv).map(|rows| rows.into_iter().flatten().collect())
+}
+
+/// The place among the events `read_events` reads of each row of the
+/// blob: `None` for a row the current rules leave out.
+pub(crate) fn event_places(csv: &[u8]) -> Result<Vec<Option<usize>>, AppError> {
+    read_rows(csv).map(|rows| {
+        rows.iter()
+            .scan(0, |next, row| {
+                let place = row.as_ref().map(|_| *next);
+                *next += usize::from(row.is_some());
+                Some(place)
+            })
+            .collect()
+    })
+}
+
+/// Each row of the blob as `read_events` reads it, in its place: `None`
+/// when the current rules leave it out.
+fn read_rows(csv: &[u8]) -> Result<Vec<Option<EventEntry>>, AppError> {
     let whole = whole_rows(csv);
     if whole.len() < csv.len() {
         log_error(&format!(
@@ -83,9 +103,9 @@ pub(crate) fn read_events(csv: &[u8]) -> Result<Vec<EventEntry>, AppError> {
         .collect::<Result<Vec<EventEntry>, csv::Error>>()
         .map_err(|e| AppError::IO(IOError::from(e)))?;
     let touches: Vec<(Side, EventEntry)> = events.into_iter().map(|e| (Side::A, e)).collect();
-    Ok(translate(Some(ScoutingRulesEnum::V1), &touches)
+    Ok(translate_rows(Some(ScoutingRulesEnum::V1), &touches)
         .into_iter()
-        .map(|(_, e)| e)
+        .map(|told| told.map(|(_, e)| e))
         .collect())
 }
 
