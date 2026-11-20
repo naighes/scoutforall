@@ -7,12 +7,11 @@
 //! after them must still fit, on both sides, and the set must end as it
 //! did.
 use crate::domain::Side;
-use crate::event_edit::{Draft, EditField, EventEditError};
+use crate::event_edit::{Correcting, Draft, EventEditError};
 use crate::rally;
 use crate::shapes::enums::{EvalEnum, EventTypeEnum, TeamSideEnum};
 use crate::shapes::set::SetEntry;
 use crate::shapes::snapshot::{EventEntry, Snapshot};
-use crate::shapes::technique::TechniqueEnum;
 
 type Touch = (Side, EventEntry);
 
@@ -78,29 +77,9 @@ impl TouchEdit {
         })
     }
 
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
     /// The side playing the touch.
     pub fn side(&self) -> Side {
         self.side
-    }
-
-    /// The touch as corrected so far.
-    pub fn event(&self) -> &EventEntry {
-        &self.draft.event
-    }
-
-    /// The side of the touch before it: the score, the rotation, the phase
-    /// as that side sees them.
-    pub fn before(&self) -> &Snapshot {
-        &self.draft.before
-    }
-
-    /// What of the touch can change (`Draft::fields`).
-    pub fn fields(&self) -> Vec<EditField> {
-        self.draft.fields()
     }
 
     /// The touches with `event` in place of the one corrected, and the
@@ -170,60 +149,6 @@ impl TouchEdit {
         self.resolved(event).is_some_and(|t| self.fits(&t))
     }
 
-    /// The types it can become: the ones the side could play at that point,
-    /// by the same player, with an evaluation that keeps the touches fit.
-    pub fn event_types(&self) -> Vec<EventTypeEnum> {
-        self.draft
-            .event_types()
-            .filter(|t| !self.fitting_evals(*t).is_empty())
-            .collect()
-    }
-
-    /// The evaluations of `event_type` the side offers at that point that
-    /// keep the touches fit: only none for a type having none, if it fits.
-    fn fitting_evals(&self, event_type: EventTypeEnum) -> Vec<Option<EvalEnum>> {
-        self.draft
-            .evals_of(event_type)
-            .into_iter()
-            .filter(|eval| self.valid(&self.draft.retyped(event_type, *eval)))
-            .collect()
-    }
-
-    /// The evaluations of its type that keep the touches fit, none for a
-    /// touch having none.
-    pub fn evals(&self) -> Vec<EvalEnum> {
-        self.fitting_evals(self.draft.event.event_type)
-            .into_iter()
-            .flatten()
-            .collect()
-    }
-
-    /// The sets and the serves, and none (`Draft::techniques`).
-    pub fn techniques(&self) -> Vec<Option<TechniqueEnum>> {
-        self.draft.techniques()
-    }
-
-    /// Another type, among `event_types`: the evaluation kept when it
-    /// keeps the touches fit, else the first that does.
-    pub fn choose_event_type(&mut self, event_type: EventTypeEnum) {
-        if !self.event_types().contains(&event_type) {
-            return;
-        }
-        let eval = self.draft.kept_or_first(&self.fitting_evals(event_type));
-        self.draft.event = self.draft.retyped(event_type, eval);
-    }
-
-    /// Another evaluation, among `evals`.
-    pub fn choose_eval(&mut self, eval: EvalEnum) {
-        let allowed = self.evals();
-        self.draft.choose_eval(eval, &allowed);
-    }
-
-    /// Another set or serve, or none, among `techniques`.
-    pub fn choose_technique(&mut self, technique: Option<TechniqueEnum>) {
-        self.draft.choose_technique(technique);
-    }
-
     /// The touches with the correction, to save: the touch and the one
     /// paired with it changed, every touch after them still admitted on its
     /// side (but the ones that weren't), and the set ending as it did.
@@ -263,6 +188,39 @@ impl TouchEdit {
                 !self.admitted(touches, k, *side, entry)
                     && self.admitted(&self.touches, k, *old_side, old)
             })
+    }
+}
+
+impl Correcting for TouchEdit {
+    fn draft(&self) -> &Draft {
+        &self.draft
+    }
+
+    fn draft_mut(&mut self) -> &mut Draft {
+        &mut self.draft
+    }
+
+    fn index(&self) -> usize {
+        self.index
+    }
+
+    /// The types it can become: the ones the side could play at that point,
+    /// by the same player, with an evaluation that keeps the touches fit.
+    fn event_types(&self) -> Vec<EventTypeEnum> {
+        self.draft
+            .event_types()
+            .filter(|t| !self.evals_of(*t).is_empty())
+            .collect()
+    }
+
+    /// The evaluations of `event_type` the side offers at that point that
+    /// keep the touches fit: only none for a type having none, if it fits.
+    fn evals_of(&self, event_type: EventTypeEnum) -> Vec<Option<EvalEnum>> {
+        self.draft
+            .evals_of(event_type)
+            .into_iter()
+            .filter(|eval| self.valid(&self.draft.retyped(event_type, *eval)))
+            .collect()
     }
 }
 

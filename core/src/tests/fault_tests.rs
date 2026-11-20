@@ -4,7 +4,7 @@
 #[cfg(test)]
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
-    use crate::event_edit::EventEdit;
+    use crate::event_edit::{Correcting, EventEdit};
     use crate::shapes::{
         enums::{ErrorTypeEnum, EvalEnum, EventTypeEnum, LineupRulesEnum, TeamSideEnum},
         set::SetEntry,

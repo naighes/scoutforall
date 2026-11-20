@@ -5,7 +5,7 @@
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::errors::{AppError, MatchError, SnapshotError};
-    use crate::event_edit::{EditField, EventEdit, EventEditError};
+    use crate::event_edit::{Correcting, EditField, EventEdit, EventEditError};
     use crate::localization::labels;
     use crate::shapes::enums::LanguageEnum;
     use crate::shapes::{

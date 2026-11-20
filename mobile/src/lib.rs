@@ -29,7 +29,7 @@ use scout4all_core::{
         model::{DvwFile, MatchDate as DvwDate, Side},
     },
     errors::{AppError, IOError},
-    event_edit::{EditField, EventEdit},
+    event_edit::{Correcting, EditField, EventEdit},
     example,
     legacy::{
         archive::file_team_id,
@@ -3562,26 +3562,8 @@ impl Correction {
     pub fn state(&self) -> CorrectionState {
         let edit = self.edit();
         let labels = self.labels;
-        let (index, event, before, fields, types, evals, techniques) = match &*edit {
-            Editing::Own(e) => (
-                e.index(),
-                e.event(),
-                e.before(),
-                e.fields(),
-                e.event_types(),
-                e.evals(),
-                e.techniques(),
-            ),
-            Editing::Both { edit: e, .. } => (
-                e.index(),
-                e.event(),
-                e.before(),
-                e.fields(),
-                e.event_types(),
-                e.evals(),
-                e.techniques(),
-            ),
-        };
+        let correcting = edit.correcting();
+        let (event, before) = (correcting.event(), correcting.before());
         let (team, side_b) = match &*edit {
             Editing::Both {
                 edit: e, team_b, ..
@@ -3589,7 +3571,7 @@ impl Correction {
             _ => (&self.current_match.team, false),
         };
         CorrectionState {
-            index: u32::try_from(index).unwrap_or(u32::MAX),
+            index: u32::try_from(correcting.index()).unwrap_or(u32::MAX),
             event: ScoutedEvent {
                 side_b,
                 ..scouted_event(team, event, labels)
@@ -3605,8 +3587,9 @@ impl Correction {
                 .get_current_phase()
                 .friendly_name(labels)
                 .to_string(),
-            fields,
-            event_types: types
+            fields: correcting.fields(),
+            event_types: correcting
+                .event_types()
                 .into_iter()
                 .map(|e| EventChoice {
                     value: e,
@@ -3614,12 +3597,14 @@ impl Correction {
                     side_b,
                 })
                 .collect(),
-            evals: evals
+            evals: correcting
+                .evals()
                 .into_iter()
                 .map(|eval| eval_choice(eval, event.event_type, labels))
                 .collect(),
             eval: event.eval,
-            techniques: techniques
+            techniques: correcting
+                .techniques()
                 .into_iter()
                 .flatten()
                 .map(|t| technique_choice(t, event.technique == Some(t), labels))
@@ -3628,24 +3613,32 @@ impl Correction {
     }
 
     pub fn choose_event_type(&self, event: EventTypeEnum) {
-        match &mut *self.edit() {
-            Editing::Own(e) => e.choose_event_type(event),
-            Editing::Both { edit, .. } => edit.choose_event_type(event),
-        }
+        self.edit().correcting_mut().choose_event_type(event);
     }
 
     pub fn choose_eval(&self, eval: EvalEnum) {
-        match &mut *self.edit() {
-            Editing::Own(e) => e.choose_eval(eval),
-            Editing::Both { edit, .. } => edit.choose_eval(eval),
-        }
+        self.edit().correcting_mut().choose_eval(eval);
     }
 
     /// A set or serve, or none.
     pub fn choose_technique(&self, technique: Option<TechniqueEnum>) {
-        match &mut *self.edit() {
-            Editing::Own(e) => e.choose_technique(technique),
-            Editing::Both { edit, .. } => edit.choose_technique(technique),
+        self.edit().correcting_mut().choose_technique(technique);
+    }
+}
+
+impl Editing {
+    /// The correction, whichever it is.
+    fn correcting(&self) -> &dyn Correcting {
+        match self {
+            Editing::Own(edit) => edit,
+            Editing::Both { edit, .. } => edit,
+        }
+    }
+
+    fn correcting_mut(&mut self) -> &mut dyn Correcting {
+        match self {
+            Editing::Own(edit) => edit,
+            Editing::Both { edit, .. } => edit,
         }
     }
 }

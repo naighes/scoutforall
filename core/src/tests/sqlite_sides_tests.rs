@@ -9,6 +9,7 @@ mod tests {
         analysis::match_stats,
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         domain::{Event, ScoutingMode, Side, adapters::EventRefs, sql::Sql},
+        event_edit::Correcting,
         localization::Language,
         match_form::{MatchInput, Opponent},
         providers::{

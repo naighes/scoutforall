@@ -44,8 +44,10 @@ impl EventEditError {
 /// The event being corrected and the side before it: what correcting an
 /// event of A alone (`EventEdit`) and a touch of both sides
 /// (`touch_edit::TouchEdit`) share.
+// public only to be named by `Correcting`: its fields and methods are the
+// crate's
 #[derive(Debug, Clone)]
-pub(crate) struct Draft {
+pub struct Draft {
     /// the side as it was before the event, its own point of view
     pub(crate) before: Snapshot,
     /// the event as corrected so far
@@ -170,6 +172,77 @@ impl Draft {
     }
 }
 
+/// What correcting an event of A alone (`EventEdit`) and a touch of both
+/// sides (`touch_edit::TouchEdit`) offer the same way: each tells its draft,
+/// the types the event can become and the evaluations of a type; the rest
+/// follows from those.
+pub trait Correcting {
+    fn draft(&self) -> &Draft;
+
+    fn draft_mut(&mut self) -> &mut Draft;
+
+    fn index(&self) -> usize;
+
+    /// The types the event can become.
+    fn event_types(&self) -> Vec<EventTypeEnum>;
+
+    /// The evaluations of `event_type` the event can take at that point:
+    /// only none for a type having none.
+    fn evals_of(&self, event_type: EventTypeEnum) -> Vec<Option<EvalEnum>>;
+
+    /// The event as corrected so far.
+    fn event(&self) -> &EventEntry {
+        &self.draft().event
+    }
+
+    /// Its side before the event: the score, the rotation, the phase as
+    /// that side sees them.
+    fn before(&self) -> &Snapshot {
+        &self.draft().before
+    }
+
+    /// What of the event can change (`Draft::fields`).
+    fn fields(&self) -> Vec<EditField> {
+        self.draft().fields()
+    }
+
+    /// The evaluations of its type, none for an event having none.
+    fn evals(&self) -> Vec<EvalEnum> {
+        self.evals_of(self.event().event_type)
+            .into_iter()
+            .flatten()
+            .collect()
+    }
+
+    /// The sets and the serves, and none (`Draft::techniques`).
+    fn techniques(&self) -> Vec<Option<TechniqueEnum>> {
+        self.draft().techniques()
+    }
+
+    /// Another type, among `event_types`: it keeps the evaluation when the
+    /// type takes it, else the first it takes (`Draft::retyped`).
+    fn choose_event_type(&mut self, event_type: EventTypeEnum) {
+        let event = self.event_types().contains(&event_type).then(|| {
+            let eval = self.draft().kept_or_first(&self.evals_of(event_type));
+            self.draft().retyped(event_type, eval)
+        });
+        if let Some(event) = event {
+            self.draft_mut().event = event;
+        }
+    }
+
+    /// Another evaluation, among `evals`.
+    fn choose_eval(&mut self, eval: EvalEnum) {
+        let allowed = self.evals();
+        self.draft_mut().choose_eval(eval, &allowed);
+    }
+
+    /// Another set or serve, or none, among `techniques`.
+    fn choose_technique(&mut self, technique: Option<TechniqueEnum>) {
+        self.draft_mut().choose_technique(technique);
+    }
+}
+
 /// An event of a set being corrected.
 #[derive(Debug, Clone)]
 pub struct EventEdit {
@@ -204,66 +277,6 @@ impl EventEdit {
         }
     }
 
-    pub fn index(&self) -> usize {
-        self.index
-    }
-
-    /// The event as corrected so far.
-    pub fn event(&self) -> &EventEntry {
-        &self.draft.event
-    }
-
-    /// The set before the event: the score, the rotation, the phase.
-    pub fn before(&self) -> &Snapshot {
-        &self.draft.before
-    }
-
-    /// What of the event can change (`Draft::fields`).
-    pub fn fields(&self) -> Vec<EditField> {
-        self.draft.fields()
-    }
-
-    /// The events it can become (`Draft::event_types`).
-    pub fn event_types(&self) -> Vec<EventTypeEnum> {
-        self.draft.event_types().collect()
-    }
-
-    /// The evaluations of its type after the events before it, none for an
-    /// event having none.
-    pub fn evals(&self) -> Vec<EvalEnum> {
-        self.draft
-            .evals_of(self.draft.event.event_type)
-            .into_iter()
-            .flatten()
-            .collect()
-    }
-
-    /// The sets and the serves, and none (`Draft::techniques`).
-    pub fn techniques(&self) -> Vec<Option<TechniqueEnum>> {
-        self.draft.techniques()
-    }
-
-    /// Another type, among `event_types`: it keeps the evaluation when it
-    /// allows it, else the first evaluation (`Draft::retyped`).
-    pub fn choose_event_type(&mut self, event_type: EventTypeEnum) {
-        if !self.event_types().contains(&event_type) {
-            return;
-        }
-        let eval = self.draft.kept_or_first(&self.draft.evals_of(event_type));
-        self.draft.event = self.draft.retyped(event_type, eval);
-    }
-
-    /// Another evaluation, among `evals`.
-    pub fn choose_eval(&mut self, eval: EvalEnum) {
-        let allowed = self.evals();
-        self.draft.choose_eval(eval, &allowed);
-    }
-
-    /// Another set or serve, or none, among `techniques`.
-    pub fn choose_technique(&mut self, technique: Option<TechniqueEnum>) {
-        self.draft.choose_technique(technique);
-    }
-
     /// The set with the event corrected, to save: only if the events after
     /// it still fit and the set ends as it did.
     pub fn apply(&self) -> Result<SetEntry, EventEditError> {
@@ -275,5 +288,29 @@ impl EventEdit {
                 }
                 _ => EventEditError::DoesNotFit,
             })
+    }
+}
+
+impl Correcting for EventEdit {
+    fn draft(&self) -> &Draft {
+        &self.draft
+    }
+
+    fn draft_mut(&mut self) -> &mut Draft {
+        &mut self.draft
+    }
+
+    fn index(&self) -> usize {
+        self.index
+    }
+
+    /// The events it can become (`Draft::event_types`).
+    fn event_types(&self) -> Vec<EventTypeEnum> {
+        self.draft.event_types().collect()
+    }
+
+    /// The evaluations of the type after the events before it.
+    fn evals_of(&self, event_type: EventTypeEnum) -> Vec<Option<EvalEnum>> {
+        self.draft.evals_of(event_type)
     }
 }
