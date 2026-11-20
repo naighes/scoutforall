@@ -9,6 +9,7 @@
   "highlights_title": "A także",
   "highlights": [
     { "title": "Strefy gry", "content": "Strefy zagrywki, przyjęcia, ataku, obrony i bloku. Zapis składu bloku." },
+    { "title": "Obie drużyny", "content": "Prowadź scouting swojej drużyny i rywala w tym samym meczu: zdarzenia obu stron, +1 dla punktów bez przyczyny i statystyki obu stron porównane obok siebie." },
     { "title": "Raport PDF", "content": "Raport z meczu w formie protokołu, gotowy do wydruku lub udostępnienia drużynie." },
     { "title": "Twoje klawisze", "content": "Każde zdarzenie, ocenę i rodzaj wystawy można przypisać do wybranego klawisza." },
     { "title": "Pięć języków", "content": "Polski, angielski, włoski, portugalski i japoński." },

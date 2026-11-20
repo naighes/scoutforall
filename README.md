@@ -18,6 +18,8 @@ It runs on **Windows, macOS and Linux**; an **Android** app is in testing.
 - **zones of play**: serve and attack destination, reception, dig and block zones on a grid, plus set tempo and number of blockers, all optional
 - **substitutions, libero and setter changes**, undo and correction of any event of the set
 - **match statistics**, while scouting and afterwards: efficiency and positivity of each fundamental, side-out and break point by rotation, setter distribution, errors, trends rally by rally; filters by set, player, rotation, phase, role and quality of the reception
+- **both teams**: scout your team and the opponent in the same match, a `+1` for points without a cause, and the statistics of the two sides compared side by side
+- **video**: link the match video to its scouting, watch the events light up with the score over the picture, jump to any action and export a montage of the chosen ones
 - **team analysis** over several matches (the last month, the last N, any period), with match-by-match trends
 - **DataVolley import** (`.dvw`), with zones
 - **PDF report** laid out as a scoresheet
