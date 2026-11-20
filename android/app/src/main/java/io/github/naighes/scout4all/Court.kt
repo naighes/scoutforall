@@ -2,6 +2,7 @@ package io.github.naighes.scout4all
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.animation.core.animateDpAsState
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material3.Icon
@@ -434,7 +436,7 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: F
             verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Token(slot, scale, dim)
-            CourtName(slot.name.orEmpty(), Modifier.alpha(dim))
+            CourtName(slot.name.orEmpty(), slot.above, Modifier.alpha(dim))
             badges(slot).takeIf { it.isNotEmpty() }?.let { Box(Modifier.readAs(it)) }
         }
     }
@@ -457,12 +459,16 @@ private fun badges(slot: CourtSlot): String = listOfNotNull(
  * fit ("Ale. Mag.", by the core: no guess about which word is the surname),
  * never a word broken: the jersey tells the rest. */
 @Composable
-private fun CourtName(name: String, modifier: Modifier = Modifier) {
+private fun CourtName(name: String, over: Boolean, modifier: Modifier = Modifier) {
     var abbreviated by remember(name) { mutableStateOf(false) }
     val text = if (abbreviated) abbreviatedName(name) else name
     Text(
         text,
-        modifier = modifier.padding(horizontal = 4.dp).let { if (text.isEmpty()) it.notRead() else it },
+        modifier = modifier
+            .padding(horizontal = 4.dp)
+            // above a player hiding behind: on the floor, not on their jersey
+            .let { if (over && text.isNotEmpty()) it.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(4.dp)) else it }
+            .let { if (text.isEmpty()) it.notRead() else it },
         style = nameStyle().copy(
             hyphens = if (abbreviated) Hyphens.Auto else Hyphens.None,
             lineBreak = LineBreak.Paragraph,
