@@ -1,0 +1,5 @@
+- Scout both teams in a match: choose per match whether to scout one side or both, player by player.
+- Both sides of a rally are told from a single sequence of touches and always agree on score and serve.
+- Statistics of the opponent, with the same filters as ours, and a comparison of the two sides.
+- Import of a DataVolley file with both sides in one match, without the round of the sides.
+- Detail with the rotation and the phase the figures are narrowed to.

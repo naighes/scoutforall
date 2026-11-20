@@ -1,0 +1,5 @@
+- Scout di entrambe le squadre: si sceglie partita per partita se scoutizzare un lato o tutti e due.
+- I due lati di uno scambio sono raccontati da un'unica sequenza di tocchi e concordano sempre su punteggio e battuta.
+- Statistiche dell'avversario, con gli stessi filtri delle nostre, e confronto dei due lati.
+- Import di un file DataVolley con entrambi i lati in una sola partita, senza il giro dei lati.
+- Dettaglio con la rotazione e la fase a cui sono ristrette le cifre.

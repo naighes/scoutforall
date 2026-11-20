@@ -1,0 +1,5 @@
+- Scout das duas equipes em uma partida: escolha, partida a partida, se registrar um lado ou os dois, jogador por jogador.
+- Os dois lados de uma jogada são contados por uma única sequência de toques e sempre concordam em placar e saque.
+- Estatísticas do adversário, com os mesmos filtros das nossas, e comparação dos dois lados.
+- Importação de um arquivo DataVolley com os dois lados em uma só partida, sem a volta pelos lados.
+- Detalhe com a rotação e a fase a que os números são restritos.

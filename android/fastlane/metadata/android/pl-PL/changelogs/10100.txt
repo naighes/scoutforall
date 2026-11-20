@@ -1,0 +1,5 @@
+- Scouting obu drużyn w meczu: dla każdego meczu wybierasz, czy notować jedną stronę, czy obie, zawodnik po zawodniku.
+- Obie strony wymiany są opisane jedną sekwencją kontaktów z piłką i zawsze zgadzają się co do wyniku i zagrywki.
+- Statystyki przeciwnika, z tymi samymi filtrami co nasze, oraz porównanie obu stron.
+- Import pliku DataVolley z obiema stronami w jednym meczu, bez rundy po stronach.
+- Szczegóły z rotacją i fazą, do których zawężono dane.
