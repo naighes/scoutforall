@@ -3341,22 +3341,17 @@ impl Scout4All {
     ) -> Result<Arc<Scouting>, MobileError> {
         let m = self.read_match(team_id, match_id)?;
         match next_set(&m.get_status()?, &m.team) {
-            NextSet::Resume(set) => self
-                .resumed(team_id, match_id, m, set)
-                .map(|session| {
-                    Arc::new(Scouting {
-                        runtime: self.runtime.clone(),
-                        session: Mutex::new(
-                            session
-                                .with_order(order)
-                                .with_finished(self.finished_matches()),
-                        ),
-                        labels: self.language.labels(),
-                    })
+            NextSet::Resume(set) => self.resumed(team_id, match_id, m, set).map(|session| {
+                Arc::new(Scouting {
+                    runtime: self.runtime.clone(),
+                    session: Mutex::new(
+                        session
+                            .with_order(order)
+                            .with_finished(self.finished_matches()),
+                    ),
+                    labels: self.language.labels(),
                 })
-                .map_err(|e| MobileError::Failed {
-                    reason: e.message(self.language.labels()),
-                }),
+            }),
             NextSet::Start(_) | NextSet::Over => Err(MobileError::Failed {
                 reason: format!("no set in progress in {match_id}"),
             }),
@@ -3364,26 +3359,25 @@ impl Scout4All {
     }
 
     /// The set in progress scouted again: on both sides when it has the
-    /// touches of B.
+    /// touches of B. Why the match or B can't be read is told as it is.
     fn resumed(
         &self,
         team_id: &str,
         match_id: &str,
         m: MatchEntry,
         set: SetEntry,
-    ) -> Result<ScoutingSession, set_start::SetStartError> {
-        let touches = self
-            .set_reader
-            .read_touches(&m, set.set_number)
-            .map_err(|_| set_start::SetStartError::CouldNotComputeSnapshot)?;
-        match touches {
-            None => set_start::resume(m, set, self.set_writer.clone()),
+    ) -> Result<ScoutingSession, MobileError> {
+        let labels = self.language.labels();
+        let failed = |e: set_start::SetStartError| MobileError::Failed {
+            reason: e.message(labels),
+        };
+        match self.set_reader.read_touches(&m, set.set_number)? {
+            None => set_start::resume(m, set, self.set_writer.clone()).map_err(failed),
             Some(touches) => {
-                let b = self
-                    .read_match_of(team_id, match_id, MatchSide::B)
-                    .map_err(|_| set_start::SetStartError::CouldNotComputeSnapshot)?;
+                let b = self.read_match_of(team_id, match_id, MatchSide::B)?;
                 set_start::resume_both(m, set, touches, b.team, self.set_writer.clone())
                     .map(|session| session.with_earlier_of_b(&b.sets))
+                    .map_err(failed)
             }
         }
     }
@@ -7725,6 +7719,77 @@ mod tests {
         start.choose_libero(Some(ids[6].clone())).unwrap();
         app.start_set(start).unwrap();
         app.scouting(team.into(), m.into()).unwrap()
+    }
+
+    /// A match against a team of seven scouted on both sides, its first set
+    /// started, the team serving; the team, the match.
+    fn set_started_on_both_sides(app: &Scout4All) -> (String, String) {
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let other = app.save_team(None, form("Livorno")).unwrap();
+        for (t, prefix) in [(&team, "P"), (&other, "L")] {
+            for n in 1..=7 {
+                app.save_player(
+                    t.clone(),
+                    None,
+                    player(&format!("{prefix}{n}"), &n.to_string()),
+                    false,
+                )
+                .unwrap();
+            }
+        }
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                MatchForm {
+                    opponent_team: Some(parse_id(&other).unwrap()),
+                    both: true,
+                    ..match_form("Livorno", "2026-10-24T18:00:00+02:00", "8")
+                },
+            )
+            .unwrap();
+        let ids = |t: &str| -> Vec<String> {
+            app.team(t.into())
+                .unwrap()
+                .players
+                .into_iter()
+                .map(|p| p.id)
+                .collect()
+        };
+        let place = |start: &SetStart, ids: &[String]| {
+            for (position, id) in (1..=6).zip(ids) {
+                start.place(position, Some(id.clone())).unwrap();
+            }
+            start.choose_setter(Some(ids[0].clone())).unwrap();
+            start.choose_libero(Some(ids[6].clone())).unwrap();
+        };
+        let start = app.set_start(team.clone(), m.clone()).unwrap();
+        start.choose_serving_team(TeamSideEnum::Us);
+        place(&start, &ids(&team));
+        let of_b = app
+            .set_start_of_b(team.clone(), m.clone())
+            .unwrap()
+            .unwrap();
+        place(&of_b, &ids(&other));
+        app.start_set_both(start, of_b).unwrap();
+        (team, m)
+    }
+
+    /// The set in progress of a match on both sides scouted again on both;
+    /// B unreadable meanwhile (the match no longer on both sides, B's
+    /// touches still there): told why, not "could not compute".
+    #[test]
+    fn a_set_on_both_sides_resumed_or_told_why_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, m) = set_started_on_both_sides(&app);
+        assert!(app.scouting(team.clone(), m.clone()).unwrap().state().both);
+        sql(&dir, "UPDATE matches SET scouting = 'a';");
+        let reason = app.scouting(team, m).err().map(reason_of);
+        assert_eq!(
+            reason.as_deref(),
+            Some(labels(LanguageEnum::En).one_side_only)
+        );
     }
 
     /// The digs of the detail of the defense: all of them with none, the
