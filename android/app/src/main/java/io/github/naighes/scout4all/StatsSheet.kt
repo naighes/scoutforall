@@ -267,7 +267,7 @@ private fun Compared(
     when (val shown = b?.takeIf { it.scope == a.scope }) {
         null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         else -> when (page) {
-            ComparedPage.Detail -> ComparedDetail(a.teamName to shown.teamName, a.scope, loadDetails)
+            ComparedPage.Detail -> ComparedDetail(a.teamName to shown.teamName, a.scope, narrowedTo(a), loadDetails)
             else -> Column(
                 Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -275,6 +275,10 @@ private fun Compared(
         }
     }
 }
+
+/** The rotation and the phase the figures are narrowed to, for the
+ * detail. */
+private fun narrowedTo(stats: LiveStats) = DetailFilter(phase = stats.filter.phase, rotations = stats.filter.rotations)
 
 private enum class ComparedPage(val title: Int) {
     Summary(R.string.stats_summary),
@@ -284,10 +288,10 @@ private enum class ComparedPage(val title: Int) {
 
 /** A fundamental on a chip, as it went for each side. */
 @Composable
-private fun ComparedDetail(names: Pair<String, String>, scope: StatsScope, loadDetails: LoadDetails) {
+private fun ComparedDetail(names: Pair<String, String>, scope: StatsScope, filter: DetailFilter, loadDetails: LoadDetails) {
     var event by remember { mutableStateOf(EventTypeEnum.S) }
-    val both by produceState<Pair<DetailStats, DetailStats>?>(null, scope, event) {
-        value = loadDetails(scope, event, DetailFilter(null))
+    val both by produceState<Pair<DetailStats, DetailStats>?>(null, scope, event, filter) {
+        value = loadDetails(scope, event, filter)
     }
     val shown = both
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -356,7 +360,8 @@ fun StatsPages(
     val scope = rememberCoroutineScope()
     // the detail asked for stays while swiping, and the last one read while
     // the next is
-    var query by remember { mutableStateOf(DetailQuery()) }
+    // with the rotation and the phase the figures are narrowed to already
+    var query by remember { mutableStateOf(DetailQuery(filter = narrowedTo(stats))) }
     val detail by produceState<DetailStats?>(null, stats.scope, query, side) {
         value = loadDetail(stats.scope, query.event, query.filter) ?: value
     }

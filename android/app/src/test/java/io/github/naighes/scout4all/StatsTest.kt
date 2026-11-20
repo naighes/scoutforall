@@ -15,6 +15,11 @@ import io.github.naighes.scout4all.core.ServeStartEnum
 import androidx.compose.ui.test.hasContentDescription
 import io.github.naighes.scout4all.core.EventTypeEnum
 import org.junit.Assert.assertEquals
+import io.github.naighes.scout4all.core.DetailFilter
+import io.github.naighes.scout4all.core.PhaseEnum
+import io.github.naighes.scout4all.core.MatchSide
+import io.github.naighes.scout4all.core.StatsScope
+import androidx.compose.foundation.layout.Column
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -336,5 +341,29 @@ class NarrowedSummaryTest {
         rule.onNode(hasText("side-out", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.onNode(hasText(string(R.string.filter_all)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitFor { aces("2") }
+    }
+
+    /** The pages opened again on figures narrowed already (the sheet
+     * reopened while scouting, the comparison left): the detail has the
+     * same phase. */
+    @Test
+    fun theDetailOfNarrowedFiguresHasTheirPhase() {
+        val team = saveNationalTeam()
+        val match = startFirstSet(team)
+        serve(team, match, EvalEnum.PERFECT)
+        val narrowed = DetailFilter(PhaseEnum.SIDE_OUT)
+        val stats = core { it.matchStats(team, match, MatchSide.A, StatsScope.Match, narrowed) }
+        rule.setContent {
+            Scout4AllTheme {
+                Column {
+                    StatsPages(stats, onScope = {}, loadDetail = { scope, event, filter ->
+                        app.core { it.matchDetail(team, match, MatchSide.A, scope, event, filter) }
+                    })
+                }
+            }
+        }
+        rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { rule.onAllNodes(hasText(string(R.string.filter_rotation)) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).assertDoesNotExist()
     }
 }
