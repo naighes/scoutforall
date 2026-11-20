@@ -646,6 +646,53 @@ mod tests {
         (core, imported.team_id, imported.match_id)
     }
 
+    /// B serving, its point lost without a cause (`PL`, as ⇧W does for B):
+    /// A scores and serves.
+    #[test]
+    fn the_point_lost_by_b_without_a_cause_goes_to_a_who_serves() {
+        use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum::*, TeamSideEnum};
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team_id, match_id) = crate::scouting::tests::both_sides_started(&core);
+        let scouting = core
+            .scouting_in_order(
+                &team_id,
+                &match_id,
+                scout4all_core::scouting::ChoiceOrder::EventFirst,
+            )
+            .unwrap();
+        let player = |scouting: &scout4all_mobile::Scouting| {
+            scouting
+                .state()
+                .court
+                .iter()
+                .map(|p| p.id.clone())
+                .find(|id| scouting.choose_player(id.clone()).is_ok())
+                .unwrap()
+        };
+        // A serves, B receives and kills: B serving
+        scouting.choose_event_of(false, S).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event_of(true, P).unwrap();
+        player(&scouting);
+        scouting.choose_eval(EvalEnum::Negative).unwrap();
+        scouting.choose_event_of(true, A).unwrap();
+        player(&scouting);
+        scouting.choose_eval(EvalEnum::Perfect).unwrap();
+        let state = scouting.state();
+        assert_eq!(
+            (state.score_us, state.score_them, state.serving_team),
+            (1, 0, TeamSideEnum::Us) // B's view
+        );
+        // B tells a point lost: 1-1, A serving
+        scouting.choose_event_of(true, PL).unwrap();
+        let state = scouting.state();
+        assert_eq!(
+            (state.score_us, state.score_them, state.serving_team),
+            (1, 1, TeamSideEnum::Us)
+        );
+    }
+
     /// A set of both sides: the touches of both in the list, a touch of
     /// the pair corrected from the keys moves the other touch too, and
     /// what is saved is read again as it was.

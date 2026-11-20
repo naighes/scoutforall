@@ -896,6 +896,45 @@ mod tests {
         assert!(!session.available_techniques().is_empty());
     }
 
+    /// B serving, its point lost without a cause (`PL`): A scores and
+    /// serves, on both sides.
+    #[tokio::test]
+    async fn the_point_lost_by_b_without_a_cause_goes_to_a_who_serves() {
+        let p = Sqlite::new();
+        let (_, team_b, m, start_a, start_b) = on_both_sides(&p).await;
+        let side = |s: &SetEntry| crate::set_start::SideInput {
+            positions: s.initial_positions,
+            setter: s.setter,
+            libero: s.libero,
+            fallback_libero: None,
+        };
+        let input = crate::set_start::SetStartInput {
+            set_number: 1,
+            serving_team: TeamSideEnum::Them,
+            positions: start_a.initial_positions,
+            setter: start_a.setter,
+            libero: start_a.libero,
+            fallback_libero: None,
+            opponent: Some(side(&start_b)),
+        };
+        let writer: std::sync::Arc<dyn SetWriter + Send + Sync> =
+            std::sync::Arc::new(crate::providers::sqlite::sets::SqliteSetWriter::new(
+                p.db.clone(),
+                crate::localization::Language::default(),
+            ));
+        let mut session = crate::set_start::start(m.clone(), input, writer, Some(team_b.clone()))
+            .await
+            .unwrap();
+        session.choose_event_of(Side::B, PL).await.unwrap();
+        let score = |side| {
+            let s = session.snapshot_of(side).unwrap();
+            (s.score_us, s.score_them)
+        };
+        assert_eq!((score(Side::A), score(Side::B)), ((1, 0), (0, 1)));
+        assert_eq!(session.side(), Side::A);
+        assert!(session.event_choices().contains(&(Side::A, S)));
+    }
+
     /// With the player first (the phone), the events before their player
     /// are of both sides: B's changes of the lineup come with A's.
     #[tokio::test]

@@ -306,6 +306,34 @@ mod tests {
     }
 
     #[test]
+    fn a_point_lost_without_a_cause_by_the_side_serving_goes_to_the_other() {
+        let (a, b) = (Team::new(), Team::new());
+        let replayed = replayed(
+            &a,
+            &b,
+            &[
+                // 1-0: an ace
+                by(Side::A, S, a.setter(), Perfect, 0),
+                by(Side::B, P, b.libero, Error, 1),
+                // 1-1: B's kill, B serving
+                by(Side::A, S, a.setter(), Positive, 2),
+                by(Side::B, P, b.libero, Negative, 3),
+                by(Side::B, A, b.outside_hitter(), Perfect, 4),
+                // B tells a point lost, without a cause
+                touch(Side::B, PL, None, 5),
+            ],
+        );
+        let scores = replayed.map(|(a, b)| {
+            (
+                (a.score_us, a.score_them),
+                (b.score_us, b.score_them),
+                a.current_lineup.get_current_phase(),
+            )
+        });
+        assert_eq!(scores, Ok(((2, 1), (1, 2), PhaseEnum::Break)));
+    }
+
+    #[test]
     fn a_touch_not_following_in_its_side_is_refused_with_its_place() {
         let (a, b) = (Team::new(), Team::new());
         // B's reception, then its attack not scouted: A's kill can't be
