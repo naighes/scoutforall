@@ -51,10 +51,13 @@ impl TouchEdit {
         index: usize,
         max_substitutions: u8,
     ) -> Result<Self, EventEditError> {
-        let (side, event) = touches.get(index).ok_or(EventEditError::Unreadable)?;
-        if event.event_type.changes_lineup() {
-            return Err(EventEditError::NotEditable);
-        }
+        let (side, event) = match touches.get(index) {
+            None => Err(EventEditError::Unreadable),
+            Some((_, event)) if event.event_type.changes_lineup() => {
+                Err(EventEditError::NotEditable)
+            }
+            Some(touch) => Ok(touch),
+        }?;
         let (before_a, before_b) = sides_at(a, b, touches, index, max_substitutions)?;
         let (all_a, _) = sides_at(a, b, touches, touches.len(), max_substitutions)?;
         Ok(TouchEdit {
@@ -105,42 +108,33 @@ impl TouchEdit {
     /// admits it, else the first the pair admits; `None` when the pair
     /// admits none.
     fn resolved(&self, event: &EventEntry) -> Option<Vec<Touch>> {
-        let mut touches = self.touches.clone();
         let i = self.index;
-        *touches.get_mut(i)? = (self.side, event.clone());
         // the touch answers the one before it
-        let prev = i
+        let answered = i
             .checked_sub(1)
             .and_then(|p| Some((p, self.touches.get(p)?)))
             .filter(|(_, (side, e))| {
                 *side != self.side && rally::answers(event.event_type, e.event_type)
-            });
-        if let Some((p, (_, answered))) = prev {
-            let fits = |e: Option<EvalEnum>| {
-                event.eval.is_some_and(|eval| {
-                    rally::answer_evals(answered.event_type, e, event.event_type).contains(&eval)
-                })
-            };
-            let eval = match fits(answered.eval) {
-                true => answered.eval,
-                false => EvalEnum::ALL.into_iter().map(Some).find(|e| fits(*e))?,
-            };
-            touches.get_mut(p)?.1.eval = eval;
-        }
+            })
+            .map(|(p, (_, answered))| answered_eval(answered, event).map(|eval| (p, eval)));
         // and the one after it answers the touch
-        let next = self.touches.get(i + 1).filter(|(side, e)| {
-            *side != self.side && rally::answers(e.event_type, event.event_type)
-        });
-        if let Some((_, answer)) = next {
-            let allowed = rally::answer_evals(event.event_type, event.eval, answer.event_type);
-            let eval = match answer.eval.is_some_and(|e| allowed.contains(&e)) {
-                true => answer.eval,
-                false => allowed.first().copied(),
-            };
-            eval?;
-            touches.get_mut(i + 1)?.1.eval = eval;
-        }
-        Some(touches)
+        let answer = self
+            .touches
+            .get(i + 1)
+            .filter(|(side, e)| {
+                *side != self.side && rally::answers(e.event_type, event.event_type)
+            })
+            .map(|(_, answer)| answer_eval(event, answer).map(|eval| (i + 1, Some(eval))));
+        let paired: Option<Vec<(usize, Option<EvalEnum>)>> =
+            [answered, answer].into_iter().flatten().collect();
+        let mut touches = self.touches.clone();
+        *touches.get_mut(i)? = (self.side, event.clone());
+        paired?
+            .into_iter()
+            .try_fold(touches, |mut touches, (k, eval)| {
+                touches.get_mut(k)?.1.eval = eval;
+                Some(touches)
+            })
     }
 
     /// Whether the touches differing from the saved ones are admitted where
@@ -245,26 +239,54 @@ impl TouchEdit {
             self.max_substitutions,
         )
         .map_err(|_| EventEditError::DoesNotFit)?;
-        if a.get_set_winner(self.a.set_number) != self.winner {
-            return Err(EventEditError::ChangesTheResult);
+        match a.get_set_winner(self.a.set_number) == self.winner {
+            false => Err(EventEditError::ChangesTheResult),
+            true if self.breaks(&touches) => Err(EventEditError::DoesNotFit),
+            true => Ok(touches),
         }
+    }
+
+    /// Whether a touch from the first one changed on is no longer admitted
+    /// in `touches`, although it was in the saved ones.
+    fn breaks(&self, touches: &[Touch]) -> bool {
         let first = touches
             .iter()
             .zip(&self.touches)
             .position(|(new, old)| new != old)
             .unwrap_or(0);
-        let broken = touches
+        touches
             .iter()
             .zip(&self.touches)
             .enumerate()
             .skip(first)
             .any(|(k, ((side, entry), (old_side, old)))| {
-                !self.admitted(&touches, k, *side, entry)
+                !self.admitted(touches, k, *side, entry)
                     && self.admitted(&self.touches, k, *old_side, old)
-            });
-        match broken {
-            true => Err(EventEditError::DoesNotFit),
-            false => Ok(touches),
-        }
+            })
     }
+}
+
+/// The evaluation of the touch `answered` that `event` answers: its own
+/// when the pair admits it, else the first the pair admits; `None` when
+/// the pair admits none.
+fn answered_eval(answered: &EventEntry, event: &EventEntry) -> Option<Option<EvalEnum>> {
+    let fits = |e: Option<EvalEnum>| {
+        event.eval.is_some_and(|eval| {
+            rally::answer_evals(answered.event_type, e, event.event_type).contains(&eval)
+        })
+    };
+    std::iter::once(answered.eval)
+        .chain(EvalEnum::ALL.into_iter().map(Some))
+        .find(|e| fits(*e))
+}
+
+/// The evaluation of the touch `answer` answering `event`: its own when
+/// the pair admits it, else the first the pair admits; `None` when the
+/// pair admits none.
+fn answer_eval(event: &EventEntry, answer: &EventEntry) -> Option<EvalEnum> {
+    let allowed = rally::answer_evals(event.event_type, event.eval, answer.event_type);
+    answer
+        .eval
+        .filter(|e| allowed.contains(e))
+        .or_else(|| allowed.first().copied())
 }

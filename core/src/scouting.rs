@@ -259,29 +259,29 @@ impl ScoutingSession {
     /// The sets of B before this one, from B's side: their statistics, and
     /// the inverted P1 a new set goes on with, as for A. Nothing scouting
     /// A alone.
-    pub fn with_earlier_of_b(mut self, earlier: &[SetEntry]) -> Self {
+    pub fn with_earlier_of_b(self, earlier: &[SetEntry]) -> Self {
         let max_substitutions = self.current_match.max_substitutions;
-        if let Some(theirs) = &mut self.theirs {
-            theirs.earlier_stats = earlier
+        let before: Vec<SetEntry> = earlier
+            .iter()
+            .filter(|s| s.set_number < self.set.set_number)
+            .cloned()
+            .collect();
+        let theirs = self.theirs.map(|theirs| Theirs {
+            earlier_stats: before
                 .iter()
-                .filter(|s| s.set_number < self.set.set_number)
                 .filter_map(|s| s.compute_snapshot(max_substitutions).ok())
                 .fold(Stats::new(), |mut stats, s| {
                     stats.merge(&s.stats);
                     stats
-                });
-            theirs.earlier = earlier
-                .iter()
-                .filter(|s| s.set_number < self.set.set_number)
-                .cloned()
-                .collect();
-            let started = theirs.touches.iter().any(|(side, _)| *side == Side::B);
-            if !started {
-                let b_set = theirs.start_b.clone();
-                theirs.inverted_p1 = earlier_inverted_p1(earlier, &b_set);
-            }
-        }
-        self
+                }),
+            inverted_p1: match theirs.touches.iter().any(|(side, _)| *side == Side::B) {
+                true => theirs.inverted_p1,
+                false => earlier_inverted_p1(earlier, &theirs.start_b),
+            },
+            earlier: before,
+            ..theirs
+        });
+        Self { theirs, ..self }
     }
 
     /// Whether both sides are scouted.
@@ -650,9 +650,23 @@ impl ScoutingSession {
     /// Whether the touch of `side` (with `eval`, or any it can have) is
     /// admitted after the touches so far. Always, scouting one side.
     fn admits(&self, side: Side, event: EventTypeEnum, eval: Option<EvalEnum>) -> bool {
-        let (Some(theirs), Some(own)) = (&self.theirs, self.snapshot_of(side)) else {
-            return true;
-        };
+        self.theirs
+            .as_ref()
+            .zip(self.snapshot_of(side))
+            .is_none_or(|(theirs, own)| self.admits_on(theirs, own, side, event, eval))
+    }
+
+    /// Whether the touch of `side` (with `eval`, or any it can have) is
+    /// admitted after the touches so far, scouting both sides: `own` the
+    /// snapshot of `side`.
+    fn admits_on(
+        &self,
+        theirs: &Theirs,
+        own: &Snapshot,
+        side: Side,
+        event: EventTypeEnum,
+        eval: Option<EvalEnum>,
+    ) -> bool {
         let touch = |eval| EventEntry {
             timestamp: Utc::now(),
             event_type: event,
@@ -1385,31 +1399,34 @@ impl ScoutingSession {
     /// whichever side: the sides replay the touches left, and the scout
     /// goes back to the side that played it.
     async fn undo_last_touch(&mut self) -> Result<Option<EventEntry>, ScoutingError> {
-        let Some(theirs) = &self.theirs else {
-            return Err(ScoutingError::CouldNotUndo);
-        };
-        let (side, removed) = match self
+        let touches = self
+            .theirs
+            .as_ref()
+            .map(|theirs| theirs.touches.clone())
+            .ok_or(ScoutingError::CouldNotUndo)?;
+        let removed = self
             .set_writer
             .remove_last_touch(&self.current_match, self.set.set_number)
             .await
-        {
-            Ok(Some(removed)) => removed,
-            Ok(None) => return Ok(None),
-            Err(_) => return Err(ScoutingError::CouldNotUndo),
-        };
-        let mut touches = theirs.touches.clone();
-        touches.pop();
-        self.replay_touches(touches)?;
-        self.side = side;
-        Ok(Some(removed))
+            .map_err(|_| ScoutingError::CouldNotUndo)?;
+        match removed {
+            Some((side, removed)) => {
+                let left = touches.split_last().map_or(&[][..], |(_, left)| left);
+                self.replay_touches(left.to_vec())?;
+                self.side = side;
+                Ok(Some(removed))
+            }
+            None => Ok(None),
+        }
     }
 
     /// The sides at the touches: their snapshots, and the set from A's
     /// side.
     fn replay_touches(&mut self, touches: Vec<(Side, EventEntry)>) -> Result<(), ScoutingError> {
-        let Some(theirs) = &mut self.theirs else {
-            return Err(ScoutingError::CouldNotComputeSnapshot);
-        };
+        let theirs = self
+            .theirs
+            .as_mut()
+            .ok_or(ScoutingError::CouldNotComputeSnapshot)?;
         let (a, b) = rally::replay(
             &theirs.start_a,
             &theirs.start_b,
@@ -1427,30 +1444,30 @@ impl ScoutingSession {
     /// Saves the touch of the side being scouted, in the sequence of the
     /// set: admitted by `rally::admits`, and the two sides still replaying.
     async fn save_touch(&mut self, event: &EventEntry) -> Result<(), ScoutingError> {
-        let Some(theirs) = &self.theirs else {
-            return Err(ScoutingError::CouldNotAddEvent);
-        };
-        let admitted = rally::admits(
-            &theirs.touches,
-            &self.snapshot,
-            &theirs.snapshot,
-            self.side,
-            event,
-        );
+        let theirs = self
+            .theirs
+            .as_ref()
+            .ok_or(ScoutingError::CouldNotAddEvent)?;
         let touches: Vec<(Side, EventEntry)> = theirs
             .touches
             .iter()
             .cloned()
             .chain([(self.side, event.clone())])
             .collect();
-        let replays = rally::replay(
+        let fits = rally::admits(
+            &theirs.touches,
+            &self.snapshot,
+            &theirs.snapshot,
+            self.side,
+            event,
+        ) && rally::replay(
             &theirs.start_a,
             &theirs.start_b,
             &touches,
             self.current_match.max_substitutions,
         )
         .is_ok();
-        match admitted && replays {
+        match fits {
             true => {
                 self.set_writer
                     .append_touch(&self.current_match, self.set.set_number, self.side, event)

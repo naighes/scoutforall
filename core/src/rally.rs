@@ -255,11 +255,12 @@ pub fn replay(
     max_substitutions: u8,
 ) -> Result<(Snapshot, Snapshot), Incoherence> {
     let streams = project(touches);
-    let same_server = start_a.serving_team != start_b.serving_team;
-    let a = same_server
-        .then_some(())
-        .ok_or(Incoherence::Serving)
-        .and_then(|_| replay_side(start_a, Side::A, &streams.a, max_substitutions))?;
+    // each start tells the serving team from its side: both `Us` (or both
+    // `Them`) are two different teams serving
+    let a = match start_a.serving_team == start_b.serving_team {
+        true => Err(Incoherence::Serving),
+        false => replay_side(start_a, Side::A, &streams.a, max_substitutions),
+    }?;
     let b = replay_side(start_b, Side::B, &streams.b, max_substitutions)?;
     let points_of = |snapshot: &Snapshot, side: Side| -> Vec<Side> {
         snapshot

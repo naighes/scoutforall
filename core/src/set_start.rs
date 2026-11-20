@@ -317,23 +317,21 @@ pub async fn start(
     opponent: Option<TeamEntry>,
 ) -> Result<ScoutingSession, SetStartError> {
     let (set, theirs) = match (&input.opponent, opponent) {
-        (Some(_), None) => return Err(SetStartError::CouldNotStartSet),
-        (None, _) => (
-            set_writer
-                .create(
-                    &current_match,
-                    input.set_number,
-                    input.serving_team,
-                    input.positions,
-                    input.libero,
-                    input.fallback_libero,
-                    input.setter,
-                    vec![], // no events at the start of the set
-                )
-                .await
-                .map_err(|_| SetStartError::CouldNotStartSet)?,
-            None,
-        ),
+        (Some(_), None) => Err(SetStartError::CouldNotStartSet),
+        (None, _) => set_writer
+            .create(
+                &current_match,
+                input.set_number,
+                input.serving_team,
+                input.positions,
+                input.libero,
+                input.fallback_libero,
+                input.setter,
+                vec![], // no events at the start of the set
+            )
+            .await
+            .map(|set| (set, None))
+            .map_err(|_| SetStartError::CouldNotStartSet),
         (Some(b), Some(team_b)) => {
             let a = SetEntry::new(
                 input.set_number,
@@ -365,9 +363,9 @@ pub async fn start(
                 b: b_start,
                 touches: vec![],
             };
-            (a, Some((team_b, touches)))
+            Ok((a, Some((team_b, touches))))
         }
-    };
+    }?;
     match theirs {
         None => resume(current_match, set, set_writer),
         Some((team_b, touches)) => resume_both(current_match, set, touches, team_b, set_writer),
