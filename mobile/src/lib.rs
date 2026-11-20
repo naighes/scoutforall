@@ -9480,6 +9480,66 @@ mod tests {
         assert!(app.correction(team, m, 2, 0).is_err());
     }
 
+    /// A set scouted on both sides: its touches listed with their side and
+    /// the score from A's, a touch of B corrected with B's team and saved
+    /// on both sides (B's statistics read it).
+    #[test]
+    fn the_touches_of_a_set_on_both_sides_are_corrected() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice).unwrap();
+        let (team, m) = (imported.team_id, imported.match_id);
+        let events = app.set_events(team.clone(), m.clone(), 1).unwrap();
+        assert!(events.both);
+        assert!(events.events.iter().any(|e| e.event.side_b));
+        assert!(events.events.iter().any(|e| !e.event.side_b));
+        let last = events.events.last().unwrap();
+        assert_eq!(last.score_us.max(last.score_them), 25);
+        // a serve of B
+        let serve = events
+            .events
+            .iter()
+            .find(|e| e.event.side_b && e.event.event == EventTypeEnum::S)
+            .unwrap();
+        let correction = app
+            .correction(team.clone(), m.clone(), 1, serve.index)
+            .unwrap();
+        let state = correction.state();
+        assert_eq!(state.index, serve.index);
+        assert!(state.event.side_b);
+        assert!(state.event_types.iter().all(|e| e.side_b));
+        let other = state
+            .techniques
+            .iter()
+            .find(|t| !t.chosen)
+            .map(|t| t.value)
+            .unwrap();
+        correction.choose_technique(Some(other));
+        app.save_correction(correction).unwrap();
+        let saved = app.set_events(team.clone(), m.clone(), 1).unwrap();
+        assert!(saved.both);
+        assert_eq!(saved.events.len(), events.events.len());
+        let index = usize::try_from(serve.index).unwrap();
+        assert_eq!(
+            saved.events[index].event.technique.as_deref(),
+            Some(other.to_string().as_str())
+        );
+        assert!(
+            app.match_stats(
+                team,
+                m,
+                MatchSide::B,
+                StatsScope::Match,
+                DetailFilter::default()
+            )
+            .is_ok()
+        );
+    }
+
     #[test]
     fn the_statistics_of_a_match_without_sets_are_empty() {
         let dir = tempfile::tempdir().unwrap();
