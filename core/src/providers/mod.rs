@@ -7,5 +7,6 @@ pub mod set_writer;
 pub mod sqlite;
 pub mod team_reader;
 pub mod team_writer;
+pub mod training_cycles;
 pub mod training_reader;
 pub mod training_writer;

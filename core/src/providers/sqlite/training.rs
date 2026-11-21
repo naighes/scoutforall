@@ -6,7 +6,7 @@ use crate::{
     domain::sql::Sql,
     errors::{AppError, IOError, TrainingError},
     providers::{
-        sqlite::{Database, not_found, sqlite},
+        sqlite::{Database, not_found, sqlite, training_cycles::check_microcycle},
         training_reader::TrainingReader,
         training_writer::TrainingWriter,
     },
@@ -29,6 +29,10 @@ pub struct SqliteTraining(Database);
 impl SqliteTraining {
     pub fn new(db: Database) -> Self {
         Self(db)
+    }
+
+    pub(crate) fn db(&self) -> &Database {
+        &self.0
     }
 }
 
@@ -484,6 +488,7 @@ impl TrainingWriter for SqliteTraining {
                 .map_err(sqlite)?;
             match team {
                 true => {
+                    check_microcycle(tx, team_id, input.microcycle_id.as_ref(), input.start)?;
                     check_session(tx, team_id, None, input.start, input.duration_min)?;
                     insert_session(tx, team_id, None, &input)
                 }
@@ -499,6 +504,12 @@ impl TrainingWriter for SqliteTraining {
     ) -> Result<TrainingSession, AppError> {
         self.0.write(|tx| {
             let session = read_session(tx, session_id)?;
+            check_microcycle(
+                tx,
+                &session.team_id,
+                input.microcycle_id.as_ref(),
+                input.start,
+            )?;
             check_session(
                 tx,
                 &session.team_id,
@@ -661,6 +672,12 @@ impl TrainingWriter for SqliteTraining {
     ) -> Result<TrainingSession, AppError> {
         self.0.write(|tx| {
             let original = read_session(tx, session_id)?;
+            check_microcycle(
+                tx,
+                &original.team_id,
+                input.microcycle_id.as_ref(),
+                input.start,
+            )?;
             check_session(
                 tx,
                 &original.team_id,

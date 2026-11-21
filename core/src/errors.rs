@@ -3,7 +3,10 @@ use zip::result::ZipError;
 
 use crate::{
     localization::Labels,
-    training::overlap::{Slot, SlotKind},
+    training::{
+        cycles::{Child, Window},
+        overlap::{Slot, SlotKind},
+    },
 };
 
 #[derive(Debug, Error)]
@@ -26,6 +29,18 @@ pub enum TrainingError {
     /// the slots of the team it overlaps, by start
     #[error("overlaps {} other slots of the team", .0.len())]
     Overlap(Vec<Slot>),
+    /// the cycles of the same level and team it overlaps
+    #[error("overlaps {} other cycles of the team", .0.len())]
+    CycleOverlap(Vec<Window>),
+    /// the window (or the day) is not inside its container
+    #[error("outside the window of its container")]
+    OutsideParent,
+    /// what a new window would leave out
+    #[error("leaves out {} children", .0.len())]
+    ChildrenOutside(Vec<Child>),
+    /// the span is not the one of the level
+    #[error("invalid window")]
+    InvalidWindow,
 }
 
 impl TrainingError {
@@ -43,6 +58,21 @@ impl TrainingError {
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
+            TrainingError::CycleOverlap(windows) => windows
+                .iter()
+                .map(|w| labels.overlaps_cycle.replace("{}", &w.text()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            TrainingError::OutsideParent => labels.outside_parent.to_string(),
+            TrainingError::ChildrenOutside(children) => labels.children_outside.replace(
+                "{}",
+                &children
+                    .iter()
+                    .map(|c| c.window.text())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            TrainingError::InvalidWindow => labels.invalid_date.to_string(),
         }
     }
 }

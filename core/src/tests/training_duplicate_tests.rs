@@ -113,7 +113,11 @@ mod tests {
         assert_eq!(copy.team_id, team.id);
         assert_eq!(copy.start, at(12, 1, 18));
         assert_eq!(
-            (copy.duration_min, copy.location.as_str(), copy.title.as_str()),
+            (
+                copy.duration_min,
+                copy.location.as_str(),
+                copy.title.as_str()
+            ),
             (120, "Gym", "Serve")
         );
         assert_eq!(copy.objectives, "Reception");
@@ -182,7 +186,11 @@ mod tests {
         assert_eq!(copy.objectives, "");
         assert!(t.activities(&copy.id).await.unwrap().is_empty());
         assert_eq!(
-            (copy.duration_min, copy.location.as_str(), copy.title.as_str()),
+            (
+                copy.duration_min,
+                copy.location.as_str(),
+                copy.title.as_str()
+            ),
             (120, "Gym", "Serve")
         );
     }

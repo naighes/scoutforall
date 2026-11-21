@@ -2,6 +2,7 @@
 //! window of a session is local, without offset: the date and time the
 //! user wrote, so that daylight saving time moves nothing.
 
+pub mod cycles;
 pub mod duplicate;
 pub mod form;
 pub mod overlap;

@@ -79,6 +79,7 @@ mod team_form_tests;
 mod technique_tests;
 mod training_activity_tests;
 mod training_attendance_tests;
+mod training_cycle_tests;
 mod training_duplicate_tests;
 mod training_form_tests;
 mod training_overlap_tests;
