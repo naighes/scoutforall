@@ -11,8 +11,8 @@ use crate::{
         training_writer::TrainingWriter,
     },
     training::{
-        Activity, ActivityHit, ActivityInput, AttendanceInput, AttendanceRow, AttendanceSheet,
-        Move, SessionInput, TrainingSession,
+        Activity, ActivityHit, ActivityInput, ActivityStatus, AttendanceInput, AttendanceRow,
+        AttendanceSheet, Move, SessionInput, SessionStatus, TrainingSession,
         overlap::{Slot, clashes},
     },
 };
@@ -127,6 +127,19 @@ fn roster_rows(
 const LAST_POSITION: u16 = 65534;
 
 /// The session not removed, or an error.
+fn write_status(
+    tx: &Transaction,
+    session_id: &Uuid,
+    status: SessionStatus,
+) -> Result<(), AppError> {
+    tx.execute(
+        "UPDATE training_sessions SET status = ?2 WHERE id = ?1 AND deleted = 0",
+        params![Sql(*session_id), status],
+    )
+    .map(|_| ())
+    .map_err(sqlite)
+}
+
 pub(crate) fn read_session(tx: &Transaction, id: &Uuid) -> Result<TrainingSession, AppError> {
     tx.query_row(
         &format!("SELECT {SESSION_COLUMNS} FROM training_sessions WHERE id = ?1 AND deleted = 0"),
@@ -458,6 +471,45 @@ impl TrainingWriter for SqliteTraining {
                 0 => Err(not_found(&format!("session {session_id}"))),
                 _ => read_session(tx, session_id),
             }
+        })
+    }
+
+    async fn set_session_status(
+        &self,
+        session_id: &Uuid,
+        status: SessionStatus,
+    ) -> Result<TrainingSession, AppError> {
+        self.0.write(|tx| {
+            read_session(tx, session_id)?;
+            write_status(tx, session_id, status)?;
+            read_session(tx, session_id)
+        })
+    }
+
+    async fn complete_session(
+        &self,
+        session_id: &Uuid,
+        activities: Vec<Uuid>,
+    ) -> Result<TrainingSession, AppError> {
+        self.0.write(|tx| {
+            read_session(tx, session_id)?;
+            activities.iter().try_for_each(|id| {
+                Some(read_activity(tx, id)?)
+                    .filter(|a| a.session_id == *session_id)
+                    .ok_or_else(|| not_found(&format!("activity {id}")))
+                    .and_then(|a| match a.status {
+                        ActivityStatus::Planned => tx
+                            .execute(
+                                "UPDATE training_activities SET status = ?2 WHERE id = ?1",
+                                params![Sql(*id), ActivityStatus::Completed],
+                            )
+                            .map(|_| ())
+                            .map_err(sqlite),
+                        _ => Ok(()),
+                    })
+            })?;
+            write_status(tx, session_id, SessionStatus::Completed)?;
+            read_session(tx, session_id)
         })
     }
 

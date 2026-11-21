@@ -5,7 +5,7 @@
 pub mod form;
 pub mod overlap;
 
-use chrono::NaiveDateTime;
+use chrono::{Duration, NaiveDateTime};
 use uuid::Uuid;
 
 /// What a session is proposed to last, in minutes.
@@ -44,6 +44,21 @@ pub struct TrainingSession {
     pub notes: String,
     pub final_remarks: String,
     pub status: SessionStatus,
+}
+
+impl TrainingSession {
+    /// Planned and already over (start + duration before `now`): the session
+    /// is "to close". The status is never changed on its own.
+    pub fn is_to_close(&self, now: NaiveDateTime) -> bool {
+        self.status == SessionStatus::Planned
+            && self.start + Duration::minutes(i64::from(self.duration_min)) < now
+    }
+
+    /// The minutes the totals count: the actual duration, the planned one
+    /// when it is empty.
+    pub fn counted_minutes(&self) -> u16 {
+        self.actual_duration_min.unwrap_or(self.duration_min)
+    }
 }
 
 /// A valid form, the arguments of `TrainingWriter::create_session` and

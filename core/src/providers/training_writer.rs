@@ -1,6 +1,9 @@
 use crate::{
     errors::AppError,
-    training::{Activity, ActivityInput, AttendanceInput, Move, SessionInput, TrainingSession},
+    training::{
+        Activity, ActivityInput, AttendanceInput, Move, SessionInput, SessionStatus,
+        TrainingSession,
+    },
 };
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -19,6 +22,23 @@ pub trait TrainingWriter {
         &self,
         session_id: &Uuid,
         input: SessionInput,
+    ) -> Result<TrainingSession, AppError>;
+
+    /// Only the status of the session: cancel it, or reopen it as planned.
+    /// Its activities stay as they are.
+    async fn set_session_status(
+        &self,
+        session_id: &Uuid,
+        status: SessionStatus,
+    ) -> Result<TrainingSession, AppError>;
+
+    /// Completes the session and marks completed those of `activities` that
+    /// are planned (the others stay as they are). An activity that is not
+    /// of the session stops everything: nothing is written.
+    async fn complete_session(
+        &self,
+        session_id: &Uuid,
+        activities: Vec<Uuid>,
     ) -> Result<TrainingSession, AppError>;
 
     /// Marks the session removed (D7): its activities and attendance are no
