@@ -3,6 +3,7 @@ use crate::{
     training::{
         Activity, ActivityInput, AttendanceInput, Move, SessionInput, SessionStatus,
         TrainingSession,
+        duplicate::DuplicateInput,
         series::{SeriesEdit, SeriesInput, SeriesOutcome, SeriesScope},
     },
 };
@@ -52,6 +53,16 @@ pub trait TrainingWriter {
     /// how many.
     async fn remove_series(&self, session_id: &Uuid, scope: SeriesScope)
     -> Result<usize, AppError>;
+
+    /// A new session of the same team on another date: planned, in no
+    /// series, with the title, location and planned duration of the
+    /// original, and its objectives and planned activities when the input
+    /// says so. It overlaps nothing, or nothing is written.
+    async fn duplicate_session(
+        &self,
+        session_id: &Uuid,
+        input: DuplicateInput,
+    ) -> Result<TrainingSession, AppError>;
 
     /// Only the status of the session: cancel it, or reopen it as planned.
     /// Its activities stay as they are.

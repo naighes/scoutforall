@@ -13,6 +13,7 @@ use crate::{
     training::{
         Activity, ActivityHit, ActivityInput, ActivityStatus, AttendanceInput, AttendanceRow,
         AttendanceSheet, Move, SessionInput, SessionStatus, TrainingSession,
+        duplicate::DuplicateInput,
         overlap::{Slot, clashes},
         series::{self, SeriesEdit, SeriesInput, SeriesOutcome, SeriesScope},
     },
@@ -650,6 +651,83 @@ impl TrainingWriter for SqliteTraining {
                 .map_err(sqlite)
             })?;
             Ok(targets.len())
+        })
+    }
+
+    async fn duplicate_session(
+        &self,
+        session_id: &Uuid,
+        input: DuplicateInput,
+    ) -> Result<TrainingSession, AppError> {
+        self.0.write(|tx| {
+            let original = read_session(tx, session_id)?;
+            check_session(
+                tx,
+                &original.team_id,
+                None,
+                input.start,
+                original.duration_min,
+            )?;
+            let copy = insert_session(
+                tx,
+                &original.team_id,
+                None,
+                &SessionInput {
+                    microcycle_id: input.microcycle_id,
+                    start: input.start,
+                    duration_min: original.duration_min,
+                    actual_duration_min: None,
+                    location: original.location,
+                    title: original.title,
+                    objectives: match input.copy_objectives {
+                        true => original.objectives,
+                        false => String::new(),
+                    },
+                    notes: String::new(),
+                    final_remarks: String::new(),
+                    status: SessionStatus::Planned,
+                },
+            )?;
+            match input.copy_activities {
+                true => tx
+                    .prepare(
+                        "SELECT name, description, planned_min FROM training_activities
+                         WHERE session_id = ?1 AND deleted = 0 AND status = 'planned'
+                         ORDER BY position",
+                    )
+                    .map_err(sqlite)?
+                    .query_map([Sql(*session_id)], |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, Option<u16>>(2)?,
+                        ))
+                    })
+                    .map_err(sqlite)?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(sqlite)?
+                    .into_iter()
+                    .zip(0u16..)
+                    .try_for_each(|((name, description, planned), position)| {
+                        tx.execute(
+                            "INSERT INTO training_activities (id, session_id, position, name,
+                                 description, planned_min)
+                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                            params![
+                                Sql(Uuid::new_v4()),
+                                Sql(copy.id),
+                                position,
+                                name,
+                                description,
+                                planned
+                            ],
+                        )
+                        .map(|_| ())
+                        .map_err(sqlite)
+                    }),
+                false => Ok(()),
+            }?;
+            Ok(copy)
         })
     }
 
