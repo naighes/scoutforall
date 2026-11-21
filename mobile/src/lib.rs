@@ -80,7 +80,7 @@ use scout4all_core::{
         set::SetEntry,
         snapshot::{EventEntry, Formation},
         stats::{
-            AttackSummary, DigsEnum, EvalSet, EventPick, Metric, RoleSet, SetTypeSet,
+            AttackSummary, DigsEnum, EvalSet, EventKey, EventPick, Metric, RoleSet, SetTypeSet,
             SituationFilter, Stats, StatsFilter,
         },
         team::TeamEntry,
@@ -2980,16 +2980,8 @@ fn detail_of(
                 }),
             ),
         };
-    // who has the fundamental, and the ones chosen even with none (the
-    // filter is shown, to take them off)
-    let mut ids = involved(everyone, event);
-    for chosen in &narrowed.players {
-        if !ids.contains(chosen) {
-            ids.push(*chosen);
-        }
-    }
-    let mut players: Vec<ScoutingPlayer> = ids.into_iter().filter_map(player_of).collect();
-    players.sort_by_key(|p| p.number);
+    // who has the fundamental, and the ones chosen even with none
+    let players = choosable(involved(everyone, event), &narrowed, teams, labels);
     let fundamental_name = |e: EventTypeEnum| match e {
         EventTypeEnum::FB => labels.freeballs.to_string(),
         _ => e.friendly_name(labels).to_string(),
@@ -3042,13 +3034,52 @@ fn narrowed(filter: &DetailFilter) -> Result<StatsFilter, MobileError> {
 /// The players with an event of ours of the kind `event` in the
 /// statistics, by their id.
 fn involved(stats: &Stats, event: EventTypeEnum) -> Vec<Uuid> {
+    with_events(stats, |k| k.event_type == event)
+}
+
+/// The players with an event of ours of any kind in the statistics (a
+/// touch of any fundamental, a fault), by their id: a libero only
+/// receiving and digging too, a player never on court not.
+pub(crate) fn touched(stats: &Stats) -> Vec<Uuid> {
+    with_events(stats, |_| true)
+}
+
+/// The players of the events of ours `keep` keeps, by their id, once.
+fn with_events(stats: &Stats, keep: impl Fn(&EventKey) -> bool) -> Vec<Uuid> {
     let mut players: Vec<Uuid> = stats
         .events
-        .iter(|k| k.player.is_some() && k.event_type == event)
+        .iter(|k| k.player.is_some() && keep(k))
         .filter_map(|(k, _)| k.player)
         .collect();
     players.sort_unstable();
     players.dedup();
+    players
+}
+
+/// The players a filter offers: `ids`, and the ones chosen even with no
+/// event (the filter shown, to take them off); each found in the first of
+/// `teams` having it (the team as it is, then as each match saw it), one
+/// found in none left out; by their number.
+pub(crate) fn choosable(
+    mut ids: Vec<Uuid>,
+    narrowed: &StatsFilter,
+    teams: &[&TeamEntry],
+    labels: &Labels,
+) -> Vec<ScoutingPlayer> {
+    for chosen in &narrowed.players {
+        if !ids.contains(chosen) {
+            ids.push(*chosen);
+        }
+    }
+    let mut players: Vec<ScoutingPlayer> = ids
+        .into_iter()
+        .filter_map(|id| {
+            teams
+                .iter()
+                .find_map(|t| t.find_player(id).map(|p| scouting_player(t, p, labels)))
+        })
+        .collect();
+    players.sort_by_key(|p| p.number);
     players
 }
 
@@ -10899,5 +10930,470 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    /// A touch of ours told event first: the event, the player, the
+    /// evaluation.
+    fn touch(scouting: &Scouting, event: EventTypeEnum, player: &str, eval: EvalEnum) {
+        scouting.choose_event(event).unwrap();
+        scouting.choose_player(player.into()).unwrap();
+        scouting.choose_eval(eval).unwrap();
+    }
+
+    /// The players of the filter, as the app lists them: number and name.
+    fn listed(players: &[ScoutingPlayer]) -> Vec<(u8, String)> {
+        players.iter().map(|p| (p.number, p.name.clone())).collect()
+    }
+
+    /// The players of the filter of the analysis, by number.
+    fn numbers(players: &[ScoutingPlayer]) -> Vec<u8> {
+        players.iter().map(|p| p.number).collect()
+    }
+
+    /// The id of the player of the number on court.
+    fn on_court(scouting: &Scouting, number: u8) -> String {
+        scouting
+            .state()
+            .court
+            .into_iter()
+            .find(|p| p.number == number)
+            .map(|p| p.id)
+            .unwrap()
+    }
+
+    /// A match of a team of eight (8 never on court, a second libero), its
+    /// set started as `started_set` (the libero 7 on court for 6): our
+    /// serve `+` of 1 and the libero's dig, their error; our serve error;
+    /// the libero's reception, their error; the serve `/` of 2 and the
+    /// block of 4 (the middle blocker, never serving); a fault of 5. The
+    /// team, the match.
+    fn libero_match(app: &Scout4All) -> (String, String) {
+        let (team, m) = match_with_a_set(app);
+        app.save_player(team.clone(), None, player("P8", "8"), false)
+            .unwrap();
+        let scouting = started_set(app, &team, &m);
+        let libero = on_court(&scouting, 7);
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        touch(&scouting, EventTypeEnum::D, &libero, EvalEnum::Positive);
+        scouting.choose_event(EventTypeEnum::OE).unwrap();
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        touch(&scouting, EventTypeEnum::P, &libero, EvalEnum::Perfect);
+        scouting.choose_event(EventTypeEnum::OE).unwrap();
+        scouting.choose_eval(EvalEnum::Over).unwrap();
+        touch(
+            &scouting,
+            EventTypeEnum::B,
+            &on_court(&scouting, 4),
+            EvalEnum::Over,
+        );
+        scouting.choose_event(EventTypeEnum::F).unwrap();
+        scouting.choose_player(on_court(&scouting, 5)).unwrap();
+        (team, m)
+    }
+
+    /// Another match of the team, a week later: our serve error of 1, the
+    /// libero's reception `+`, their error.
+    fn libero_receives(app: &Scout4All, team: &str, date: &str) {
+        let m = app
+            .save_match(team.into(), None, match_form("Siena", date, "8"))
+            .unwrap();
+        let scouting = started_set(app, team, &m);
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        let libero = scouting
+            .state()
+            .court
+            .into_iter()
+            .find(|p| p.libero)
+            .map(|p| p.id)
+            .unwrap();
+        touch(&scouting, EventTypeEnum::P, &libero, EvalEnum::Positive);
+        scouting.choose_event(EventTypeEnum::OE).unwrap();
+    }
+
+    fn analysis_of(
+        app: &Scout4All,
+        team: &str,
+        count: u32,
+        event: EventTypeEnum,
+        filter: DetailFilter,
+    ) -> TeamAnalysis {
+        app.team_analysis(
+            team.into(),
+            AnalysisPeriod::LastMatches { count },
+            None,
+            event,
+            filter,
+        )
+        .unwrap()
+    }
+
+    /// The filter of the pages of the analysis but the detail lists every
+    /// player with a touch of any fundamental, whatever the fundamental of
+    /// the detail: the libero only receiving and digging, the middle
+    /// blocker only blocking, the player only at fault; not the ones never
+    /// touching the ball (the second libero, 3, 6 replaced by the libero).
+    /// The detail keeps the players of its fundamental (TODO/000).
+    #[test]
+    fn the_filter_of_the_analysis_lists_every_player_with_a_touch() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, _) = libero_match(&app);
+        let all = DetailFilter::default();
+        for (event, of_the_detail) in [
+            (EventTypeEnum::S, vec![1, 2]),
+            (EventTypeEnum::P, vec![7]),
+            (EventTypeEnum::D, vec![7]),
+            (EventTypeEnum::B, vec![4]),
+            (EventTypeEnum::A, vec![]),
+            (EventTypeEnum::FB, vec![]),
+        ] {
+            let a = analysis_of(&app, &team, 4, event, all.clone());
+            assert_eq!(
+                listed(&a.players),
+                [(1, "P1"), (2, "P2"), (4, "P4"), (5, "P5"), (7, "P7")]
+                    .map(|(n, name)| (n, name.to_string())),
+                "{event:?}"
+            );
+            assert_eq!(numbers(&a.detail.players), of_the_detail, "{event:?}");
+            // the detail's players are among them
+            assert!(a.detail.players.iter().all(|p| a.players.contains(p)));
+        }
+    }
+
+    /// The libero chosen in the filter of the analysis: the summary and the
+    /// trend count their reception and dig only, as the role of libero
+    /// does; with the rotation and the phase, the touches of those; with
+    /// another player, the touches of both (TODO/000).
+    #[test]
+    fn the_figures_of_the_libero_chosen_are_their_touches() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, _) = libero_match(&app);
+        let all = analysis_of(&app, &team, 4, EventTypeEnum::S, DetailFilter::default());
+        let id = |number: u8| {
+            all.players
+                .iter()
+                .find(|p| p.number == number)
+                .map(|p| p.id.clone())
+                .unwrap()
+        };
+        let totals = |filter: DetailFilter| {
+            let a = analysis_of(&app, &team, 4, EventTypeEnum::S, filter);
+            let summary: Vec<(EventTypeEnum, u32)> = a
+                .summary
+                .fundamentals
+                .iter()
+                .map(|f| (f.event, f.total))
+                .collect();
+            let trend: Vec<(Series, Vec<u32>)> = a
+                .trend
+                .iter()
+                .filter(|t| matches!(t.series, Series::Reception | Series::Serve))
+                .map(|t| (t.series, t.touches.clone()))
+                .collect();
+            (summary, trend)
+        };
+        let libero = DetailFilter {
+            players: vec![id(7)],
+            ..DetailFilter::default()
+        };
+        use EventTypeEnum::{A, B, D, P, S};
+        let (summary, trend) = totals(libero.clone());
+        assert_eq!(summary, [(P, 1), (A, 0), (S, 0), (B, 0), (D, 1)]);
+        assert_eq!(
+            trend,
+            [(Series::Reception, vec![1]), (Series::Serve, vec![0])]
+        );
+        // the role of libero: the same touches
+        let role = DetailFilter {
+            roles: vec![RoleEnum::Libero],
+            ..DetailFilter::default()
+        };
+        assert_eq!(totals(role.clone()).0, summary);
+        assert_eq!(
+            totals(DetailFilter {
+                players: vec![id(7)],
+                ..role
+            })
+            .0,
+            summary
+        );
+        // the reception in side out, the dig in break, both in S1
+        let narrowed = |phase, rotations: Vec<u8>| {
+            totals(DetailFilter {
+                phase,
+                rotations,
+                ..libero.clone()
+            })
+            .0
+        };
+        assert_eq!(
+            narrowed(Some(PhaseEnum::SideOut), vec![]),
+            [(P, 1), (A, 0), (S, 0), (B, 0), (D, 0)]
+        );
+        assert_eq!(
+            narrowed(Some(PhaseEnum::Break), vec![]),
+            [(P, 0), (A, 0), (S, 0), (B, 0), (D, 1)]
+        );
+        assert_eq!(narrowed(None, vec![0]), summary);
+        assert_eq!(
+            narrowed(None, vec![1]),
+            [(P, 0), (A, 0), (S, 0), (B, 0), (D, 0)]
+        );
+        // with the server of the first rallies: the touches of both
+        let both = DetailFilter {
+            players: vec![id(7), id(1)],
+            ..DetailFilter::default()
+        };
+        assert_eq!(totals(both).0, [(P, 1), (A, 0), (S, 2), (B, 0), (D, 1)]);
+    }
+
+    /// A player chosen in the filter of the analysis with no touch (the
+    /// second libero), or no player of the team at all: no error, the
+    /// first listed to take the filter off, with figures of none; the
+    /// other one left out (TODO/000).
+    #[test]
+    fn a_player_chosen_with_no_touch_stays_in_the_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, _) = libero_match(&app);
+        let second = app
+            .team(team.clone())
+            .unwrap()
+            .players
+            .into_iter()
+            .find(|p| p.number == 8)
+            .unwrap()
+            .id;
+        let chosen = DetailFilter {
+            players: vec![second.clone(), Uuid::new_v4().to_string()],
+            ..DetailFilter::default()
+        };
+        for event in [EventTypeEnum::S, EventTypeEnum::P] {
+            let a = analysis_of(&app, &team, 4, event, chosen.clone());
+            assert_eq!(numbers(&a.players), [1, 2, 4, 5, 7, 8]);
+            assert!(numbers(&a.detail.players).contains(&8));
+            assert!(a.summary.fundamentals.iter().all(|f| f.total == 0));
+            assert!(a.trend.iter().all(|t| t.touches.iter().all(|n| *n == 0)));
+        }
+        // a period with no match: only the one chosen
+        let none = app
+            .team_analysis(
+                team.clone(),
+                AnalysisPeriod::Between {
+                    from: "2020-01-01".into(),
+                    to: "2020-01-31".into(),
+                },
+                None,
+                EventTypeEnum::S,
+                chosen,
+            )
+            .unwrap();
+        assert!(none.matches.is_empty());
+        assert_eq!(numbers(&none.players), [8]);
+    }
+
+    /// No match, or no touch: nobody to choose, no panic.
+    #[test]
+    fn with_no_touch_the_filter_of_the_analysis_is_empty() {
+        assert!(touched(&Stats::default()).is_empty());
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, m) = match_with_a_set(&app);
+        let all = DetailFilter::default();
+        let a = analysis_of(&app, &team, 4, EventTypeEnum::S, all.clone());
+        assert!(a.matches.is_empty() && a.players.is_empty());
+        // a set started, no rally
+        started_set(&app, &team, &m);
+        let a = analysis_of(&app, &team, 4, EventTypeEnum::S, all);
+        assert!(a.players.is_empty() && a.detail.players.is_empty());
+    }
+
+    /// Over several matches each player is listed once, by number; one
+    /// removed from the team after the matches stays, with the name and
+    /// number of then, beside the new player with the same number; the
+    /// period lists the players of its matches only (TODO/000).
+    #[test]
+    fn the_filter_of_the_analysis_over_matches_and_removed_players() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, _) = libero_match(&app);
+        libero_receives(&app, &team, "2026-10-31T18:00:00+01:00");
+        let all = DetailFilter::default();
+        let both = analysis_of(&app, &team, 4, EventTypeEnum::S, all.clone());
+        assert_eq!(numbers(&both.players), [1, 2, 4, 5, 7]);
+        assert_eq!(numbers(&both.detail.players), [1, 2]);
+        // the last match: the server and the libero
+        let last = analysis_of(&app, &team, 1, EventTypeEnum::S, all.clone());
+        assert_eq!(numbers(&last.players), [1, 7]);
+        // the libero leaves, a new 7 is the libero of a third match
+        let libero = both.players[4].id.clone();
+        app.remove_player(team.clone(), libero.clone()).unwrap();
+        app.save_player(team.clone(), None, player("Q7", "7"), false)
+            .unwrap();
+        libero_receives(&app, &team, "2026-11-07T18:00:00+01:00");
+        let three = analysis_of(&app, &team, 4, EventTypeEnum::P, all.clone());
+        let sevens: Vec<(String, &str)> = three
+            .players
+            .iter()
+            .filter(|p| p.number == 7)
+            .map(|p| (p.id.clone(), p.name.as_str()))
+            .collect();
+        assert_eq!(sevens.len(), 2, "{sevens:?}");
+        assert!(sevens.contains(&(libero.clone(), "P7")));
+        assert!(
+            sevens
+                .iter()
+                .any(|(id, name)| *id != libero && *name == "Q7")
+        );
+        assert_eq!(numbers(&three.players), [1, 2, 4, 5, 7, 7]);
+        assert_eq!(numbers(&three.detail.players), [7, 7]);
+        // the last match: the new libero only
+        let last = analysis_of(&app, &team, 1, EventTypeEnum::S, all);
+        assert_eq!(listed(&last.players), [(1, "P1".into()), (7, "Q7".into())]);
+        // the libero removed, chosen: their reception of the two matches
+        let removed = analysis_of(
+            &app,
+            &team,
+            4,
+            EventTypeEnum::P,
+            DetailFilter {
+                players: vec![libero],
+                ..DetailFilter::default()
+            },
+        );
+        assert_eq!(removed.detail.fundamental.map(|f| f.total), Some(2));
+    }
+
+    /// Seen from an opponent scouted on both sides, the filter lists its
+    /// players with a touch, never the team's; every fundamental's players
+    /// among them; the team against the opponent lists its own (TODO/000).
+    #[test]
+    fn the_filter_of_the_analysis_of_an_opponent() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(
+                THREE_SETS.to_vec(),
+                DvwChoice {
+                    opponent: DvwOpponent::NewTeam,
+                    ..dvw_choice(DvwSide::Home, None)
+                },
+            )
+            .unwrap();
+        let team = imported.team_id;
+        let opponent = app.analysis_opponents(team.clone()).unwrap()[0].id;
+        let ids = |players: &[ScoutingPlayer]| -> Vec<String> {
+            players.iter().map(|p| p.id.clone()).collect()
+        };
+        let of_team =
+            ids(&analysis_of(&app, &team, 4, EventTypeEnum::S, DetailFilter::default()).players);
+        let period = AnalysisPeriod::LastMatches { count: 4 };
+        let all = DetailFilter::default();
+        let mut of_the_details: Vec<String> = vec![];
+        for event in FUNDAMENTALS {
+            let b = app
+                .opponent_analysis(
+                    team.clone(),
+                    opponent,
+                    period.clone(),
+                    None,
+                    event,
+                    all.clone(),
+                )
+                .unwrap();
+            assert!(!b.players.is_empty());
+            assert!(ids(&b.players).iter().all(|p| !of_team.contains(p)));
+            assert!(b.detail.players.iter().all(|p| b.players.contains(p)));
+            of_the_details.extend(ids(&b.detail.players));
+            let against = app
+                .analysis_against(
+                    team.clone(),
+                    opponent,
+                    period.clone(),
+                    None,
+                    event,
+                    all.clone(),
+                )
+                .unwrap();
+            assert_eq!(ids(&against.players), of_team);
+        }
+        // a player of the opponent touching the ball has a fundamental
+        let b = app
+            .opponent_analysis(team.clone(), opponent, period, None, EventTypeEnum::S, all)
+            .unwrap();
+        assert!(ids(&b.players).iter().all(|p| of_the_details.contains(p)));
+    }
+
+    /// A match imported from DataVolley on both sides, the libero 7
+    /// receiving (DataVolley tells the libero's touches with them out of
+    /// the lineup) and a second libero 8 never on court: the filter of the
+    /// analysis lists the libero, not the second one, whatever the detail;
+    /// chosen, the libero counts their reception (TODO/000).
+    #[test]
+    fn the_filter_of_the_analysis_lists_the_libero_of_datavolley() {
+        let text = String::from_utf8_lossy(THREE_SETS)
+            .replacen("*05RM+;", "*07RM+;", 1)
+            .replacen(
+                "0;7;7;*;;;;;P7;Surname7;Name7;;L;1;False;;;\n",
+                "0;7;7;*;;;;;P7;Surname7;Name7;;L;1;False;;;\n0;8;8;;;;;;P8;Surname8;Name8;;L;1;False;;;\n",
+                1,
+            );
+        assert!(text.contains("*07RM+;") && text.contains("P8;Surname8"));
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(
+                text.into_bytes(),
+                DvwChoice {
+                    opponent: DvwOpponent::NewTeam,
+                    ..dvw_choice(DvwSide::Home, None)
+                },
+            )
+            .unwrap();
+        let team = imported.team_id;
+        let numbers_of_team: Vec<u8> = app
+            .team(team.clone())
+            .unwrap()
+            .players
+            .iter()
+            .map(|p| p.number)
+            .collect();
+        assert!(numbers_of_team.contains(&8), "{numbers_of_team:?}");
+        let all = DetailFilter::default();
+        for event in FUNDAMENTALS {
+            let a = analysis_of(&app, &team, 4, event, all.clone());
+            assert!(numbers(&a.players).contains(&7), "{event:?}");
+            assert!(!numbers(&a.players).contains(&8), "{event:?}");
+            assert_eq!(
+                numbers(&a.detail.players).contains(&7),
+                event == EventTypeEnum::P,
+                "{event:?}"
+            );
+        }
+        let libero = analysis_of(&app, &team, 4, EventTypeEnum::S, all)
+            .players
+            .into_iter()
+            .find(|p| p.number == 7)
+            .unwrap()
+            .id;
+        let chosen = analysis_of(
+            &app,
+            &team,
+            4,
+            EventTypeEnum::S,
+            DetailFilter {
+                players: vec![libero],
+                ..DetailFilter::default()
+            },
+        );
+        let totals: Vec<(EventTypeEnum, u32)> = chosen
+            .summary
+            .fundamentals
+            .iter()
+            .map(|f| (f.event, f.total))
+            .collect();
+        use EventTypeEnum::{A, B, D, P, S};
+        assert_eq!(totals, [(P, 1), (A, 0), (S, 0), (B, 0), (D, 0)]);
     }
 }

@@ -4,7 +4,8 @@
 //! choices of the filters on the situation.
 use super::{
     ClipPick, CompetitionChoice, DetailFilter, DetailStats, GradeBand, LiveStats, MobileError,
-    RoleChoice, Scout4All, StatsScope, clips_of, detail_of, narrowed, series_name, summary,
+    RoleChoice, Scout4All, ScoutingPlayer, StatsScope, choosable, clips_of, detail_of, narrowed,
+    series_name, summary, touched,
 };
 use chrono::{Local, NaiveDate};
 use scout4all_core::player_form::name_the_removed;
@@ -130,6 +131,11 @@ pub struct TeamAnalysis {
     pub summary: LiveStats,
     pub trend: Vec<MatchTrend>,
     pub detail: DetailStats,
+    /// the players with a touch of any fundamental in the matches (a
+    /// libero only receiving and digging too), and the ones chosen even
+    /// with none, by their number: the filter of every page but the
+    /// detail, which offers the players of its fundamental
+    pub players: Vec<ScoutingPlayer>,
     pub situation: SituationChoices,
 }
 
@@ -548,6 +554,7 @@ pub(crate) fn team_analysis(
         played_days,
         summary: summary(&total, &narrowed, team, labels),
         trend,
+        players: choosable(touched(&total), &narrowed, &teams, labels),
         detail: detail_of(&total, &total, &teams, labels, event, filter)?,
         situation: situation_choices(labels, team.gender),
     })

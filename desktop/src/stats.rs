@@ -41,7 +41,7 @@ use {
     scout4all_mobile::{
         AnalysisPeriod, ClipPick, DetailFilter, DetailStats, ErrorCount, FundamentalDetail,
         LiveStats, MatchClips, MatchSide, MobileError, PhaseStats, Scout4All, ScoutedOpponent,
-        SituationChoices, StatsScope, TargetStats, TeamAnalysis,
+        ScoutingPlayer, SituationChoices, StatsScope, TargetStats, TeamAnalysis,
     },
     std::sync::Arc,
 };
@@ -856,6 +856,17 @@ impl StatsScreen {
         self.source == Source::Team
     }
 
+    /// The players the filter offers: on the pages of a team but the
+    /// detail, every one with a touch of any fundamental (the libero too,
+    /// who never serves); on the detail, the ones of its fundamental.
+    fn choosable_players(&self) -> &[ScoutingPlayer] {
+        match (self.is_team(), self.current(), &self.analysis, &self.detail) {
+            (true, Page::Summary | Page::Trend, Some(a), _) => &a.players,
+            (_, _, _, Some(d)) => &d.players,
+            _ => &[],
+        }
+    }
+
     /// The title of a match, the team shown first; of a team, as it is.
     fn titled(&self) -> String {
         match (&self.sides, self.side) {
@@ -1225,7 +1236,9 @@ impl StatsScreen {
             .as_ref()
             .and_then(|d| d.fundamental.as_ref())
             .is_some_and(|f| !f.targets.is_empty());
-        let narrow = [Filter::Player, Filter::Rotation, Filter::Phase];
+        // side by side, no player: they're of one of the two teams
+        let player = (!self.compare).then_some(Filter::Player);
+        let narrow = player.into_iter().chain([Filter::Rotation, Filter::Phase]);
         let competition = self.has_competitions().then_some(Filter::Competition);
         let opponent = (self.is_team() && !self.opponents.is_empty()).then_some(Filter::Opponent);
         let first: Vec<Filter> = match (self.is_team(), self.current()) {
@@ -1339,11 +1352,7 @@ impl StatsScreen {
             Filter::Player => {
                 let players: Vec<Vec<String>> = [vec![]]
                     .into_iter()
-                    .chain(
-                        detail
-                            .into_iter()
-                            .flat_map(|d| d.players.iter().map(|p| vec![p.id.clone()])),
-                    )
+                    .chain(self.choosable_players().iter().map(|p| vec![p.id.clone()]))
                     .collect();
                 ui::cycle(&players, &self.filter.players, forward).map(Message::Players)
             }
@@ -1469,7 +1478,9 @@ impl StatsScreen {
                 self.load();
             }
             Message::Versus => {
+                // the players chosen are of one of the two teams
                 self.compare = self.opponent.is_some();
+                self.filter.players.clear();
                 self.load();
             }
             Message::Series(series) => {
@@ -2033,7 +2044,7 @@ impl StatsScreen {
                     Message::Players(vec![]),
                 )]
                 .into_iter()
-                .chain(detail.iter().flat_map(|d| d.players.iter()).map(|p| {
+                .chain(self.choosable_players().iter().map(|p| {
                     pill(
                         format!("{} {}", p.number, p.name),
                         self.filter.players.contains(&p.id),
@@ -4475,6 +4486,140 @@ pub(crate) mod tests {
         assert_eq!(screen.filter.rotations, Vec::<u8>::new());
         screen.key(key!(right));
         assert_eq!(screen.filter.rotations, vec![0]);
+    }
+
+    /// The DataVolley fixture of three sets imported on both sides, the
+    /// libero 7 receiving (DataVolley tells the libero's touches with them
+    /// out of the lineup), into a new team: the team.
+    fn team_with_a_libero_receiving(core: &Scout4All) -> String {
+        use scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide};
+        let text = String::from_utf8_lossy(include_bytes!(
+            "../../core/src/tests/fixtures/three_sets.dvw"
+        ))
+        .replacen("*05RM+;", "*07RM+;", 1);
+        assert!(text.contains("*07RM+;"));
+        core.import_dvw(
+            text.into_bytes(),
+            DvwChoice {
+                opponent: DvwOpponent::NewTeam,
+                side: DvwSide::Home,
+                day: "2015-01-25".into(),
+                max_substitutions: 6,
+                team_id: None,
+                classification: core.classifications().first().map(|c| c.value),
+                gender: core.genders().first().map(|g| g.value),
+                country: core.countries("Ital".into()).first().map(|c| c.value),
+            },
+        )
+        .unwrap()
+        .team_id
+    }
+
+    /// The numbers of the players the arrows go round on the row of the
+    /// filter of the players, from all of them back to all of them.
+    fn players_by_arrows(screen: &mut StatsScreen) -> Vec<u8> {
+        screen.update(Message::Players(vec![]));
+        screen.row = screen
+            .filters()
+            .iter()
+            .position(|f| *f == Filter::Player)
+            .unwrap();
+        let mut numbers = vec![];
+        loop {
+            screen.key(key!(right));
+            let chosen = screen.filter.players.clone();
+            let [id] = chosen.as_slice() else {
+                assert!(chosen.is_empty(), "{chosen:?}");
+                return numbers;
+            };
+            let number = screen
+                .choosable_players()
+                .iter()
+                .find(|p| p.id == *id)
+                .map(|p| p.number)
+                .unwrap();
+            numbers.push(number);
+        }
+    }
+
+    /// The filter of the players of a team lists the libero, who never
+    /// serves, on the summary and the trend (the arrows and the pills go
+    /// round `choosable_players`); the
+    /// detail the players of its fundamental only; no hidden dependence
+    /// on the fundamental of the detail (TODO/000).
+    #[test]
+    fn the_libero_in_the_filter_of_the_players_of_a_team() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_a_libero_receiving(&core);
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        screen.update(Message::Kind(Kind::LastMatches));
+        let summary = players_by_arrows(&mut screen);
+        assert!(summary.contains(&7), "{summary:?}");
+        assert!(summary.windows(2).all(|w| w[0] <= w[1]), "{summary:?}");
+        screen.update(Message::Page(1));
+        assert_eq!(players_by_arrows(&mut screen), summary);
+        // the detail: the serve, no libero; the reception, the libero
+        screen.update(Message::Page(2));
+        let serve = players_by_arrows(&mut screen);
+        assert!(!serve.is_empty() && !serve.contains(&7), "{serve:?}");
+        screen.update(Message::Event(EventTypeEnum::P));
+        assert_eq!(players_by_arrows(&mut screen), [7]);
+        // the other pages the same, whatever the fundamental of the detail
+        screen.update(Message::Page(0));
+        assert_eq!(players_by_arrows(&mut screen), summary);
+        // the libero chosen: their reception only
+        let libero = screen
+            .choosable_players()
+            .iter()
+            .find(|p| p.number == 7)
+            .map(|p| p.id.clone())
+            .unwrap();
+        screen.update(Message::Players(vec![libero]));
+        let totals: Vec<(EventTypeEnum, u32)> = screen
+            .live
+            .iter()
+            .flat_map(|l| l.fundamentals.iter().map(|f| (f.event, f.total)))
+            .collect();
+        use EventTypeEnum::{A, B, D, P, S};
+        assert_eq!(totals, [(P, 1), (A, 0), (S, 0), (B, 0), (D, 0)]);
+        assert_eq!(aces(&screen), 0);
+    }
+
+    /// The opponent and the team side by side: no filter of the players
+    /// (theirs aren't ours), the ones chosen taken off: the same figures
+    /// as with none chosen (TODO/000).
+    #[test]
+    fn side_by_side_no_filter_of_the_players() {
+        let s = strings(LanguageEnum::En);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let team = team_with_a_libero_receiving(&core);
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        screen.update(Message::Kind(Kind::LastMatches));
+        let opponent = screen.opponents.first().map(|o| o.id);
+        screen.update(Message::Opponent(opponent));
+        assert!(screen.filters().contains(&Filter::Player));
+        screen.update(Message::Versus);
+        assert!(!screen.filters().contains(&Filter::Player));
+        let (live, versus) = (screen.live.clone(), screen.versus.clone());
+        assert!(versus.as_ref().is_some_and(|v| v.aces > 0));
+        // one of theirs chosen, then side by side again
+        screen.update(Message::Opponent(opponent));
+        let theirs = screen
+            .choosable_players()
+            .first()
+            .map(|p| p.id.clone())
+            .unwrap();
+        screen.update(Message::Players(vec![theirs]));
+        assert_ne!(screen.live, live);
+        screen.update(Message::Versus);
+        assert!(screen.filter.players.is_empty());
+        assert_eq!((screen.live.clone(), screen.versus.clone()), (live, versus));
+        // the trend: the filter again
+        screen.update(Message::Page(1));
+        assert!(screen.filters().contains(&Filter::Player));
     }
 
     /// A match scouted on both sides (imported, B a new team): the team
