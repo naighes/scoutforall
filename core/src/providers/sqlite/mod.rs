@@ -30,6 +30,7 @@ pub(crate) mod rows;
 pub mod sets;
 pub(crate) mod summary;
 pub mod teams;
+pub mod training;
 pub mod upload;
 pub mod video;
 
