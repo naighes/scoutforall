@@ -4,6 +4,7 @@
 
 pub mod form;
 pub mod overlap;
+pub mod series;
 
 use chrono::{Duration, NaiveDateTime};
 use uuid::Uuid;

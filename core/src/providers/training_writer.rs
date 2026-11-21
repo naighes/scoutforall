@@ -3,6 +3,7 @@ use crate::{
     training::{
         Activity, ActivityInput, AttendanceInput, Move, SessionInput, SessionStatus,
         TrainingSession,
+        series::{SeriesEdit, SeriesInput, SeriesOutcome, SeriesScope},
     },
 };
 use async_trait::async_trait;
@@ -23,6 +24,34 @@ pub trait TrainingWriter {
         session_id: &Uuid,
         input: SessionInput,
     ) -> Result<TrainingSession, AppError>;
+
+    /// Repeats the bands between the dates: real sessions with a `series_id`
+    /// in common, planned, with no objectives, activities or attendance.
+    /// The ones that overlap a session or a match in programma (or an
+    /// earlier one of the series) are reported as conflicts: with
+    /// `create_others` false any conflict stops everything and nothing is
+    /// written; with true the others are created.
+    async fn create_series(
+        &self,
+        team_id: &Uuid,
+        input: SeriesInput,
+        create_others: bool,
+    ) -> Result<SeriesOutcome, AppError>;
+
+    /// Changes location, time or duration of the planned sessions `scope`
+    /// reaches from `session_id` (the date never changes). A change that
+    /// overlaps something stops the whole group: nothing is written.
+    async fn update_series(
+        &self,
+        session_id: &Uuid,
+        scope: SeriesScope,
+        edit: SeriesEdit,
+    ) -> Result<Vec<TrainingSession>, AppError>;
+
+    /// Removes (D7) the planned sessions `scope` reaches from `session_id`;
+    /// how many.
+    async fn remove_series(&self, session_id: &Uuid, scope: SeriesScope)
+    -> Result<usize, AppError>;
 
     /// Only the status of the session: cancel it, or reopen it as planned.
     /// Its activities stay as they are.
