@@ -71,6 +71,7 @@ import io.github.naighes.scout4all.core.MatchTrend
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.ScoutedOpponent
+import io.github.naighes.scout4all.core.ScoutingPlayer
 import io.github.naighes.scout4all.core.TeamAnalysis
 import java.time.DateTimeException
 import java.time.Instant
@@ -186,8 +187,14 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                             opponent,
                             compare,
                             comparable = pages[page] == AnalysisPage.Summary,
-                            onCompare = { compare = true },
+                            onCompare = {
+                                // the players chosen are of one of the two teams
+                                query = query.withoutPlayers()
+                                compare = true
+                            },
                         ) {
+                            // the players chosen are of the other team
+                            query = query.withoutPlayers()
                             opponent = it
                             compare = false
                         }
@@ -225,6 +232,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                             a.situation,
                             query.filter,
                             query.event.takeIf { pages[page] == AnalysisPage.Detail },
+                            filterPlayers(a, pages[page] == AnalysisPage.Detail, compare),
                         ) { query = query.copy(filter = it) }
                         when (pages[page]) {
                             AnalysisPage.Summary -> if (compare) {
@@ -247,6 +255,19 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
         }
     }
 }
+
+/** The players the filter offers: on the detail the ones of its
+ * fundamental, on the other pages every one with a touch of any (the libero
+ * too, who never serves); none comparing two teams, whose players aren't
+ * the same. */
+internal fun filterPlayers(analysis: TeamAnalysis, detail: Boolean, compare: Boolean): List<ScoutingPlayer>? = when {
+    compare -> null
+    detail -> analysis.detail.players
+    else -> analysis.players
+}
+
+/** The query with no player chosen. */
+private fun DetailQuery.withoutPlayers() = copy(filter = filter.copy(players = emptyList()))
 
 /** The day of the digits typed, YYYYMMDD; none until it's whole and a day. */
 internal fun dayOf(digits: String): LocalDate? = when (digits.length) {

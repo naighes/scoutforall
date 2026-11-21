@@ -49,6 +49,7 @@ import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.PhaseChoice
 import io.github.naighes.scout4all.core.RotationChoice
+import io.github.naighes.scout4all.core.ScoutingPlayer
 import io.github.naighes.scout4all.core.SituationChoices
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -149,11 +150,12 @@ fun Detail(
     detail.freeballs?.let { FreeballContent(it) }
 }
 
-/** The filters of the statistics: the player, the rotation, the phase, in
- * the detail of the defense ([event] the dig) the digs counted and, with its
- * choices, the situation of the game (the role, the reception of the rally,
- * the touch before, the set, the reception formation, the P1), on as many
- * lines as they take. */
+/** The filters of the statistics: the player (among [players], by default
+ * the ones of the fundamental of the detail; none, no such filter), the
+ * rotation, the phase, in the detail of the defense ([event] the dig) the
+ * digs counted and, with its choices, the situation of the game (the role,
+ * the reception of the rally, the touch before, the set, the reception
+ * formation, the P1), on as many lines as they take. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun DetailFilters(
@@ -161,19 +163,22 @@ fun DetailFilters(
     situation: SituationChoices?,
     filter: DetailFilter,
     event: EventTypeEnum?,
+    players: List<ScoutingPlayer>? = detail.players,
     onFilter: (DetailFilter) -> Unit,
 ) =
     FlowRow(
         Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        ManyFilterMenu(
-            stringResource(R.string.filter_player),
-            filter.players,
-            emptyList(),
-            detail.players.map { "${it.number} ${it.name}" to it.id },
-            { chosen -> detail.players.filter { it.id in chosen }.joinToString(", ") { it.number.toString() } },
-        ) { onFilter(filter.copy(players = it)) }
+        if (players != null) {
+            ManyFilterMenu(
+                stringResource(R.string.filter_player),
+                filter.players,
+                emptyList(),
+                players.map { "${it.number} ${it.name}" to it.id },
+                { chosen -> players.filter { it.id in chosen }.joinToString(", ") { it.number.toString() } },
+            ) { onFilter(filter.copy(players = it)) }
+        }
         NarrowMenus(detail.rotations, detail.phases, filter, onFilter)
         if (event == EventTypeEnum.D) {
             // all of them, the digs that aren't covers, the covers
