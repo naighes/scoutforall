@@ -78,6 +78,7 @@ mod summary_tests;
 mod team_form_tests;
 mod technique_tests;
 mod training_activity_tests;
+mod training_agenda_tests;
 mod training_attendance_tests;
 mod training_cycle_duplicate_tests;
 mod training_cycle_tests;

@@ -31,6 +31,7 @@ pub mod sets;
 pub(crate) mod summary;
 pub mod teams;
 pub mod training;
+pub mod training_agenda;
 pub mod training_cycles;
 pub mod upload;
 pub mod video;
