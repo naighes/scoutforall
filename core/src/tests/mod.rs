@@ -77,6 +77,7 @@ mod substitution_tests;
 mod summary_tests;
 mod team_form_tests;
 mod technique_tests;
+mod training_schema_tests;
 mod upload_queue_tests;
 mod upload_tests;
 mod video_seconds_tests;
