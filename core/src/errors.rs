@@ -1,7 +1,10 @@
 use thiserror::Error;
 use zip::result::ZipError;
 
-use crate::localization::Labels;
+use crate::{
+    localization::Labels,
+    training::overlap::{Slot, SlotKind},
+};
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -13,6 +16,35 @@ pub enum AppError {
 
     #[error("IO error: {0}")]
     IO(#[from] IOError),
+
+    #[error("training error: {0}")]
+    Training(#[from] TrainingError),
+}
+
+#[derive(Debug, Error)]
+pub enum TrainingError {
+    /// the slots of the team it overlaps, by start
+    #[error("overlaps {} other slots of the team", .0.len())]
+    Overlap(Vec<Slot>),
+}
+
+impl TrainingError {
+    /// What overlaps what, in the language of `labels`: one line a slot.
+    pub fn message(&self, labels: &Labels) -> String {
+        match self {
+            TrainingError::Overlap(slots) => slots
+                .iter()
+                .map(|slot| {
+                    let template = match slot.kind {
+                        SlotKind::Session => labels.overlaps_session,
+                        SlotKind::Match => labels.overlaps_match,
+                    };
+                    template.replace("{}", &slot.start.format("%Y-%m-%d %H:%M").to_string())
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -68,6 +100,7 @@ impl AppError {
     pub fn message(&self, labels: &Labels) -> String {
         match self {
             AppError::IO(e) => e.message(labels),
+            AppError::Training(e) => e.message(labels),
             other => other.to_string(),
         }
     }

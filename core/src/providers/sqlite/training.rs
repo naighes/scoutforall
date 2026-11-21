@@ -4,16 +4,19 @@
 
 use crate::{
     domain::sql::Sql,
-    errors::AppError,
+    errors::{AppError, TrainingError},
     providers::{
         sqlite::{Database, not_found, sqlite},
         training_reader::TrainingReader,
         training_writer::TrainingWriter,
     },
-    training::{SessionInput, TrainingSession},
+    training::{
+        SessionInput, TrainingSession,
+        overlap::{Slot, clashes},
+    },
 };
 use async_trait::async_trait;
-use chrono::NaiveDateTime;
+use chrono::{DateTime, FixedOffset, NaiveDateTime};
 use rusqlite::{Row, Transaction, params};
 use uuid::Uuid;
 
@@ -57,6 +60,89 @@ pub(crate) fn read_session(tx: &Transaction, id: &Uuid) -> Result<TrainingSessio
         rusqlite::Error::QueryReturnedNoRows => not_found(&format!("session {id}")),
         e => sqlite(e),
     })
+}
+
+/// The sessions of the team not removed, but `except`: what a new or edited
+/// session, or a match, mustn't overlap.
+fn session_slots(
+    tx: &Transaction,
+    team_id: &Uuid,
+    except: Option<&Uuid>,
+) -> Result<Vec<Slot>, AppError> {
+    tx.prepare(
+        "SELECT start_local, duration_min FROM training_sessions
+         WHERE team_id = ?1 AND deleted = 0 AND (?2 IS NULL OR id <> ?2)",
+    )
+    .map_err(sqlite)?
+    .query_map(params![Sql(*team_id), except.map(|id| Sql(*id))], |row| {
+        Ok(Slot::session(
+            row.get::<_, Sql<NaiveDateTime>>(0)?.0,
+            row.get(1)?,
+        ))
+    })
+    .map_err(sqlite)?
+    .collect::<Result<_, _>>()
+    .map_err(sqlite)
+}
+
+/// The matches in programma of the team, as A or as B: not removed, without
+/// a set. Their time is the clock time of the offset they were written with.
+fn match_slots(
+    tx: &Transaction,
+    team_id: &Uuid,
+    except: Option<&Uuid>,
+) -> Result<Vec<Slot>, AppError> {
+    tx.prepare(
+        "SELECT m.start, m.duration_min FROM matches m
+         WHERE (m.team_a = ?1 OR m.team_b = ?1) AND m.deleted = 0
+           AND (?2 IS NULL OR m.id <> ?2)
+           AND NOT EXISTS (SELECT 1 FROM sets s WHERE s.match_id = m.id AND s.deleted = 0)",
+    )
+    .map_err(sqlite)?
+    .query_map(params![Sql(*team_id), except.map(|id| Sql(*id))], |row| {
+        Ok(Slot::match_of(
+            row.get::<_, Sql<DateTime<FixedOffset>>>(0)?.0.naive_local(),
+            row.get(1)?,
+        ))
+    })
+    .map_err(sqlite)?
+    .collect::<Result<_, _>>()
+    .map_err(sqlite)
+}
+
+fn overlap(slot: &Slot, others: Vec<Slot>) -> Result<(), AppError> {
+    match clashes(slot, &others) {
+        found if found.is_empty() => Ok(()),
+        found => Err(TrainingError::Overlap(found).into()),
+    }
+}
+
+/// A session of the team in this window overlaps no other session of the
+/// team, nor a match in programma of it.
+fn check_session(
+    tx: &Transaction,
+    team_id: &Uuid,
+    except: Option<&Uuid>,
+    start: NaiveDateTime,
+    minutes: u16,
+) -> Result<(), AppError> {
+    let mut busy = session_slots(tx, team_id, except)?;
+    busy.extend(match_slots(tx, team_id, None)?);
+    overlap(&Slot::session(start, minutes), busy)
+}
+
+/// A match in programma of these teams (A, and B when a team) at `start`
+/// overlaps no session of either. The other direction of `check_session`.
+pub(crate) fn check_match(
+    tx: &Transaction,
+    teams: &[Uuid],
+    start: DateTime<FixedOffset>,
+    minutes: Option<u16>,
+) -> Result<(), AppError> {
+    let slot = Slot::match_of(start.naive_local(), minutes);
+    teams
+        .iter()
+        .try_for_each(|team| overlap(&slot, session_slots(tx, team, None)?))
 }
 
 #[async_trait]
@@ -112,6 +198,7 @@ impl TrainingWriter for SqliteTraining {
                 .map_err(sqlite)?;
             match team {
                 true => {
+                    check_session(tx, team_id, None, input.start, input.duration_min)?;
                     let id = Uuid::new_v4();
                     tx.execute(
                         "INSERT INTO training_sessions (id, team_id, microcycle_id, start_local,
@@ -147,6 +234,14 @@ impl TrainingWriter for SqliteTraining {
         input: SessionInput,
     ) -> Result<TrainingSession, AppError> {
         self.0.write(|tx| {
+            let session = read_session(tx, session_id)?;
+            check_session(
+                tx,
+                &session.team_id,
+                Some(session_id),
+                input.start,
+                input.duration_min,
+            )?;
             let changed = tx
                 .execute(
                     "UPDATE training_sessions SET microcycle_id = ?2, start_local = ?3,

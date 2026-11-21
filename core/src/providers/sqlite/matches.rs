@@ -22,6 +22,7 @@ use crate::{
             sqlite,
             summary::{cached, competition_of, forget, refresh, save},
             teams::read_team,
+            training::check_match,
             video::forget_video,
         },
     },
@@ -619,6 +620,14 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
             "match {id}: team B of a match scouted on both sides can't change"
         ))));
     }
+    let played = rows.sets.iter().any(|s| !s.row.deleted);
+    if !played {
+        let teams: Vec<Uuid> = [Some(rows.row.team_a), team_b.team_id()]
+            .into_iter()
+            .flatten()
+            .collect();
+        check_match(tx, &teams, date, rows.row.duration_min)?;
+    }
     let competition_id = saved_competition(tx, &team, competition.as_ref())?;
     let (team_b, team_b_name) = team_b.columns();
     tx.execute(
@@ -720,6 +729,11 @@ impl MatchWriter for SqliteMatchWriter {
         self.0.write(|tx| {
             let (team_b, b) = saved_team_b(tx, team, &input.opponent)?;
             let competition_id = saved_competition(tx, team, input.competition.as_ref())?;
+            let teams: Vec<Uuid> = [Some(team.id), team_b.team_id()]
+                .into_iter()
+                .flatten()
+                .collect();
+            check_match(tx, &teams, input.date, None)?;
             let rows = MatchRows::of(&m, id, team_b, None)?;
             let rows = MatchRows {
                 row: Match {

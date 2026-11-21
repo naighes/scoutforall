@@ -206,6 +206,16 @@ pub enum TeamRef {
     Name(String),
 }
 
+impl TeamRef {
+    /// The team, none for a name.
+    pub fn team_id(&self) -> Option<Uuid> {
+        match self {
+            TeamRef::Team(id) => Some(*id),
+            TeamRef::Name(_) => None,
+        }
+    }
+}
+
 /// Where a match is played (D3): a fact of the match, not of a point of
 /// view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

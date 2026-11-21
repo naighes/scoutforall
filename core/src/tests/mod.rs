@@ -78,6 +78,7 @@ mod summary_tests;
 mod team_form_tests;
 mod technique_tests;
 mod training_form_tests;
+mod training_overlap_tests;
 mod training_schema_tests;
 mod training_session_tests;
 mod upload_queue_tests;
