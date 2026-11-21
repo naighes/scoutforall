@@ -133,6 +133,27 @@ impl PinnedTeams {
     }
 }
 
+/// Where the search of activities to copy looks (TODO/021): in every team,
+/// or in the open one only. A preference of the device, remembered; it
+/// travels neither in the archives nor in the uploads. Missing or
+/// unreadable it's every team, so the other settings are kept.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ActivitySearch {
+    #[serde(
+        default,
+        deserialize_with = "lenient_flag",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub activity_search_team_only: bool,
+}
+
+fn lenient_flag<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
+    Ok(Option::<serde_json::Value>::deserialize(deserializer)?
+        .as_ref()
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false))
+}
+
 /// How far the video jumps back and forward (← →, the buttons), in
 /// seconds: at least one, to move at all.
 pub const STEP_SECONDS: RangeInclusive<u32> = 1..=30;

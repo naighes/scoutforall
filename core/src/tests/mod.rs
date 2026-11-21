@@ -77,6 +77,7 @@ mod substitution_tests;
 mod summary_tests;
 mod team_form_tests;
 mod technique_tests;
+mod training_activity_tests;
 mod training_form_tests;
 mod training_overlap_tests;
 mod training_schema_tests;

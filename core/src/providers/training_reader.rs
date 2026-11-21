@@ -1,4 +1,7 @@
-use crate::{errors::AppError, training::TrainingSession};
+use crate::{
+    errors::AppError,
+    training::{Activity, ActivityHit, TrainingSession},
+};
 use async_trait::async_trait;
 use uuid::Uuid;
 
@@ -13,4 +16,20 @@ pub trait TrainingReader {
     /// The places the team trained in, the one of the latest session first:
     /// what the form of a session proposes.
     async fn locations(&self, team_id: &Uuid) -> Result<Vec<String>, AppError>;
+
+    /// The activities of the session not removed, in order. Empty when the
+    /// session is removed.
+    async fn activities(&self, session_id: &Uuid) -> Result<Vec<Activity>, AppError>;
+
+    /// The activities written before whose name holds `query` (case
+    /// aside; all when empty), the first `limit`: the ones of `team_id` in
+    /// front, then by the latest session. The same name and description
+    /// appear once. With `only_team` those of the team only.
+    async fn search_activities(
+        &self,
+        team_id: &Uuid,
+        query: &str,
+        only_team: bool,
+        limit: usize,
+    ) -> Result<Vec<ActivityHit>, AppError>;
 }

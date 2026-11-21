@@ -32,7 +32,7 @@ use crate::{
         r#match::MatchSource,
         technique::TechniqueEnum,
     },
-    training::SessionStatus,
+    training::{ActivityStatus, SessionStatus},
 };
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, SecondsFormat, Utc};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
@@ -158,6 +158,12 @@ db_text!(SessionStatus, "session status", SessionStatus::ALL, {
     SessionStatus::Planned => "planned",
     SessionStatus::Completed => "completed",
     SessionStatus::Cancelled => "cancelled",
+});
+
+db_text!(ActivityStatus, "activity status", ActivityStatus::ALL, {
+    ActivityStatus::Planned => "planned",
+    ActivityStatus::Completed => "completed",
+    ActivityStatus::Skipped => "skipped",
 });
 
 db_text!(CompetitionFormat, "format", CompetitionFormat::ALL, {

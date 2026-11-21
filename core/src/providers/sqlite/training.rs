@@ -4,20 +4,21 @@
 
 use crate::{
     domain::sql::Sql,
-    errors::{AppError, TrainingError},
+    errors::{AppError, IOError, TrainingError},
     providers::{
         sqlite::{Database, not_found, sqlite},
         training_reader::TrainingReader,
         training_writer::TrainingWriter,
     },
     training::{
-        SessionInput, TrainingSession,
+        Activity, ActivityHit, ActivityInput, Move, SessionInput, TrainingSession,
         overlap::{Slot, clashes},
     },
 };
 use async_trait::async_trait;
 use chrono::{DateTime, FixedOffset, NaiveDateTime};
 use rusqlite::{Row, Transaction, params};
+use std::collections::HashSet;
 use uuid::Uuid;
 
 pub struct SqliteTraining(Database);
@@ -48,6 +49,43 @@ fn session_from_row(row: &Row) -> rusqlite::Result<TrainingSession> {
         status: row.get(12)?,
     })
 }
+
+const ACTIVITY_COLUMNS: &str =
+    "id, session_id, position, name, description, planned_min, actual_min, notes, status";
+
+fn activity_from_row(row: &Row) -> rusqlite::Result<Activity> {
+    Ok(Activity {
+        id: row.get::<_, Sql<Uuid>>(0)?.0,
+        session_id: row.get::<_, Sql<Uuid>>(1)?.0,
+        position: row.get(2)?,
+        name: row.get(3)?,
+        description: row.get(4)?,
+        planned_min: row.get(5)?,
+        actual_min: row.get(6)?,
+        notes: row.get(7)?,
+        status: row.get(8)?,
+    })
+}
+
+/// The activity not removed, of a session not removed, or an error.
+fn read_activity(tx: &Transaction, id: &Uuid) -> Result<Activity, AppError> {
+    tx.query_row(
+        &format!(
+            "SELECT {ACTIVITY_COLUMNS} FROM training_activities
+             WHERE id = ?1 AND deleted = 0
+               AND session_id IN (SELECT id FROM training_sessions WHERE deleted = 0)"
+        ),
+        [Sql(*id)],
+        activity_from_row,
+    )
+    .map_err(|e| match e {
+        rusqlite::Error::QueryReturnedNoRows => not_found(&format!("activity {id}")),
+        e => sqlite(e),
+    })
+}
+
+/// The last place an activity can take: one is kept free to swap two.
+const LAST_POSITION: u16 = 65534;
 
 /// The session not removed, or an error.
 pub(crate) fn read_session(tx: &Transaction, id: &Uuid) -> Result<TrainingSession, AppError> {
@@ -179,6 +217,64 @@ impl TrainingReader for SqliteTraining {
             .map_err(sqlite)
         })
     }
+
+    async fn activities(&self, session_id: &Uuid) -> Result<Vec<Activity>, AppError> {
+        self.0.read(|tx| {
+            tx.prepare(&format!(
+                "SELECT {ACTIVITY_COLUMNS} FROM training_activities
+                 WHERE session_id = ?1 AND deleted = 0
+                   AND session_id IN (SELECT id FROM training_sessions WHERE deleted = 0)
+                 ORDER BY position"
+            ))
+            .map_err(sqlite)?
+            .query_map([Sql(*session_id)], activity_from_row)
+            .map_err(sqlite)?
+            .collect::<Result<_, _>>()
+            .map_err(sqlite)
+        })
+    }
+
+    async fn search_activities(
+        &self,
+        team_id: &Uuid,
+        query: &str,
+        only_team: bool,
+        limit: usize,
+    ) -> Result<Vec<ActivityHit>, AppError> {
+        let query = query.trim().to_lowercase();
+        let found: Vec<ActivityHit> = self.0.read(|tx| {
+            tx.prepare(
+                "SELECT a.name, a.description, a.planned_min, t.id, t.name, s.start_local
+                 FROM training_activities a
+                 JOIN training_sessions s ON s.id = a.session_id
+                 JOIN teams t ON t.id = s.team_id
+                 WHERE a.deleted = 0 AND s.deleted = 0 AND t.deleted = 0
+                   AND (?1 = 0 OR s.team_id = ?2)
+                 ORDER BY s.team_id <> ?2, s.start_local DESC, a.position, a.id",
+            )
+            .map_err(sqlite)?
+            .query_map(params![only_team, Sql(*team_id)], |row| {
+                Ok(ActivityHit {
+                    name: row.get(0)?,
+                    description: row.get(1)?,
+                    planned_min: row.get(2)?,
+                    team_id: row.get::<_, Sql<Uuid>>(3)?.0,
+                    team_name: row.get(4)?,
+                    session_start: row.get::<_, Sql<NaiveDateTime>>(5)?.0,
+                })
+            })
+            .map_err(sqlite)?
+            .collect::<Result<_, _>>()
+            .map_err(sqlite)
+        })?;
+        let mut seen = HashSet::new();
+        Ok(found
+            .into_iter()
+            .filter(|hit| hit.name.to_lowercase().contains(&query))
+            .filter(|hit| seen.insert((hit.name.clone(), hit.description.clone())))
+            .take(limit)
+            .collect())
+    }
 }
 
 #[async_trait]
@@ -281,6 +377,128 @@ impl TrainingWriter for SqliteTraining {
             {
                 0 => Err(not_found(&format!("session {session_id}"))),
                 _ => Ok(()),
+            }
+        })
+    }
+
+    async fn add_activity(
+        &self,
+        session_id: &Uuid,
+        input: ActivityInput,
+    ) -> Result<Activity, AppError> {
+        self.0.write(|tx| {
+            read_session(tx, session_id)?;
+            // a removed activity keeps its place: after the last one ever
+            let next: Option<u32> = tx
+                .query_row(
+                    "SELECT MAX(position) + 1 FROM training_activities WHERE session_id = ?1",
+                    [Sql(*session_id)],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite)?;
+            let position = u16::try_from(next.unwrap_or(0))
+                .ok()
+                .filter(|p| *p <= LAST_POSITION)
+                .ok_or_else(|| AppError::IO(IOError::Msg("too many activities".into())))?;
+            let id = Uuid::new_v4();
+            tx.execute(
+                "INSERT INTO training_activities (id, session_id, position, name, description,
+                     planned_min, actual_min, notes, status)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    Sql(id),
+                    Sql(*session_id),
+                    position,
+                    input.name,
+                    input.description,
+                    input.planned_min,
+                    input.actual_min,
+                    input.notes,
+                    input.status,
+                ],
+            )
+            .map_err(sqlite)?;
+            read_activity(tx, &id)
+        })
+    }
+
+    async fn update_activity(
+        &self,
+        activity_id: &Uuid,
+        input: ActivityInput,
+    ) -> Result<Activity, AppError> {
+        self.0.write(|tx| {
+            read_activity(tx, activity_id)?;
+            tx.execute(
+                "UPDATE training_activities SET name = ?2, description = ?3, planned_min = ?4,
+                     actual_min = ?5, notes = ?6, status = ?7
+                 WHERE id = ?1 AND deleted = 0",
+                params![
+                    Sql(*activity_id),
+                    input.name,
+                    input.description,
+                    input.planned_min,
+                    input.actual_min,
+                    input.notes,
+                    input.status,
+                ],
+            )
+            .map_err(sqlite)?;
+            read_activity(tx, activity_id)
+        })
+    }
+
+    async fn remove_activity(&self, activity_id: &Uuid) -> Result<(), AppError> {
+        self.0.write(|tx| {
+            read_activity(tx, activity_id)?;
+            tx.execute(
+                "UPDATE training_activities SET deleted = 1 WHERE id = ?1",
+                [Sql(*activity_id)],
+            )
+            .map_err(sqlite)
+            .map(|_| ())
+        })
+    }
+
+    async fn move_activity(&self, activity_id: &Uuid, to: Move) -> Result<(), AppError> {
+        self.0.write(|tx| {
+            let activity = read_activity(tx, activity_id)?;
+            let (compare, order) = match to {
+                Move::Up => ("<", "DESC"),
+                Move::Down => (">", "ASC"),
+            };
+            let neighbour: Option<(Sql<Uuid>, u16)> = tx
+                .query_row(
+                    &format!(
+                        "SELECT id, position FROM training_activities
+                         WHERE session_id = ?1 AND deleted = 0 AND position {compare} ?2
+                         ORDER BY position {order} LIMIT 1"
+                    ),
+                    params![Sql(activity.session_id), activity.position],
+                    |row| Ok((row.get(0)?, row.get(1)?)),
+                )
+                .map(Some)
+                .or_else(|e| match e {
+                    rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                    e => Err(sqlite(e)),
+                })?;
+            match neighbour {
+                // the places are unique: the spare one holds the first meanwhile
+                Some((other, place)) => [
+                    (Sql(activity.id), 65535),
+                    (other, activity.position),
+                    (Sql(activity.id), place),
+                ]
+                .into_iter()
+                .try_for_each(|(id, position)| {
+                    tx.execute(
+                        "UPDATE training_activities SET position = ?2 WHERE id = ?1",
+                        params![id, position],
+                    )
+                    .map(|_| ())
+                    .map_err(sqlite)
+                }),
+                None => Ok(()),
             }
         })
     }

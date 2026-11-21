@@ -1,6 +1,6 @@
 use crate::{
     errors::AppError,
-    training::{SessionInput, TrainingSession},
+    training::{Activity, ActivityInput, Move, SessionInput, TrainingSession},
 };
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -24,4 +24,25 @@ pub trait TrainingWriter {
     /// Marks the session removed (D7): its activities and attendance are no
     /// longer read.
     async fn remove_session(&self, session_id: &Uuid) -> Result<(), AppError>;
+
+    /// A new activity at the end of the session.
+    async fn add_activity(
+        &self,
+        session_id: &Uuid,
+        input: ActivityInput,
+    ) -> Result<Activity, AppError>;
+
+    /// The activity as the input says; its session and place stay.
+    async fn update_activity(
+        &self,
+        activity_id: &Uuid,
+        input: ActivityInput,
+    ) -> Result<Activity, AppError>;
+
+    /// Marks the activity removed (D7); the others keep their order.
+    async fn remove_activity(&self, activity_id: &Uuid) -> Result<(), AppError>;
+
+    /// The activity swaps place with the one before or after it; the first
+    /// going up and the last going down stay.
+    async fn move_activity(&self, activity_id: &Uuid, to: Move) -> Result<(), AppError>;
 }

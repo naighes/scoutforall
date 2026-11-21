@@ -4,7 +4,10 @@
 
 use crate::{
     localization::Labels,
-    training::{DEFAULT_SESSION_MINUTES, SessionInput, SessionStatus, TrainingSession},
+    training::{
+        Activity, ActivityHit, ActivityInput, ActivityStatus, DEFAULT_SESSION_MINUTES,
+        SessionInput, SessionStatus, TrainingSession,
+    },
 };
 use chrono::NaiveDateTime;
 use uuid::Uuid;
@@ -119,5 +122,100 @@ pub(crate) fn parse_minutes(minutes: &str) -> Option<u16> {
     match minutes.chars().all(|c| c.is_ascii_digit()) {
         true => minutes.parse().ok().filter(|m| *m >= 1),
         false => None,
+    }
+}
+
+/// What the user filled in for an activity: the minutes are text, as typed,
+/// and may be empty.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ActivityForm {
+    pub name: String,
+    pub description: String,
+    pub planned: String,
+    pub actual: String,
+    pub notes: String,
+    pub status: ActivityStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ActivityFormError {
+    EmptyName,
+    /// filled in, and not a number of minutes, at least 1
+    InvalidPlanned,
+    /// filled in, and not a number of minutes, at least 1
+    InvalidActual,
+}
+
+impl ActivityFormError {
+    pub fn message(&self, labels: &Labels) -> String {
+        match self {
+            ActivityFormError::EmptyName => labels.name_cannot_be_empty,
+            ActivityFormError::InvalidPlanned | ActivityFormError::InvalidActual => {
+                labels.invalid_duration
+            }
+        }
+        .to_string()
+    }
+}
+
+impl ActivityForm {
+    /// The form of an activity being edited.
+    pub fn of(activity: &Activity) -> Self {
+        Self {
+            name: activity.name.clone(),
+            description: activity.description.clone(),
+            planned: activity
+                .planned_min
+                .map(|m| m.to_string())
+                .unwrap_or_default(),
+            actual: activity
+                .actual_min
+                .map(|m| m.to_string())
+                .unwrap_or_default(),
+            notes: activity.notes.clone(),
+            status: activity.status,
+        }
+    }
+
+    /// The form of a copy: its own activity, planned, with the name, the
+    /// description and the planned minutes of the one found.
+    pub fn copy_of(hit: &ActivityHit) -> Self {
+        Self {
+            name: hit.name.clone(),
+            description: hit.description.clone(),
+            planned: hit.planned_min.map(|m| m.to_string()).unwrap_or_default(),
+            ..Self::default()
+        }
+    }
+
+    /// The input of the writer; the texts are trimmed. The first error, in
+    /// the order of the fields, when the form isn't valid.
+    pub fn validate(self) -> Result<ActivityInput, ActivityFormError> {
+        let name = self.name.trim().to_string();
+        match (
+            name.is_empty(),
+            optional_minutes(&self.planned),
+            optional_minutes(&self.actual),
+        ) {
+            (true, _, _) => Err(ActivityFormError::EmptyName),
+            (_, None, _) => Err(ActivityFormError::InvalidPlanned),
+            (_, _, None) => Err(ActivityFormError::InvalidActual),
+            (false, Some(planned_min), Some(actual_min)) => Ok(ActivityInput {
+                name,
+                description: self.description.trim().to_string(),
+                planned_min,
+                actual_min,
+                notes: self.notes.trim().to_string(),
+                status: self.status,
+            }),
+        }
+    }
+}
+
+/// Empty is no minutes (`Some(None)`); otherwise a valid number or nothing.
+fn optional_minutes(minutes: &str) -> Option<Option<u16>> {
+    match minutes.trim().is_empty() {
+        true => Some(None),
+        false => parse_minutes(minutes).map(Some),
     }
 }

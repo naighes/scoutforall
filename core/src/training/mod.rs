@@ -62,3 +62,67 @@ pub struct SessionInput {
     pub final_remarks: String,
     pub status: SessionStatus,
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ActivityStatus {
+    #[default]
+    Planned,
+    Completed,
+    Skipped,
+}
+
+impl ActivityStatus {
+    pub const ALL: [ActivityStatus; 3] = [
+        ActivityStatus::Planned,
+        ActivityStatus::Completed,
+        ActivityStatus::Skipped,
+    ];
+}
+
+/// An activity of a session, as saved: the session lists them by
+/// `position`, the first at 0 (a removed one keeps its place, so the
+/// positions may have gaps).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Activity {
+    pub id: Uuid,
+    pub session_id: Uuid,
+    pub position: u16,
+    pub name: String,
+    pub description: String,
+    pub planned_min: Option<u16>,
+    pub actual_min: Option<u16>,
+    pub notes: String,
+    pub status: ActivityStatus,
+}
+
+/// A valid form, the arguments of `TrainingWriter::add_activity` and
+/// `update_activity`: the session and the place of an activity are not
+/// changed by an edit.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityInput {
+    pub name: String,
+    pub description: String,
+    pub planned_min: Option<u16>,
+    pub actual_min: Option<u16>,
+    pub notes: String,
+    pub status: ActivityStatus,
+}
+
+/// An activity written before, found by name to be copied into a session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActivityHit {
+    pub name: String,
+    pub description: String,
+    pub planned_min: Option<u16>,
+    pub team_id: Uuid,
+    pub team_name: String,
+    /// the start of the session it was in
+    pub session_start: NaiveDateTime,
+}
+
+/// Where an activity goes in the order of its session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Move {
+    Up,
+    Down,
+}
