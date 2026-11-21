@@ -1,6 +1,6 @@
 use crate::{
     errors::AppError,
-    training::{Activity, ActivityInput, Move, SessionInput, TrainingSession},
+    training::{Activity, ActivityInput, AttendanceInput, Move, SessionInput, TrainingSession},
 };
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -45,4 +45,13 @@ pub trait TrainingWriter {
     /// The activity swaps place with the one before or after it; the first
     /// going up and the last going down stay.
     async fn move_activity(&self, activity_id: &Uuid, to: Move) -> Result<(), AppError>;
+
+    /// The attendance of the session is exactly `rows`: the others it had
+    /// are removed (D7). A person twice, a removed one or a guest of the
+    /// team itself are refused.
+    async fn save_attendance(
+        &self,
+        session_id: &Uuid,
+        rows: Vec<AttendanceInput>,
+    ) -> Result<(), AppError>;
 }

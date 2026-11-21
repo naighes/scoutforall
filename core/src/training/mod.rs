@@ -126,3 +126,66 @@ pub enum Move {
     Up,
     Down,
 }
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AttendanceStatus {
+    #[default]
+    Present,
+    Absent,
+    Late,
+    Unavailable,
+}
+
+impl AttendanceStatus {
+    pub const ALL: [AttendanceStatus; 4] = [
+        AttendanceStatus::Present,
+        AttendanceStatus::Absent,
+        AttendanceStatus::Late,
+        AttendanceStatus::Unavailable,
+    ];
+}
+
+/// A line of the attendance of a session: who, how, and the number they had
+/// in that moment (the team's, or their own team's for a guest).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttendanceRow {
+    pub person_id: Uuid,
+    /// empty when the person was removed from the registry (D16)
+    pub name: String,
+    pub number: Option<u8>,
+    pub status: AttendanceStatus,
+    pub note: String,
+    /// a player of another team
+    pub guest: bool,
+}
+
+/// The attendance as the session shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttendanceSheet {
+    /// written at least once: otherwise `rows` is the active roster of the
+    /// team, all present, still to be saved
+    pub recorded: bool,
+    pub rows: Vec<AttendanceRow>,
+}
+
+/// A line to save: `TrainingWriter::save_attendance` writes exactly these.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttendanceInput {
+    pub person_id: Uuid,
+    pub number: Option<u8>,
+    pub status: AttendanceStatus,
+    pub note: String,
+    pub guest: bool,
+}
+
+impl From<&AttendanceRow> for AttendanceInput {
+    fn from(row: &AttendanceRow) -> Self {
+        Self {
+            person_id: row.person_id,
+            number: row.number,
+            status: row.status,
+            note: row.note.trim().to_string(),
+            guest: row.guest,
+        }
+    }
+}

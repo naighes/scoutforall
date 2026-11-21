@@ -1,6 +1,6 @@
 use crate::{
     errors::AppError,
-    training::{Activity, ActivityHit, TrainingSession},
+    training::{Activity, ActivityHit, AttendanceRow, AttendanceSheet, TrainingSession},
 };
 use async_trait::async_trait;
 use uuid::Uuid;
@@ -32,4 +32,12 @@ pub trait TrainingReader {
         only_team: bool,
         limit: usize,
     ) -> Result<Vec<ActivityHit>, AppError>;
+
+    /// The attendance of the session: the saved lines, the guests last; when
+    /// none was ever saved, the active roster of the team, all present.
+    async fn attendance(&self, session_id: &Uuid) -> Result<AttendanceSheet, AppError>;
+
+    /// The active players of the team that the saved attendance doesn't
+    /// list: who joined after it, to add by hand. Empty when none was saved.
+    async fn missing_players(&self, session_id: &Uuid) -> Result<Vec<AttendanceRow>, AppError>;
 }

@@ -11,7 +11,8 @@ use crate::{
         training_writer::TrainingWriter,
     },
     training::{
-        Activity, ActivityHit, ActivityInput, Move, SessionInput, TrainingSession,
+        Activity, ActivityHit, ActivityInput, AttendanceInput, AttendanceRow, AttendanceSheet,
+        Move, SessionInput, TrainingSession,
         overlap::{Slot, clashes},
     },
 };
@@ -82,6 +83,44 @@ fn read_activity(tx: &Transaction, id: &Uuid) -> Result<Activity, AppError> {
         rusqlite::Error::QueryReturnedNoRows => not_found(&format!("activity {id}")),
         e => sqlite(e),
     })
+}
+
+fn attendance_from_row(row: &Row) -> rusqlite::Result<AttendanceRow> {
+    Ok(AttendanceRow {
+        person_id: row.get::<_, Sql<Uuid>>(0)?.0,
+        name: row.get(1)?,
+        number: row.get(2)?,
+        status: row.get(3)?,
+        note: row.get(4)?,
+        guest: row.get::<_, u8>(5)? == 1,
+    })
+}
+
+/// The active players of the team, in the order of the team, all present;
+/// with `unlisted` only those the saved attendance of the session lacks.
+fn roster_rows(
+    tx: &Transaction,
+    team_id: &Uuid,
+    session_id: &Uuid,
+    unlisted: bool,
+) -> Result<Vec<AttendanceRow>, AppError> {
+    tx.prepare(
+        "SELECT p.id, p.name, tm.number, 'present', '', 0
+         FROM team_members tm JOIN persons p ON p.id = tm.person_id
+         WHERE tm.team_id = ?1 AND tm.deleted = 0 AND p.deleted = 0
+           AND (?3 = 0 OR NOT EXISTS (
+                SELECT 1 FROM training_attendance a
+                WHERE a.session_id = ?2 AND a.person_id = p.id AND a.deleted = 0))
+         ORDER BY tm.position",
+    )
+    .map_err(sqlite)?
+    .query_map(
+        params![Sql(*team_id), Sql(*session_id), unlisted],
+        attendance_from_row,
+    )
+    .map_err(sqlite)?
+    .collect::<Result<_, _>>()
+    .map_err(sqlite)
 }
 
 /// The last place an activity can take: one is kept free to swap two.
@@ -231,6 +270,62 @@ impl TrainingReader for SqliteTraining {
             .map_err(sqlite)?
             .collect::<Result<_, _>>()
             .map_err(sqlite)
+        })
+    }
+
+    async fn attendance(&self, session_id: &Uuid) -> Result<AttendanceSheet, AppError> {
+        self.0.read(|tx| {
+            let session = read_session(tx, session_id)?;
+            let recorded: bool = tx
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM training_attendance WHERE session_id = ?1)",
+                    [Sql(*session_id)],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite)?;
+            match recorded {
+                false => Ok(AttendanceSheet {
+                    recorded,
+                    rows: roster_rows(tx, &session.team_id, session_id, false)?,
+                }),
+                true => tx
+                    .prepare(
+                        "SELECT a.person_id, p.name, a.number, a.status, a.note, a.guest
+                         FROM training_attendance a
+                         JOIN persons p ON p.id = a.person_id
+                         LEFT JOIN team_members tm
+                           ON tm.team_id = ?2 AND tm.person_id = a.person_id
+                         WHERE a.session_id = ?1 AND a.deleted = 0
+                         ORDER BY a.guest, COALESCE(tm.position, 65536),
+                                  p.name COLLATE NOCASE, a.person_id",
+                    )
+                    .map_err(sqlite)?
+                    .query_map(
+                        params![Sql(*session_id), Sql(session.team_id)],
+                        attendance_from_row,
+                    )
+                    .map_err(sqlite)?
+                    .collect::<Result<_, _>>()
+                    .map_err(sqlite)
+                    .map(|rows| AttendanceSheet { recorded, rows }),
+            }
+        })
+    }
+
+    async fn missing_players(&self, session_id: &Uuid) -> Result<Vec<AttendanceRow>, AppError> {
+        self.0.read(|tx| {
+            let session = read_session(tx, session_id)?;
+            let recorded: bool = tx
+                .query_row(
+                    "SELECT EXISTS (SELECT 1 FROM training_attendance WHERE session_id = ?1)",
+                    [Sql(*session_id)],
+                    |row| row.get(0),
+                )
+                .map_err(sqlite)?;
+            match recorded {
+                false => Ok(vec![]),
+                true => roster_rows(tx, &session.team_id, session_id, true),
+            }
         })
     }
 
@@ -500,6 +595,70 @@ impl TrainingWriter for SqliteTraining {
                 }),
                 None => Ok(()),
             }
+        })
+    }
+
+    async fn save_attendance(
+        &self,
+        session_id: &Uuid,
+        rows: Vec<AttendanceInput>,
+    ) -> Result<(), AppError> {
+        self.0.write(|tx| {
+            let session = read_session(tx, session_id)?;
+            let mut seen = HashSet::new();
+            rows.iter().try_for_each(|row| {
+                let member: bool = tx
+                    .query_row(
+                        "SELECT EXISTS (SELECT 1 FROM team_members
+                                        WHERE team_id = ?1 AND person_id = ?2 AND deleted = 0)",
+                        params![Sql(session.team_id), Sql(row.person_id)],
+                        |r| r.get(0),
+                    )
+                    .map_err(sqlite)?;
+                let alive: bool = tx
+                    .query_row(
+                        "SELECT EXISTS (SELECT 1 FROM persons WHERE id = ?1 AND deleted = 0)",
+                        [Sql(row.person_id)],
+                        |r| r.get(0),
+                    )
+                    .map_err(sqlite)?;
+                match (seen.insert(row.person_id), alive, row.guest && member) {
+                    (false, _, _) => Err(AppError::IO(IOError::Msg(format!(
+                        "person {} twice in the attendance",
+                        row.person_id
+                    )))),
+                    (_, false, _) => Err(not_found(&format!("person {}", row.person_id))),
+                    (_, _, true) => Err(AppError::IO(IOError::Msg(format!(
+                        "person {} is of the team, not a guest",
+                        row.person_id
+                    )))),
+                    _ => Ok(()),
+                }
+            })?;
+            tx.execute(
+                "UPDATE training_attendance SET deleted = 1 WHERE session_id = ?1",
+                [Sql(*session_id)],
+            )
+            .map_err(sqlite)?;
+            rows.iter().try_for_each(|row| {
+                tx.execute(
+                    "INSERT INTO training_attendance
+                         (session_id, person_id, status, note, number, guest, deleted)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)
+                     ON CONFLICT (session_id, person_id) DO UPDATE SET
+                         status = ?3, note = ?4, number = ?5, guest = ?6, deleted = 0",
+                    params![
+                        Sql(*session_id),
+                        Sql(row.person_id),
+                        row.status,
+                        row.note,
+                        row.number,
+                        row.guest,
+                    ],
+                )
+                .map(|_| ())
+                .map_err(sqlite)
+            })
         })
     }
 }
