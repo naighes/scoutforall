@@ -1,6 +1,9 @@
 use crate::{
     errors::AppError,
-    training::cycles::{Child, Cycle, CycleInput, Level},
+    training::{
+        cycles::{Child, Cycle, CycleInput, Level},
+        duplicate::DuplicateCycleInput,
+    },
 };
 use async_trait::async_trait;
 use chrono::NaiveDate;
@@ -70,4 +73,16 @@ pub trait TrainingCycles {
         id: &Uuid,
         with_children: bool,
     ) -> Result<(), AppError>;
+
+    /// The microcycle copied as the input says, from the first copy to the
+    /// last. A copy goes in the mesocycle of the original when its window
+    /// fits there, otherwise it is free (its `parent_id` is none: the
+    /// dialog says so). Any overlap (a microcycle, a session, a match)
+    /// stops all the copies and says which; nothing is written then. A
+    /// shift or a number of copies out of range is `InvalidWindow`.
+    async fn duplicate_microcycle(
+        &self,
+        id: &Uuid,
+        input: DuplicateCycleInput,
+    ) -> Result<Vec<Cycle>, AppError>;
 }

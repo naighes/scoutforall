@@ -160,7 +160,7 @@ pub(crate) fn read_session(tx: &Transaction, id: &Uuid) -> Result<TrainingSessio
 
 /// The sessions of the team not removed, but `except`: what a new or edited
 /// session, or a match, mustn't overlap.
-fn session_slots(
+pub(crate) fn session_slots(
     tx: &Transaction,
     team_id: &Uuid,
     except: Option<&Uuid>,
@@ -183,7 +183,7 @@ fn session_slots(
 
 /// The matches in programma of the team, as A or as B: not removed, without
 /// a set. Their time is the clock time of the offset they were written with.
-fn match_slots(
+pub(crate) fn match_slots(
     tx: &Transaction,
     team_id: &Uuid,
     except: Option<&Uuid>,
@@ -241,8 +241,52 @@ pub(crate) fn check_match(
         .try_for_each(|team| overlap(&slot, session_slots(tx, team, None)?))
 }
 
+/// Copies the planned activities of a session (name, description, planned
+/// duration) into another, from position 0; never the completed ones.
+pub(crate) fn copy_planned_activities(
+    tx: &Transaction,
+    from: &Uuid,
+    to: &Uuid,
+) -> Result<(), AppError> {
+    tx.prepare(
+        "SELECT name, description, planned_min FROM training_activities
+         WHERE session_id = ?1 AND deleted = 0 AND status = 'planned'
+         ORDER BY position",
+    )
+    .map_err(sqlite)?
+    .query_map([Sql(*from)], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, Option<u16>>(2)?,
+        ))
+    })
+    .map_err(sqlite)?
+    .collect::<Result<Vec<_>, _>>()
+    .map_err(sqlite)?
+    .into_iter()
+    .zip(0u16..)
+    .try_for_each(|((name, description, planned), position)| {
+        tx.execute(
+            "INSERT INTO training_activities (id, session_id, position, name,
+                 description, planned_min)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                Sql(Uuid::new_v4()),
+                Sql(*to),
+                position,
+                name,
+                description,
+                planned
+            ],
+        )
+        .map(|_| ())
+        .map_err(sqlite)
+    })
+}
+
 /// Writes a new session and reads it back.
-fn insert_session(
+pub(crate) fn insert_session(
     tx: &Transaction,
     team_id: &Uuid,
     series_id: Option<Uuid>,
@@ -706,42 +750,7 @@ impl TrainingWriter for SqliteTraining {
                 },
             )?;
             match input.copy_activities {
-                true => tx
-                    .prepare(
-                        "SELECT name, description, planned_min FROM training_activities
-                         WHERE session_id = ?1 AND deleted = 0 AND status = 'planned'
-                         ORDER BY position",
-                    )
-                    .map_err(sqlite)?
-                    .query_map([Sql(*session_id)], |row| {
-                        Ok((
-                            row.get::<_, String>(0)?,
-                            row.get::<_, String>(1)?,
-                            row.get::<_, Option<u16>>(2)?,
-                        ))
-                    })
-                    .map_err(sqlite)?
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(sqlite)?
-                    .into_iter()
-                    .zip(0u16..)
-                    .try_for_each(|((name, description, planned), position)| {
-                        tx.execute(
-                            "INSERT INTO training_activities (id, session_id, position, name,
-                                 description, planned_min)
-                             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                            params![
-                                Sql(Uuid::new_v4()),
-                                Sql(copy.id),
-                                position,
-                                name,
-                                description,
-                                planned
-                            ],
-                        )
-                        .map(|_| ())
-                        .map_err(sqlite)
-                    }),
+                true => copy_planned_activities(tx, session_id, &copy.id),
                 false => Ok(()),
             }?;
             Ok(copy)

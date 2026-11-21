@@ -10,14 +10,22 @@ use crate::{
     providers::{
         sqlite::{
             not_found, sqlite,
-            training::{SqliteTraining, read_session},
+            training::{
+                SqliteTraining, copy_planned_activities, insert_session, match_slots, read_session,
+                session_slots,
+            },
         },
         training_cycles::TrainingCycles,
     },
-    training::cycles::{Child, Cycle, CycleInput, Level, Span, Window},
+    training::{
+        SessionInput, SessionStatus,
+        cycles::{Child, Cycle, CycleInput, Level, Span, Window},
+        duplicate::{DuplicateCycleInput, MAX_CYCLE_COPIES},
+        overlap::{Slot, clashes},
+    },
 };
 use async_trait::async_trait;
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{Duration, NaiveDate, NaiveDateTime};
 use rusqlite::{Row, Transaction, params};
 use uuid::Uuid;
 
@@ -282,6 +290,67 @@ fn window_of(level: Level, input: &CycleInput) -> Result<Window, AppError> {
     Window::of(level, input.start, input.span).ok_or_else(|| TrainingError::InvalidWindow.into())
 }
 
+/// Writes a new cycle of `level` and returns its id.
+fn insert_cycle(
+    tx: &Transaction,
+    level: Level,
+    team_id: &Uuid,
+    parent_id: Option<&Uuid>,
+    input: &CycleInput,
+    window: &Window,
+) -> Result<Uuid, AppError> {
+    let id = Uuid::new_v4();
+    match (level, input.span) {
+        (Level::Program, Span::Until(_)) => execute(
+            tx,
+            "INSERT INTO training_programs (id, team_id, title, start_date, end_date, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                Sql(id),
+                Sql(*team_id),
+                input.title,
+                Sql(window.start),
+                Sql(window.last()),
+                input.notes
+            ],
+        ),
+        (Level::Mesocycle, Span::Weeks(weeks)) => execute(
+            tx,
+            "INSERT INTO mesocycles (id, team_id, program_id, title, start_date, weeks,
+                 objectives, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                Sql(id),
+                Sql(*team_id),
+                parent_id.map(|p| Sql(*p)),
+                input.title,
+                Sql(window.start),
+                weeks,
+                input.objectives,
+                input.notes
+            ],
+        ),
+        (Level::Microcycle, Span::Weeks(weeks)) => execute(
+            tx,
+            "INSERT INTO microcycles (id, team_id, mesocycle_id, title, start_date, weeks,
+                 objectives, notes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                Sql(id),
+                Sql(*team_id),
+                parent_id.map(|p| Sql(*p)),
+                input.title,
+                Sql(window.start),
+                weeks,
+                input.objectives,
+                input.notes
+            ],
+        ),
+        _ => Err(TrainingError::InvalidWindow.into()),
+    }?;
+    Ok(id)
+}
+
 #[async_trait]
 impl TrainingCycles for SqliteTraining {
     async fn cycles(&self, team_id: &Uuid, level: Level) -> Result<Vec<Cycle>, AppError> {
@@ -346,55 +415,7 @@ impl TrainingCycles for SqliteTraining {
                 true => check_cycle(tx, level, team_id, None, &window, parent_id.as_ref()),
                 false => Err(not_found(&format!("team {team_id}"))),
             }?;
-            let id = Uuid::new_v4();
-            match (level, input.span) {
-                (Level::Program, Span::Until(_)) => execute(
-                    tx,
-                    "INSERT INTO training_programs (id, team_id, title, start_date, end_date, notes)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![
-                        Sql(id),
-                        Sql(*team_id),
-                        input.title,
-                        Sql(window.start),
-                        Sql(window.last()),
-                        input.notes
-                    ],
-                ),
-                (Level::Mesocycle, Span::Weeks(weeks)) => execute(
-                    tx,
-                    "INSERT INTO mesocycles (id, team_id, program_id, title, start_date, weeks,
-                         objectives, notes)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![
-                        Sql(id),
-                        Sql(*team_id),
-                        parent_id.map(Sql),
-                        input.title,
-                        Sql(window.start),
-                        weeks,
-                        input.objectives,
-                        input.notes
-                    ],
-                ),
-                (Level::Microcycle, Span::Weeks(weeks)) => execute(
-                    tx,
-                    "INSERT INTO microcycles (id, team_id, mesocycle_id, title, start_date, weeks,
-                         objectives, notes)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-                    params![
-                        Sql(id),
-                        Sql(*team_id),
-                        parent_id.map(Sql),
-                        input.title,
-                        Sql(window.start),
-                        weeks,
-                        input.objectives,
-                        input.notes
-                    ],
-                ),
-                _ => Err(TrainingError::InvalidWindow.into()),
-            }?;
+            let id = insert_cycle(tx, level, team_id, parent_id.as_ref(), &input, &window)?;
             let cycle = read_cycle(tx, level, &id)?;
             attach(tx, &cycle, &children)?;
             Ok(cycle)
@@ -503,6 +524,130 @@ impl TrainingCycles for SqliteTraining {
                     mark_removed(tx, level, id)
                 }
             }
+        })
+    }
+
+    async fn duplicate_microcycle(
+        &self,
+        id: &Uuid,
+        input: DuplicateCycleInput,
+    ) -> Result<Vec<Cycle>, AppError> {
+        self.db().write(|tx| {
+            let original = read_cycle(tx, Level::Microcycle, id)?;
+            match (
+                (1..=MAX_CYCLE_COPIES).contains(&input.copies),
+                input.shift_weeks >= 1,
+            ) {
+                (true, true) => Ok(()),
+                _ => Err(TrainingError::InvalidWindow),
+            }?;
+            let sessions = child_rows(tx, Level::Microcycle, "{col} = ?1", id)?
+                .iter()
+                .map(|c| read_session(tx, &c.id))
+                .collect::<Result<Vec<_>, _>>()?;
+            let shifts: Vec<Duration> = (1..=i64::from(input.copies))
+                .map(|k| Duration::weeks(k * i64::from(input.shift_weeks)))
+                .collect();
+            let windows = shifts
+                .iter()
+                .map(|d| {
+                    original
+                        .window
+                        .start
+                        .checked_add_signed(*d)
+                        .and_then(|start| Window::of(Level::Microcycle, start, original.span))
+                        .ok_or(TrainingError::InvalidWindow)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            // everything that is in the way, before writing anything
+            let cycle_clashes: Vec<Window> = team_cycles(tx, &original.team_id, Level::Microcycle)?
+                .into_iter()
+                .filter(|other| windows.iter().any(|w| w.overlaps(&other.window)))
+                .map(|other| other.window)
+                .collect();
+            let mut busy = session_slots(tx, &original.team_id, None)?;
+            busy.extend(match_slots(tx, &original.team_id, None)?);
+            let mut slot_clashes: Vec<Slot> = sessions
+                .iter()
+                .flat_map(|s| {
+                    shifts.iter().flat_map(|d| {
+                        s.start
+                            .checked_add_signed(*d)
+                            .map(|start| clashes(&Slot::session(start, s.duration_min), &busy))
+                            .unwrap_or_default()
+                    })
+                })
+                .collect();
+            slot_clashes.sort_by_key(|s| (s.start, s.minutes));
+            slot_clashes.dedup();
+            match (cycle_clashes.is_empty(), slot_clashes.is_empty()) {
+                (false, _) => Err(TrainingError::CycleOverlap(cycle_clashes)),
+                (_, false) => Err(TrainingError::Overlap(slot_clashes)),
+                _ => Ok(()),
+            }?;
+            let parent = original
+                .parent_id
+                .map(|p| read_cycle(tx, Level::Mesocycle, &p))
+                .transpose()?;
+            windows
+                .iter()
+                .zip(&shifts)
+                .map(|(window, shift)| {
+                    let parent_id = parent
+                        .as_ref()
+                        .filter(|p| p.window.contains(window))
+                        .map(|p| p.id);
+                    let copy_id = insert_cycle(
+                        tx,
+                        Level::Microcycle,
+                        &original.team_id,
+                        parent_id.as_ref(),
+                        &CycleInput {
+                            parent_id,
+                            title: original.title.clone(),
+                            start: window.start,
+                            span: original.span,
+                            objectives: match input.copy_objectives {
+                                true => original.objectives.clone(),
+                                false => String::new(),
+                            },
+                            notes: String::new(),
+                        },
+                        window,
+                    )?;
+                    sessions.iter().try_for_each(|s| {
+                        let start = s
+                            .start
+                            .checked_add_signed(*shift)
+                            .ok_or(TrainingError::InvalidWindow)?;
+                        let copy = insert_session(
+                            tx,
+                            &s.team_id,
+                            None,
+                            &SessionInput {
+                                microcycle_id: Some(copy_id),
+                                start,
+                                duration_min: s.duration_min,
+                                actual_duration_min: None,
+                                location: s.location.clone(),
+                                title: s.title.clone(),
+                                objectives: match input.copy_objectives {
+                                    true => s.objectives.clone(),
+                                    false => String::new(),
+                                },
+                                notes: String::new(),
+                                final_remarks: String::new(),
+                                status: SessionStatus::Planned,
+                            },
+                        )?;
+                        match input.copy_activities {
+                            true => copy_planned_activities(tx, &s.id, &copy.id),
+                            false => Ok(()),
+                        }
+                    })?;
+                    read_cycle(tx, Level::Microcycle, &copy_id)
+                })
+                .collect()
         })
     }
 }

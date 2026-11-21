@@ -31,3 +31,33 @@ impl DuplicateInput {
         }
     }
 }
+
+/// The most copies of a microcycle one duplication makes.
+pub const MAX_CYCLE_COPIES: u16 = 52;
+
+/// The arguments of `TrainingCycles::duplicate_microcycle`: the microcycle
+/// is moved `shift_weeks` weeks, `copies` times (the k-th copy `k * shift`
+/// weeks away). The copies keep the title and the sessions (same weekday,
+/// same time, title, location, planned duration); never notes, attendance,
+/// status or series. The objectives (of the microcycle and of its sessions)
+/// and the planned activities are the user's choice.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DuplicateCycleInput {
+    pub shift_weeks: u16,
+    pub copies: u16,
+    pub copy_objectives: bool,
+    pub copy_activities: bool,
+}
+
+impl DuplicateCycleInput {
+    /// What the dialog proposes: one copy right after the microcycle, with
+    /// both boxes ticked.
+    pub fn proposed(weeks: u16) -> Self {
+        Self {
+            shift_weeks: weeks,
+            copies: 1,
+            copy_objectives: true,
+            copy_activities: true,
+        }
+    }
+}
