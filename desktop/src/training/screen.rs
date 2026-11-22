@@ -6,6 +6,7 @@
 use {
     super::{
         forms::{Edited, SessionEditor},
+        series::SeriesEditor,
         session::{self, SessionPage},
     },
     crate::{
@@ -71,6 +72,7 @@ enum Mode {
     List,
     Page(Box<SessionPage>),
     New(Box<SessionEditor>),
+    Series(Box<SeriesEditor>),
     /// id of the session to delete
     Delete(String),
 }
@@ -80,6 +82,7 @@ pub enum Message {
     Filter(Filter),
     Row(usize),
     New,
+    Repeat,
     Delete,
     Confirm,
     Dismiss,
@@ -151,6 +154,8 @@ impl TrainingScreen {
         match &self.mode {
             Mode::Page(page) => page.focus_id(),
             Mode::New(editor) => Some(editor.form.focus_id()),
+            Mode::Series(editor) if editor.conflicts.is_empty() => Some(editor.form.focus_id()),
+            Mode::Series(_) => None,
             Mode::List | Mode::Delete(_) => None,
         }
     }
@@ -228,6 +233,26 @@ impl TrainingScreen {
         }
     }
 
+    fn repeat(&mut self, s: &Strings) {
+        match SeriesEditor::new(&self.core, s, self.team_id.clone(), None) {
+            Ok(editor) => self.mode = Mode::Series(Box::new(editor)),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// The series made: the list shows them.
+    fn series_edited(&mut self, edited: Edited) {
+        match edited {
+            Edited::Cancel => self.mode = Mode::List,
+            Edited::Saved(_) => {
+                self.mode = Mode::List;
+                self.filter = Filter::All;
+                self.reload();
+            }
+            Edited::Stay | Edited::Copy(_) => {}
+        }
+    }
+
     fn ask_deletion(&mut self) {
         let id = self.shown().get(self.selected).map(|r| r.id.clone());
         if let Some(id) = id {
@@ -261,9 +286,16 @@ impl TrainingScreen {
     }
 
     fn paged(&mut self, outcome: session::Outcome) {
-        if let session::Outcome::Back = outcome {
-            self.mode = Mode::List;
-            self.reload();
+        match outcome {
+            session::Outcome::Stay => {}
+            session::Outcome::Back => {
+                self.mode = Mode::List;
+                self.reload();
+            }
+            session::Outcome::Opened(id) => {
+                self.reload();
+                self.open_session(&id);
+            }
         }
     }
 
@@ -277,6 +309,18 @@ impl TrainingScreen {
                 let edited = editor.update(&self.core, m);
                 self.edited(edited);
             }
+            (Mode::Series(editor), Message::Form(m)) => {
+                let edited = editor.update(&self.core, s, m);
+                self.series_edited(edited);
+            }
+            (Mode::Series(editor), Message::Confirm) => {
+                let edited = editor.answer(&self.core, s, true);
+                self.series_edited(edited);
+            }
+            (Mode::Series(editor), Message::Dismiss) => {
+                let edited = editor.answer(&self.core, s, false);
+                self.series_edited(edited);
+            }
             (Mode::Delete(_), Message::Confirm) => self.delete(),
             (Mode::Delete(_), Message::Dismiss) => self.mode = Mode::List,
             (Mode::List, Message::Filter(filter)) => {
@@ -288,6 +332,7 @@ impl TrainingScreen {
                 self.open_selected();
             }
             (Mode::List, Message::New) => self.new_session(s),
+            (Mode::List, Message::Repeat) => self.repeat(s),
             (Mode::List, Message::Delete) => self.ask_deletion(),
             _ => {}
         }
@@ -303,6 +348,10 @@ impl TrainingScreen {
             Mode::New(editor) => {
                 let edited = editor.key(&self.core, ck);
                 self.edited(edited);
+            }
+            Mode::Series(editor) => {
+                let edited = editor.key(&self.core, s, ck);
+                self.series_edited(edited);
             }
             Mode::Delete(_) => match ck {
                 k if k == key!(enter) => self.delete(),
@@ -326,6 +375,7 @@ impl TrainingScreen {
             k if k == key!(left) => self.step_filter(false),
             k if k == key!(enter) => self.open_selected(),
             k if k == key!(n) => self.new_session(s),
+            k if k == key!(r) => self.repeat(s),
             k if (k == key!(backspace) || k == key!(delete)) && count > 0 => self.ask_deletion(),
             _ => {}
         }
@@ -343,6 +393,11 @@ impl TrainingScreen {
         match &self.mode {
             Mode::Page(page) => page.hints(s),
             Mode::New(_) => Form::hints(s),
+            Mode::Series(editor) if !editor.conflicts.is_empty() => vec![
+                ("Enter".to_string(), s.create_others.to_string()),
+                ("Esc".to_string(), s.cancel.to_string()),
+            ],
+            Mode::Series(_) => Form::hints(s),
             Mode::Delete(_) => vec![
                 ("Enter".to_string(), s.delete_forever.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
@@ -352,6 +407,7 @@ impl TrainingScreen {
                 ("Enter".to_string(), s.open.to_string()),
                 ("← → f".to_string(), s.filter.to_string()),
                 ("n".to_string(), s.new_session.to_string()),
+                ("r".to_string(), s.repeat_sessions.to_string()),
                 ("⌫".to_string(), s.delete_forever.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
             ],
@@ -366,6 +422,15 @@ impl TrainingScreen {
         let body: Element<'a, Message> = match &self.mode {
             Mode::Page(page) => page.view(s, c).map(Message::Page),
             Mode::New(editor) => {
+                container(container(editor.form.view(s, c, Message::Form, None)).max_width(720))
+                    .center_x(Length::Fill)
+                    .height(Length::Fill)
+                    .into()
+            }
+            Mode::Series(editor) if !editor.conflicts.is_empty() => {
+                editor.dialog(s, c, Message::Confirm, Message::Dismiss)
+            }
+            Mode::Series(editor) => {
                 container(container(editor.form.view(s, c, Message::Form, None)).max_width(720))
                     .center_x(Length::Fill)
                     .height(Length::Fill)
@@ -414,6 +479,7 @@ impl TrainingScreen {
                 .color(c.muted)
                 .into(),
             ui::pill(s.new_session, false, Some(Message::New), c),
+            ui::pill(s.repeat_sessions, false, Some(Message::Repeat), c),
             ui::pill(s.delete_forever, false, Some(Message::Delete), c),
         ];
         column![
@@ -687,5 +753,127 @@ mod tests {
             scout4all_core::training::AttendanceStatus::Late
         );
         assert_eq!(sheet.rows[1].note, "dal medico");
+    }
+
+    /// The duplicate: a week later, the activities copied; it opens on the
+    /// new sheet. An overlap is told on the form and nothing is written.
+    #[test]
+    fn a_session_is_duplicated_and_an_overlap_is_refused() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let id = session(&core, &team, "2026-03-02T18:00", "Prima");
+        core.save_activity(
+            id.clone(),
+            None,
+            ActivityDraft {
+                name: "Palleggio".into(),
+                ..core.new_activity_draft()
+            },
+        )
+        .unwrap();
+        let busy = session(&core, &team, "2026-03-09T18:30", "Occupata");
+        let mut screen =
+            TrainingScreen::new(core.clone(), s, team.clone(), Open::Session(id.clone())).unwrap();
+        screen.key(s, key!(d));
+        let Mode::Page(page) = &screen.mode else {
+            panic!("the sheet")
+        };
+        assert_eq!(page.mode_name(), "duplicate");
+        screen.key(s, key!(enter));
+        assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 2);
+        // another hour: it is saved and its sheet opens
+        type_in(&mut screen, 1, "20:00");
+        screen.key(s, key!(enter));
+        let sessions = core.training_sessions(team.clone()).unwrap();
+        assert_eq!(sessions.len(), 3);
+        let copy = sessions
+            .iter()
+            .find(|r| r.id != id && r.id != busy)
+            .unwrap();
+        assert_eq!(copy.start, "2026-03-09T20:00");
+        assert!(matches!(&screen.mode, Mode::Page(p) if p.id == copy.id));
+        assert_eq!(core.session_activities(copy.id.clone()).unwrap().len(), 1);
+    }
+
+    /// The series: a session on the way is told in a dialog and nothing is
+    /// made; the others are made on Enter. The group is then changed from
+    /// the sheet of one of them, from it on.
+    #[test]
+    fn a_series_tells_its_conflicts_and_is_changed_as_a_group() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        session(&core, &team, "2026-03-09T20:00", "Occupata");
+        let mut screen =
+            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        screen.key(s, key!(r));
+        assert!(matches!(screen.mode, Mode::Series(_)));
+        type_in(&mut screen, 0, "2026-03-02");
+        type_in(&mut screen, 1, "2026-03-16");
+        type_in(&mut screen, 3, "20:30");
+        type_in(&mut screen, 4, "120");
+        screen.key(s, key!(enter));
+        let Mode::Series(editor) = &screen.mode else {
+            panic!("the dialog")
+        };
+        assert_eq!(editor.conflicts, vec!["2026-03-09 20:30".to_string()]);
+        assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 1);
+        // Esc goes back to the form, Enter again asks again
+        screen.key(s, BACK_KEY);
+        assert!(matches!(&screen.mode, Mode::Series(e) if e.conflicts.is_empty()));
+        screen.key(s, key!(enter));
+        screen.key(s, key!(enter));
+        assert!(matches!(screen.mode, Mode::List));
+        let sessions = core.training_sessions(team.clone()).unwrap();
+        assert_eq!(sessions.len(), 3);
+        let first = sessions
+            .iter()
+            .find(|r| r.start == "2026-03-02T20:30")
+            .unwrap();
+        assert!(first.series_id.is_some());
+        // from the last on: the time moves
+        let last = sessions
+            .iter()
+            .find(|r| r.start == "2026-03-16T20:30")
+            .unwrap()
+            .id
+            .clone();
+        let mut screen =
+            TrainingScreen::new(core.clone(), s, team.clone(), Open::Session(last.clone()))
+                .unwrap();
+        screen.key(s, key!(g));
+        screen.update(
+            s,
+            Message::Page(session::Message::Form(FormMessage::Choose(0, 1))),
+        );
+        type_in(&mut screen, 2, "19:00");
+        screen.key(s, key!(enter));
+        let starts: Vec<String> = core
+            .training_sessions(team.clone())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.start)
+            .collect();
+        assert!(starts.contains(&"2026-03-02T20:30".to_string()));
+        assert!(starts.contains(&"2026-03-16T19:00".to_string()));
+        // removed from the first on: the sheet closes
+        let mut screen = TrainingScreen::new(
+            core.clone(),
+            s,
+            team.clone(),
+            Open::Session(first.id.clone()),
+        )
+        .unwrap();
+        screen.key(s, key!(g));
+        screen.update(
+            s,
+            Message::Page(session::Message::Form(FormMessage::Choose(4, 1))),
+        );
+        screen.key(s, key!(enter));
+        assert!(matches!(screen.mode, Mode::List));
+        assert_eq!(core.training_sessions(team).unwrap().len(), 1);
     }
 }

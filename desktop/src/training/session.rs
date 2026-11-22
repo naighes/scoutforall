@@ -7,6 +7,7 @@ use {
     super::{
         forms::{ActivityEditor, CopyEditor, Edited, SessionEditor},
         roll::{self, Done, Roll},
+        series::{DuplicateEditor, SeriesChangeEditor},
     },
     crate::{
         form::{self, Form},
@@ -45,6 +46,8 @@ enum Mode {
     Session(Box<SessionEditor>),
     Activity(Box<ActivityEditor>),
     Copy(Box<CopyEditor>),
+    Duplicate(Box<DuplicateEditor>),
+    Series(Box<SeriesChangeEditor>),
     Roll(Box<Roll>),
     Complete(Checklist),
     DeleteSession,
@@ -63,6 +66,8 @@ pub enum Message {
     DeleteActivity,
     Attendance,
     EditSession,
+    Duplicate,
+    EditSeries,
     Complete,
     CancelSession,
     Reopen,
@@ -78,6 +83,8 @@ pub enum Outcome {
     Stay,
     /// back to the list
     Back,
+    /// the sheet of another session (the duplicate)
+    Opened(String),
 }
 
 pub struct SessionPage {
@@ -123,6 +130,8 @@ impl SessionPage {
             Mode::Session(_) => "session",
             Mode::Activity(_) => "activity",
             Mode::Copy(_) => "copy",
+            Mode::Duplicate(_) => "duplicate",
+            Mode::Series(_) => "series",
             Mode::Roll(_) => "roll",
             Mode::Complete(_) => "complete",
             Mode::DeleteSession | Mode::DeleteActivity(..) => "delete",
@@ -142,6 +151,8 @@ impl SessionPage {
             Mode::Session(e) => Some(e.form.focus_id()),
             Mode::Activity(e) => Some(e.form.focus_id()),
             Mode::Copy(e) => Some(e.form.focus_id()),
+            Mode::Duplicate(e) => Some(e.form.focus_id()),
+            Mode::Series(e) => Some(e.form.focus_id()),
             Mode::Roll(r) => r.focus_id(),
             _ => None,
         }
@@ -183,6 +194,24 @@ impl SessionPage {
             None,
         ) {
             Ok(editor) => self.mode = Mode::Session(Box::new(editor)),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    fn duplicate(&mut self, s: &Strings) {
+        match DuplicateEditor::new(&self.core, s, self.team_id.clone(), self.id.clone()) {
+            Ok(editor) => self.mode = Mode::Duplicate(Box::new(editor)),
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// The change of the group, for a session of a series.
+    fn edit_series(&mut self, s: &Strings) {
+        if self.record.series_id.is_none() {
+            return;
+        }
+        match SeriesChangeEditor::new(&self.core, s, self.team_id.clone(), self.id.clone()) {
+            Ok(editor) => self.mode = Mode::Series(Box::new(editor)),
             Err(e) => self.error = Some(e.to_string()),
         }
     }
@@ -299,16 +328,27 @@ impl SessionPage {
         Outcome::Stay
     }
 
-    fn edited(&mut self, s: &Strings, edited: Edited) {
-        match edited {
-            Edited::Stay => {}
-            Edited::Cancel => self.mode = Mode::Browse,
-            Edited::Saved(_) => {
+    fn edited(&mut self, s: &Strings, edited: Edited) -> Outcome {
+        match (&self.mode, edited) {
+            (_, Edited::Stay) => {}
+            (_, Edited::Cancel) => self.mode = Mode::Browse,
+            // the duplicate: its sheet opens
+            (Mode::Duplicate(_), Edited::Saved(id)) => return Outcome::Opened(id),
+            // the series changed or removed: the session may be gone
+            (Mode::Series(_), Edited::Saved(_)) => {
+                self.mode = Mode::Browse;
+                if self.core.training_session(self.id.clone()).is_err() {
+                    return Outcome::Back;
+                }
+                self.reload();
+            }
+            (_, Edited::Saved(_)) => {
                 self.mode = Mode::Browse;
                 self.reload();
             }
-            Edited::Copy(hit) => self.edit_activity(s, None, Some(hit)),
+            (_, Edited::Copy(hit)) => self.edit_activity(s, None, Some(hit)),
         }
+        Outcome::Stay
     }
 
     fn rolled(&mut self, done: Done) {
@@ -326,15 +366,23 @@ impl SessionPage {
         match (&mut self.mode, message) {
             (Mode::Session(e), Message::Form(m)) => {
                 let edited = e.update(&self.core, m);
-                self.edited(s, edited);
+                return self.edited(s, edited);
             }
             (Mode::Activity(e), Message::Form(m)) => {
                 let edited = e.update(&self.core, m);
-                self.edited(s, edited);
+                return self.edited(s, edited);
             }
             (Mode::Copy(e), Message::Form(m)) => {
                 let edited = e.update(&self.core, s, m);
-                self.edited(s, edited);
+                return self.edited(s, edited);
+            }
+            (Mode::Duplicate(e), Message::Form(m)) => {
+                let edited = e.update(&self.core, m);
+                return self.edited(s, edited);
+            }
+            (Mode::Series(e), Message::Form(m)) => {
+                let edited = e.update(&self.core, m);
+                return self.edited(s, edited);
             }
             (Mode::Roll(r), Message::Roll(m)) => {
                 let done = r.update(&self.core, s, m);
@@ -375,6 +423,8 @@ impl SessionPage {
             Message::DeleteActivity => self.ask_activity_deletion(),
             Message::Attendance => self.open_roll(),
             Message::EditSession => self.edit_session(s),
+            Message::Duplicate => self.duplicate(s),
+            Message::EditSeries => self.edit_series(s),
             Message::Complete => self.ask_completion(),
             Message::CancelSession => self.set_status(SessionStatus::Cancelled),
             Message::Reopen => self.set_status(SessionStatus::Planned),
@@ -392,15 +442,23 @@ impl SessionPage {
         match &mut self.mode {
             Mode::Session(e) => {
                 let edited = e.key(&self.core, ck);
-                self.edited(s, edited);
+                return self.edited(s, edited);
             }
             Mode::Activity(e) => {
                 let edited = e.key(&self.core, ck);
-                self.edited(s, edited);
+                return self.edited(s, edited);
             }
             Mode::Copy(e) => {
                 let edited = e.key(&self.core, s, ck);
-                self.edited(s, edited);
+                return self.edited(s, edited);
+            }
+            Mode::Duplicate(e) => {
+                let edited = e.key(&self.core, ck);
+                return self.edited(s, edited);
+            }
+            Mode::Series(e) => {
+                let edited = e.key(&self.core, ck);
+                return self.edited(s, edited);
             }
             Mode::Roll(r) => {
                 let done = r.key(&self.core, s, ck);
@@ -456,6 +514,8 @@ impl SessionPage {
                 }
             }
             (_, k) if k == key!(e) => self.edit_session(s),
+            (_, k) if k == key!(d) => self.duplicate(s),
+            (_, k) if k == key!(g) => self.edit_series(s),
             (_, k) if k == key!(c) => self.ask_completion(),
             (_, k) if k == key!(x) => self.set_status(SessionStatus::Cancelled),
             (_, k) if k == key!(r) => self.set_status(SessionStatus::Planned),
@@ -492,7 +552,11 @@ impl SessionPage {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
-            Mode::Session(_) | Mode::Activity(_) | Mode::Copy(_) => Form::hints(s),
+            Mode::Session(_)
+            | Mode::Activity(_)
+            | Mode::Copy(_)
+            | Mode::Duplicate(_)
+            | Mode::Series(_) => Form::hints(s),
             Mode::Roll(r) => r.hints(s),
             Mode::Complete(_) => vec![
                 ("↑ ↓".to_string(), String::new()),
@@ -520,7 +584,14 @@ impl SessionPage {
                 [
                     vec![("← → ⇥".to_string(), s.panel.to_string())],
                     panel,
-                    vec![("e".to_string(), s.edit_session.to_string())],
+                    vec![
+                        ("e".to_string(), s.edit_session.to_string()),
+                        ("d".to_string(), s.duplicate_session.to_string()),
+                    ],
+                    match self.record.series_id {
+                        Some(_) => vec![("g".to_string(), s.edit_series.to_string())],
+                        None => vec![],
+                    },
                     match planned {
                         true => vec![
                             ("c".to_string(), s.complete_session.to_string()),
@@ -543,6 +614,8 @@ impl SessionPage {
             Mode::Session(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Activity(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Copy(e) => centered(e.form.view(s, c, Message::Form, None)),
+            Mode::Duplicate(e) => centered(e.form.view(s, c, Message::Form, None)),
+            Mode::Series(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Roll(r) => r.view(s, c).map(Message::Roll),
             Mode::Complete(list) => self.completion(list, s, c),
             Mode::DeleteSession => ui::confirm_deletion(
@@ -672,6 +745,30 @@ impl SessionPage {
             .width(Length::Fill)
             .into(),
         ];
+        actions.push(
+            ui::action(
+                theme::icons::ADD,
+                s.duplicate_session,
+                Message::Duplicate,
+                false,
+                c,
+            )
+            .width(Length::Fill)
+            .into(),
+        );
+        if r.series_id.is_some() {
+            actions.push(
+                ui::action(
+                    theme::icons::EDIT,
+                    s.edit_series,
+                    Message::EditSeries,
+                    false,
+                    c,
+                )
+                .width(Length::Fill)
+                .into(),
+            );
+        }
         match planned {
             true => {
                 actions.push(

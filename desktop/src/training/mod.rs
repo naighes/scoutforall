@@ -5,4 +5,5 @@
 mod forms;
 mod roll;
 pub mod screen;
+mod series;
 mod session;

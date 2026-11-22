@@ -39,8 +39,66 @@ const REMARKS: usize = 7;
 const ACTUAL: usize = 8;
 const MICROCYCLE: usize = 9;
 
+/// The microcycles of the team that hold the day written, and the one
+/// `current` even when the day is out of it: id and name.
+pub(super) fn microcycle_options(
+    core: &Scout4All,
+    team_id: &str,
+    date: &str,
+    current: Option<&str>,
+) -> Vec<(String, String)> {
+    let containing = day_of(date)
+        .and_then(|day| {
+            core.cycles_containing(
+                team_id.to_string(),
+                Level::Microcycle,
+                day.format("%Y-%m-%d").to_string(),
+            )
+            .ok()
+        })
+        .unwrap_or_default();
+    let kept = current.and_then(|id| core.cycle(Level::Microcycle, id.to_string()).ok());
+    let mut options: Vec<(String, String)> = containing
+        .iter()
+        .map(|c| (c.id.clone(), cycle_label(c)))
+        .collect();
+    if let Some(kept) = kept.filter(|k| !options.iter().any(|(id, _)| *id == k.id)) {
+        options.push((kept.id.clone(), cycle_label(&kept)));
+    }
+    options
+}
+
+/// The places written before that fit what is written (all, when the
+/// arrow of the drop-down opened them).
+pub(super) fn location_suggestions(
+    locations: &[String],
+    written: &str,
+    all: bool,
+) -> Vec<Suggestion> {
+    let needle = written.to_lowercase();
+    locations
+        .iter()
+        .filter(|l| all || needle.is_empty() || l.to_lowercase().contains(&needle))
+        .map(|l| Suggestion {
+            label: l.clone(),
+            value: l.clone(),
+        })
+        .collect()
+}
+
+/// The choice of a microcycle: the empty one, then `options`; `chosen` is
+/// the position among them.
+pub(super) fn microcycle_value(options: &[(String, String)], chosen: Option<usize>) -> Value {
+    Value::Choice {
+        options: std::iter::once(EMPTY.to_string())
+            .chain(options.iter().map(|(_, name)| name.clone()))
+            .collect(),
+        index: chosen.map_or(0, |at| at + 1),
+    }
+}
+
 /// The text of a draft's start: its day, its time.
-fn split(start: &Option<String>) -> (String, String) {
+pub(super) fn split(start: &Option<String>) -> (String, String) {
     match start {
         Some(start) => (
             start.get(..10).unwrap_or_default().to_string(),
@@ -50,7 +108,7 @@ fn split(start: &Option<String>) -> (String, String) {
     }
 }
 
-fn day_of(text: &str) -> Option<NaiveDate> {
+pub(super) fn day_of(text: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d").ok()
 }
 
@@ -123,17 +181,11 @@ impl SessionEditor {
     }
 
     fn offer_locations(&mut self) {
-        let (written, all) = (self.form.text(LOCATION), self.form.browsing(LOCATION));
-        let needle = written.to_lowercase();
-        let offered = self
-            .locations
-            .iter()
-            .filter(|l| all || needle.is_empty() || l.to_lowercase().contains(&needle))
-            .map(|l| Suggestion {
-                label: l.clone(),
-                value: l.clone(),
-            })
-            .collect();
+        let offered = location_suggestions(
+            &self.locations,
+            &self.form.text(LOCATION),
+            self.form.browsing(LOCATION),
+        );
         self.form.suggest(LOCATION, offered);
     }
 
@@ -142,24 +194,7 @@ impl SessionEditor {
     /// the empty choice takes it out. With none chosen, the one that holds
     /// the day is proposed.
     fn offer_microcycles(&mut self, core: &Scout4All, current: Option<&str>) {
-        let containing = day_of(&self.form.text(DATE))
-            .and_then(|day| {
-                core.cycles_containing(
-                    self.team_id.clone(),
-                    Level::Microcycle,
-                    day.format("%Y-%m-%d").to_string(),
-                )
-                .ok()
-            })
-            .unwrap_or_default();
-        let kept = current.and_then(|id| core.cycle(Level::Microcycle, id.to_string()).ok());
-        let mut options: Vec<(String, String)> = containing
-            .iter()
-            .map(|c| (c.id.clone(), cycle_label(c)))
-            .collect();
-        if let Some(kept) = kept.filter(|k| !options.iter().any(|(id, _)| *id == k.id)) {
-            options.push((kept.id.clone(), cycle_label(&kept)));
-        }
+        let options = microcycle_options(core, &self.team_id, &self.form.text(DATE), current);
         let chosen = match current {
             Some(id) => options.iter().position(|(o, _)| o == id),
             None => (self.id.is_none() && !options.is_empty()).then_some(0),
@@ -169,12 +204,7 @@ impl SessionEditor {
             .enumerate()
             .map(|(i, field)| match i == MICROCYCLE {
                 true => Field {
-                    value: Value::Choice {
-                        options: std::iter::once(EMPTY.to_string())
-                            .chain(options.iter().map(|(_, name)| name.clone()))
-                            .collect(),
-                        index: chosen.map_or(0, |at| at + 1),
-                    },
+                    value: microcycle_value(&options, chosen),
                     ..field
                 },
                 false => field,
