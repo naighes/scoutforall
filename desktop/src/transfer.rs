@@ -221,7 +221,7 @@ impl Importing {
     fn teams(&self) -> &[scout4all_mobile::TeamChoice] {
         match &self.preview {
             ArchivePreview::Match { teams, .. } => teams,
-            ArchivePreview::Team { .. } => &[],
+            ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => &[],
         }
     }
 
@@ -229,7 +229,9 @@ impl Importing {
     pub fn import(&self, core: &Scout4All) -> Result<Imported, MobileError> {
         let bytes = self.picked.bytes.to_vec();
         match &self.preview {
-            ArchivePreview::Team { .. } => core
+            // the training of a team goes in as the team does: the archive
+            // says what it holds
+            ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => core
                 .import_team(bytes, Some(self.picked.name.clone()))
                 .map(|team| Imported::Team(team.id, team.summary)),
             ArchivePreview::Match { .. } => {
@@ -310,6 +312,10 @@ impl Importing {
                 name.clone(),
                 format!("{year} · {players} {}", s.players),
             ),
+            // the screen of its own comes with TODO/021 step 21
+            ArchivePreview::Training { name, year, .. } => {
+                (s.import_team_title, name.clone(), year.to_string())
+            }
             ArchivePreview::Match {
                 opponent,
                 home,

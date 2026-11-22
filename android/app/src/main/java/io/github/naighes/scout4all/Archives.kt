@@ -221,7 +221,7 @@ private fun ImportDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = {
-            Text(stringResource(if (preview is ArchivePreview.Team) R.string.import_team_title else R.string.import_match_title))
+            Text(stringResource(if (preview !is ArchivePreview.Match) R.string.import_team_title else R.string.import_match_title))
         },
         text = {
             Column {
@@ -230,6 +230,11 @@ private fun ImportDialog(
                         val players = preview.players.toInt()
                         Text(preview.name, style = MaterialTheme.typography.titleMedium)
                         Text("${preview.year} · ${pluralStringResource(R.plurals.players, players, players)}")
+                    }
+                    // the screen of its own comes with TODO/021 step 24
+                    is ArchivePreview.Training -> {
+                        Text(preview.name, style = MaterialTheme.typography.titleMedium)
+                        Text("${preview.year}")
                     }
                     is ArchivePreview.Match -> {
                         val place = stringResource(if (preview.home) R.string.home else R.string.away)
@@ -242,7 +247,7 @@ private fun ImportDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onImport(if (preview is ArchivePreview.Team) null else into) }) {
+            TextButton(onClick = { onImport(if (preview is ArchivePreview.Match) into else null) }) {
                 Text(stringResource(R.string.import_archive))
             }
         },

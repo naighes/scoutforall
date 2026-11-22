@@ -28,7 +28,7 @@ use scout4all_core::{
         },
         model::{DvwFile, MatchDate as DvwDate, Side},
     },
-    errors::{AppError, IOError},
+    errors::{AppError, IOError, TrainingError},
     event_edit::{Correcting, EditField, EventEdit},
     example,
     legacy::{
@@ -63,7 +63,7 @@ use scout4all_core::{
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     season::{self, SeasonError, SeasonMember},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::{Consent, PinnedTeams, TeamDefaults, VideoSeconds},
+    settings::{ActivitySearch, Consent, PinnedTeams, TeamDefaults, VideoSeconds},
     shapes::{
         country::CountryCode,
         court_zone::{
@@ -116,6 +116,7 @@ mod analysis;
 pub mod sender;
 pub use analysis::*;
 pub mod strip;
+pub mod training;
 pub mod video;
 
 // the types of the core the app sees as they are
@@ -469,6 +470,20 @@ pub enum MobileError {
     /// confirms it
     #[error("{reason}")]
     Namesake { reason: String },
+    /// a field of a form of the training
+    #[error("{reason}")]
+    InvalidTraining {
+        field: training::TrainingField,
+        reason: String,
+    },
+    /// a session or a cycle that overlaps others of the team: each is told
+    /// in the reason
+    #[error("{reason}")]
+    Overlap { reason: String },
+    /// a window that would leave out what is in the cycle: saved once the
+    /// user agrees to detach it
+    #[error("{reason}")]
+    ChildrenOutside { reason: String },
 }
 
 /// The language of the app, for the errors converted with `?` (see
@@ -519,8 +534,15 @@ impl From<AppError> for MobileError {
     fn from(e: AppError) -> Self {
         // the messages of the core are in the labels of the domain, for the
         // user as they are; the files and the network in the language
-        MobileError::Failed {
-            reason: e.message(errors_labels()),
+        let reason = e.message(errors_labels());
+        match e {
+            AppError::Training(TrainingError::Overlap(_) | TrainingError::CycleOverlap(_)) => {
+                MobileError::Overlap { reason }
+            }
+            AppError::Training(TrainingError::ChildrenOutside(_)) => {
+                MobileError::ChildrenOutside { reason }
+            }
+            _ => MobileError::Failed { reason },
         }
     }
 }
@@ -1064,6 +1086,14 @@ pub enum ArchivePreview {
         /// the teams of its players without it, by name: usually one
         teams: Vec<TeamChoice>,
     },
+    /// the training of a team: cycles and sessions with their activities
+    /// and attendance
+    Training {
+        name: String,
+        year: u16,
+        sessions: u32,
+        cycles: u32,
+    },
 }
 
 /// The points of a set, the team's first.
@@ -1152,6 +1182,8 @@ pub struct TeamRemovalCounts {
     pub kept: u32,
     /// the matches against a name: gone with the team
     pub removed: u32,
+    /// the sessions of training: gone with the team
+    pub sessions: u32,
 }
 
 /// A player to choose when starting a set.
@@ -4091,6 +4123,7 @@ impl Scout4All {
         Ok(TeamRemovalCounts {
             kept: u32::try_from(removal.kept).unwrap_or(u32::MAX),
             removed: u32::try_from(removal.removed).unwrap_or(u32::MAX),
+            sessions: u32::try_from(removal.sessions).unwrap_or(u32::MAX),
         })
     }
 
@@ -4930,9 +4963,12 @@ impl Scout4All {
                     m.status.them_wins,
                     vec![choice(&m.team)],
                 ),
-                // the archives of the training have no screen yet (TODO/021
-                // steps 15, 21, 24): they aren't offered for import
-                Preview::Training(_) => return Err(failed(labels.invalid_archive)),
+                Preview::Training(t) => ArchivePreview::Training {
+                    name: t.team.name,
+                    year: t.team.year,
+                    sessions: count_of(t.sessions),
+                    cycles: count_of(t.cycles),
+                },
             },
             // up to v0.9.0 the id only in the name of the file
             Opened::LegacyTeam { team, id } => {
@@ -5470,6 +5506,8 @@ struct AppConfig {
     pinned: PinnedTeams,
     #[serde(flatten)]
     video: VideoSeconds,
+    #[serde(flatten)]
+    activity_search: ActivitySearch,
     #[serde(flatten)]
     other: Map<String, Value>,
 }
@@ -7620,6 +7658,7 @@ mod tests {
         assert_eq!(
             app.team_removal(team.clone()).unwrap(),
             TeamRemovalCounts {
+                sessions: 0,
                 kept: 1,
                 removed: 1
             }
@@ -7627,6 +7666,7 @@ mod tests {
         assert_eq!(
             app.team_removal(livorno.clone()).unwrap(),
             TeamRemovalCounts {
+                sessions: 0,
                 kept: 1,
                 removed: 0
             }
