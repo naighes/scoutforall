@@ -1695,6 +1695,7 @@ fn training_go(team_id: &str, outcome: training::screen::Outcome) -> Go {
     match outcome {
         training::screen::Outcome::Stay => Go::Stay,
         training::screen::Outcome::Back => Go::Team(team_id.to_string()),
+        training::screen::Outcome::Match(id) => Go::Match(team_id.to_string(), id),
     }
 }
 

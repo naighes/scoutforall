@@ -134,7 +134,7 @@ impl HistoryTab {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         vec![
             ("↑ ↓".to_string(), String::new()),
-            ("⇥".to_string(), s.sessions.to_string()),
+            ("⇥".to_string(), s.calendar.to_string()),
             ("Esc".to_string(), s.back.to_string()),
         ]
     }

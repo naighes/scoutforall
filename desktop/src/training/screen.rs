@@ -5,6 +5,7 @@
 
 use {
     super::{
+        calendar::{self, CalendarTab},
         cycles::{self, CyclesTab, Leave},
         forms::{Edited, SessionEditor},
         history::{self, HistoryTab},
@@ -62,6 +63,7 @@ const FILTERS: [Filter; 6] = [
 /// The tabs, the one shown chosen.
 fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> {
     row([
+        (Tab::Calendar, s.calendar),
         (Tab::Sessions, s.sessions),
         (Tab::Cycles, s.cycles),
         (Tab::History, s.history),
@@ -143,6 +145,7 @@ impl Period {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tab {
+    Calendar,
     Sessions,
     Cycles,
     History,
@@ -172,12 +175,15 @@ pub enum Message {
     Tab(Tab),
     Cycles(cycles::Message),
     History(history::Message),
+    Calendar(calendar::Message),
     /// the sessions marked, in a new microcycle
     Create,
 }
 
 pub enum Outcome {
     Stay,
+    /// a match, to open
+    Match(String),
     /// back to the team
     Back,
 }
@@ -196,6 +202,7 @@ pub struct TrainingScreen {
     /// the sessions marked to make a microcycle
     marked: HashSet<String>,
     tab: Tab,
+    calendar: CalendarTab,
     cycles: CyclesTab,
     history: HistoryTab,
     mode: Mode,
@@ -211,6 +218,7 @@ impl TrainingScreen {
     ) -> Result<TrainingScreen, MobileError> {
         let team_name = core.team(team_id.clone())?.name;
         let mut screen = TrainingScreen {
+            calendar: CalendarTab::new(core.clone(), team_id.clone()),
             cycles: CyclesTab::new(core.clone(), team_id.clone()),
             history: HistoryTab::new(core.clone(), team_id.clone()),
             core,
@@ -273,6 +281,7 @@ impl TrainingScreen {
 
     /// The sessions read again, the latest first; the one chosen stays.
     fn reload(&mut self) {
+        self.calendar.reload();
         match self.core.training_sessions(self.team_id.clone()) {
             Ok(mut sessions) => {
                 sessions.reverse();
@@ -323,6 +332,7 @@ impl TrainingScreen {
     fn set_tab(&mut self, tab: Tab) {
         self.tab = tab;
         match tab {
+            Tab::Calendar => self.calendar.reload(),
             Tab::Sessions => self.reload(),
             Tab::Cycles => self.cycles.reload(),
             Tab::History => self.history.reload(),
@@ -331,7 +341,7 @@ impl TrainingScreen {
 
     /// The tab after (or before) the one shown, around.
     fn step_tab(&mut self, forward: bool) {
-        const TABS: [Tab; 3] = [Tab::Sessions, Tab::Cycles, Tab::History];
+        const TABS: [Tab; 4] = [Tab::Calendar, Tab::Sessions, Tab::Cycles, Tab::History];
         if let Some(next) = ui::cycle(&TABS, &self.tab, forward) {
             self.set_tab(next);
         }
@@ -390,6 +400,32 @@ impl TrainingScreen {
         if let Some(id) = id {
             self.open_session(&id);
         }
+    }
+
+    /// What the calendar asked for.
+    fn calendared(&mut self, s: &Strings, leave: calendar::Leave) -> Outcome {
+        match leave {
+            calendar::Leave::Stay => {}
+            calendar::Leave::Session(id) => {
+                self.tab = Tab::Sessions;
+                self.reload();
+                self.open_session(&id);
+            }
+            calendar::Leave::Match(id) => return Outcome::Match(id),
+            calendar::Leave::NewSession(day) => {
+                match SessionEditor::new(&self.core, s, self.team_id.clone(), None, Some(day)) {
+                    Ok(editor) => self.mode = Mode::New(Box::new(editor)),
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+            calendar::Leave::Repeat(day) => {
+                match SeriesEditor::new(&self.core, s, self.team_id.clone(), Some(day)) {
+                    Ok(editor) => self.mode = Mode::Series(Box::new(editor)),
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
+        }
+        Outcome::Stay
     }
 
     fn new_session(&mut self, s: &Strings) {
@@ -495,6 +531,10 @@ impl TrainingScreen {
                 return self.cycled(leave);
             }
             (Mode::List, Message::History(m)) if self.tab == Tab::History => self.history.update(m),
+            (Mode::List, Message::Calendar(m)) if self.tab == Tab::Calendar => {
+                let leave = self.calendar.update(m);
+                return self.calendared(s, leave);
+            }
             (Mode::List, Message::Period(period)) => {
                 self.period = period;
                 self.selected = 0;
@@ -543,6 +583,14 @@ impl TrainingScreen {
                 let leave = self.cycles.key(s, ck);
                 return self.cycled(leave);
             }
+            Mode::List if self.tab == Tab::Calendar => match ck {
+                k if k == BACK_KEY => return Outcome::Back,
+                k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
+                k => {
+                    let leave = self.calendar.key(k);
+                    return self.calendared(s, leave);
+                }
+            },
             Mode::List if self.tab == Tab::History => match ck {
                 k if k == BACK_KEY => return Outcome::Back,
                 k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
@@ -604,6 +652,7 @@ impl TrainingScreen {
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             Mode::List if self.tab == Tab::Cycles => self.cycles.hints(s),
+            Mode::List if self.tab == Tab::Calendar => self.calendar.hints(s),
             Mode::List if self.tab == Tab::History => self.history.hints(s),
             Mode::List => vec![
                 ("↑ ↓".to_string(), String::new()),
@@ -653,6 +702,13 @@ impl TrainingScreen {
             Mode::List if self.tab == Tab::Cycles => column![
                 tabs(s, Tab::Cycles, c),
                 self.cycles.view(s, c).map(Message::Cycles)
+            ]
+            .spacing(10)
+            .height(Length::Fill)
+            .into(),
+            Mode::List if self.tab == Tab::Calendar => column![
+                tabs(s, Tab::Calendar, c),
+                self.calendar.view(s, c).map(Message::Calendar)
             ]
             .spacing(10)
             .height(Length::Fill)
@@ -914,21 +970,21 @@ mod tests {
         assert_eq!(ids(&screen).len(), 2);
     }
 
-    /// Tab goes round sessions, cycles, history and back; the history has
-    /// nothing to change.
+    /// Tab goes round sessions, cycles, history, calendar and back; the
+    /// history has nothing to change.
     #[test]
-    fn tab_goes_round_the_three_tabs() {
+    fn tab_goes_round_the_four_tabs() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         let team = core.tutorial_team().unwrap();
         let mut screen = TrainingScreen::new(core, s, team, Open::Sessions).unwrap();
-        for tab in [Tab::Cycles, Tab::History, Tab::Sessions] {
+        for tab in [Tab::Cycles, Tab::History, Tab::Calendar, Tab::Sessions] {
             screen.key(s, key!(tab));
             assert_eq!(screen.tab, tab);
         }
         screen.key(s, key!(shift - tab));
-        assert_eq!(screen.tab, Tab::History);
+        assert_eq!(screen.tab, Tab::Calendar);
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Back));
     }
 
@@ -1305,5 +1361,135 @@ mod tests {
         assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 2);
         assert_eq!(attached(&core), 0);
         assert!(screen.cycles.on_list());
+    }
+    fn press(screen: &mut TrainingScreen, k: KeyCombination) -> Outcome {
+        screen.key(strings(LanguageEnum::It), k)
+    }
+
+    fn microcycle(core: &Scout4All, team: &str, title: &str, start: &str) {
+        let draft = scout4all_mobile::training::CycleDraft {
+            title: title.into(),
+            start: Some(start.into()),
+            weeks: "1".into(),
+            ..core.new_cycle_draft()
+        };
+        core.save_cycle(team.into(), Level::Microcycle, None, draft, vec![], false)
+            .unwrap();
+    }
+
+    /// The calendar shows the week of the day with the sessions and the
+    /// bands of its microcycles; the month shows the days of the month with
+    /// the bands of the mesocycles; PgDn moves the period, Home goes back.
+    #[test]
+    fn the_calendar_reads_the_week_the_month_and_the_bands() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        session(&core, &team, "2026-03-10T18:00", "Martedì");
+        session(&core, &team, "2026-03-25T18:00", "Fine mese");
+        microcycle(&core, &team, "Carico", "2026-03-09");
+        let today = NaiveDate::from_ymd_opt(2026, 3, 11).unwrap();
+        let mut tab = super::super::calendar::CalendarTab::at(core.clone(), team.clone(), today);
+        assert_eq!(tab.days().len(), 7);
+        assert_eq!(tab.days().iter().map(|d| d.events.len()).sum::<usize>(), 1);
+        assert_eq!(tab.bands().len(), 1);
+        assert_eq!(tab.bands()[0].title, "Carico");
+        tab.key(key!(pagedown));
+        assert_eq!(tab.anchor(), NaiveDate::from_ymd_opt(2026, 3, 18).unwrap());
+        assert!(tab.bands().is_empty());
+        tab.key(key!(home));
+        assert_eq!(tab.anchor(), today);
+        tab.key(key!(m));
+        assert_eq!(tab.days().len(), 31);
+        assert_eq!(tab.days().iter().map(|d| d.events.len()).sum::<usize>(), 2);
+        let _ = s;
+    }
+
+    /// The bands of a row of days: the days under a cycle together, the
+    /// free ones apart, the days out of the month under none.
+    #[test]
+    fn the_bands_group_the_days_under_a_cycle() {
+        use super::super::calendar::segments;
+        let day = |d: u32| NaiveDate::from_ymd_opt(2026, 3, d);
+        let cycle = |id: &str, first: &str, last: &str| scout4all_mobile::training::CycleRecord {
+            id: id.into(),
+            team_id: "t".into(),
+            level: Level::Microcycle,
+            parent_id: None,
+            title: id.into(),
+            weeks: Some(1),
+            first_day: first.into(),
+            last_day: last.into(),
+            window: String::new(),
+            objectives: String::new(),
+            notes: String::new(),
+        };
+        let cycles = [
+            cycle("a", "2026-03-09", "2026-03-11"),
+            cycle("b", "2026-03-12", "2026-03-12"),
+        ];
+        let row = [None, day(9), day(10), day(11), day(12), day(13), None];
+        let got: Vec<(usize, usize, Option<String>)> = segments(&row, &cycles)
+            .into_iter()
+            .map(|(i, n, c)| (i, n, c.map(|c| c.id.clone())))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (0, 1, None),
+                (1, 3, Some("a".into())),
+                (4, 1, Some("b".into())),
+                (5, 2, None),
+            ]
+        );
+    }
+
+    /// Enter on an event opens the session (on the sessions tab) or the
+    /// match; on a free day a new session on that day; `r` a series from
+    /// the day; in the month Enter goes to the week of the day.
+    #[test]
+    fn the_calendar_opens_events_and_creates_on_a_day() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let id = session(&core, &team, "2026-03-10T18:00", "Martedì");
+        let mut screen =
+            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        screen.calendar = super::super::calendar::CalendarTab::at(
+            core.clone(),
+            team.clone(),
+            NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
+        );
+        press(&mut screen, key!(shift - tab));
+        assert_eq!(screen.tab, Tab::Calendar);
+        press(&mut screen, key!(enter));
+        assert_eq!(screen.tab, Tab::Sessions);
+        let Mode::Page(page) = &screen.mode else {
+            panic!("the event opens its sheet")
+        };
+        let _ = (page, &id);
+        press(&mut screen, BACK_KEY);
+        press(&mut screen, key!(shift - tab));
+        assert_eq!(screen.tab, Tab::Calendar);
+        // a free day: a new session on it
+        press(&mut screen, key!(right));
+        press(&mut screen, key!(enter));
+        assert!(matches!(screen.mode, Mode::New(_)));
+        press(&mut screen, BACK_KEY);
+        assert!(matches!(screen.mode, Mode::List));
+        // a series from the day
+        press(&mut screen, key!(r));
+        assert!(matches!(screen.mode, Mode::Series(_)));
+        press(&mut screen, BACK_KEY);
+        // the month: Enter comes back to the week of the day
+        press(&mut screen, key!(m));
+        press(&mut screen, key!(enter));
+        assert_eq!(
+            screen.calendar.view_shown(),
+            super::super::calendar::View::Week
+        );
+        assert!(matches!(press(&mut screen, BACK_KEY), Outcome::Back));
     }
 }

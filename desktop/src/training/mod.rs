@@ -2,6 +2,7 @@
 //! calendar, the cycles and the attendance in the next steps), the sheet of
 //! a session with its activities and its attendance.
 
+mod calendar;
 mod cycles;
 mod forms;
 mod history;
