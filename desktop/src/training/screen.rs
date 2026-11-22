@@ -230,6 +230,9 @@ pub struct TrainingScreen {
     history: HistoryTab,
     presence: PresenceTab,
     mode: Mode,
+    /// the new session was asked from the sheet of a microcycle: saved or
+    /// not, that sheet comes back
+    from_cycle: bool,
     error: Option<String>,
 }
 
@@ -256,6 +259,7 @@ impl TrainingScreen {
             marked: HashSet::new(),
             tab: Tab::Sessions,
             mode: Mode::List,
+            from_cycle: false,
             error: None,
         };
         screen.reload();
@@ -401,11 +405,21 @@ impl TrainingScreen {
     }
 
     /// What the cycles tab did.
-    fn cycled(&mut self, leave: Leave) -> Outcome {
+    fn cycled(&mut self, s: &'static Strings, leave: Leave) -> Outcome {
         match leave {
             Leave::Stay => Outcome::Stay,
             Leave::Back => Outcome::Back,
             Leave::Export(export) => Outcome::Export(export),
+            Leave::NewSession(day) => {
+                match SessionEditor::new(&self.core, s, self.team_id.clone(), None, Some(day)) {
+                    Ok(editor) => {
+                        self.mode = Mode::New(Box::new(editor));
+                        self.from_cycle = true;
+                    }
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+                Outcome::Stay
+            }
             Leave::Session(id) => {
                 self.tab = Tab::Sessions;
                 self.reload();
@@ -502,16 +516,23 @@ impl TrainingScreen {
     }
 
     fn edited(&mut self, edited: Edited) {
+        let from_cycle = self.from_cycle;
         match edited {
-            Edited::Stay => {}
+            Edited::Stay | Edited::Copy(_) => return,
             Edited::Cancel => self.mode = Mode::List,
+            // made from a microcycle: its sheet again, the session in it
+            Edited::Saved(_) if from_cycle => {
+                self.reload();
+                self.cycles.refresh();
+                self.mode = Mode::List;
+            }
             // the new session opens on its sheet
             Edited::Saved(id) => {
                 self.reload();
                 self.open_session(&id);
             }
-            Edited::Copy(_) => {}
         }
+        self.from_cycle = false;
     }
 
     fn paged(&mut self, outcome: session::Outcome) -> Outcome {
@@ -557,7 +578,7 @@ impl TrainingScreen {
             (Mode::List, Message::Tab(tab)) => self.set_tab(tab),
             (Mode::List, Message::Cycles(m)) if self.tab == Tab::Cycles => {
                 let leave = self.cycles.update(s, m);
-                return self.cycled(leave);
+                return self.cycled(s, leave);
             }
             (Mode::List, Message::History(m)) if self.tab == Tab::History => self.history.update(m),
             (Mode::List, Message::Presence(m)) if self.tab == Tab::Presence => {
@@ -628,7 +649,7 @@ impl TrainingScreen {
                     return Outcome::Stay;
                 }
                 let leave = self.cycles.key(s, ck);
-                return self.cycled(leave);
+                return self.cycled(s, leave);
             }
             Mode::List if self.tab == Tab::Calendar => match ck {
                 k if k == BACK_KEY => return Outcome::Back,
@@ -1421,6 +1442,84 @@ mod tests {
         assert_eq!(core.cycles(team, Level::Mesocycle).unwrap().len(), 1);
     }
 
+    /// The sheet of a cycle makes its children: an empty program offers a
+    /// new mesocycle (in it, from its first day) and nothing to add, since
+    /// no mesocycle is free; saved, the program's sheet comes back with it.
+    /// The same down to a microcycle, whose new session lands in it. A free
+    /// one in the window brings the choice to add the existing ones.
+    #[test]
+    fn the_sheet_of_a_cycle_makes_its_children_and_adds_only_free_ones() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let program = core
+            .save_cycle(
+                team.clone(),
+                Level::Program,
+                None,
+                scout4all_mobile::training::CycleDraft {
+                    title: "Stagione".into(),
+                    start: Some("2026-03-02".into()),
+                    end: Some("2026-06-28".into()),
+                    ..core.new_cycle_draft()
+                },
+                vec![],
+                false,
+            )
+            .unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        screen.update(s, Message::Tab(Tab::Cycles));
+        screen.update(s, Message::Cycles(cycles::Message::Level(Level::Program)));
+        screen.key(s, key!(enter));
+        let keys = |screen: &TrainingScreen| -> Vec<String> {
+            screen.hints(s).into_iter().map(|(k, _)| k).collect()
+        };
+        // nothing free: no "a", and "a" does nothing
+        assert!(keys(&screen).contains(&"n".to_string()));
+        assert!(!keys(&screen).contains(&"a".to_string()));
+        screen.key(s, key!(a));
+        assert!(screen.cycles.on_card());
+        // a new mesocycle, already in the program, from its first day
+        screen.key(s, key!(n));
+        type_in(&mut screen, 2, "4");
+        screen.key(s, key!(enter));
+        let mesos = core.cycles(team.clone(), Level::Mesocycle).unwrap();
+        assert_eq!(mesos.len(), 1);
+        assert_eq!(mesos[0].parent_id.as_deref(), Some(program.id.as_str()));
+        assert_eq!(mesos[0].first_day, "2026-03-02");
+        assert_eq!(screen.cycles.card_totals().map(|(_, n)| n), Some(1));
+        // a cancelled form brings back the program's sheet, at its level
+        screen.update(s, Message::Cycles(cycles::Message::NewChild));
+        screen.key(s, BACK_KEY);
+        assert!(screen.cycles.on_card());
+        assert_eq!(screen.cycles.card_totals().map(|(_, n)| n), Some(1));
+        // down to a microcycle, then a session in it
+        screen.key(s, key!(enter));
+        screen.key(s, key!(n));
+        type_in(&mut screen, 2, "1");
+        screen.key(s, key!(enter));
+        let micros = core.cycles(team.clone(), Level::Microcycle).unwrap();
+        assert_eq!(micros.len(), 1);
+        assert_eq!(micros[0].parent_id.as_deref(), Some(mesos[0].id.as_str()));
+        screen.key(s, key!(enter));
+        screen.key(s, key!(n));
+        assert!(matches!(screen.mode, Mode::New(_)));
+        screen.update(s, Message::Form(FormMessage::Focus(1)));
+        screen.update(s, Message::Form(FormMessage::Input(1, "18:00".into())));
+        screen.key(s, key!(enter));
+        assert!(matches!(screen.mode, Mode::List));
+        assert!(screen.cycles.on_card());
+        assert_eq!(screen.cycles.card_totals().map(|(_, n)| n), Some(1));
+        // a free session in the window: now the existing ones can be added
+        session(&core, &team, "2026-03-04T18:00", "Libera");
+        screen.key(s, BACK_KEY);
+        screen.key(s, key!(enter));
+        assert!(keys(&screen).contains(&"a".to_string()));
+        screen.key(s, key!(a));
+        assert!(!screen.cycles.on_card());
+    }
+
     /// A shorter window that leaves a child out stops the save and says so;
     /// Enter again detaches it. Deleting a microcycle frees its sessions.
     #[test]
@@ -1477,7 +1576,7 @@ mod tests {
         assert!(screen.cycles.on_list());
     }
 
-    /// The sheet of a cycle names what it edits and what it adds by its
+    /// The sheet of a cycle names what it edits and what it makes by its
     /// level; the deletion asks first, and `a` deletes what it contains too.
     #[test]
     fn the_sheet_names_its_level_and_a_deletion_can_take_the_children() {
@@ -1497,7 +1596,9 @@ mod tests {
         };
         let shown = hints(&screen);
         assert!(shown.iter().any(|h| h == s.edit_microcycle));
-        assert!(shown.iter().any(|h| h == s.add_sessions));
+        // a new session in it; no free one to add
+        assert!(shown.iter().any(|h| h == s.new_session));
+        assert!(!shown.iter().any(|h| h == s.add_sessions));
         assert!(shown.iter().any(|h| h == s.delete));
         // asked: Esc keeps it
         screen.key(s, key!(backspace));

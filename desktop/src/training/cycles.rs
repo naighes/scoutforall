@@ -5,6 +5,7 @@
 
 use {
     super::forms::{Edited, clash_warning, cycle_label, day_of},
+    chrono::NaiveDate,
     crate::{
         calendar::text_of,
         form::{self, Field, Form, Mask, Outcome, Value},
@@ -63,8 +64,18 @@ fn edit_name(s: &Strings, level: Level) -> &'static str {
     }
 }
 
-/// What a cycle takes in: the cycles of the level below, the sessions of a
-/// microcycle.
+/// What a cycle makes inside itself: a cycle of the level below, a session
+/// of a microcycle.
+fn new_child_name(s: &Strings, level: Level) -> &'static str {
+    match level {
+        Level::Program => s.create_mesocycle,
+        Level::Mesocycle => s.create_microcycle,
+        Level::Microcycle => s.new_session,
+    }
+}
+
+/// What a cycle takes in among the free ones: the cycles of the level below,
+/// the sessions of a microcycle.
 fn add_name(s: &Strings, level: Level) -> &'static str {
     match level {
         Level::Program => s.add_mesocycles,
@@ -338,6 +349,8 @@ struct Card {
     record: CycleRecord,
     totals: TotalsRecord,
     children: Vec<Child>,
+    /// the free ones that fit in it: without them nothing is offered to add
+    free: usize,
     selected: usize,
 }
 
@@ -356,6 +369,8 @@ pub enum Message {
     New,
     Create,
     Edit,
+    /// a new child made inside the cycle of the sheet
+    NewChild,
     Add,
     Duplicate,
     Pdf,
@@ -377,6 +392,8 @@ pub enum Leave {
     Session(String),
     /// the PDF of the plan of the microcycle, to share
     Export(crate::transfer::Export),
+    /// a new session on the day, in the microcycle that holds it
+    NewSession(NaiveDate),
 }
 
 pub struct CyclesTab {
@@ -388,6 +405,8 @@ pub struct CyclesTab {
     /// the free ones marked to be put in a cycle of the level above
     marked: HashSet<String>,
     card: Option<Card>,
+    /// the sheet a new child was made from: saved, it opens again there
+    back_to: Option<(Level, String)>,
     mode: Mode,
     notice: Option<String>,
     error: Option<String>,
@@ -403,6 +422,7 @@ impl CyclesTab {
             selected: 0,
             marked: HashSet::new(),
             card: None,
+            back_to: None,
             mode: Mode::List,
             notice: None,
             error: None,
@@ -422,6 +442,11 @@ impl CyclesTab {
             Mode::Editor(e) => e.form.error.clone(),
             _ => None,
         }
+    }
+
+    #[cfg(test)]
+    pub fn on_card(&self) -> bool {
+        matches!(self.mode, Mode::Card)
     }
 
     /// True when the tab is on its list, to let the plan take its keys.
@@ -546,16 +571,18 @@ impl CyclesTab {
                 Child { id: c.id, shown }
             })
             .collect();
+        let free = self.core.free_children(level, id.to_string())?.len();
         Ok(Card {
             record,
             totals,
             children,
+            free,
             selected: 0,
         })
     }
 
     /// The sheet read again after a change; the list too.
-    fn refresh(&mut self) {
+    pub fn refresh(&mut self) {
         let at = self
             .card
             .as_ref()
@@ -586,6 +613,13 @@ impl CyclesTab {
     }
 
     fn close_forms(&mut self) {
+        self.back_to = None;
+        // a child's form moved the level: the sheet's comes back
+        let level = self.card.as_ref().map(|c| c.record.level);
+        if let Some(level) = level.filter(|l| *l != self.level) {
+            self.level = level;
+            self.reload();
+        }
         self.mode = match self.card {
             Some(_) => Mode::Card,
             None => Mode::List,
@@ -624,6 +658,34 @@ impl CyclesTab {
         self.set_editor(s, level, None, None, vec![]);
     }
 
+    /// A new child of the cycle of the sheet: a cycle of the level below in
+    /// it (starting on its first day when it holds nothing yet), or a session
+    /// on its first day for a microcycle.
+    fn new_child(&mut self, s: &Strings) -> Leave {
+        let Some(card) = &self.card else {
+            return Leave::Stay;
+        };
+        let r = &card.record;
+        let empty = card.children.is_empty();
+        match (r.level.child(), day_of(&r.first_day)) {
+            (Some(down), _) => {
+                let back = (r.level, r.id.clone());
+                let seed = CycleDraft {
+                    start: empty.then(|| r.first_day.clone()),
+                    parent: Some(r.id.clone()),
+                    ..self.core.new_cycle_draft()
+                };
+                self.set_editor(s, down, None, Some(seed), vec![]);
+                if matches!(self.mode, Mode::Editor(_)) {
+                    self.back_to = Some(back);
+                }
+                Leave::Stay
+            }
+            (None, Some(day)) => Leave::NewSession(day),
+            (None, None) => Leave::Stay,
+        }
+    }
+
     fn edit_card(&mut self, s: &Strings) {
         let target = self
             .card
@@ -643,7 +705,10 @@ impl CyclesTab {
             return;
         };
         match self.core.free_children(level, id) {
-            Ok(free) if free.is_empty() => self.notice = Some(s.nothing_to_add.to_string()),
+            Ok(free) if free.is_empty() => {
+                self.notice = Some(s.nothing_to_add.to_string());
+                self.refresh();
+            }
             Ok(free) => {
                 let fields = free
                     .iter()
@@ -813,12 +878,16 @@ impl CyclesTab {
         match edited {
             Edited::Stay | Edited::Copy(_) => {}
             Edited::Cancel => self.close_forms(),
+            // a child made from a sheet opens that sheet, holding it
             Edited::Saved(id) => {
                 let level = match &self.mode {
                     Mode::Editor(e) => e.level,
                     _ => self.level,
                 };
-                self.open(level, &id);
+                match self.back_to.take() {
+                    Some((up, parent)) => self.open(up, &parent),
+                    None => self.open(level, &id),
+                }
             }
         }
     }
@@ -865,6 +934,7 @@ impl CyclesTab {
                 self.toggle_mark(i);
             }
             (Mode::Card, Message::Edit) => self.edit_card(s),
+            (Mode::Card, Message::NewChild) => return self.new_child(s),
             (Mode::Card, Message::Add) => self.start_add(s),
             (Mode::Card, Message::Duplicate) => self.start_duplicate(s),
             (Mode::Card, Message::Pdf) => return self.plan_pdf(),
@@ -921,7 +991,10 @@ impl CyclesTab {
                 return self.open_child(at);
             }
             k if k == key!(e) => self.edit_card(s),
-            k if k == key!(a) => self.start_add(s),
+            k if k == key!(n) => return self.new_child(s),
+            k if k == key!(a) && self.card.as_ref().is_some_and(|c| c.free > 0) => {
+                self.start_add(s)
+            }
             k if k == key!(d) => self.start_duplicate(s),
             k if k == key!(p) => return self.plan_pdf(),
             k if k == key!(backspace) || k == key!(delete) => self.start_remove(s),
@@ -979,12 +1052,16 @@ impl CyclesTab {
             }
             Mode::Card => {
                 let level = self.card.as_ref().map_or(self.level, |c| c.record.level);
+                let free = self.card.as_ref().is_some_and(|c| c.free > 0);
                 let mut hints = vec![
                     ("↑ ↓".to_string(), String::new()),
                     ("Enter".to_string(), s.open.to_string()),
                     ("e".to_string(), edit_name(s, level).to_string()),
-                    ("a".to_string(), add_name(s, level).to_string()),
+                    ("n".to_string(), new_child_name(s, level).to_string()),
                 ];
+                if free {
+                    hints.push(("a".to_string(), add_name(s, level).to_string()));
+                }
                 if level == Level::Microcycle {
                     hints.push(("d".to_string(), s.duplicate_microcycle.to_string()));
                     hints.push(("p".to_string(), s.plan_pdf.to_string()));
@@ -1192,14 +1269,28 @@ impl CyclesTab {
             .into(),
             ui::action(
                 theme::icons::ADD,
-                add_name(s, r.level),
-                Message::Add,
+                new_child_name(s, r.level),
+                Message::NewChild,
                 false,
                 c,
             )
             .width(Length::Fill)
             .into(),
         ];
+        // the free ones only when there are some
+        if card.free > 0 {
+            actions.push(
+                ui::action(
+                    theme::icons::ADD,
+                    add_name(s, r.level),
+                    Message::Add,
+                    false,
+                    c,
+                )
+                .width(Length::Fill)
+                .into(),
+            );
+        }
         if r.level == Level::Microcycle {
             actions.push(
                 ui::action(
@@ -1266,12 +1357,21 @@ impl CyclesTab {
                     ui::body(empty_name(s, r.level)).color(c.muted),
                     ui::action(
                         theme::icons::ADD,
-                        add_name(s, r.level),
-                        Message::Add,
+                        new_child_name(s, r.level),
+                        Message::NewChild,
                         false,
                         c
                     ),
                 ]
+                .push((card.free > 0).then(|| {
+                    ui::action(
+                        theme::icons::ADD,
+                        add_name(s, r.level),
+                        Message::Add,
+                        false,
+                        c,
+                    )
+                }))
                 .spacing(12)
                 .align_x(Alignment::Center),
             )
