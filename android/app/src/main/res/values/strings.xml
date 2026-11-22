@@ -45,6 +45,14 @@
     <string name="in_progress">in progress</string>
     <string name="home_in_progress">In progress</string>
     <string name="home_recent">Recent matches</string>
+    <string name="agenda_today">Today</string>
+    <string name="agenda_week">This week</string>
+    <string name="agenda_training">Training</string>
+    <string name="agenda_cancelled">cancelled</string>
+    <string name="agenda_to_close">to close</string>
+    <string name="agenda_previous_week">Previous week</string>
+    <string name="agenda_next_week">Next week</string>
+    <string name="agenda_nothing">Nothing planned</string>
     <string name="resume">Resume</string>
     <string name="start">Start</string>
     <string name="new_match">New match</string>

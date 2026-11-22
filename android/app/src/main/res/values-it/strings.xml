@@ -44,6 +44,14 @@
     <string name="in_progress">in corso</string>
     <string name="home_in_progress">In corso</string>
     <string name="home_recent">Ultime partite</string>
+    <string name="agenda_today">Oggi</string>
+    <string name="agenda_week">Settimana</string>
+    <string name="agenda_training">Allenamento</string>
+    <string name="agenda_cancelled">annullata</string>
+    <string name="agenda_to_close">da chiudere</string>
+    <string name="agenda_previous_week">Settimana precedente</string>
+    <string name="agenda_next_week">Settimana successiva</string>
+    <string name="agenda_nothing">Niente in programma</string>
     <string name="resume">Riprendi</string>
     <string name="start">Inizia</string>
     <string name="new_match">Nuova partita</string>

@@ -31,6 +31,11 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import java.time.LocalDate
+import io.github.naighes.scout4all.core.AgendaSpan
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -151,7 +156,19 @@ fun TeamsScreen(
                             list.animateScrollToItem(count - 1)
                         }
                     }
+                    var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
+                    val today = LocalDate.now()
+                    val week by rememberAgenda(null, AgendaSpan.WEEK, day, s.home)
+                    val now by rememberAgenda(null, AgendaSpan.DAY, today, s.home)
                     LazyColumn(modifier, list, contentPadding = PaddingValues(bottom = 88.dp)) {
+                    agendaToday(now, withTeam = true, onMatch = onMatch)
+                    agendaWeek(
+                        week, today, withTeam = true,
+                        onPrevious = { day = day.minusWeeks(1) },
+                        onNext = { day = day.plusWeeks(1) },
+                        onToday = { day = LocalDate.now() },
+                        onMatch = onMatch,
+                    )
                     // a section only with something in it
                     section(R.string.home_in_progress, s.home.inProgress) {
                         InProgressRow(it, { onMatch(it.teamId, it.id) }) { onResume(it.teamId, it.id, it.next) }

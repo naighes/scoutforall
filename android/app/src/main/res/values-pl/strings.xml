@@ -44,6 +44,14 @@
     <string name="in_progress">w trakcie</string>
     <string name="home_in_progress">W toku</string>
     <string name="home_recent">Ostatnie mecze</string>
+    <string name="agenda_today">Dziś</string>
+    <string name="agenda_week">Tydzień</string>
+    <string name="agenda_training">Trening</string>
+    <string name="agenda_cancelled">odwołany</string>
+    <string name="agenda_to_close">do zamknięcia</string>
+    <string name="agenda_previous_week">Poprzedni tydzień</string>
+    <string name="agenda_next_week">Następny tydzień</string>
+    <string name="agenda_nothing">Nic w planie</string>
     <string name="resume">Wznów</string>
     <string name="start">Rozpocznij</string>
     <string name="new_match">Nowy mecz</string>

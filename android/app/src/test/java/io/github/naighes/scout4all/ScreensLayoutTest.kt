@@ -3,6 +3,7 @@ package io.github.naighes.scout4all
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
@@ -74,6 +75,40 @@ class ScreensLayoutTest(private val screen: Size) {
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText("Cortona")
         rule.shot("screen-team-matches-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+    }
+
+    /** A training today: in the home, under Today and in the week; in the
+     * team, in the week above the matches. */
+    private fun planTraining(team: String): String {
+        val start = java.time.LocalDate.now().toString() + "T18:00"
+        core { it.saveSession(team, null, it.newSessionDraft().copy(start = start, duration = "90", title = "Ricezione")) }
+        return "Ricezione"
+    }
+
+    @Test
+    fun theAgendaOfTheHome() {
+        val team = saveNationalTeam()
+        val title = planTraining(team)
+        assertFits("home-agenda", title) {
+            TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
+        }
+        rule.onAllNodes(hasText(string(R.string.agenda_today))).assertCountEquals(2)
+    }
+
+    @Test
+    fun theWeekOfTheTeam() {
+        val team = saveNationalTeam()
+        val title = planTraining(team)
+        rule.setContent {
+            Scout4AllTheme {
+                TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
+            }
+        }
+        rule.waitForText("Ekaterina Antropova")
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(title)
+        rule.shot("screen-team-week-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
