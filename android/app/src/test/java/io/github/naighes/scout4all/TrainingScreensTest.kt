@@ -9,6 +9,7 @@ import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.performClick
 import io.github.naighes.scout4all.core.ActivityStatus
 import io.github.naighes.scout4all.core.AttendanceStatus
+import io.github.naighes.scout4all.core.Level
 import io.github.naighes.scout4all.core.SessionStatus
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -150,5 +151,67 @@ class TrainingScreensTest {
         assertTrue(saved.recorded)
         assertEquals(AttendanceStatus.LATE, saved.rows.single { it.personId == first.personId }.status)
         assertEquals(saved.rows.size - 1, saved.rows.count { it.status == AttendanceStatus.PRESENT })
+    }
+
+    private fun hub(part: Part, onNewOn: (LocalDate) -> Unit = {}, onNewCycle: (Level) -> Unit = {}) = rule.setContent {
+        Scout4AllTheme {
+            TrainingScreen(
+                team, onBack = {}, onSession = {}, onNew = {}, onSeries = {}, onCycle = { _, _ -> },
+                onNewCycle = onNewCycle, onNewOn = onNewOn, onMatch = {}, first = part,
+            )
+        }
+    }
+
+    @Test
+    fun aMicrocycleIsWrittenInItsForm() {
+        val saved = mutableListOf<String>()
+        rule.setContent { Scout4AllTheme { CycleFormScreen(team, Level.MICROCYCLE, null, onBack = {}, onSaved = { saved += it }) } }
+        rule.waitForText(string(R.string.tr_cycle_weeks))
+        rule.type(string(R.string.tr_session_title), "Carico")
+        rule.save()
+        rule.waitFor({ "not saved" }) { saved.isNotEmpty() }
+        val cycles = core { it.cycles(team, Level.MICROCYCLE) }
+        assertEquals(listOf("Carico"), cycles.map { it.title })
+        assertEquals(saved, cycles.map { it.id })
+    }
+
+    @Test
+    fun theSessionsOfAWeekAreAddedToItsMicrocycle() {
+        val monday = LocalDate.now().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val cycle = core {
+            it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(title = "Carico", start = monday.toString(), weeks = "1"), emptyList(), false)
+        }
+        val s = core {
+            it.saveSession(team, null, it.newSessionDraft().copy(start = "${monday.plusDays(2)}T18:00", duration = "90", title = "Ricezione"))
+        }
+        // inside the window but not attached: free
+        val done = mutableListOf<Unit>()
+        rule.setContent { Scout4AllTheme { AddChildrenScreen(Level.MICROCYCLE, cycle.id, onBack = {}, onDone = { done += Unit }) } }
+        rule.waitForText(core { it.freeChildren(Level.MICROCYCLE, cycle.id) }.first { c -> c.id == s.id }.window)
+        rule.onNode(isToggleable()).performClick()
+        press(string(R.string.tr_add_children))
+        rule.waitFor({ "not added" }) { done.isNotEmpty() }
+        assertEquals(listOf(s.id), core { it.cycleChildren(Level.MICROCYCLE, cycle.id) }.map { c -> c.id })
+    }
+
+    @Test
+    fun theCalendarOpensANewSessionOnTheDay() {
+        val days = mutableListOf<LocalDate>()
+        hub(Part.CALENDAR, onNewOn = { days += it })
+        rule.waitForText(string(R.string.agenda_today))
+        rule.onNode(hasContentDescription(string(R.string.tr_new_session)) and hasClickAction()).performClick()
+        assertEquals(listOf(LocalDate.now()), days)
+    }
+
+    @Test
+    fun theAttendanceReportCountsTheCompletedSessions() {
+        val s = session(LocalDate.now().minusDays(1))
+        val rows = core { it.sessionAttendance(s) }.rows
+        core { it.saveAttendance(s, rows.mapIndexed { i, r -> r.copy(status = if (i == 0) AttendanceStatus.ABSENT else AttendanceStatus.PRESENT) }) }
+        core { it.completeSession(s, emptyList()) }
+        hub(Part.ATTENDANCE)
+        // the first is absent once, present never: 0% on one session
+        rule.waitForText("0% ${string(R.string.tr_on_sessions)} 1")
+        rule.waitForText(rows.first().name)
     }
 }

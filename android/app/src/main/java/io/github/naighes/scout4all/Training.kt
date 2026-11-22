@@ -85,14 +85,25 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
     }
     composable("team/{id}/training") { entry ->
         val id = entry.arg("id")
-        SessionsScreen(
+        TrainingScreen(
             id,
             onBack = { nav.back(entry) },
             onSession = { nav.navigate("team/$id/training/$it") },
             onNew = { nav.navigate("team/$id/training-new") },
             onSeries = { nav.navigate("team/$id/training-series") },
+            onCycle = { level, cycle -> nav.navigate("team/$id/cycles/${level.name}/$cycle") },
+            onNewCycle = { level -> nav.navigate("team/$id/cycle-new/${level.name}") },
+            onNewOn = { day -> nav.navigate("team/$id/training-new-on/$day") },
+            onMatch = { match -> nav.navigate("team/$id/match/${android.net.Uri.encode(match)}") },
         )
     }
+    composable("team/{id}/training-new-on/{day}") { entry ->
+        val id = entry.arg("id")
+        SessionFormScreen(id, null, onBack = { nav.back(entry) }, day = runCatching { LocalDate.parse(entry.arg("day")) }.getOrNull(), onSaved = { session ->
+            nav.navigate("team/$id/training/$session") { popUpTo("team/{id}/training-new-on/{day}") { inclusive = true } }
+        })
+    }
+    cycleRoutes(nav)
     composable("team/{id}/training-new") { entry ->
         val id = entry.arg("id")
         SessionFormScreen(id, null, onBack = { nav.back(entry) }, onSaved = { session ->
@@ -172,7 +183,7 @@ private fun SessionStatus.label(): String = stringResource(
 /** The sessions of the team read from the core, again when `refresh`
  * changes; null until read. */
 @Composable
-private fun <T> rememberCore(refresh: Any?, key: Any?, read: (io.github.naighes.scout4all.core.Scout4All) -> T): State<T?> {
+internal fun <T> rememberCore(refresh: Any?, key: Any?, read: (io.github.naighes.scout4all.core.Scout4All) -> T): State<T?> {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     return produceState<T?>(null, refresh, key) {
         value = try {
@@ -185,69 +196,51 @@ private fun <T> rememberCore(refresh: Any?, key: Any?, read: (io.github.naighes.
 
 private enum class Filter { ALL, PLANNED, TO_CLOSE, COMPLETED, CANCELLED }
 
-/** The sessions of the team, the latest first, to filter by state; a new
- * one, a series. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** The sessions of the team, the latest first, to filter by state. */
 @Composable
-fun SessionsScreen(teamId: String, onBack: () -> Unit, onSession: (String) -> Unit, onNew: () -> Unit, onSeries: () -> Unit) {
+fun SessionsTab(teamId: String, modifier: Modifier, onSession: (String) -> Unit) {
     var filter by rememberSaveable { mutableStateOf(Filter.ALL) }
     val sessions by rememberCore(Unit, teamId) { it.trainingSessions(teamId) }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.tr_programming), Modifier.title()) },
-                navigationIcon = { BackButton(onBack) },
-                actions = { TextButton(onClick = onSeries) { Text(stringResource(R.string.tr_repeat_sessions)) } },
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = onNew) {
-                Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tr_new_session))
-            }
-        },
-    ) { padding ->
-        val modifier = Modifier.fillMaxSize().padding(padding)
-        val all = sessions
-        when {
-            all == null -> Centered(modifier) { CircularProgressIndicator() }
-            else -> Column(modifier) {
-                Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Filter.entries.forEach {
-                        FilterChip(
-                            selected = filter == it,
-                            onClick = { filter = it },
-                            label = {
-                                Text(
-                                    stringResource(
-                                        when (it) {
-                                            Filter.ALL -> R.string.tr_filter_all
-                                            Filter.PLANNED -> R.string.tr_filter_planned
-                                            Filter.TO_CLOSE -> R.string.tr_filter_to_close
-                                            Filter.COMPLETED -> R.string.tr_filter_completed
-                                            Filter.CANCELLED -> R.string.tr_filter_cancelled
-                                        },
-                                    ),
-                                )
-                            },
-                        )
-                    }
+    val all = sessions
+    when {
+        all == null -> Centered(modifier) { CircularProgressIndicator() }
+        else -> Column(modifier) {
+            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Filter.entries.forEach {
+                    FilterChip(
+                        selected = filter == it,
+                        onClick = { filter = it },
+                        label = {
+                            Text(
+                                stringResource(
+                                    when (it) {
+                                        Filter.ALL -> R.string.tr_filter_all
+                                        Filter.PLANNED -> R.string.tr_filter_planned
+                                        Filter.TO_CLOSE -> R.string.tr_filter_to_close
+                                        Filter.COMPLETED -> R.string.tr_filter_completed
+                                        Filter.CANCELLED -> R.string.tr_filter_cancelled
+                                    },
+                                ),
+                            )
+                        },
+                    )
                 }
-                val shown = all.filter {
-                    when (filter) {
-                        Filter.ALL -> true
-                        Filter.PLANNED -> it.status == SessionStatus.PLANNED
-                        Filter.TO_CLOSE -> it.toClose
-                        Filter.COMPLETED -> it.status == SessionStatus.COMPLETED
-                        Filter.CANCELLED -> it.status == SessionStatus.CANCELLED
-                    }
-                }.sortedByDescending { it.start }
-                if (shown.isEmpty()) {
-                    Text(stringResource(R.string.tr_no_sessions), Modifier.padding(16.dp))
-                } else {
-                    // room at the bottom: the button doesn't cover the last
-                    LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
-                        items(shown, key = { it.id }) { SessionRow(it) { onSession(it.id) } }
-                    }
+            }
+            val shown = all.filter {
+                when (filter) {
+                    Filter.ALL -> true
+                    Filter.PLANNED -> it.status == SessionStatus.PLANNED
+                    Filter.TO_CLOSE -> it.toClose
+                    Filter.COMPLETED -> it.status == SessionStatus.COMPLETED
+                    Filter.CANCELLED -> it.status == SessionStatus.CANCELLED
+                }
+            }.sortedByDescending { it.start }
+            if (shown.isEmpty()) {
+                Text(stringResource(R.string.tr_no_sessions), Modifier.padding(16.dp))
+            } else {
+                // room at the bottom: the button doesn't cover the last
+                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+                    items(shown, key = { it.id }) { SessionRow(it) { onSession(it.id) } }
                 }
             }
         }
@@ -255,7 +248,7 @@ fun SessionsScreen(teamId: String, onBack: () -> Unit, onSession: (String) -> Un
 }
 
 @Composable
-private fun SessionRow(s: SessionRecord, onClick: () -> Unit) {
+internal fun SessionRow(s: SessionRecord, onClick: () -> Unit) {
     val cancelled = s.status == SessionStatus.CANCELLED
     ListItem(
         modifier = Modifier.clickable(onClick = onClick),
@@ -429,7 +422,7 @@ fun SessionScreen(
 }
 
 @Composable
-private fun DeleteIcon(description: String, onClick: () -> Unit) = IconButton(onClick = onClick) {
+internal fun DeleteIcon(description: String, onClick: () -> Unit) = IconButton(onClick = onClick) {
     Icon(Icons.Filled.Delete, contentDescription = description)
 }
 

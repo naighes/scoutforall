@@ -136,7 +136,73 @@ class ScreensLayoutTest(private val screen: Size) {
         val team = saveNationalTeam()
         trainingWithActivities(team)
         assertFits("sessions", "Ricezione e attacco", null) {
-            SessionsScreen(team, onBack = {}, onSession = {}, onNew = {}, onSeries = {})
+            Hub(team, Part.SESSIONS)
+        }
+    }
+
+    @Composable
+    private fun Hub(team: String, part: Part) = TrainingScreen(
+        team, onBack = {}, onSession = {}, onNew = {}, onSeries = {}, onCycle = { _, _ -> }, onNewCycle = {}, onNewOn = {},
+        onMatch = {}, first = part,
+    )
+
+    private fun week(team: String): String = core {
+        val monday = java.time.LocalDate.now().let { d -> d.minusDays((d.dayOfWeek.value - 1).toLong()) }
+        it.saveCycle(
+            team, io.github.naighes.scout4all.core.Level.MICROCYCLE, null,
+            it.newCycleDraft().copy(title = "Settimana di ricezione", start = monday.toString(), weeks = "1"),
+            emptyList(), false,
+        )
+    }.id
+
+    @Test
+    fun theCalendarOfTheTeam() {
+        val team = saveNationalTeam()
+        planTraining(team)
+        assertFits("calendar", string(R.string.agenda_today), null) { Hub(team, Part.CALENDAR) }
+    }
+
+    @Test
+    fun theCyclesOfTheTeam() {
+        val team = saveNationalTeam()
+        week(team)
+        assertFits("cycles", "Settimana di ricezione", null) { Hub(team, Part.CYCLES) }
+    }
+
+    @Test
+    fun theAttendanceOfTheTeam() {
+        val team = saveNationalTeam()
+        assertFits("attendance-report", string(R.string.tr_no_attendance_to_count).replaceFirstChar { it.uppercase() }, null) {
+            Hub(team, Part.ATTENDANCE)
+        }
+    }
+
+    @Test
+    fun aCycle() {
+        val team = saveNationalTeam()
+        val cycle = week(team)
+        assertFits("cycle", string(R.string.tr_cycle_totals), string(R.string.tr_add_children)) {
+            CycleScreen(
+                team, io.github.naighes.scout4all.core.Level.MICROCYCLE, cycle,
+                onBack = {}, onEdit = {}, onAdd = {}, onDuplicate = {}, onChild = {},
+            )
+        }
+    }
+
+    @Test
+    fun theFormOfACycle() {
+        val team = saveNationalTeam()
+        assertFits("cycle-form", string(R.string.tr_cycle_weeks), string(R.string.save)) {
+            CycleFormScreen(team, io.github.naighes.scout4all.core.Level.MICROCYCLE, null, onBack = {}, onSaved = {})
+        }
+    }
+
+    @Test
+    fun theCopyOfACycle() {
+        val team = saveNationalTeam()
+        val cycle = week(team)
+        assertFits("cycle-duplicate", string(R.string.tr_copies), string(R.string.tr_duplicate_microcycle)) {
+            DuplicateCycleScreen(cycle, onBack = {}, onDone = {})
         }
     }
 

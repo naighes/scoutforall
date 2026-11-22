@@ -113,7 +113,7 @@ fun LazyListScope.agendaWeek(
     }
 }
 
-private fun AgendaEventRecord.id(): String = when (val i = item) {
+internal fun AgendaEventRecord.id(): String = when (val i = item) {
     is AgendaItemRecord.Session -> i.id
     is AgendaItemRecord.Match -> i.id
 }
@@ -128,7 +128,7 @@ private fun AgendaTitle(title: Int) = Text(
 
 /** The day, today in the accent. */
 @Composable
-private fun DayHeader(date: LocalDate, today: Boolean) = Text(
+internal fun DayHeader(date: LocalDate, today: Boolean) = Text(
     date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(java.util.Locale.getDefault())),
     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
     style = MaterialTheme.typography.labelLarge,
@@ -138,7 +138,7 @@ private fun DayHeader(date: LocalDate, today: Boolean) = Text(
 
 /** A session or a match: the time, what, where; the match opens. */
 @Composable
-private fun EventRow(
+internal fun EventRow(
     e: AgendaEventRecord,
     withTeam: Boolean,
     onMatch: (teamId: String, matchId: String) -> Unit,

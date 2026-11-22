@@ -61,18 +61,18 @@ import java.time.format.TextStyle
 import java.util.Locale
 
 /** The text under the field an error is about, or at the bottom. */
-private class Failure(val field: TrainingField?, val text: String)
+internal class Failure(val field: TrainingField?, val text: String)
 
-private fun MobileException.failure() = Failure((this as? MobileException.InvalidTraining)?.field, reason)
+internal fun MobileException.failure() = Failure((this as? MobileException.InvalidTraining)?.field, reason)
 
-private fun ErrorFor(failure: Failure?, vararg fields: TrainingField): String? =
+internal fun ErrorFor(failure: Failure?, vararg fields: TrainingField): String? =
     failure?.takeIf { it.field in fields }?.text
 
-private fun Failure?.elsewhere(vararg fields: TrainingField): String? =
+internal fun Failure?.elsewhere(vararg fields: TrainingField): String? =
     this?.takeIf { it.field == null || it.field !in fields }?.text
 
 @Composable
-private fun Section(title: Int) = Text(
+internal fun TrainingSection(title: Int) = Text(
     stringResource(title),
     Modifier.title(),
     style = MaterialTheme.typography.titleMedium,
@@ -82,7 +82,7 @@ private fun Section(title: Int) = Text(
 /** The form of a session, new (no `sessionId`) or edited. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionFormScreen(teamId: String, sessionId: String?, onBack: () -> Unit, onSaved: (String) -> Unit) {
+fun SessionFormScreen(teamId: String, sessionId: String?, onBack: () -> Unit, onSaved: (String) -> Unit, day: LocalDate? = null) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val draft by produceState<SessionDraft?>(null, sessionId) {
         value = try {
@@ -116,7 +116,7 @@ fun SessionFormScreen(teamId: String, sessionId: String?, onBack: () -> Unit, on
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         val d = draft
         if (d == null) Centered(modifier) { CircularProgressIndicator() }
-        else SessionFields(teamId, sessionId, d, places, modifier, onChanged = { changed = true }, onSaved = onSaved)
+        else SessionFields(teamId, sessionId, d, places, modifier, day, onChanged = { changed = true }, onSaved = onSaved)
     }
 }
 
@@ -127,6 +127,7 @@ private fun SessionFields(
     draft: SessionDraft,
     places: List<String>,
     modifier: Modifier,
+    initialDay: LocalDate?,
     onChanged: () -> Unit,
     onSaved: (String) -> Unit,
 ) {
@@ -135,6 +136,7 @@ private fun SessionFields(
     // a new session: in the next hour; the form of the core has no day
     val first = remember {
         draft.start?.let(LocalDateTime::parse)
+            ?: initialDay?.atTime(LocalTime.of(18, 0))
             ?: LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
     }
     var day by rememberSaveable { mutableStateOf<LocalDate?>(first.toLocalDate()) }
@@ -241,7 +243,7 @@ private fun SessionFields(
 }
 
 @Composable
-private fun NumberField(label: Int, value: String, error: String?, onChange: (String) -> Unit) = OutlinedTextField(
+internal fun NumberField(label: Int, value: String, error: String?, onChange: (String) -> Unit) = OutlinedTextField(
     value,
     onChange,
     Modifier.fillMaxWidth(),
@@ -253,7 +255,7 @@ private fun NumberField(label: Int, value: String, error: String?, onChange: (St
 )
 
 @Composable
-private fun Lines(label: Int, value: String, onChange: (String) -> Unit) = OutlinedTextField(
+internal fun Lines(label: Int, value: String, onChange: (String) -> Unit) = OutlinedTextField(
     value,
     onChange,
     Modifier.fillMaxWidth(),
