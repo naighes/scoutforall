@@ -95,6 +95,12 @@ pub enum TrainingField {
     End,
     Range,
     Bands,
+    /// the name of a gym
+    VenueName,
+    /// the latitude and longitude of a gym
+    Coordinates,
+    /// the link of the map of a gym
+    MapLink,
 }
 
 /// A session, as saved.
@@ -402,6 +408,8 @@ pub struct PlayerAttendanceRecord {
     pub late: u32,
     pub absent: u32,
     pub unavailable: u32,
+    /// of the presences, the makeups that took the place of an absence
+    pub makeups: u32,
     /// none without sessions to count
     pub percent: Option<u8>,
 }
@@ -414,26 +422,46 @@ pub struct AttendanceReportRecord {
 
 // the records of the core
 
-fn moment(at: NaiveDateTime) -> String {
+pub(crate) fn moment(at: NaiveDateTime) -> String {
     at.format(MOMENT).to_string()
 }
 
-fn day(on: NaiveDate) -> String {
+pub(crate) fn day(on: NaiveDate) -> String {
     on.format(DAY).to_string()
 }
 
-fn parse_moment(text: &str) -> Result<NaiveDateTime, MobileError> {
+pub(crate) fn parse_moment(text: &str) -> Result<NaiveDateTime, MobileError> {
     NaiveDateTime::parse_from_str(text.trim(), MOMENT)
         .or_else(|_| NaiveDateTime::parse_from_str(text.trim(), "%Y-%m-%dT%H:%M:%S"))
         .map_err(|_| invalid(TrainingField::Start, text))
 }
 
-fn parse_day(text: &str, field: TrainingField) -> Result<NaiveDate, MobileError> {
+pub(crate) fn parse_day(text: &str, field: TrainingField) -> Result<NaiveDate, MobileError> {
     NaiveDate::parse_from_str(text.trim(), DAY).map_err(|_| invalid(field, text))
 }
 
 fn parse_time(text: &str) -> Result<NaiveTime, MobileError> {
     NaiveTime::parse_from_str(text.trim(), "%H:%M").map_err(|_| invalid(TrainingField::Bands, text))
+}
+
+/// The input of a series from what the user typed.
+pub(crate) fn series_input(draft: &SeriesDraft) -> Result<SeriesInput, MobileError> {
+    Ok(SeriesInput {
+        from: parse_day(&draft.from, TrainingField::Range)?,
+        to: parse_day(&draft.to, TrainingField::Range)?,
+        bands: draft
+            .bands
+            .iter()
+            .map(|b| {
+                Ok(Band {
+                    weekday: weekday(b.weekday)?,
+                    time: parse_time(&b.time)?,
+                    duration_min: b.duration_min,
+                    venue_id: opt_id(&b.venue)?,
+                })
+            })
+            .collect::<Result<Vec<_>, MobileError>>()?,
+    })
 }
 
 fn invalid(field: TrainingField, text: &str) -> MobileError {
@@ -627,6 +655,7 @@ fn report_record(r: &AttendanceReport) -> AttendanceReportRecord {
                 late: p.late,
                 absent: p.absent,
                 unavailable: p.unavailable,
+                makeups: p.makeups,
                 percent: p.percent(),
             })
             .collect(),
@@ -961,22 +990,7 @@ impl Scout4All {
         draft: SeriesDraft,
         create_others: bool,
     ) -> Result<SeriesResult, MobileError> {
-        let input = SeriesInput {
-            from: parse_day(&draft.from, TrainingField::Range)?,
-            to: parse_day(&draft.to, TrainingField::Range)?,
-            bands: draft
-                .bands
-                .iter()
-                .map(|b| {
-                    Ok(Band {
-                        weekday: weekday(b.weekday)?,
-                        time: parse_time(&b.time)?,
-                        duration_min: b.duration_min,
-                        venue_id: opt_id(&b.venue)?,
-                    })
-                })
-                .collect::<Result<Vec<_>, MobileError>>()?,
-        };
+        let input = series_input(&draft)?;
         let outcome = self.runtime.block_on(self.training().create_series(
             &parse_id(&team_id)?,
             input,

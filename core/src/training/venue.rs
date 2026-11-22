@@ -345,6 +345,8 @@ pub fn web_url(venue: &Venue) -> Option<String> {
 /// allowed, but the user is told.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VenueClash {
+    /// the gym that is busy
+    pub venue: Uuid,
     /// the start of the window that was asked about
     pub window: NaiveDateTime,
     pub team_id: Uuid,
@@ -410,6 +412,7 @@ pub fn clashes_in(
                     o.others(own)
                         .into_iter()
                         .map(|(team_id, team_name)| VenueClash {
+                            venue: *venue,
                             window: *start,
                             team_id: *team_id,
                             team_name: team_name.clone(),
