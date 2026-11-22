@@ -262,7 +262,7 @@ internal fun SessionRow(s: SessionRecord, onClick: () -> Unit) {
                 s.status != SessionStatus.PLANNED -> s.status.label()
                 else -> null
             }
-            val line = listOfNotNull(s.location.takeIf { it.isNotBlank() }, state).joinToString(" · ")
+            val line = listOfNotNull(venueLabel(s.venueId), state).joinToString(" · ")
             if (line.isNotEmpty()) Text(line)
         },
     )
@@ -435,7 +435,7 @@ private fun SessionData(s: SessionRecord, attendance: AttendanceSheetRecord?) {
         Text(
             listOfNotNull(
                 "$minutes ${stringResource(R.string.tr_min_short)}",
-                s.location.takeIf { it.isNotBlank() },
+                venueLabel(s.venueId),
             ).joinToString(" · "),
         )
         val state = when {

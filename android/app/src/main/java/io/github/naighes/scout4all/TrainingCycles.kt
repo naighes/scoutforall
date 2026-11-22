@@ -493,6 +493,35 @@ fun DuplicateCycleScreen(cycleId: String, onBack: () -> Unit, onDone: () -> Unit
     var failure by remember { mutableStateOf<Failure?>(null) }
     var free by remember { mutableIntStateOf(0) }
     var busy by remember { mutableStateOf(false) }
+    var clashes by remember { mutableStateOf<List<io.github.naighes.scout4all.core.VenueClashRecord>?>(null) }
+    fun duplicate(confirmed: Boolean) {
+        val s = shift.trim().toUShortOrNull()
+        val n = copies.trim().toUShortOrNull()
+        if (s == null || n == null) {
+            failure = Failure(TrainingField.WEEKS, "")
+            return
+        }
+        busy = true
+        scope.launch {
+            failure = try {
+                val draft = DuplicateCycleDraft(s, n, objectives, activities)
+                val busyWith = if (confirmed) emptyList() else app.core { it.microcycleVenueClashes(cycleId, draft) }
+                if (busyWith.isNotEmpty()) {
+                    clashes = busyWith
+                } else {
+                    val made = app.core { it.duplicateMicrocycle(cycleId, draft) }
+                    // copies out of the mesocycle are free: said
+                    free = made.count { it.parentId == null }
+                    if (free == 0) onDone()
+                }
+                null
+            } catch (e: MobileException) {
+                e.failure()
+            }
+            busy = false
+        }
+    }
+    clashes?.let { ClashDialog(it, onConfirm = { clashes = null; duplicate(true) }, onDismiss = { clashes = null }) }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -515,29 +544,7 @@ fun DuplicateCycleScreen(cycleId: String, onBack: () -> Unit, onDone: () -> Unit
                 Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
             }
             Button(
-                onClick = {
-                    val s = shift.trim().toUShortOrNull()
-                    val n = copies.trim().toUShortOrNull()
-                    if (s == null || n == null) {
-                        failure = Failure(TrainingField.WEEKS, "")
-                        return@Button
-                    }
-                    busy = true
-                    scope.launch {
-                        failure = try {
-                            val made = app.core {
-                                it.duplicateMicrocycle(cycleId, DuplicateCycleDraft(s, n, objectives, activities))
-                            }
-                            // copies out of the mesocycle are free: said
-                            free = made.count { it.parentId == null }
-                            if (free == 0) onDone()
-                            null
-                        } catch (e: MobileException) {
-                            e.failure()
-                        }
-                        busy = false
-                    }
-                },
+                onClick = { duplicate(false) },
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
             ) { Text(stringResource(R.string.tr_duplicate_microcycle)) }

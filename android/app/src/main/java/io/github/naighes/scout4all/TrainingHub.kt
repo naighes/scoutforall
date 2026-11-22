@@ -41,6 +41,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -57,6 +58,7 @@ import io.github.naighes.scout4all.core.Level
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.TrainingScope
 import io.github.naighes.scout4all.core.AgendaDay
+import io.github.naighes.scout4all.core.AgendaEventRecord
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -165,8 +167,20 @@ private fun Part.label(): String = when (this) {
 @Composable
 private fun CalendarTab(teamId: String, selected: LocalDate, onSelected: (LocalDate) -> Unit, modifier: Modifier, onSession: (String) -> Unit, onMatch: (String) -> Unit) {
     var month by rememberSaveable { mutableStateOf(YearMonth.from(selected)) }
-    val agenda by rememberAgenda(teamId, AgendaSpan.MONTH, month.atDay(1), month)
-    val byDate = agenda.associateBy { it.date }
+    // the gyms are shared: every team, or one gym only
+    var allTeams by rememberSaveable { mutableStateOf(false) }
+    var venue by rememberSaveable { mutableStateOf<String?>(null) }
+    val agenda by rememberAgenda(teamId.takeIf { !allTeams }, AgendaSpan.MONTH, month.atDay(1), month)
+    val byDate = agenda.map { d -> d.copy(events = d.events.filter { venue == null || it.venue?.id == venue }) }.associateBy { it.date }
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+    val venues by produceState(emptyList<io.github.naighes.scout4all.core.VenueRecord>()) {
+        value = try {
+            app.core { it.venues() }
+        } catch (_: io.github.naighes.scout4all.core.MobileException) {
+            emptyList()
+        }
+    }
+    var picking by remember { mutableStateOf(false) }
     val today = LocalDate.now()
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp)) {
         item(key = "month") {
@@ -189,6 +203,36 @@ private fun CalendarTab(teamId: String, selected: LocalDate, onSelected: (LocalD
                 }
             }
         }
+        item(key = "filters") {
+            Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                androidx.compose.material3.FilterChip(
+                    selected = allTeams,
+                    onClick = { allTeams = !allTeams },
+                    label = { Text(stringResource(if (allTeams) R.string.venue_all_teams else R.string.venue_this_team)) },
+                )
+                if (venues.isNotEmpty()) {
+                    Box {
+                        androidx.compose.material3.FilterChip(
+                            selected = venue != null,
+                            onClick = { picking = true },
+                            label = { Text(venues.firstOrNull { it.id == venue }?.name ?: stringResource(R.string.venue_all)) },
+                        )
+                        androidx.compose.material3.DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(stringResource(R.string.venue_all)) },
+                                onClick = { venue = null; picking = false },
+                            )
+                            venues.forEach { v ->
+                                androidx.compose.material3.DropdownMenuItem(
+                                    text = { Text(v.name) },
+                                    onClick = { venue = v.id; picking = false },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
         item(key = "grid") {
             MonthGrid(month, selected, today, byDate, onSelected)
         }
@@ -203,7 +247,15 @@ private fun CalendarTab(teamId: String, selected: LocalDate, onSelected: (LocalD
                 )
             }
         }
-        items(events, key = { "${it.start}/${it.id()}" }) { EventRow(it, false, { _, m -> onMatch(m) }, { _, s -> onSession(s) }) }
+        // the other teams' events are shown, not opened
+        items(events, key = { "${it.teamId}/${it.start}/${it.id()}" }) { e ->
+            EventRow(
+                e,
+                allTeams,
+                { t, m -> if (t == teamId) onMatch(m) },
+                { t, s -> if (t == teamId) onSession(s) },
+            )
+        }
     }
 }
 
@@ -232,7 +284,7 @@ private fun MonthGrid(month: YearMonth, selected: LocalDate, today: LocalDate, b
                         Box(Modifier.weight(1f).height(52.dp))
                     } else {
                         val date = month.atDay(n)
-                        DayCell(date, date == selected, date == today, byDate[date.toString()]?.events.orEmpty().map { it.item }, Modifier.weight(1f)) { onDay(date) }
+                        DayCell(date, date == selected, date == today, byDate[date.toString()]?.events.orEmpty(), Modifier.weight(1f)) { onDay(date) }
                     }
                 }
             }
@@ -241,7 +293,9 @@ private fun MonthGrid(month: YearMonth, selected: LocalDate, today: LocalDate, b
 }
 
 @Composable
-private fun DayCell(date: LocalDate, selected: Boolean, today: Boolean, items: List<AgendaItemRecord>, modifier: Modifier, onClick: () -> Unit) {
+private fun DayCell(date: LocalDate, selected: Boolean, today: Boolean, events: List<AgendaEventRecord>, modifier: Modifier, onClick: () -> Unit) {
+    val items = events.map { it.item }
+    val clash = events.any { it.sharedVenue }
     val sessions = items.count { it is AgendaItemRecord.Session }
     val matches = items.size - sessions
     val spoken = date.format(DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.FULL)) +
@@ -268,6 +322,7 @@ private fun DayCell(date: LocalDate, selected: Boolean, today: Boolean, items: L
         Row(Modifier.height(8.dp).padding(top = 2.dp), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             if (sessions > 0) Dot(MaterialTheme.colorScheme.primary)
             if (matches > 0) Dot(MaterialTheme.colorScheme.tertiary)
+            if (clash) Dot(MaterialTheme.colorScheme.error)
         }
     }
 }
@@ -332,7 +387,8 @@ private fun AttendanceTab(teamId: String, modifier: Modifier) {
                                         if (p.late > 0u) " (${stringResource(R.string.tr_late)} ${p.late})" else "",
                                     "${stringResource(R.string.tr_absent)} ${p.absent}",
                                     "${stringResource(R.string.tr_unavailable)} ${p.unavailable}",
-                                ).joinToString(" · "),
+                                    stringResource(R.string.makeups_count, p.makeups.toInt()).takeIf { p.makeups > 0u },
+                                ).filterNotNull().joinToString(" · "),
                             )
                         },
                         trailingContent = {

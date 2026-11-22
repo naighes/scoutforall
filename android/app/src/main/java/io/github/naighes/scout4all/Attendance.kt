@@ -201,6 +201,7 @@ fun AttendanceScreen(teamId: String, sessionId: String, onBack: () -> Unit) {
                             AttendanceStatus.PRESENT,
                             "",
                             true,
+                            false,
                         ),
                     )
                     changed = true

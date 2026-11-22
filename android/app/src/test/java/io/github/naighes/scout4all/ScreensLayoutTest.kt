@@ -115,12 +115,13 @@ class ScreensLayoutTest(private val screen: Size) {
     /** The training screens fit every screen: the sessions, a session with
      * its activities, the forms, the attendance. */
     private fun trainingWithActivities(team: String): String {
+        val gym = core { it.createVenueNamed("Palestra comunale") }.id
         val session = core {
             it.saveSession(
                 team, null,
                 it.newSessionDraft().copy(
                     start = java.time.LocalDate.now().plusDays(1).toString() + "T18:00",
-                    duration = "90", title = "Ricezione e attacco", location = "Palestra comunale",
+                    duration = "90", title = "Ricezione e attacco", venue = gym,
                     objectives = "Ricezione a tre, cambio palla", notes = "Portare i palloni leggeri",
                 ),
             )
@@ -258,8 +259,8 @@ class ScreensLayoutTest(private val screen: Size) {
             it.createSeries(
                 team,
                 io.github.naighes.scout4all.core.SeriesDraft(
-                    first.toString(), first.plusWeeks(3).toString(), "Palestra",
-                    listOf(io.github.naighes.scout4all.core.SeriesBand(first.dayOfWeek.value.toUByte(), "20:30", 90.toUShort())),
+                    first.toString(), first.plusWeeks(3).toString(),
+                    listOf(io.github.naighes.scout4all.core.SeriesBand(first.dayOfWeek.value.toUByte(), "20:30", 90.toUShort(), null)),
                 ),
                 false,
             )

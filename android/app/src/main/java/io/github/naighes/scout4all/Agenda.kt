@@ -9,6 +9,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -163,16 +164,21 @@ internal fun EventRow(
                         i.toClose -> stringResource(R.string.agenda_to_close)
                         else -> null
                     }
-                    val line = listOfNotNull(i.location.takeIf { it.isNotBlank() }, note).joinToString(" · ")
-                    if (line.isNotEmpty()) Text(line)
+                    val line = listOfNotNull(e.venueText(), note).joinToString(" · ")
+                    if (line.isNotEmpty()) Text(line, color = e.clashColor())
                 },
+                trailingContent = if (e.sharedVenue) {
+                    { ClashMark() }
+                } else null,
             )
         }
         is AgendaItemRecord.Match -> ListItem(
             modifier = Modifier.clickable { onMatch(e.teamId, i.id) },
             overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam }).joinToString(" · ")) },
             headlineContent = { Text(i.opponent) },
+            supportingContent = e.venueText()?.let { { Text(it, color = e.clashColor()) } },
             trailingContent = {
+                if (e.sharedVenue) ClashMark()
                 val ours = i.ours
                 val theirs = i.theirs
                 if (i.played && ours != null && theirs != null) {
@@ -188,3 +194,21 @@ internal fun EventRow(
         )
     }
 }
+
+/** The name of the gym of an event, "deleted gym" for a removed one. */
+@Composable
+internal fun AgendaEventRecord.venueText(): String? =
+    venue?.let { if (it.deleted) stringResource(R.string.venue_deleted) else it.name }
+
+/** The error colour of an event whose gym another team holds too. */
+@Composable
+internal fun AgendaEventRecord.clashColor() =
+    if (sharedVenue) MaterialTheme.colorScheme.error else androidx.compose.ui.graphics.Color.Unspecified
+
+/** The sign of a gym held by two teams at once. */
+@Composable
+internal fun ClashMark() = Icon(
+    Icons.Filled.Warning,
+    contentDescription = stringResource(R.string.venue_busy_mark),
+    tint = MaterialTheme.colorScheme.error,
+)

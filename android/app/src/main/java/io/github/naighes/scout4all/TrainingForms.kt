@@ -52,6 +52,7 @@ import io.github.naighes.scout4all.core.SeriesConflictRecord
 import io.github.naighes.scout4all.core.SeriesDraft
 import io.github.naighes.scout4all.core.SessionDraft
 import io.github.naighes.scout4all.core.TrainingField
+import io.github.naighes.scout4all.core.VenueClashRecord
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -91,13 +92,6 @@ fun SessionFormScreen(teamId: String, sessionId: String?, onBack: () -> Unit, on
             null
         }
     }
-    val places by produceState(emptyList<String>(), teamId) {
-        value = try {
-            app.core { it.trainingLocations(teamId) }
-        } catch (_: MobileException) {
-            emptyList()
-        }
-    }
     var changed by rememberSaveable { mutableStateOf(false) }
     val back = rememberFormBack(changed, onBack)
     Scaffold(
@@ -116,7 +110,7 @@ fun SessionFormScreen(teamId: String, sessionId: String?, onBack: () -> Unit, on
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         val d = draft
         if (d == null) Centered(modifier) { CircularProgressIndicator() }
-        else SessionFields(teamId, sessionId, d, places, modifier, day, onChanged = { changed = true }, onSaved = onSaved)
+        else SessionFields(teamId, sessionId, d, modifier, day, onChanged = { changed = true }, onSaved = onSaved)
     }
 }
 
@@ -125,7 +119,6 @@ private fun SessionFields(
     teamId: String,
     sessionId: String?,
     draft: SessionDraft,
-    places: List<String>,
     modifier: Modifier,
     initialDay: LocalDate?,
     onChanged: () -> Unit,
@@ -143,7 +136,8 @@ private fun SessionFields(
     var time by rememberSaveable { mutableStateOf<LocalTime?>(first.toLocalTime()) }
     var duration by rememberSaveable { mutableStateOf(draft.duration) }
     var actual by rememberSaveable { mutableStateOf(draft.actualDuration) }
-    var location by rememberSaveable { mutableStateOf(draft.location) }
+    var venue by rememberSaveable { mutableStateOf(draft.venue) }
+    var clashes by remember { mutableStateOf<List<VenueClashRecord>?>(null) }
     var title by rememberSaveable { mutableStateOf(draft.title) }
     var objectives by rememberSaveable { mutableStateOf(draft.objectives) }
     var notes by rememberSaveable { mutableStateOf(draft.notes) }
@@ -161,6 +155,48 @@ private fun SessionFields(
         change()
         onChanged()
     }
+    // a gym held by another team asks first, once
+    fun save(confirmed: Boolean) {
+        busy = true
+        scope.launch {
+            failure = try {
+                val start = day?.let { d -> time?.let { t -> "${d}T${t.format(HOUR_MINUTE)}" } }
+                val busyWith = when {
+                    confirmed || venue == null || start == null -> emptyList()
+                    else -> duration.trim().toUShortOrNull()?.let { m ->
+                        app.core { it.sessionVenueClashes(teamId, venue!!, start, m) }
+                    }.orEmpty()
+                }
+                if (busyWith.isNotEmpty()) {
+                    clashes = busyWith
+                } else {
+                    val saved = app.core {
+                        it.saveSession(
+                            teamId,
+                            sessionId,
+                            draft.copy(
+                                start = start,
+                                duration = duration,
+                                actualDuration = actual,
+                                venue = venue,
+                                title = title,
+                                objectives = objectives,
+                                notes = notes,
+                                finalRemarks = remarks,
+                                microcycle = micro,
+                            ),
+                        )
+                    }
+                    onSaved(saved.id)
+                }
+                null
+            } catch (e: MobileException) {
+                e.failure()
+            }
+            busy = false
+        }
+    }
+    clashes?.let { ClashDialog(it, onConfirm = { clashes = null; save(true) }, onDismiss = { clashes = null }) }
     Column(modifier) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
@@ -174,14 +210,7 @@ private fun SessionFields(
             )
             TimeField(stringResource(R.string.tr_time), time, onTime = { t -> edit { time = t } })
             NumberField(R.string.tr_session_duration, duration, ErrorFor(failure, TrainingField.DURATION)) { edit { duration = it } }
-            SuggestField(
-                location,
-                stringResource(R.string.tr_session_location),
-                places,
-                error = null,
-                onChange = { edit { location = it } },
-                onPick = { edit { location = it } },
-            )
+            VenueChoice(teamId, venue, onVenue = { v -> edit { venue = v } })
             OutlinedTextField(
                 title,
                 { edit { title = it } },
@@ -206,36 +235,7 @@ private fun SessionFields(
         }
         // big and at the bottom, where the thumb is
         Button(
-            onClick = {
-                busy = true
-                scope.launch {
-                    failure = try {
-                        val start = day?.let { d -> time?.let { t -> "${d}T${t.format(HOUR_MINUTE)}" } }
-                        val saved = app.core {
-                            it.saveSession(
-                                teamId,
-                                sessionId,
-                                draft.copy(
-                                    start = start,
-                                    duration = duration,
-                                    actualDuration = actual,
-                                    location = location,
-                                    title = title,
-                                    objectives = objectives,
-                                    notes = notes,
-                                    finalRemarks = remarks,
-                                    microcycle = micro,
-                                ),
-                            )
-                        }
-                        onSaved(saved.id)
-                        null
-                    } catch (e: MobileException) {
-                        e.failure()
-                    }
-                    busy = false
-                }
-            },
+            onClick = { save(false) },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.save)) }
@@ -486,23 +486,18 @@ private fun CopyActivity(teamId: String, onCopy: (ActivityDraft) -> Unit) {
 fun SeriesScreen(teamId: String, onBack: () -> Unit, onDone: () -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
-    val places by produceState(emptyList<String>(), teamId) {
-        value = try {
-            app.core { it.trainingLocations(teamId) }
-        } catch (_: MobileException) {
-            emptyList()
-        }
-    }
     var from by rememberSaveable { mutableStateOf<LocalDate?>(LocalDate.now()) }
     var to by rememberSaveable { mutableStateOf<LocalDate?>(LocalDate.now().plusMonths(1)) }
-    var location by rememberSaveable { mutableStateOf("") }
+    // the gym of each weekday
+    var venues by rememberSaveable { mutableStateOf(List<String?>(7) { null }) }
+    var clashes by remember { mutableStateOf<List<VenueClashRecord>?>(null) }
     // the time and the minutes of each weekday: no time, no session
     var times by rememberSaveable { mutableStateOf(List<LocalTime?>(7) { null }) }
     var minutes by rememberSaveable { mutableStateOf(List(7) { "90" }) }
     var failure by remember { mutableStateOf<Failure?>(null) }
     var conflicts by remember { mutableStateOf<List<SeriesConflictRecord>?>(null) }
     var busy by remember { mutableStateOf(false) }
-    fun create(others: Boolean) {
+    fun create(others: Boolean, confirmed: Boolean = false) {
         val bands = DayOfWeek.entries.mapNotNull { d ->
             val i = d.ordinal
             times[i]?.let { t ->
@@ -511,7 +506,7 @@ fun SeriesScreen(teamId: String, onBack: () -> Unit, onDone: () -> Unit) {
                     failure = Failure(TrainingField.BANDS, minutes[i])
                     return
                 }
-                SeriesBand((i + 1).toUByte(), t.format(HOUR_MINUTE), m)
+                SeriesBand((i + 1).toUByte(), t.format(HOUR_MINUTE), m, venues[i])
             }
         }
         val start = from
@@ -520,10 +515,14 @@ fun SeriesScreen(teamId: String, onBack: () -> Unit, onDone: () -> Unit) {
         busy = true
         scope.launch {
             failure = try {
-                val result = app.core {
-                    it.createSeries(teamId, SeriesDraft(start.toString(), end.toString(), location, bands), others)
+                val draft = SeriesDraft(start.toString(), end.toString(), bands)
+                val busyWith = if (confirmed) emptyList() else app.core { it.seriesVenueClashes(teamId, draft) }
+                val result = when {
+                    busyWith.isNotEmpty() -> null
+                    else -> app.core { it.createSeries(teamId, draft, others) }
                 }
                 when {
+                    result == null -> clashes = busyWith
                     // nothing written: the user decides
                     result.conflicts.isNotEmpty() && result.created.isEmpty() && !others -> conflicts = result.conflicts
                     else -> onDone()
@@ -535,7 +534,7 @@ fun SeriesScreen(teamId: String, onBack: () -> Unit, onDone: () -> Unit) {
             busy = false
         }
     }
-    val changed = location.isNotEmpty() || times.any { it != null }
+    val changed = venues.any { it != null } || times.any { it != null }
     val back = rememberFormBack(changed, onBack)
     Scaffold(
         topBar = {
@@ -552,12 +551,12 @@ fun SeriesScreen(teamId: String, onBack: () -> Unit, onDone: () -> Unit) {
             ) {
                 DayField(stringResource(R.string.tr_from), from, onDay = { d -> d?.let { from = it } }, error = ErrorFor(failure, TrainingField.RANGE))
                 DayField(stringResource(R.string.tr_to), to, onDay = { d -> d?.let { to = it } })
-                SuggestField(location, stringResource(R.string.tr_session_location), places, null, onChange = { location = it }, onPick = { location = it })
                 Text(stringResource(R.string.tr_band_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 DayOfWeek.entries.forEach { d ->
                     val i = d.ordinal
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text(d.getDisplayName(TextStyle.FULL, Locale.getDefault()), style = MaterialTheme.typography.titleSmall)
+                        VenueChoice(teamId, venues[i], onVenue = { v -> venues = venues.toMutableList().also { it[i] = v } })
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             TimeField(
                                 stringResource(R.string.tr_time),
@@ -586,6 +585,9 @@ fun SeriesScreen(teamId: String, onBack: () -> Unit, onDone: () -> Unit) {
                 enabled = !busy,
                 modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
             ) { Text(stringResource(R.string.save)) }
+        }
+        clashes?.let { c ->
+            ClashDialog(c, onConfirm = { clashes = null; create(false, confirmed = true) }, onDismiss = { clashes = null })
         }
         conflicts?.let { list ->
             AlertDialog(
@@ -654,7 +656,35 @@ private fun DuplicateFields(
     var activities by rememberSaveable { mutableStateOf(proposed.copyActivities) }
     var failure by remember { mutableStateOf<Failure?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var clashes by remember { mutableStateOf<List<VenueClashRecord>?>(null) }
     val options = rememberMicrocycles(teamId, day ?: start.toLocalDate(), micro)
+    fun duplicate(confirmed: Boolean) {
+        val d = day
+        val t = time
+        if (d == null || t == null) return
+        busy = true
+        scope.launch {
+            failure = try {
+                val draft = proposed.copy(
+                    start = "${d}T${t.format(HOUR_MINUTE)}",
+                    microcycleId = micro,
+                    copyObjectives = objectives,
+                    copyActivities = activities,
+                )
+                val busyWith = if (confirmed) emptyList() else app.core { it.duplicateVenueClashes(sessionId, draft) }
+                if (busyWith.isNotEmpty()) {
+                    clashes = busyWith
+                } else {
+                    onDuplicated(app.core { it.duplicateSession(sessionId, draft) }.id)
+                }
+                null
+            } catch (e: MobileException) {
+                e.failure()
+            }
+            busy = false
+        }
+    }
+    clashes?.let { ClashDialog(it, onConfirm = { clashes = null; duplicate(true) }, onDismiss = { clashes = null }) }
     Column(modifier) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
@@ -670,32 +700,7 @@ private fun DuplicateFields(
             Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
         }
         Button(
-            onClick = {
-                val d = day
-                val t = time
-                if (d == null || t == null) return@Button
-                busy = true
-                scope.launch {
-                    failure = try {
-                        val copy = app.core {
-                            it.duplicateSession(
-                                sessionId,
-                                proposed.copy(
-                                    start = "${d}T${t.format(HOUR_MINUTE)}",
-                                    microcycleId = micro,
-                                    copyObjectives = objectives,
-                                    copyActivities = activities,
-                                ),
-                            )
-                        }
-                        onDuplicated(copy.id)
-                        null
-                    } catch (e: MobileException) {
-                        e.failure()
-                    }
-                    busy = false
-                }
-            },
+            onClick = { duplicate(false) },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.tr_duplicate_session)) }
@@ -716,13 +721,6 @@ fun SeriesChangeScreen(teamId: String, sessionId: String, onBack: () -> Unit, on
             null
         }
     }
-    val places by produceState(emptyList<String>(), teamId) {
-        value = try {
-            app.core { it.trainingLocations(teamId) }
-        } catch (_: MobileException) {
-            emptyList()
-        }
-    }
     Scaffold(
         topBar = {
             TopAppBar(
@@ -734,14 +732,14 @@ fun SeriesChangeScreen(teamId: String, sessionId: String, onBack: () -> Unit, on
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         val s = session
         if (s == null) Centered(modifier) { CircularProgressIndicator() }
-        else SeriesChangeFields(s, places, modifier, onDone)
+        else SeriesChangeFields(teamId, s, modifier, onDone)
     }
 }
 
 @Composable
 private fun SeriesChangeFields(
+    teamId: String,
     s: io.github.naighes.scout4all.core.SessionRecord,
-    places: List<String>,
     modifier: Modifier,
     onDone: (gone: Boolean) -> Unit,
 ) {
@@ -749,7 +747,7 @@ private fun SeriesChangeFields(
     val scope = rememberCoroutineScope()
     val own = remember { LocalDateTime.parse(s.start) }
     var range by rememberSaveable { mutableStateOf(io.github.naighes.scout4all.core.SeriesScope.THIS) }
-    var location by rememberSaveable { mutableStateOf(s.location) }
+    var venue by rememberSaveable { mutableStateOf(s.venueId) }
     var time by rememberSaveable { mutableStateOf<LocalTime?>(own.toLocalTime()) }
     var minutes by rememberSaveable { mutableStateOf(s.durationMin.toString()) }
     var remove by rememberSaveable { mutableStateOf(false) }
@@ -771,7 +769,7 @@ private fun SeriesChangeFields(
                 onSelect = { range = it },
             )
             if (!remove) {
-                SuggestField(location, stringResource(R.string.tr_session_location), places, null, onChange = { location = it }, onPick = { location = it })
+                VenueChoice(teamId, venue, onVenue = { venue = it })
                 TimeField(stringResource(R.string.tr_time), time, onTime = { t -> t?.let { time = it } })
                 NumberField(R.string.tr_session_duration, minutes, ErrorFor(failure, TrainingField.DURATION)) { minutes = it }
             }
@@ -787,7 +785,8 @@ private fun SeriesChangeFields(
                     failure = try {
                         // only what is different is sent
                         val change = io.github.naighes.scout4all.core.SeriesChange(
-                            location = location.takeIf { it.trim() != s.location },
+                            venue = venue.takeIf { it != s.venueId },
+                            clearVenue = venue == null && s.venueId != null,
                             time = time?.takeIf { it != own.toLocalTime() }?.format(HOUR_MINUTE),
                             durationMin = minutes.trim().toUShortOrNull()?.takeIf { it != s.durationMin },
                         )
