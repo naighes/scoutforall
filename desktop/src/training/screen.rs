@@ -1595,4 +1595,77 @@ mod tests {
         let (_, bytes) = transfer::archive(&core, &export).unwrap();
         assert!(bytes.starts_with(b"%PDF"));
     }
+
+    /// `t` shows every team's events, each with its team; `v` limits them to
+    /// a gym (and then none); the ones that share a gym with another team
+    /// at the same time are marked; what another team holds is not opened.
+    #[test]
+    fn the_calendar_of_all_teams_filters_by_gym_and_marks_the_overlaps() {
+        use super::super::calendar::{CalendarTab, Leave};
+        use scout4all_core::shapes::{
+            country::CountryCode,
+            enums::{GenderEnum, TeamClassificationEnum},
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let a = core.tutorial_team().unwrap();
+        let b = core
+            .save_team(
+                None,
+                scout4all_core::team_form::TeamForm {
+                    name: "Vigili".to_string(),
+                    classification: Some(TeamClassificationEnum::Regional),
+                    gender: Some(GenderEnum::Men),
+                    country: CountryCode::known("IT"),
+                    ..core.new_team_form(2026)
+                },
+            )
+            .unwrap();
+        let gym = core
+            .save_venue(
+                None,
+                scout4all_mobile::venues::VenueDraft {
+                    name: "Terontola".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .id;
+        let today = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
+        for (team, time) in [(&a, "18:00"), (&b, "18:30")] {
+            core.save_session(
+                team.clone(),
+                None,
+                SessionDraft {
+                    start: Some(format!("{today}T{time}")),
+                    duration: "90".into(),
+                    venue: Some(gym.clone()),
+                    ..core.new_session_draft()
+                },
+            )
+            .unwrap();
+        }
+        let mut tab = CalendarTab::at(core.clone(), a.clone(), today);
+        let events = |tab: &CalendarTab| -> Vec<(String, bool)> {
+            tab.days()
+                .iter()
+                .flat_map(|d| d.events.iter())
+                .map(|e| (e.team_id.clone(), e.shared_venue))
+                .collect()
+        };
+        assert_eq!(events(&tab), vec![(a.clone(), true)]);
+        tab.key(key!(t));
+        assert_eq!(events(&tab), vec![(a.clone(), true), (b.clone(), true)]);
+        // the event of the other team is not opened from here
+        tab.key(key!(down));
+        let _ = tab.key(key!(down));
+        assert_eq!(tab.key(key!(enter)), Leave::Stay);
+        tab.key(key!(v));
+        assert_eq!(events(&tab).len(), 2);
+        tab.key(key!(v));
+        assert_eq!(events(&tab).len(), 2);
+        tab.key(key!(v));
+        tab.key(key!(t));
+        assert_eq!(events(&tab), vec![(a, true)]);
+    }
 }

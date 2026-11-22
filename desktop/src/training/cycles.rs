@@ -4,7 +4,7 @@
 //! fill, duplicate and delete them.
 
 use {
-    super::forms::{Edited, cycle_label, day_of},
+    super::forms::{Edited, clash_warning, cycle_label, day_of},
     crate::{
         form::{self, Field, Form, Mask, Outcome, Value},
         strings::Strings,
@@ -259,6 +259,9 @@ enum Kind {
 struct Overlay {
     form: Form,
     kind: Kind,
+    /// another team holds the gym on some of the days and the user was
+    /// told: Enter again saves
+    warned: bool,
 }
 
 fn checked(form: &Form, field: usize) -> bool {
@@ -597,6 +600,7 @@ impl CyclesTab {
                 self.mode = Mode::Overlay(Box::new(Overlay {
                     form: Form::new(s.add_children, fields),
                     kind: Kind::Add(free.into_iter().map(|c| c.id).collect()),
+                    warned: false,
                 }));
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -620,6 +624,7 @@ impl CyclesTab {
         self.mode = Mode::Overlay(Box::new(Overlay {
             form: Form::new(s.duplicate_microcycle, fields),
             kind: Kind::Duplicate,
+            warned: false,
         }));
     }
 
@@ -631,6 +636,7 @@ impl CyclesTab {
         self.mode = Mode::Overlay(Box::new(Overlay {
             form: Form::new(s.delete_forever, fields),
             kind: Kind::Remove,
+            warned: false,
         }));
     }
 
@@ -646,7 +652,12 @@ impl CyclesTab {
         match outcome {
             Outcome::Cancel => self.close_forms(),
             Outcome::Save => self.overlay_save(s),
-            Outcome::Stay | Outcome::Changed(_) => {}
+            Outcome::Stay => {}
+            Outcome::Changed(_) => {
+                if let Mode::Overlay(overlay) = &mut self.mode {
+                    overlay.warned = false;
+                }
+            }
         }
     }
 
@@ -676,16 +687,25 @@ impl CyclesTab {
             }
             Kind::Duplicate => {
                 let number = |field: usize| overlay.form.text(field).trim().parse().unwrap_or(0);
+                let draft = DuplicateCycleDraft {
+                    shift_weeks: number(0),
+                    copies: number(1),
+                    copy_objectives: checked(&overlay.form, 2),
+                    copy_activities: checked(&overlay.form, 3),
+                };
+                if !overlay.warned {
+                    let warning = clash_warning(
+                        s.save_anyway_hint,
+                        self.core.microcycle_venue_clashes(id.clone(), draft.clone()),
+                    );
+                    overlay.warned = warning.is_some();
+                    if warning.is_some() {
+                        overlay.form.error = warning;
+                        return;
+                    }
+                }
                 self.core
-                    .duplicate_microcycle(
-                        id.clone(),
-                        DuplicateCycleDraft {
-                            shift_weeks: number(0),
-                            copies: number(1),
-                            copy_objectives: checked(&overlay.form, 2),
-                            copy_activities: checked(&overlay.form, 3),
-                        },
-                    )
+                    .duplicate_microcycle(id.clone(), draft)
                     .map(|copies| {
                         let free = copies.iter().filter(|c| c.parent_id.is_none()).count();
                         (free > 0 && had_parent)

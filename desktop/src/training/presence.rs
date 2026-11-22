@@ -239,8 +239,12 @@ impl PresenceTab {
                             Some(v) => format!("{v}% {} {base}", s.on_sessions),
                             None => "–".to_string(),
                         };
+                        let makeups = match p.makeups {
+                            0 => String::new(),
+                            n => format!(" · {}", ui::fill(s.makeups_count, &[n.to_string()])),
+                        };
                         let counts = format!(
-                            "{} {} ({} {}) · {} {} · {} {}",
+                            "{} {} ({} {}) · {} {} · {} {}{makeups}",
                             p.present,
                             s.present,
                             p.late,

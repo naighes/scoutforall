@@ -243,4 +243,5 @@ pub mod icons {
     pub const SHARE: &[u8] = include_bytes!("../assets/icons/share.svg");
     pub const SAVE: &[u8] = include_bytes!("../assets/icons/save.svg");
     pub const DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
+    pub const WARNING: &[u8] = include_bytes!("../assets/icons/warning.svg");
 }

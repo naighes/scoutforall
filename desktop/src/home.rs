@@ -60,6 +60,7 @@ pub enum Message {
     NewTeam,
     Import,
     Competitions,
+    Venues,
     Form(form::Message),
     /// the agenda of today
     Today(agenda::Message),
@@ -77,6 +78,7 @@ pub enum Outcome {
     /// an archive or a DataVolley file to choose
     Import,
     Competitions,
+    Venues,
 }
 
 const TODAY: usize = 0;
@@ -210,6 +212,7 @@ impl HomeScreen {
             (Message::Team(team), None) => Outcome::Team(team),
             (Message::Import, None) => Outcome::Import,
             (Message::Competitions, None) => Outcome::Competitions,
+            (Message::Venues, None) => Outcome::Venues,
             (Message::NewTeam, None) => {
                 self.new_team(core, s);
                 Outcome::Stay
@@ -256,6 +259,7 @@ impl HomeScreen {
             }
             k if k == key!(i) => return Outcome::Import,
             k if k == key!(c) => return Outcome::Competitions,
+            k if k == key!(g) => return Outcome::Venues,
             _ => None,
         };
         if let (Some(index), Some(slot)) = (moved, self.selected.get_mut(self.panel)) {
@@ -280,6 +284,7 @@ impl HomeScreen {
                         ("n".to_string(), s.new_team.to_string()),
                         ("i".to_string(), s.import_archive.to_string()),
                         ("c".to_string(), s.competitions.to_string()),
+                        ("g".to_string(), s.venues.to_string()),
                         ("F2".to_string(), s.settings.to_string()),
                     ],
                 ]
@@ -292,6 +297,7 @@ impl HomeScreen {
                 ("n".to_string(), s.new_team.to_string()),
                 ("i".to_string(), s.import_archive.to_string()),
                 ("c".to_string(), s.competitions.to_string()),
+                ("g".to_string(), s.venues.to_string()),
                 ("F2".to_string(), s.settings.to_string()),
             ],
         }
@@ -443,12 +449,10 @@ impl HomeScreen {
             // have no room left for a third action in a small window
             list(
                 s.recent,
-                vec![ui::pill(
-                    s.competitions,
-                    false,
-                    Some(Message::Competitions),
-                    c
-                )],
+                vec![
+                    ui::pill(s.competitions, false, Some(Message::Competitions), c),
+                    ui::pill(s.venues, false, Some(Message::Venues), c),
+                ],
                 recent,
                 s.no_matches,
                 c

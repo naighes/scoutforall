@@ -46,6 +46,10 @@ pub enum Message {
     View(View),
     New,
     Repeat,
+    /// this team or all the teams
+    AllTeams,
+    /// the next gym of the filter
+    NextVenue,
 }
 
 /// What the calendar asks the screen for.
@@ -71,6 +75,10 @@ pub struct CalendarTab {
     /// the cycles whose bands are drawn: microcycles in the week,
     /// mesocycles in the month
     bands: Vec<CycleRecord>,
+    /// the sessions and matches of every team, not only of this one
+    all_teams: bool,
+    /// the gym the events are limited to: id and name
+    venue: Option<(String, String)>,
     error: Option<String>,
 }
 
@@ -148,6 +156,8 @@ impl CalendarTab {
             slot: 0,
             days: vec![],
             bands: vec![],
+            all_teams: false,
+            venue: None,
             error: None,
         };
         tab.reload();
@@ -197,8 +207,18 @@ impl CalendarTab {
         let (first, last) = period(self.view, self.anchor);
         let read = self
             .core
-            .training_agenda(Some(self.team_id.clone()), span, text_of(self.anchor))
-            .and_then(|days| {
+            .training_agenda(
+                (!self.all_teams).then(|| self.team_id.clone()),
+                span,
+                text_of(self.anchor),
+            )
+            .and_then(|mut days| {
+                if let Some((venue, _)) = &self.venue {
+                    for day in &mut days {
+                        day.events
+                            .retain(|e| e.venue.as_ref().is_some_and(|v| v.id == *venue));
+                    }
+                }
                 let bands = self
                     .core
                     .cycles(self.team_id.clone(), level)?
@@ -282,8 +302,34 @@ impl CalendarTab {
         }
     }
 
+    /// The next gym of the filter: none, then each of them, then none.
+    fn next_venue(&mut self) {
+        let venues = self.core.venues().unwrap_or_default();
+        self.venue = match &self.venue {
+            None => venues.first(),
+            Some((id, _)) => venues
+                .iter()
+                .position(|v| v.id == *id)
+                .and_then(|at| venues.get(at + 1)),
+        }
+        .map(|v| (v.id.clone(), v.name.clone()));
+        self.slot = 0;
+        self.reload();
+    }
+
+    fn set_all_teams(&mut self) {
+        self.all_teams = !self.all_teams;
+        self.slot = 0;
+        self.reload();
+    }
+
     fn pick(&self, day: NaiveDate, slot: usize) -> Leave {
-        match self.day_record(day).and_then(|d| d.events.get(slot)) {
+        // what another team holds opens from its own screen
+        let event = self.day_record(day).and_then(|d| d.events.get(slot));
+        if event.is_some_and(|e| e.team_id != self.team_id) {
+            return Leave::Stay;
+        }
+        match event {
             Some(AgendaEventRecord {
                 item: AgendaItemRecord::Session { id, .. },
                 ..
@@ -325,6 +371,14 @@ impl CalendarTab {
             }
             Message::New => Leave::NewSession(self.anchor),
             Message::Repeat => Leave::Repeat(self.anchor),
+            Message::AllTeams => {
+                self.set_all_teams();
+                Leave::Stay
+            }
+            Message::NextVenue => {
+                self.next_venue();
+                Leave::Stay
+            }
         }
     }
 
@@ -355,6 +409,8 @@ impl CalendarTab {
             k if k == key!(enter) => return self.open(),
             k if k == key!(n) => return Leave::NewSession(self.anchor),
             k if k == key!(r) => return Leave::Repeat(self.anchor),
+            k if k == key!(t) => self.set_all_teams(),
+            k if k == key!(v) => self.next_venue(),
             _ => {}
         }
         Leave::Stay
@@ -379,6 +435,8 @@ impl CalendarTab {
             ("Enter".to_string(), s.open.to_string()),
             ("n".to_string(), s.new_session.to_string()),
             ("r".to_string(), s.repeat_sessions.to_string()),
+            ("t".to_string(), s.all_teams.to_string()),
+            ("v".to_string(), s.venues.to_string()),
         ];
         hints.push(("⇥".to_string(), s.sessions.to_string()));
         hints.push(("Esc".to_string(), s.back.to_string()));
@@ -437,6 +495,21 @@ impl CalendarTab {
             controls.push(ui::pill(s.today, false, Some(Message::Today), c));
         }
         controls.push(space::horizontal().width(Length::Fill).into());
+        controls.push(ui::pill(
+            match self.all_teams {
+                true => s.all_teams,
+                false => s.this_team,
+            },
+            self.all_teams,
+            Some(Message::AllTeams),
+            c,
+        ));
+        controls.push(ui::pill(
+            self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
+            self.venue.is_some(),
+            Some(Message::NextVenue),
+            c,
+        ));
         controls.push(ui::pill(s.new_session, false, Some(Message::New), c));
         controls.push(ui::pill(s.repeat_sessions, false, Some(Message::Repeat), c));
         let body: Element<'a, Message> = match &self.error {
@@ -527,7 +600,7 @@ impl CalendarTab {
             };
             let events = Column::with_children(day.events.iter().enumerate().map(|(i, event)| {
                 ui::list_row(
-                    event_text(event, s, c, false),
+                    event_text(event, s, c, false, self.all_teams),
                     here && i == self.slot,
                     date.map(|d| Message::Event(d, i)),
                     c,
@@ -589,7 +662,7 @@ impl CalendarTab {
             events
                 .iter()
                 .take(CELL_EVENTS)
-                .map(|e| event_text(e, s, c, true)),
+                .map(|e| event_text(e, s, c, true, self.all_teams)),
         );
         if events.len() > CELL_EVENTS {
             lines.push(
@@ -615,6 +688,7 @@ fn event_text<'a>(
     s: &'static Strings,
     c: Colors,
     compact: bool,
+    with_team: bool,
 ) -> Element<'a, Message> {
     let time = event.start.get(11..16).unwrap_or_default().to_string();
     let (icon, color, title, detail) = match &event.item {
@@ -677,12 +751,19 @@ fn event_text<'a>(
         (true, false, true) => " !".to_string(),
         (true, false, false) => String::new(),
     };
+    let title = match with_team {
+        true => format!("{} · {title}", event.team_name),
+        false => title,
+    };
+    // another team holds the gym then: the error color and an icon
+    let shared = event.shared_venue && !cancelled;
     let first = text(format!("{time} {title}{marks}"))
         .size(SIZE_SMALL)
         .font(theme::fonts().bold)
-        .color(match cancelled {
-            true => c.muted,
-            false => c.text,
+        .color(match (cancelled, shared) {
+            (true, _) => c.muted,
+            (false, true) => c.danger,
+            (false, false) => c.text,
         });
     let lines: Element<'a, Message> = match compact {
         true => first.into(),
@@ -693,8 +774,15 @@ fn event_text<'a>(
         .spacing(1)
         .into(),
     };
-    row![ui::icon(icon, 14.0, color), lines]
+    let mut line = row![ui::icon(icon, 14.0, color), lines]
         .spacing(5)
-        .align_y(Alignment::Center)
-        .into()
+        .align_y(Alignment::Center);
+    if shared {
+        line = line.push(ui::tip(
+            ui::icon(theme::icons::WARNING, 14.0, c.danger),
+            s.venue_busy_mark,
+            c,
+        ));
+    }
+    line.into()
 }

@@ -13,10 +13,13 @@ use {
     scout4all_mobile::{
         MobileError, Scout4All,
         training::{ActivityDraft, ActivityHitRecord, CycleRecord, SessionDraft, TrainingField},
+        venues::VenueClashRecord,
     },
 };
 
 const EMPTY: &str = "–";
+
+pub(super) use crate::venue_choice::{venue_at, venue_options, venue_value};
 
 /// What a key or a click did to a form.
 pub enum Edited {
@@ -68,48 +71,23 @@ pub(super) fn microcycle_options(
     options
 }
 
-/// The gyms a form of the team offers, and the one `current` even when it
-/// was removed: id and name, in the order of the choice (pinned first, then
-/// the ones the team used).
-pub(super) fn venue_options(
-    core: &Scout4All,
-    team_id: &str,
-    current: Option<&str>,
-) -> Vec<(String, String)> {
-    let mut options: Vec<(String, String)> = core
-        .venue_choices(team_id.to_string(), String::new())
-        .unwrap_or_default()
-        .into_iter()
-        .map(|v| (v.id, v.name))
-        .collect();
-    if let Some(kept) = current
-        .filter(|id| !options.iter().any(|(o, _)| o == id))
-        .and_then(|id| core.venue(id.to_string()).ok())
-    {
-        options.push((kept.id, kept.name));
-    }
-    options
-}
-
-/// The choice of a gym: the empty one, then `options`; `current` is the
-/// one chosen.
-pub(super) fn venue_value(options: &[(String, String)], current: Option<&str>) -> Value {
-    Value::Choice {
-        options: std::iter::once(EMPTY.to_string())
-            .chain(options.iter().map(|(_, name)| name.clone()))
-            .collect(),
-        index: current
-            .and_then(|id| options.iter().position(|(o, _)| o == id))
-            .map_or(0, |at| at + 1),
-    }
-}
-
-/// The id of the gym at the position `index` of a choice made by `venue_value`.
-pub(super) fn venue_at(options: &[(String, String)], index: usize) -> Option<String> {
-    index
-        .checked_sub(1)
-        .and_then(|at| options.get(at))
-        .map(|(id, _)| id.clone())
+/// What a save says when other teams hold the gym then (nothing when none
+/// does): their names and times, and that Enter again saves anyway.
+pub(crate) fn clash_warning(
+    hint: &str,
+    clashes: Result<Vec<VenueClashRecord>, MobileError>,
+) -> Option<String> {
+    clashes
+        .ok()
+        .filter(|found| !found.is_empty())
+        .map(|found| {
+            found
+                .iter()
+                .map(|c| c.message.clone())
+                .chain([hint.to_string()])
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
 }
 
 /// The choice of a microcycle: the empty one, then `options`; `chosen` is
@@ -154,6 +132,10 @@ pub struct SessionEditor {
     venues: Vec<(String, String)>,
     /// the microcycles of the choice after the empty one: id and name
     microcycles: Vec<(String, String)>,
+    /// another team holds the gym then and the user was told: Enter again
+    /// saves
+    warned: bool,
+    anyway_hint: String,
 }
 
 impl SessionEditor {
@@ -203,6 +185,8 @@ impl SessionEditor {
             status: draft.status,
             venues,
             microcycles: vec![],
+            warned: false,
+            anyway_hint: s.save_anyway_hint.to_string(),
         };
         editor.offer_microcycles(core, draft.microcycle.as_deref());
         Ok(editor)
@@ -247,11 +231,15 @@ impl SessionEditor {
             Outcome::Cancel => Edited::Cancel,
             Outcome::Changed(DATE) => {
                 // the day moved: the microcycle that holds it is offered
+                self.warned = false;
                 let current = self.microcycle();
                 self.offer_microcycles(core, current.as_deref());
                 Edited::Stay
             }
-            Outcome::Changed(_) => Edited::Stay,
+            Outcome::Changed(_) => {
+                self.warned = false;
+                Edited::Stay
+            }
             Outcome::Save => self.save(core),
         }
     }
@@ -273,7 +261,30 @@ impl SessionEditor {
         }
     }
 
+    /// The warning of the gym held by another team then, once: the next save
+    /// goes through.
+    fn warning(&mut self, core: &Scout4All) -> Option<String> {
+        let draft = self.draft();
+        let (venue, start) = (draft.venue?, draft.start?);
+        let minutes = draft.duration.trim().parse().ok()?;
+        match self.warned {
+            true => None,
+            false => {
+                let warning = clash_warning(
+                    &self.anyway_hint,
+                    core.session_venue_clashes(self.team_id.clone(), venue, start, minutes),
+                );
+                self.warned = warning.is_some();
+                warning
+            }
+        }
+    }
+
     fn save(&mut self, core: &Scout4All) -> Edited {
+        if let Some(warning) = self.warning(core) {
+            self.form.error = Some(warning);
+            return Edited::Stay;
+        }
         match core.save_session(self.team_id.clone(), self.id.clone(), self.draft()) {
             Ok(saved) => Edited::Saved(saved.id),
             Err(e) => {
@@ -532,5 +543,99 @@ impl CopyEditor {
         }
         let outcome = self.form.key(ck);
         self.outcome(core, s, outcome)
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::unreachable)]
+mod tests {
+    use {
+        super::*,
+        crate::form::Message,
+        scout4all_core::shapes::{
+            country::CountryCode,
+            enums::{GenderEnum, TeamClassificationEnum},
+        },
+        scout4all_mobile::venues::VenueDraft,
+        std::sync::Arc,
+    };
+
+    fn two_teams() -> (tempfile::TempDir, Arc<Scout4All>, String, String, String) {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let a = core.tutorial_team().unwrap();
+        let b = core
+            .save_team(
+                None,
+                scout4all_core::team_form::TeamForm {
+                    name: "Vigili".to_string(),
+                    classification: Some(TeamClassificationEnum::Regional),
+                    gender: Some(GenderEnum::Men),
+                    country: CountryCode::known("IT"),
+                    ..core.new_team_form(2026)
+                },
+            )
+            .unwrap();
+        let venue = core
+            .save_venue(
+                None,
+                VenueDraft {
+                    name: "Terontola".into(),
+                    ..VenueDraft::default()
+                },
+            )
+            .unwrap()
+            .id;
+        (dir, core, a, b, venue)
+    }
+
+    /// Another team holds the gym then: the first save tells which one and
+    /// writes nothing, the second saves; changing a field asks again.
+    #[test]
+    fn a_session_in_a_gym_held_by_another_team_is_told_first() {
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let (_dir, core, a, b, venue) = two_teams();
+        let held = SessionDraft {
+            start: Some("2026-03-10T18:00".into()),
+            duration: "90".into(),
+            venue: Some(venue),
+            ..core.new_session_draft()
+        };
+        core.save_session(a.clone(), None, held).unwrap();
+        let mut editor = SessionEditor::new(&core, s, b.clone(), None, None).unwrap();
+        for (field, text) in [(DATE, "2026-03-10"), (TIME, "18:30"), (DURATION, "60")] {
+            editor.update(&core, Message::Input(field, text.into()));
+        }
+        editor.update(&core, Message::Choose(LOCATION, 1));
+        assert!(matches!(editor.update(&core, Message::Save), Edited::Stay));
+        let told = editor.form.error.clone().unwrap();
+        assert!(told.contains("Terontola") && told.contains(s.save_anyway_hint));
+        assert!(core.training_sessions(b.clone()).unwrap().is_empty());
+        // another time: asked again
+        editor.update(&core, Message::Input(TIME, "18:45".into()));
+        assert!(matches!(editor.update(&core, Message::Save), Edited::Stay));
+        assert!(core.training_sessions(b.clone()).unwrap().is_empty());
+        // Enter again saves
+        assert!(matches!(
+            editor.update(&core, Message::Save),
+            Edited::Saved(_)
+        ));
+        assert_eq!(core.training_sessions(b).unwrap().len(), 1);
+    }
+
+    /// A free gym, or none chosen, saves at once.
+    #[test]
+    fn a_free_gym_saves_without_asking() {
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let (_dir, core, _a, b, _venue) = two_teams();
+        let mut editor = SessionEditor::new(&core, s, b.clone(), None, None).unwrap();
+        for (field, text) in [(DATE, "2026-03-10"), (TIME, "18:30"), (DURATION, "60")] {
+            editor.update(&core, Message::Input(field, text.into()));
+        }
+        editor.update(&core, Message::Choose(LOCATION, 1));
+        assert!(matches!(
+            editor.update(&core, Message::Save),
+            Edited::Saved(_)
+        ));
     }
 }

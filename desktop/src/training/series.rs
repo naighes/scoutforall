@@ -4,7 +4,7 @@
 
 use {
     super::forms::{
-        Edited, day_of, microcycle_options, microcycle_value, split, venue_at, venue_options,
+        Edited, clash_warning, day_of, microcycle_options, microcycle_value, split, venue_at, venue_options,
         venue_value,
     },
     crate::{
@@ -46,6 +46,10 @@ pub struct DuplicateEditor {
     team_id: String,
     session_id: String,
     microcycles: Vec<(String, String)>,
+    /// another team holds the gym then and the user was told: Enter again
+    /// saves
+    warned: bool,
+    anyway_hint: String,
 }
 
 impl DuplicateEditor {
@@ -69,6 +73,8 @@ impl DuplicateEditor {
             team_id,
             session_id,
             microcycles: vec![],
+            warned: false,
+            anyway_hint: s.save_anyway_hint.to_string(),
         };
         editor.offer_microcycles(core, proposed.microcycle_id.as_deref());
         Ok(editor)
@@ -99,6 +105,17 @@ impl DuplicateEditor {
             copy_objectives: checked(&self.form, OBJECTIVES),
             copy_activities: checked(&self.form, ACTIVITIES),
         };
+        if !self.warned {
+            let warning = clash_warning(
+                &self.anyway_hint,
+                core.duplicate_venue_clashes(self.session_id.clone(), draft.clone()),
+            );
+            self.warned = warning.is_some();
+            if warning.is_some() {
+                self.form.error = warning;
+                return Edited::Stay;
+            }
+        }
         match core.duplicate_session(self.session_id.clone(), draft) {
             Ok(saved) => Edited::Saved(saved.id),
             Err(e) => {
@@ -114,11 +131,15 @@ impl DuplicateEditor {
             Outcome::Stay => Edited::Stay,
             Outcome::Cancel => Edited::Cancel,
             Outcome::Changed(DATE) => {
+                self.warned = false;
                 let current = self.microcycle();
                 self.offer_microcycles(core, current.as_deref());
                 Edited::Stay
             }
-            Outcome::Changed(_) => Edited::Stay,
+            Outcome::Changed(_) => {
+                self.warned = false;
+                Edited::Stay
+            }
             Outcome::Save => self.save(core),
         }
     }
@@ -151,6 +172,9 @@ pub struct SeriesEditor {
     venues: Vec<(String, String)>,
     /// the sessions that overlap, written, when the dialog is open
     pub conflicts: Vec<String>,
+    /// another team holds the gym on some of the days and the user was
+    /// told: Enter again goes on
+    warned: bool,
 }
 
 impl SeriesEditor {
@@ -191,6 +215,7 @@ impl SeriesEditor {
             team_id,
             venues,
             conflicts: vec![],
+            warned: false,
         };
         Ok(editor)
     }
@@ -254,9 +279,25 @@ impl SeriesEditor {
         match outcome {
             Outcome::Stay => Edited::Stay,
             Outcome::Cancel => Edited::Cancel,
-            Outcome::Changed(_) => Edited::Stay,
+            Outcome::Changed(_) => {
+                self.warned = false;
+                Edited::Stay
+            }
             Outcome::Save => {
                 self.form.error = None;
+                let draft = self.draft();
+                let busy = draft.bands.iter().any(|b| b.venue.is_some());
+                if busy && !self.warned {
+                    let warning = clash_warning(
+                        s.save_anyway_hint,
+                        core.series_venue_clashes(self.team_id.clone(), draft),
+                    );
+                    self.warned = warning.is_some();
+                    if warning.is_some() {
+                        self.form.error = warning;
+                        return Edited::Stay;
+                    }
+                }
                 self.make(core, s, false)
             }
         }
