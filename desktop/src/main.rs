@@ -35,6 +35,7 @@ mod stats;
 mod strings;
 mod team;
 mod theme;
+mod training;
 mod transfer;
 mod ui;
 mod update;
@@ -130,6 +131,7 @@ enum Screen {
     Events(Box<events::EventsScreen>),
     Video(Box<video::VideoScreen>),
     Live(Box<live::screen::LiveScreen>),
+    Training(Box<training::screen::TrainingScreen>),
 }
 
 /// Where a key or a click leads.
@@ -143,6 +145,8 @@ enum Go {
     /// the competitions, from the home
     Competitions,
     Team(String),
+    /// the training of the team: what it opens on
+    Training(String, training::screen::Open),
     Match(String, String),
     /// the statistics of the match of team A, from the page of team B
     Stats(String, String, Option<String>),
@@ -255,6 +259,7 @@ enum Message {
     Home(home::Message),
     Competitions(competitions::Message),
     Team(team::Message),
+    Training(training::screen::Message),
     Match(game::Message),
     Scouting(scouting::Message),
     Start(start::Message),
@@ -418,6 +423,7 @@ impl App {
             (None, Screen::Home(_)) => String::new(),
             (None, Screen::Competitions(_)) => self.strings.competitions.to_string(),
             (None, Screen::Team(screen)) => screen.title(),
+            (None, Screen::Training(screen)) => screen.title(self.strings),
             (None, Screen::Match(screen)) => screen.title(),
             (None, Screen::Start(screen)) => screen.title(),
             (None, Screen::Scouting(screen)) => screen.title(),
@@ -468,6 +474,10 @@ impl App {
             Go::Competitions => competitions::CompetitionsScreen::new(core)
                 .map(|screen| Screen::Competitions(Box::new(screen))),
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
+            Go::Training(team, open) => {
+                training::screen::TrainingScreen::new(core, self.strings, team, open)
+                    .map(|t| Screen::Training(Box::new(t)))
+            }
             Go::Match(team, m) => {
                 MatchScreen::new(core, team, m).map(|m| Screen::Match(Box::new(m)))
             }
@@ -781,6 +791,9 @@ impl App {
             Screen::Home(_) => Go::Home,
             Screen::Competitions(_) => Go::Competitions,
             Screen::Team(t) => Go::Team(t.team_id.clone()),
+            Screen::Training(t) => {
+                Go::Training(t.team_id.clone(), training::screen::Open::Sessions)
+            }
             Screen::Match(m) => Go::Match(m.team_id.clone(), m.match_id.clone()),
             Screen::Stats(st) => match st.match_id() {
                 Some(m) => Go::Stats(st.team_id.clone(), m, st.of_b.clone()),
@@ -872,6 +885,7 @@ impl App {
             (None, Screen::Home(screen)) => screen.focus_id(),
             (None, Screen::Competitions(screen)) => screen.focus_id(),
             (None, Screen::Team(screen)) => screen.focus_id(),
+            (None, Screen::Training(screen)) => screen.focus_id(),
             (None, Screen::Match(screen)) => screen.focus_id(),
             (None, Screen::Dvw(screen)) => screen.focus_id(),
             (None, Screen::Video(screen)) => screen.focus_id(),
@@ -922,6 +936,7 @@ impl App {
             // video don't take the list back while scrolled
             Screen::Video(screen) => screen.take_scroll(),
             Screen::Stats(screen) => screen.take_scroll(),
+            Screen::Training(screen) => screen.scroll(),
             _ => None,
         };
         let task = match scroll {
@@ -1305,6 +1320,12 @@ impl App {
             (Message::Key(ck), Screen::Team(screen)) => {
                 team_go(&screen.team_id.clone(), screen.key(s, ck))
             }
+            (Message::Training(m), Screen::Training(screen)) => {
+                training_go(&screen.team_id.clone(), screen.update(s, m))
+            }
+            (Message::Key(ck), Screen::Training(screen)) => {
+                training_go(&screen.team_id.clone(), screen.key(s, ck))
+            }
             (Message::Match(m), Screen::Match(screen)) => {
                 let outcome = screen.update(s, m);
                 match_go(screen, outcome)
@@ -1415,6 +1436,11 @@ impl App {
                 (None, None, Screen::Team(screen)) => {
                     (screen.view(s, c).map(Message::Team), screen.hints(s), true)
                 }
+                (None, None, Screen::Training(screen)) => (
+                    screen.view(s, c).map(Message::Training),
+                    screen.hints(s),
+                    true,
+                ),
                 (None, None, Screen::Match(screen)) => {
                     (screen.view(s, c).map(Message::Match), screen.hints(s), true)
                 }
@@ -1639,6 +1665,7 @@ fn home_go(outcome: home::Outcome) -> Go {
         home::Outcome::Scout(open) => Go::Scout(open),
         home::Outcome::Match(team, m) => Go::Match(team, m),
         home::Outcome::Team(team) => Go::Team(team),
+        home::Outcome::Training(team, open) => Go::Training(team, open),
         home::Outcome::Competitions => Go::Competitions,
     }
 }
@@ -1660,6 +1687,14 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
         team::Outcome::OpenTeam(team) => Go::Team(team),
+        team::Outcome::Training(open) => Go::Training(team_id.to_string(), open),
+    }
+}
+
+fn training_go(team_id: &str, outcome: training::screen::Outcome) -> Go {
+    match outcome {
+        training::screen::Outcome::Stay => Go::Stay,
+        training::screen::Outcome::Back => Go::Team(team_id.to_string()),
     }
 }
 

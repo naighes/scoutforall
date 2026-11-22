@@ -72,6 +72,8 @@ pub enum Outcome {
     Scout(Open),
     Match(String, String),
     Team(String),
+    /// the training of a team: a session or a new one
+    Training(String, crate::training::screen::Open),
     /// an archive or a DataVolley file to choose
     Import,
     Competitions,
@@ -140,12 +142,15 @@ impl HomeScreen {
         }
     }
 
-    /// What the row picked in an agenda opens: a match; the sessions have
-    /// no screen yet.
+    /// What the row picked in an agenda opens: a match or a session; a free
+    /// day of all the teams has no team to plan in.
     fn picked(pick: Option<Pick>) -> Outcome {
         match pick {
             Some(Pick::Match { team_id, id }) => Outcome::Match(team_id, id),
-            Some(Pick::Session { .. } | Pick::FreeDay { .. }) | None => Outcome::Stay,
+            Some(Pick::Session { team_id, id }) => {
+                Outcome::Training(team_id, crate::training::screen::Open::Session(id))
+            }
+            Some(Pick::FreeDay { .. }) | None => Outcome::Stay,
         }
     }
 

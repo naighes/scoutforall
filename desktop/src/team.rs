@@ -71,6 +71,7 @@ pub enum Message {
     Import,
     Export,
     Analysis,
+    Programming,
     DeleteTeam,
     Form(form::Message),
     Confirm,
@@ -97,6 +98,8 @@ pub enum Outcome {
     Analysis,
     /// a team saved now (the new season), to open
     OpenTeam(String),
+    /// the training of the team
+    Training(crate::training::screen::Open),
 }
 
 pub struct TeamScreen {
@@ -211,12 +214,15 @@ impl TeamScreen {
         self.edit(editor);
     }
 
-    /// What the row picked in the week opens: a match; the sessions have
-    /// no screen yet.
+    /// What the row picked in the week opens: a match, a session, or a new
+    /// session on a free day.
     fn picked(pick: Option<Pick>) -> Outcome {
+        use crate::training::screen::Open;
         match pick {
             Some(Pick::Match { id, .. }) => Outcome::OpenMatch(id),
-            Some(Pick::Session { .. } | Pick::FreeDay { .. }) | None => Outcome::Stay,
+            Some(Pick::Session { id, .. }) => Outcome::Training(Open::Session(id)),
+            Some(Pick::FreeDay { day, .. }) => Outcome::Training(Open::NewSession(day)),
+            None => Outcome::Stay,
         }
     }
 
@@ -402,6 +408,9 @@ impl TeamScreen {
             (Message::Import, Mode::Browse) => Outcome::Import,
             (Message::Export, Mode::Browse) => Outcome::Export,
             (Message::Analysis, Mode::Browse) => Outcome::Analysis,
+            (Message::Programming, Mode::Browse) => {
+                Outcome::Training(crate::training::screen::Open::Sessions)
+            }
             (Message::DeleteTeam, Mode::Browse) => {
                 self.ask_team_deletion();
                 Outcome::Stay
@@ -478,6 +487,9 @@ impl TeamScreen {
             (_, k) if k == key!(i) => return Outcome::Import,
             (_, k) if k == key!(x) => return Outcome::Export,
             (_, k) if k == key!(s) => return Outcome::Analysis,
+            (_, k) if k == key!(p) => {
+                return Outcome::Training(crate::training::screen::Open::Sessions);
+            }
             (Panel::Players, k) if k == key!(n) => self.edit_player(s, None),
             (Panel::Matches | Panel::Week, k) if k == key!(n) => self.new_match(s),
             (Panel::Players, k) if k == key!(enter) && count > 0 => {
@@ -535,6 +547,7 @@ impl TeamScreen {
                         ("i".to_string(), s.import_archive.to_string()),
                         ("x".to_string(), s.export_team.to_string()),
                         ("s".to_string(), s.analysis.to_string()),
+                        ("p".to_string(), s.programming.to_string()),
                     ],
                     vec![
                         ("⌫".to_string(), remove.to_string()),
@@ -617,6 +630,14 @@ impl TeamScreen {
                         theme::icons::ANALYSIS,
                         s.analysis,
                         Message::Analysis,
+                        false,
+                        c
+                    )
+                    .width(Length::Fill),
+                    ui::action(
+                        theme::icons::CALENDAR,
+                        s.programming,
+                        Message::Programming,
                         false,
                         c
                     )
@@ -1490,9 +1511,9 @@ mod tests {
     }
 
     /// The week of the team: ← → reach it between the players and the
-    /// matches, ↑ ↓ go through the rows, Enter opens the match (the
-    /// sessions have no screen yet) and does nothing on a free day, PgDn
-    /// shows the next week and Home today again.
+    /// matches, ↑ ↓ go through the rows, Enter opens the match, the session
+    /// on its sheet and a free day on a new session, PgDn shows the next
+    /// week and Home today again.
     #[test]
     fn the_week_of_the_team_opens_a_match_and_changes_week() {
         let s = strings(LanguageEnum::It);
@@ -1531,8 +1552,11 @@ mod tests {
         for _ in 0..first_event {
             team.key(s, key!(down));
         }
-        // the session: nothing opens yet
-        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
+        // the session opens on its sheet
+        assert!(matches!(
+            team.key(s, key!(enter)),
+            Outcome::Training(crate::training::screen::Open::Session(_))
+        ));
         team.key(s, key!(down));
         assert!(matches!(team.key(s, key!(enter)), Outcome::OpenMatch(id) if id == m));
         // a week on: nothing planned, the rows are free days
@@ -1542,7 +1566,10 @@ mod tests {
                 .iter()
                 .all(|p| matches!(p, Pick::FreeDay { .. }))
         );
-        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
+        assert!(matches!(
+            team.key(s, key!(enter)),
+            Outcome::Training(crate::training::screen::Open::NewSession(_))
+        ));
         team.key(s, key!(home));
         assert!(rows(&team).iter().any(|p| matches!(p, Pick::Match { .. })));
     }
@@ -1569,7 +1596,11 @@ mod tests {
         home.key(&core, s, key!(left));
         home.key(&core, s, key!(left));
         assert_eq!(home.panel_name(), "today");
-        // today: the session, then the match
+        // today: the session opens on its sheet, then the match
+        assert!(matches!(
+            home.key(&core, s, key!(enter)),
+            home::Outcome::Training(t, crate::training::screen::Open::Session(_)) if t == team_id
+        ));
         home.key(&core, s, key!(down));
         assert!(matches!(
             home.key(&core, s, key!(enter)),
