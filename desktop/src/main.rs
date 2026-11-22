@@ -7,6 +7,7 @@
 // still answers whoever reads its output (the self update, the workflow)
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agenda;
 mod calendar;
 mod charts;
 mod compare;
@@ -357,6 +358,14 @@ impl App {
                 Err(_) => std::process::exit(1),
             },
         };
+        let home = HomeScreen::new(
+            &core,
+            Home {
+                in_progress: vec![],
+                recent: vec![],
+                teams: vec![],
+            },
+        );
         let mut app = App {
             core,
             dir,
@@ -367,11 +376,7 @@ impl App {
             // the screenshots always dark, whatever was chosen
             theme: if quiet { None } else { theme },
             system_dark: true,
-            screen: Screen::Home(Box::new(HomeScreen::new(Home {
-                in_progress: vec![],
-                recent: vec![],
-                teams: vec![],
-            }))),
+            screen: Screen::Home(Box::new(home)),
             error,
             notice: None,
             importing: None,
@@ -459,7 +464,7 @@ impl App {
             }
             Go::Home => core
                 .home()
-                .map(|home| Screen::Home(Box::new(HomeScreen::new(home)))),
+                .map(|home| Screen::Home(Box::new(HomeScreen::new(&core, home)))),
             Go::Competitions => competitions::CompetitionsScreen::new(core)
                 .map(|screen| Screen::Competitions(Box::new(screen))),
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),

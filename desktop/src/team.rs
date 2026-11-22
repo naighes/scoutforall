@@ -7,6 +7,7 @@
 
 use {
     crate::{
+        agenda::{self, Agenda, Pick},
         editors::{Edited, Editor},
         form,
         strings::Strings,
@@ -25,6 +26,8 @@ use {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Panel {
     Players,
+    /// the agenda of the week, over the matches
+    Week,
     Matches,
 }
 
@@ -64,6 +67,7 @@ pub enum Message {
     Player(usize),
     NewMatch,
     Match(usize),
+    Week(agenda::Message),
     Import,
     Export,
     Analysis,
@@ -100,6 +104,7 @@ pub struct TeamScreen {
     pub team_id: String,
     details: TeamDetails,
     matches: Vec<MatchListing>,
+    week: Agenda,
     panel: Panel,
     player: usize,
     game: usize,
@@ -111,11 +116,17 @@ impl TeamScreen {
     pub fn new(core: Arc<Scout4All>, team_id: String) -> Result<TeamScreen, MobileError> {
         let details = core.team(team_id.clone())?;
         let matches = core.matches(team_id.clone())?;
+        let week = Agenda::week(
+            &core,
+            Some(team_id.clone()),
+            chrono::Local::now().date_naive(),
+        );
         Ok(TeamScreen {
             core,
             team_id,
             details,
             matches,
+            week,
             panel: Panel::Players,
             player: 0,
             game: 0,
@@ -142,6 +153,7 @@ impl TeamScreen {
                     .player
                     .min(self.details.players.len().saturating_sub(1));
                 self.game = self.game.min(self.matches.len().saturating_sub(1));
+                self.week.reload(&self.core);
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -199,6 +211,15 @@ impl TeamScreen {
         self.edit(editor);
     }
 
+    /// What the row picked in the week opens: a match; the sessions have
+    /// no screen yet.
+    fn picked(pick: Option<Pick>) -> Outcome {
+        match pick {
+            Some(Pick::Match { id, .. }) => Outcome::OpenMatch(id),
+            Some(Pick::Session { .. } | Pick::FreeDay { .. }) | None => Outcome::Stay,
+        }
+    }
+
     fn open_match(&self, index: usize) -> Outcome {
         match self.matches.get(index) {
             Some(MatchListing::Match { id, .. }) => Outcome::OpenMatch(id.clone()),
@@ -220,6 +241,7 @@ impl TeamScreen {
                         .unwrap_or_default(),
                 })
             }),
+            Panel::Week => None,
             Panel::Matches => self.matches.get(self.game).map(|m| match m {
                 MatchListing::Match {
                     id, opponent, date, ..
@@ -373,6 +395,10 @@ impl TeamScreen {
                 self.game = i;
                 self.open_match(i)
             }
+            (Message::Week(m), Mode::Browse) => {
+                self.panel = Panel::Week;
+                TeamScreen::picked(self.week.update(&self.core, m))
+            }
             (Message::Import, Mode::Browse) => Outcome::Import,
             (Message::Export, Mode::Browse) => Outcome::Export,
             (Message::Analysis, Mode::Browse) => Outcome::Analysis,
@@ -403,14 +429,31 @@ impl TeamScreen {
                 _ => Outcome::Stay,
             };
         }
+        if self.panel == Panel::Week
+            && [
+                key!(up),
+                key!(down),
+                key!(enter),
+                key!(pageup),
+                key!(pagedown),
+                key!(home),
+            ]
+            .contains(&ck)
+        {
+            return TeamScreen::picked(self.week.key(&self.core, ck));
+        }
         let count = match self.panel {
             Panel::Players => self.details.players.len(),
+            Panel::Week => 0,
             Panel::Matches => self.matches.len(),
         };
+        let mut none = 0;
         let selected = match self.panel {
             Panel::Players => &mut self.player,
+            Panel::Week => &mut none,
             Panel::Matches => &mut self.game,
         };
+        let backward = ck == key!(left) || ck == key!(shift - tab) || ck == key!(shift - backtab);
         let switch = ck == key!(left)
             || ck == key!(right)
             || ck == key!(tab)
@@ -420,9 +463,10 @@ impl TeamScreen {
         match (self.panel, ck) {
             (_, k) if k == BACK_KEY => return Outcome::Back,
             (_, _) if switch => {
-                self.panel = match self.panel {
-                    Panel::Players => Panel::Matches,
-                    Panel::Matches => Panel::Players,
+                self.panel = match (self.panel, backward) {
+                    (Panel::Players, false) | (Panel::Matches, true) => Panel::Week,
+                    (Panel::Week, false) | (Panel::Players, true) => Panel::Matches,
+                    (Panel::Matches, false) | (Panel::Week, true) => Panel::Players,
                 }
             }
             (_, k) if k == key!(down) && count > 0 => *selected = (*selected + 1) % count,
@@ -435,7 +479,7 @@ impl TeamScreen {
             (_, k) if k == key!(x) => return Outcome::Export,
             (_, k) if k == key!(s) => return Outcome::Analysis,
             (Panel::Players, k) if k == key!(n) => self.edit_player(s, None),
-            (Panel::Matches, k) if k == key!(n) => self.new_match(s),
+            (Panel::Matches | Panel::Week, k) if k == key!(n) => self.new_match(s),
             (Panel::Players, k) if k == key!(enter) && count > 0 => {
                 self.edit_player(s, Some(self.player))
             }
@@ -466,20 +510,24 @@ impl TeamScreen {
             (Mode::Browse, panel) => {
                 let enter = match panel {
                     Panel::Players => s.edit,
-                    Panel::Matches => s.open,
+                    Panel::Week | Panel::Matches => s.open,
                 };
                 let new = match panel {
                     Panel::Players => s.new_player,
-                    Panel::Matches => s.new_match,
+                    Panel::Week | Panel::Matches => s.new_match,
                 };
                 let remove = match panel {
                     Panel::Players => s.remove_player,
-                    Panel::Matches => s.delete_match,
+                    Panel::Week | Panel::Matches => s.delete_match,
+                };
+                let moves = match panel {
+                    Panel::Week => self.week.hints(s),
+                    Panel::Players | Panel::Matches => vec![("↑ ↓".to_string(), String::new())],
                 };
                 [
+                    vec![("← → ⇧⇥ ⇥".to_string(), s.panel.to_string())],
+                    moves,
                     vec![
-                        ("← → ⇧⇥ ⇥".to_string(), s.panel.to_string()),
-                        ("↑ ↓".to_string(), String::new()),
                         ("Enter".to_string(), enter.to_string()),
                         ("n".to_string(), new.to_string()),
                         ("e".to_string(), s.edit_team.to_string()),
@@ -521,7 +569,17 @@ impl TeamScreen {
             Mode::Browse => row![
                 container(self.info(s, c)).width(Length::FillPortion(2)),
                 container(self.players(s, c)).width(Length::FillPortion(3)),
-                container(self.matches(s, c)).width(Length::FillPortion(3)),
+                column![
+                    container(
+                        self.week
+                            .view(s, c, self.panel == Panel::Week, false)
+                            .map(Message::Week)
+                    )
+                    .height(Length::FillPortion(1)),
+                    container(self.matches(s, c)).height(Length::FillPortion(1)),
+                ]
+                .spacing(14)
+                .width(Length::FillPortion(3)),
             ]
             .spacing(14)
             .height(Length::Fill)
@@ -811,7 +869,7 @@ mod tests {
             [MatchListing::Match { opponent, scouted_by: Some(of), .. }]
                 if opponent == "Cortona" && of == &a
         ));
-        team.key(s, key!(right));
+        team.key(s, key!(left));
         assert!(matches!(team.key(s, key!(enter)), Outcome::OpenMatch(id) if id == m));
 
         let mut seen = MatchScreen::new(core.clone(), b.clone(), m.clone()).unwrap();
@@ -882,7 +940,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         // the home: n writes a new team
-        let mut home = HomeScreen::new(core.home().unwrap());
+        let mut home = HomeScreen::new(&core, core.home().unwrap());
         assert!(matches!(home.key(&core, s, key!(i)), home::Outcome::Import));
         home.key(&core, s, key!(n));
         assert!(home.focus_id().is_some());
@@ -948,7 +1006,7 @@ mod tests {
             core.save_player(team_id.clone(), None, player, false)
                 .unwrap();
         }
-        team.key(s, key!(right));
+        team.key(s, key!(left));
         team.key(s, key!(n));
         team.update(s, Message::Form(Input(1, "Arezzo".into())));
         team.update(s, Message::Form(Input(3, "2026-11-05".into())));
@@ -1004,7 +1062,7 @@ mod tests {
         core.save_match(team_id.clone(), None, m).unwrap();
         let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
         assert_eq!(team.matches.len(), 1);
-        team.key(s, key!(right));
+        team.key(s, key!(left));
         team.key(s, key!(backspace));
         assert!(matches!(team.mode, Mode::Delete(Deletion::Match(..))));
         assert!(
@@ -1409,5 +1467,113 @@ mod tests {
         team.key(s, key!(enter));
         assert!(matches!(team.mode, Mode::Browse));
         assert_eq!(team.details.players.len(), 2);
+    }
+
+    /// A training session (07:00) and a match (18:00) today, of the team;
+    /// the id of the match.
+    fn plan_today(core: &Scout4All, team_id: &str) -> String {
+        use chrono::TimeZone;
+        let today = chrono::Local::now().date_naive();
+        let at = chrono::Local
+            .from_local_datetime(&today.and_hms_opt(18, 0, 0).unwrap())
+            .earliest()
+            .unwrap()
+            .fixed_offset();
+        let form = core.tutorial_match_form(team_id.to_string(), at).unwrap();
+        let m = core.save_match(team_id.to_string(), None, form).unwrap();
+        let mut draft = core.new_session_draft();
+        draft.start = Some(format!("{today}T07:00"));
+        draft.duration = "90".into();
+        draft.title = "Palleggio".into();
+        core.save_session(team_id.to_string(), None, draft).unwrap();
+        m
+    }
+
+    /// The week of the team: ← → reach it between the players and the
+    /// matches, ↑ ↓ go through the rows, Enter opens the match (the
+    /// sessions have no screen yet) and does nothing on a free day, PgDn
+    /// shows the next week and Home today again.
+    #[test]
+    fn the_week_of_the_team_opens_a_match_and_changes_week() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team_id = core.tutorial_team().unwrap();
+        let m = plan_today(&core, &team_id);
+        let mut team = TeamScreen::new(core.clone(), team_id).unwrap();
+        // the players first, then the week, then the matches
+        assert_eq!(team.panel, Panel::Players);
+        team.key(s, key!(right));
+        assert_eq!(team.panel, Panel::Week);
+        team.key(s, key!(right));
+        assert_eq!(team.panel, Panel::Matches);
+        team.key(s, key!(left));
+        assert_eq!(team.panel, Panel::Week);
+        // today's rows come in order of time: the session, the match
+        let rows = |team: &TeamScreen| -> Vec<Pick> {
+            (0..team.week.slots_len())
+                .filter_map(|i| team.week.pick(i))
+                .collect()
+        };
+        let todays: Vec<Pick> = rows(&team)
+            .into_iter()
+            .filter(|p| !matches!(p, Pick::FreeDay { .. }))
+            .collect();
+        assert!(matches!(
+            todays.as_slice(),
+            [Pick::Session { .. }, Pick::Match { id, .. }] if id == &m
+        ));
+        // down to the match (after the days before today that are free)
+        let first_event = rows(&team)
+            .iter()
+            .position(|p| !matches!(p, Pick::FreeDay { .. }))
+            .unwrap();
+        for _ in 0..first_event {
+            team.key(s, key!(down));
+        }
+        // the session: nothing opens yet
+        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
+        team.key(s, key!(down));
+        assert!(matches!(team.key(s, key!(enter)), Outcome::OpenMatch(id) if id == m));
+        // a week on: nothing planned, the rows are free days
+        team.key(s, key!(pagedown));
+        assert!(
+            rows(&team)
+                .iter()
+                .all(|p| matches!(p, Pick::FreeDay { .. }))
+        );
+        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
+        team.key(s, key!(home));
+        assert!(rows(&team).iter().any(|p| matches!(p, Pick::Match { .. })));
+    }
+
+    /// The home: today (when something is planned) and the week come
+    /// before the matches in progress; ← → go through the panels, today
+    /// is skipped while empty; Enter on a match opens it.
+    #[test]
+    fn the_home_shows_today_and_the_week_of_every_team() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let mut home = HomeScreen::new(&core, core.home().unwrap());
+        // nothing planned: today has no row to choose, the week does
+        assert!(home.today_is_empty());
+        home.key(&core, s, key!(left));
+        assert_eq!(home.panel_name(), "week");
+        home.key(&core, s, key!(left));
+        assert_eq!(home.panel_name(), "teams");
+        let team_id = core.tutorial_team().unwrap();
+        let m = plan_today(&core, &team_id);
+        let mut home = HomeScreen::new(&core, core.home().unwrap());
+        assert!(!home.today_is_empty());
+        home.key(&core, s, key!(left));
+        home.key(&core, s, key!(left));
+        assert_eq!(home.panel_name(), "today");
+        // today: the session, then the match
+        home.key(&core, s, key!(down));
+        assert!(matches!(
+            home.key(&core, s, key!(enter)),
+            home::Outcome::Match(t, id) if t == team_id && id == m
+        ));
     }
 }
