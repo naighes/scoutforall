@@ -57,10 +57,10 @@ mod tests {
             .unwrap()
     }
 
-    fn input(start: NaiveDateTime, location: &str) -> SessionInput {
+    fn input(start: NaiveDateTime, venue: Option<Uuid>) -> SessionInput {
         SessionForm {
             start: Some(start),
-            location: location.into(),
+            venue,
             ..SessionForm::default()
         }
         .validate()
@@ -79,7 +79,7 @@ mod tests {
             start: Some(at(23, 20, 30)),
             duration: "120".into(),
             actual_duration: "100".into(),
-            location: "Gym".into(),
+            venue: Some(crate::tests::gym(&p.db)),
             title: "Defense".into(),
             objectives: "dig".into(),
             notes: "n".into(),
@@ -107,7 +107,7 @@ mod tests {
         let p = providers();
         let t = team(&p, "A").await;
         p.training
-            .create_session(&t.id, input(at(29, 0, 5), ""))
+            .create_session(&t.id, input(at(29, 0, 5), None))
             .await
             .unwrap();
         let stored: String =
@@ -128,17 +128,17 @@ mod tests {
         let b = team(&p, "B").await;
         let late = p
             .training
-            .create_session(&a.id, input(at(25, 20, 0), ""))
+            .create_session(&a.id, input(at(25, 20, 0), None))
             .await
             .unwrap();
         let early = p
             .training
-            .create_session(&a.id, input(at(24, 18, 0), ""))
+            .create_session(&a.id, input(at(24, 18, 0), None))
             .await
             .unwrap();
         let other = p
             .training
-            .create_session(&b.id, input(at(24, 18, 0), ""))
+            .create_session(&b.id, input(at(24, 18, 0), None))
             .await
             .unwrap();
         assert_eq!(p.training.sessions(&a.id).await.unwrap(), [early, late]);
@@ -151,7 +151,7 @@ mod tests {
         let t = team(&p, "A").await;
         let s = p
             .training
-            .create_session(&t.id, input(at(23, 20, 30), "Gym"))
+            .create_session(&t.id, input(at(23, 20, 30), Some(crate::tests::gym(&p.db))))
             .await
             .unwrap();
         p.db.write(|tx| {
@@ -193,12 +193,12 @@ mod tests {
         let t = team(&p, "A").await;
         let s = p
             .training
-            .create_session(&t.id, input(at(23, 20, 30), "Gym"))
+            .create_session(&t.id, input(at(23, 20, 30), Some(crate::tests::gym(&p.db))))
             .await
             .unwrap();
         let keep = p
             .training
-            .create_session(&t.id, input(at(24, 20, 30), ""))
+            .create_session(&t.id, input(at(24, 20, 30), None))
             .await
             .unwrap();
         p.training.remove_session(&s.id).await.unwrap();
@@ -206,7 +206,7 @@ mod tests {
         assert!(is_not_found(&p.training.session(&s.id).await.unwrap_err()));
         assert!(is_not_found(
             &p.training
-                .update_session(&s.id, input(at(23, 20, 30), ""))
+                .update_session(&s.id, input(at(23, 20, 30), None))
                 .await
                 .unwrap_err()
         ));
@@ -221,8 +221,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(rows, 2);
-        // and a place used only by it is no longer proposed
-        assert!(p.training.locations(&t.id).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -231,44 +229,15 @@ mod tests {
         let t = team(&p, "A").await;
         let missing = p
             .training
-            .create_session(&Uuid::new_v4(), input(at(23, 20, 0), ""))
+            .create_session(&Uuid::new_v4(), input(at(23, 20, 0), None))
             .await;
         assert!(is_not_found(&missing.unwrap_err()));
         p.teams.remove(&t.id).await.unwrap();
         let removed = p
             .training
-            .create_session(&t.id, input(at(23, 20, 0), ""))
+            .create_session(&t.id, input(at(23, 20, 0), None))
             .await;
         assert!(is_not_found(&removed.unwrap_err()));
-    }
-
-    #[tokio::test]
-    async fn the_places_come_the_latest_first_each_once() {
-        let p = providers();
-        let a = team(&p, "A").await;
-        let b = team(&p, "B").await;
-        for (day, place) in [
-            (2, "Old gym"),
-            (9, "New gym"),
-            (16, "Old gym"),
-            (20, ""),
-            (23, "Park"),
-        ] {
-            p.training
-                .create_session(&a.id, input(at(day, 20, 0), place))
-                .await
-                .unwrap();
-        }
-        p.training
-            .create_session(&b.id, input(at(24, 20, 0), "Elsewhere"))
-            .await
-            .unwrap();
-        // "Old gym" was used again on the 16th: before "New gym"
-        assert_eq!(
-            p.training.locations(&a.id).await.unwrap(),
-            ["Park", "Old gym", "New gym"]
-        );
-        assert_eq!(p.training.locations(&b.id).await.unwrap(), ["Elsewhere"]);
     }
 
     /// A microcycle of another team is refused by the schema.

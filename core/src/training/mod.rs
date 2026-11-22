@@ -9,6 +9,7 @@ pub mod form;
 pub mod overlap;
 pub mod series;
 pub mod totals;
+pub mod venue;
 
 use chrono::{Duration, NaiveDateTime};
 use uuid::Uuid;
@@ -43,7 +44,8 @@ pub struct TrainingSession {
     pub start: NaiveDateTime,
     pub duration_min: u16,
     pub actual_duration_min: Option<u16>,
-    pub location: String,
+    /// the gym, if any; it may be a removed one
+    pub venue_id: Option<Uuid>,
     pub title: String,
     pub objectives: String,
     pub notes: String,
@@ -75,7 +77,7 @@ pub struct SessionInput {
     pub start: NaiveDateTime,
     pub duration_min: u16,
     pub actual_duration_min: Option<u16>,
-    pub location: String,
+    pub venue_id: Option<Uuid>,
     pub title: String,
     pub objectives: String,
     pub notes: String,
@@ -177,6 +179,8 @@ pub struct AttendanceRow {
     pub note: String,
     /// a player of another team
     pub guest: bool,
+    /// a guest who makes up for a session of their own team they missed
+    pub makeup: bool,
 }
 
 /// The attendance as the session shows it.
@@ -196,6 +200,8 @@ pub struct AttendanceInput {
     pub status: AttendanceStatus,
     pub note: String,
     pub guest: bool,
+    /// only a guest makes up: for a player of the team it is not kept
+    pub makeup: bool,
 }
 
 impl From<&AttendanceRow> for AttendanceInput {
@@ -206,6 +212,7 @@ impl From<&AttendanceRow> for AttendanceInput {
             status: row.status,
             note: row.note.trim().to_string(),
             guest: row.guest,
+            makeup: row.makeup,
         }
     }
 }

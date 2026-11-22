@@ -55,6 +55,7 @@ pub(crate) const OWN: [(&str, &str); 6] = [
 ];
 
 const PERSONS: (&str, &str) = ("persons", "id");
+const VENUES: (&str, &str) = ("venues", "id");
 const TEAMS_TABLE: (&str, &str) = ("teams", "id");
 
 /// The sessions of the team not removed, to chose their children by.
@@ -63,6 +64,10 @@ const SESSIONS_KEPT: &str = "(SELECT id FROM training_sessions WHERE team_id IN 
 fn filter(table: &str) -> String {
     match table {
         "persons" => format!("id IN {CITED}"),
+        "venues" => format!(
+            "id IN (SELECT venue_id FROM training_sessions
+                    WHERE team_id IN {TEAMS} AND deleted = 0 AND venue_id IS NOT NULL)"
+        ),
         "teams" => format!("id IN {TEAMS}"),
         "training_activities" | "training_attendance" => {
             format!("deleted = 0 AND session_id IN {SESSIONS_KEPT}")
@@ -97,7 +102,7 @@ pub(crate) fn tables(db: &Database, team: Uuid) -> Result<Vec<(&'static str, Vec
             json_of_ids(&[team.to_string()]),
             json_of_ids(&cited),
         ];
-        [PERSONS, TEAMS_TABLE]
+        [VENUES, PERSONS, TEAMS_TABLE]
             .iter()
             .chain(OWN.iter())
             .map(|(table, order)| {
@@ -368,6 +373,7 @@ pub(crate) fn merge(
         _ => Err(invalid(labels, format!("training of team {id}"))),
     }?;
     let persons = rows(PERSONS)?;
+    let venues = rows(VENUES)?;
     let table = |name: &str| -> Result<Vec<Row>, AppError> {
         OWN.iter()
             .find(|(table, _)| *table == name)
@@ -394,6 +400,7 @@ pub(crate) fn merge(
             true => Ok(()),
             false => Err(message(labels.import_team_first)),
         }?;
+        merge_rows(tx, "venues", &venues, |local, row| local == row)?;
         let persons = merge_rows(tx, "persons", &persons, agrees_person)?;
         let mut training = TrainingMerged::default();
         for (level, name, parent, rows) in &cycles {

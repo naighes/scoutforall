@@ -7,6 +7,7 @@ use crate::{
         sqlite::{
             sqlite,
             training::{SESSION_COLUMNS, SqliteTraining, session_from_row},
+            training_cycles::read_cycle,
         },
         training_totals::TrainingTotals,
     },
@@ -17,7 +18,7 @@ use crate::{
 };
 use async_trait::async_trait;
 use chrono::NaiveDate;
-use rusqlite::params;
+use rusqlite::{Transaction, params};
 use uuid::Uuid;
 
 /// The sessions of the team in the scope, the `s` of the query: the scope
@@ -48,6 +49,48 @@ fn bounds(scope: Scope) -> Bounds {
         Scope::Cycle(Level::Microcycle, id) => (None, None, Some(Sql(id)), None, None),
         Scope::Cycle(Level::Mesocycle, id) => (None, None, None, Some(Sql(id)), None),
         Scope::Cycle(Level::Program, id) => (None, None, None, None, Some(Sql(id))),
+    }
+}
+
+/// The person of each makeup of the team in the scope: a guest line, marked
+/// so, present or late, of a player of the team in a completed session of
+/// another team, whose start is in the period of the scope (that of the
+/// window for a cycle, none for all).
+fn makeups(tx: &Transaction, team_id: &Uuid, scope: Scope) -> Result<Vec<Uuid>, AppError> {
+    let period: Option<Option<(NaiveDate, NaiveDate)>> = match scope {
+        Scope::All => Some(None),
+        Scope::Dates(w) => Some(Some((w.start, w.end))),
+        Scope::Cycle(level, id) => read_cycle(tx, level, &id)
+            .ok()
+            .filter(|c| c.team_id == *team_id)
+            .map(|c| Some((c.window.start, c.window.end))),
+    };
+    match period {
+        None => Ok(vec![]),
+        Some(period) => tx
+            .prepare(
+                "SELECT a.person_id
+                 FROM training_attendance a JOIN training_sessions s ON s.id = a.session_id
+                 WHERE a.deleted = 0 AND a.guest = 1 AND a.makeup = 1
+                   AND a.status IN ('present', 'late')
+                   AND s.deleted = 0 AND s.status = 'completed' AND s.team_id <> ?1
+                   AND EXISTS (SELECT 1 FROM team_members tm
+                               WHERE tm.team_id = ?1 AND tm.person_id = a.person_id)
+                   AND (?2 IS NULL OR substr(s.start_local, 1, 10) >= ?2)
+                   AND (?3 IS NULL OR substr(s.start_local, 1, 10) < ?3)",
+            )
+            .map_err(sqlite)?
+            .query_map(
+                params![
+                    Sql(*team_id),
+                    period.map(|(from, _)| Sql(from)),
+                    period.map(|(_, to)| Sql(to))
+                ],
+                |row| Ok(row.get::<_, Sql<Uuid>>(0)?.0),
+            )
+            .map_err(sqlite)?
+            .collect::<Result<_, _>>()
+            .map_err(sqlite),
     }
 }
 
@@ -101,7 +144,9 @@ impl TrainingTotals for SqliteTraining {
             .map_err(sqlite)?
             .collect::<Result<Vec<_>, _>>()
             .map_err(sqlite)
-            .map(|lines| attendance_report(&lines))
+            .and_then(|lines| {
+                makeups(tx, team_id, scope).map(|makeups| attendance_report(&lines, &makeups))
+            })
         })
     }
 }

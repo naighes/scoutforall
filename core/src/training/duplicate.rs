@@ -8,7 +8,7 @@ use uuid::Uuid;
 pub const PROPOSED_DAYS: i64 = 7;
 
 /// The arguments of `TrainingWriter::duplicate_session`. The title, the
-/// location and the planned duration are always copied; never the
+/// gym and the planned duration are always copied; never the
 /// attendance, the notes, the final remarks, the actual durations, the
 /// status or the series.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,7 +38,7 @@ pub const MAX_CYCLE_COPIES: u16 = 52;
 /// The arguments of `TrainingCycles::duplicate_microcycle`: the microcycle
 /// is moved `shift_weeks` weeks, `copies` times (the k-th copy `k * shift`
 /// weeks away). The copies keep the title and the sessions (same weekday,
-/// same time, title, location, planned duration); never notes, attendance,
+/// same time, title, gym, planned duration); never notes, attendance,
 /// status or series. The objectives (of the microcycle and of its sessions)
 /// and the planned activities are the user's choice.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

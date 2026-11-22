@@ -232,6 +232,7 @@ mod tests {
                 status: AttendanceStatus::Present,
                 note: String::new(),
                 guest: true,
+                makeup: false,
             },
         );
         p.training.save_attendance(&s, lines.clone()).await.unwrap();
@@ -262,6 +263,7 @@ mod tests {
             status: AttendanceStatus::Present,
             note: String::new(),
             guest: false,
+            makeup: false,
         };
         // twice
         assert!(

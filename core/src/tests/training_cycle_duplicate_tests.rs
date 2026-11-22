@@ -79,7 +79,7 @@ mod tests {
                 microcycle: micro,
                 duration: "90".into(),
                 actual_duration: "80".into(),
-                location: "Gym".into(),
+                venue: Some(crate::tests::gym(t.db())),
                 title: "Serve".into(),
                 objectives: "Reception".into(),
                 notes: "n".into(),
@@ -217,7 +217,7 @@ mod tests {
         assert_eq!(
             (
                 c.title.as_str(),
-                c.location.as_str(),
+                c.venue_id,
                 c.duration_min,
                 c.objectives.as_str(),
                 c.notes.as_str(),
@@ -228,7 +228,7 @@ mod tests {
             ),
             (
                 "Serve",
-                "Gym",
+                Some(crate::tests::gym(t.db())),
                 90,
                 "Reception",
                 "",

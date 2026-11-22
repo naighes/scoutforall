@@ -58,6 +58,7 @@ mod tests {
         DvwFile {
             generator: None,
             last_change: None,
+            venue: None,
             match_info: MatchInfo {
                 date: match_date,
                 time: None,

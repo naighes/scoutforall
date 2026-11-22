@@ -206,7 +206,8 @@ pub(crate) type Row = Map<String, Json>;
 
 /// The tables of an archive, in the order they're written (the foreign
 /// keys), each with the order of its rows.
-const TABLES: [(&str, &str); 9] = [
+const TABLES: [(&str, &str); 10] = [
+    ("venues", "id"),
     ("persons", "id"),
     ("teams", "id"),
     ("team_members", "team_id, position"),
@@ -260,7 +261,11 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
         exported_at: Utc::now(),
     };
     let mut files = vec![(MANIFEST.to_string(), pretty(&manifest)?)];
-    for (table, rows) in &tables {
+    // without gyms the archive is as it was before them
+    for (table, rows) in tables
+        .iter()
+        .filter(|(t, r)| *t != "venues" || !r.is_empty())
+    {
         files.push((format!("{table}.json"), pretty(rows)?));
     }
     zip_files(&files, Deflated)
@@ -368,6 +373,9 @@ fn filter(table: &str) -> String {
             format!("id IN {CITED} OR id IN (SELECT person_id FROM team_members WHERE {members})")
         }
         "teams" => format!("id IN {TEAMS}"),
+        "venues" => format!(
+            "id IN (SELECT venue_id FROM matches WHERE id IN {MATCHES} AND venue_id IS NOT NULL)"
+        ),
         "team_members" => members,
         "competitions" => {
             format!("id IN (SELECT competition_id FROM matches WHERE id IN {MATCHES})")
@@ -426,6 +434,17 @@ pub(crate) fn dump(
                 })
                 .collect())
         }
+        // a match without a gym is written as before the gyms, so that the
+        // versions that don't know them read it
+        "matches" => Ok(rows
+            .into_iter()
+            .map(|mut row| {
+                if row.get("venue_id") == Some(&Json::Null) {
+                    row.remove("venue_id");
+                }
+                row
+            })
+            .collect()),
         _ => Ok(rows),
     }
 }
@@ -673,6 +692,8 @@ pub(crate) fn merge_staged(
         return Err(invalid(labels, format!("{kind:?} {subject}")));
     }
     db.write(|tx| {
+        // the gyms: the local ones win, the pin included
+        merge(tx, "venues", of("venues"), |local, row| local == row)?;
         let persons = merge(tx, "persons", of("persons"), agrees_person)?;
         let teams = merge(tx, "teams", of("teams"), |local, row| local == row)?;
         let members = merge_members(tx, of("team_members"))?;

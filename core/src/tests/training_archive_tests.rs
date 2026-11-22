@@ -35,6 +35,7 @@ mod tests {
     const S2: &str = "bbbbbbbb-0000-4000-8000-000000000002";
     const S3: &str = "bbbbbbbb-0000-4000-8000-000000000003";
     const GUEST: &str = "cccccccc-0000-4000-8000-000000000001";
+    const VENUE: &str = "dddddddd-0000-4000-8000-000000000001";
 
     fn player(n: u8) -> PlayerEntry {
         PlayerEntry {
@@ -76,6 +77,8 @@ mod tests {
             &format!(
                 "INSERT INTO persons (id, name, birth_date, height_cm, notes)
                      VALUES ('{GUEST}', 'guest', '2001-02-03', 190, 'secret');
+                 INSERT INTO venues (id, name, address, pinned)
+                     VALUES ('{VENUE}', 'gym', 'Via Roma 1', 1);
                  INSERT INTO training_programs (id, team_id, title, start_date, end_date)
                      VALUES ('{PROGRAM}', '{t}', 'season', '2026-09-01', '2026-12-31');
                  INSERT INTO mesocycles (id, team_id, program_id, title, start_date, weeks)
@@ -84,12 +87,12 @@ mod tests {
                                           objectives)
                      VALUES ('{MICRO}', '{t}', '{MESO}', 'week', '2026-11-09', 1, 'serve');
                  INSERT INTO training_sessions (id, team_id, microcycle_id, start_local,
-                         duration_min, location, title, notes, final_remarks, status)
-                     VALUES ('{S1}', '{t}', '{MICRO}', '2026-11-10T18:00', 90, 'gym', 'one',
+                         duration_min, venue_id, title, notes, final_remarks, status)
+                     VALUES ('{S1}', '{t}', '{MICRO}', '2026-11-10T18:00', 90, '{VENUE}', 'one',
                              'n', 'f', 'completed'),
-                            ('{S2}', '{t}', NULL, '2026-11-12T18:00', 60, 'gym', 'two', '', '',
+                            ('{S2}', '{t}', NULL, '2026-11-12T18:00', 60, '{VENUE}', 'two', '', '',
                              'planned'),
-                            ('{S3}', '{t}', NULL, '2026-11-13T18:00', 60, 'gym', 'gone', '', '',
+                            ('{S3}', '{t}', NULL, '2026-11-13T18:00', 60, '{VENUE}', 'gone', '', '',
                              'planned');
                  UPDATE training_sessions SET deleted = 1 WHERE id = '{S3}';
                  INSERT INTO training_activities (id, session_id, position, name, planned_min)
@@ -165,8 +168,9 @@ mod tests {
                 count("training_attendance"),
                 count("teams"),
                 count("persons"),
+                count("venues"),
             ],
-            [1, 1, 1, 2, 2, 3, 1, 3]
+            [1, 1, 1, 2, 2, 3, 1, 3, 1]
         );
         for absent in ["matches", "match_roster", "team_members", "events", "sets"] {
             assert!(!files.contains_key(&format!("{absent}.json")), "{absent}");
@@ -180,6 +184,63 @@ mod tests {
         // an archive of the team doesn't say it
         let team = files_of_team(&db, &t);
         assert!(team[MANIFEST].get("contents").is_none());
+    }
+
+    /// The gyms of the sessions go with the training, the pin included, and
+    /// come back: the local ones win, a removed one is not revived with
+    /// other data, an archive with no gym has no file of them.
+    #[tokio::test]
+    async fn the_gyms_go_and_come_back_the_local_ones_win() {
+        let (db, t) = trained().await;
+        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let files = files(&archive);
+        let venues = files["venues.json"].as_array().unwrap();
+        assert_eq!(venues.len(), 1);
+        assert_eq!(
+            (venues[0]["name"].as_str(), venues[0]["pinned"].as_i64()),
+            (Some("gym"), Some(1))
+        );
+        // a database without it gets it, pinned, and the sessions refer to it
+        let there = with_team(&db, &t).await;
+        import(&there, &archive, &en()).unwrap();
+        let kept: i64 = there
+            .read(|tx| {
+                tx.query_row(
+                    "SELECT count(*) FROM training_sessions s JOIN venues v ON v.id = s.venue_id
+                     WHERE v.pinned = 1",
+                    [],
+                    |r| r.get(0),
+                )
+                .map_err(crate::providers::sqlite::sqlite)
+            })
+            .unwrap();
+        assert_eq!(kept, 2);
+        // changed here (the name, the pin), it stays as it is here
+        execute(
+            &there,
+            &format!(
+                "UPDATE venues SET name = 'mine', pinned = 0, address = '' WHERE id = '{VENUE}'"
+            ),
+        );
+        import(&there, &archive, &en()).unwrap();
+        let (name, pinned): (String, i64) = there
+            .read(|tx| {
+                tx.query_row("SELECT name, pinned FROM venues", [], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })
+                .map_err(crate::providers::sqlite::sqlite)
+            })
+            .unwrap();
+        assert_eq!((name.as_str(), pinned), ("mine", 0));
+        // an archive of a training without gyms has no file of them
+        execute(&db, "UPDATE training_sessions SET venue_id = NULL");
+        assert!(
+            !files_of(&export(&db, Subject::Training(t.id)).unwrap()).contains_key("venues.json")
+        );
+    }
+
+    fn files_of(archive: &[u8]) -> BTreeMap<String, Json> {
+        files(archive)
     }
 
     fn files_of_team(db: &Database, t: &TeamEntry) -> BTreeMap<String, Json> {
@@ -306,7 +367,7 @@ mod tests {
         execute(
             &there,
             &format!(
-                "UPDATE training_sessions SET location = 'elsewhere' WHERE id = '{S2}';
+                "UPDATE training_sessions SET title = 'elsewhere' WHERE id = '{S2}';
                  UPDATE training_sessions SET deleted = 1 WHERE id = '{S1}';
                  UPDATE microcycles SET title = 'mine' WHERE id = '{MICRO}';"
             ),
@@ -464,10 +525,12 @@ mod tests {
                                 Json::from("2026-11-12"),
                                 Json::from(S2),
                                 Json::from(MICRO),
+                                Json::from(VENUE),
+                                Json::from(95.5),
                                 Json::from(true),
                                 Json::from(vec![1]),
                                 Json::from("é".repeat(100)),
-                            ][rng.below(13)]
+                            ][rng.below(15)]
                             .clone();
                             map.insert(key, value);
                         }

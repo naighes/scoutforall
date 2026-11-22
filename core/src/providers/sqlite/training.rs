@@ -38,7 +38,7 @@ impl SqliteTraining {
 
 pub(crate) const SESSION_COLUMNS: &str =
     "id, team_id, microcycle_id, series_id, start_local, duration_min,
-     actual_duration_min, location, title, objectives, notes, final_remarks, status";
+     actual_duration_min, venue_id, title, objectives, notes, final_remarks, status";
 
 pub(crate) fn session_from_row(row: &Row) -> rusqlite::Result<TrainingSession> {
     Ok(TrainingSession {
@@ -49,7 +49,7 @@ pub(crate) fn session_from_row(row: &Row) -> rusqlite::Result<TrainingSession> {
         start: row.get::<_, Sql<NaiveDateTime>>(4)?.0,
         duration_min: row.get(5)?,
         actual_duration_min: row.get(6)?,
-        location: row.get(7)?,
+        venue_id: row.get::<_, Option<Sql<Uuid>>>(7)?.map(|id| id.0),
         title: row.get(8)?,
         objectives: row.get(9)?,
         notes: row.get(10)?,
@@ -100,6 +100,7 @@ fn attendance_from_row(row: &Row) -> rusqlite::Result<AttendanceRow> {
         status: row.get(3)?,
         note: row.get(4)?,
         guest: row.get::<_, u8>(5)? == 1,
+        makeup: row.get::<_, u8>(6)? == 1,
     })
 }
 
@@ -112,7 +113,7 @@ fn roster_rows(
     unlisted: bool,
 ) -> Result<Vec<AttendanceRow>, AppError> {
     tx.prepare(
-        "SELECT p.id, p.name, tm.number, 'present', '', 0
+        "SELECT p.id, p.name, tm.number, 'present', '', 0, 0
          FROM team_members tm JOIN persons p ON p.id = tm.person_id
          WHERE tm.team_id = ?1 AND tm.deleted = 0 AND p.deleted = 0
            AND (?3 = 0 OR NOT EXISTS (
@@ -296,7 +297,7 @@ pub(crate) fn insert_session(
     let id = Uuid::new_v4();
     tx.execute(
         "INSERT INTO training_sessions (id, team_id, microcycle_id, series_id, start_local,
-             duration_min, actual_duration_min, location, title, objectives,
+             duration_min, actual_duration_min, venue_id, title, objectives,
              notes, final_remarks, status)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
@@ -307,7 +308,7 @@ pub(crate) fn insert_session(
             Sql(input.start),
             input.duration_min,
             input.actual_duration_min,
-            input.location,
+            input.venue_id.map(Sql),
             input.title,
             input.objectives,
             input.notes,
@@ -386,21 +387,6 @@ impl TrainingReader for SqliteTraining {
         self.0.read(|tx| read_session(tx, session_id))
     }
 
-    async fn locations(&self, team_id: &Uuid) -> Result<Vec<String>, AppError> {
-        self.0.read(|tx| {
-            tx.prepare(
-                "SELECT location FROM training_sessions
-                 WHERE team_id = ?1 AND deleted = 0 AND location <> ''
-                 GROUP BY location ORDER BY MAX(start_local) DESC, location",
-            )
-            .map_err(sqlite)?
-            .query_map([Sql(*team_id)], |row| row.get(0))
-            .map_err(sqlite)?
-            .collect::<Result<_, _>>()
-            .map_err(sqlite)
-        })
-    }
-
     async fn activities(&self, session_id: &Uuid) -> Result<Vec<Activity>, AppError> {
         self.0.read(|tx| {
             tx.prepare(&format!(
@@ -434,7 +420,7 @@ impl TrainingReader for SqliteTraining {
                 }),
                 true => tx
                     .prepare(
-                        "SELECT a.person_id, p.name, a.number, a.status, a.note, a.guest
+                        "SELECT a.person_id, p.name, a.number, a.status, a.note, a.guest, a.makeup
                          FROM training_attendance a
                          JOIN persons p ON p.id = a.person_id
                          LEFT JOIN team_members tm
@@ -565,7 +551,7 @@ impl TrainingWriter for SqliteTraining {
             let changed = tx
                 .execute(
                     "UPDATE training_sessions SET microcycle_id = ?2, start_local = ?3,
-                         duration_min = ?4, actual_duration_min = ?5, location = ?6, title = ?7,
+                         duration_min = ?4, actual_duration_min = ?5, venue_id = ?6, title = ?7,
                          objectives = ?8, notes = ?9, final_remarks = ?10, status = ?11
                      WHERE id = ?1 AND deleted = 0",
                     params![
@@ -574,7 +560,7 @@ impl TrainingWriter for SqliteTraining {
                         Sql(input.start),
                         input.duration_min,
                         input.actual_duration_min,
-                        input.location,
+                        input.venue_id.map(Sql),
                         input.title,
                         input.objectives,
                         input.notes,
@@ -632,7 +618,7 @@ impl TrainingWriter for SqliteTraining {
                                             start,
                                             duration_min,
                                             actual_duration_min: None,
-                                            location: input.location.trim().to_string(),
+                                            venue_id: input.venue_of(start),
                                             title: String::new(),
                                             objectives: String::new(),
                                             notes: String::new(),
@@ -660,7 +646,7 @@ impl TrainingWriter for SqliteTraining {
             Some(0) => Err(AppError::IO(IOError::Msg("invalid duration".into()))),
             _ => self.0.write(|tx| {
                 let (targets, busy) = series_targets(tx, session_id, scope)?;
-                let moved: Vec<(NaiveDateTime, u16, String)> =
+                let moved: Vec<(NaiveDateTime, u16, Option<Uuid>)> =
                     targets.iter().map(|s| edit.apply(s)).collect();
                 let windows: Vec<(NaiveDateTime, u16)> =
                     moved.iter().map(|(start, min, _)| (*start, *min)).collect();
@@ -676,11 +662,11 @@ impl TrainingWriter for SqliteTraining {
                     true => targets
                         .iter()
                         .zip(moved)
-                        .map(|(session, (start, minutes, location))| {
+                        .map(|(session, (start, minutes, venue))| {
                             tx.execute(
                                 "UPDATE training_sessions SET start_local = ?2,
-                                     duration_min = ?3, location = ?4 WHERE id = ?1",
-                                params![Sql(session.id), Sql(start), minutes, location],
+                                     duration_min = ?3, venue_id = ?4 WHERE id = ?1",
+                                params![Sql(session.id), Sql(start), minutes, venue.map(Sql)],
                             )
                             .map_err(sqlite)?;
                             read_session(tx, &session.id)
@@ -739,7 +725,7 @@ impl TrainingWriter for SqliteTraining {
                     start: input.start,
                     duration_min: original.duration_min,
                     actual_duration_min: None,
-                    location: original.location,
+                    venue_id: original.venue_id,
                     title: original.title,
                     objectives: match input.copy_objectives {
                         true => original.objectives,
@@ -979,10 +965,11 @@ impl TrainingWriter for SqliteTraining {
             rows.iter().try_for_each(|row| {
                 tx.execute(
                     "INSERT INTO training_attendance
-                         (session_id, person_id, status, note, number, guest, deleted)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0)
+                         (session_id, person_id, status, note, number, guest, makeup, deleted)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 0)
                      ON CONFLICT (session_id, person_id) DO UPDATE SET
-                         status = ?3, note = ?4, number = ?5, guest = ?6, deleted = 0",
+                         status = ?3, note = ?4, number = ?5, guest = ?6, makeup = ?7,
+                         deleted = 0",
                     params![
                         Sql(*session_id),
                         Sql(row.person_id),
@@ -990,6 +977,7 @@ impl TrainingWriter for SqliteTraining {
                         row.note,
                         row.number,
                         row.guest,
+                        row.guest && row.makeup,
                     ],
                 )
                 .map(|_| ())

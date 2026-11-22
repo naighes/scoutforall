@@ -1139,4 +1139,29 @@ mod tests {
             println!("{column:3} {count:5} {sum:+6}  {}", examples.join("; "));
         }
     }
+
+    /// The city and the hall of `[3MORE]`, with the UTF-8 copy when the file
+    /// has it; none when the section has neither.
+    #[test]
+    fn the_hall_is_read_from_the_more_section() {
+        let hall = |bytes: &[u8]| parse(bytes).unwrap().venue.map(|h| (h.city, h.name));
+        assert_eq!(
+            hall(EXAMPLE),
+            Some(("Braslovče".to_string(), "OŠ Braslovče".to_string()))
+        );
+        assert_eq!(hall(EXAMPLE), hall(TRUNCATED));
+        // the copy in UTF-8 of a file in a code page
+        assert_eq!(
+            hall(DCUP),
+            Some((
+                "Hartberg".to_string(),
+                "Bundesschulzentrum {HARTBERG}".to_string()
+            ))
+        );
+        // a hall and no city
+        assert_eq!(
+            hall(CLICK_SCOUT),
+            Some((String::new(), "Sport Centre".to_string()))
+        );
+    }
 }

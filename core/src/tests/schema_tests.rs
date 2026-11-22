@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn a_new_database_has_the_tables_of_this_version() {
         let db = db::open_in_memory().unwrap();
-        assert_eq!(db::schema_version(), 5);
+        assert_eq!(db::schema_version(), 6);
         let expected: &[(&str, &[&str])] = &[
             (
                 "competitions",
@@ -221,6 +221,7 @@ mod tests {
                     "legacy_id",
                     "legacy_team",
                     "deleted",
+                    "venue_id",
                 ],
             ),
             (
@@ -330,6 +331,7 @@ mod tests {
                     "note",
                     "number",
                     "guest",
+                    "makeup",
                     "deleted",
                 ],
             ),
@@ -355,7 +357,7 @@ mod tests {
                     "start_local",
                     "duration_min",
                     "actual_duration_min",
-                    "location",
+                    "venue_id",
                     "title",
                     "objectives",
                     "notes",
@@ -367,6 +369,20 @@ mod tests {
             (
                 "upload_queue",
                 &["match_id", "position", "queued_at", "retry_count"],
+            ),
+            (
+                "venues",
+                &[
+                    "id",
+                    "name",
+                    "address",
+                    "map_url",
+                    "latitude",
+                    "longitude",
+                    "notes",
+                    "pinned",
+                    "deleted",
+                ],
             ),
         ];
         assert_eq!(

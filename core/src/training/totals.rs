@@ -70,7 +70,9 @@ pub struct AttendanceLine {
 }
 
 /// The attendance of a player: late counts as present (and apart), the
-/// unavailable stay out of the base.
+/// unavailable stay out of the base. A makeup (a guest line of the player in
+/// a completed session of another team) takes the place of an absence, up to
+/// as many as there are: the percentage never goes over 100%.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayerAttendance {
     pub person_id: Uuid,
@@ -82,6 +84,8 @@ pub struct PlayerAttendance {
     pub late: u32,
     pub absent: u32,
     pub unavailable: u32,
+    /// of the presences, the makeups that took the place of an absence
+    pub makeups: u32,
 }
 
 impl PlayerAttendance {
@@ -124,8 +128,9 @@ pub struct AttendanceReport {
 }
 
 /// The report of the lines: a row for whoever has a line not as a guest,
-/// guests count in no row. Ordered by percentage.
-pub fn attendance_report(lines: &[AttendanceLine]) -> AttendanceReport {
+/// guests count in no row. `makeups` has the person of each makeup in the
+/// period (see `PlayerAttendance`). Ordered by percentage.
+pub fn attendance_report(lines: &[AttendanceLine], makeups: &[Uuid]) -> AttendanceReport {
     let sessions = lines.iter().map(|l| l.session_id).collect::<HashSet<_>>();
     let mut latest = lines.iter().filter(|l| !l.guest).collect::<Vec<_>>();
     latest.sort_by_key(|l| (l.start, l.session_id));
@@ -139,6 +144,7 @@ pub fn attendance_report(lines: &[AttendanceLine]) -> AttendanceReport {
             late: 0,
             absent: 0,
             unavailable: 0,
+            makeups: 0,
         });
         p.name = l.name.clone();
         p.number = l.number;
@@ -152,7 +158,17 @@ pub fn attendance_report(lines: &[AttendanceLine]) -> AttendanceReport {
             AttendanceStatus::Unavailable => p.unavailable += 1,
         }
     });
-    let mut players: Vec<PlayerAttendance> = rows.into_values().collect();
+    let mut players: Vec<PlayerAttendance> = rows
+        .into_values()
+        .map(|mut p| {
+            let made = makeups.iter().filter(|m| **m == p.person_id).count();
+            let used = u32::try_from(made).unwrap_or(u32::MAX).min(p.absent);
+            p.makeups = used;
+            p.present += used;
+            p.absent -= used;
+            p
+        })
+        .collect();
     players.sort_by(PlayerAttendance::order);
     AttendanceReport {
         sessions: u32::try_from(sessions.len()).unwrap_or(u32::MAX),

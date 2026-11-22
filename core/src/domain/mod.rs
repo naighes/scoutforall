@@ -291,6 +291,8 @@ pub struct Match {
     pub source: MatchSource,
     pub video_clock: bool,
     pub legacy: Option<LegacyId>,
+    /// the gym, if any; it may be a removed one
+    pub venue_id: Option<Uuid>,
     pub deleted: bool,
 }
 

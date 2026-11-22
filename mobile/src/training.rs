@@ -7,7 +7,7 @@ use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use scout4all_core::{
     errors::AppError,
     providers::{
-        sqlite::{persons::SqlitePersons, training::SqliteTraining},
+        sqlite::{persons::SqlitePersons, training::SqliteTraining, venues::SqliteVenues},
         training_agenda::TrainingAgenda,
         training_cycles::TrainingCycles,
         training_reader::TrainingReader,
@@ -30,6 +30,7 @@ use scout4all_core::{
         overlap::{Slot, SlotKind},
         series::{Band, SeriesEdit, SeriesInput, SeriesScope},
         totals::{AttendanceReport, Scope, Totals},
+        venue::Venue,
     },
 };
 use uuid::Uuid;
@@ -106,7 +107,8 @@ pub struct SessionRecord {
     pub start: String,
     pub duration_min: u16,
     pub actual_duration_min: Option<u16>,
-    pub location: String,
+    /// the gym, if any (it may be a removed one)
+    pub venue_id: Option<String>,
     pub title: String,
     pub objectives: String,
     pub notes: String,
@@ -122,7 +124,8 @@ pub struct SessionDraft {
     pub start: Option<String>,
     pub duration: String,
     pub actual_duration: String,
-    pub location: String,
+    /// the id of the gym, if any
+    pub venue: Option<String>,
     pub title: String,
     pub objectives: String,
     pub notes: String,
@@ -174,6 +177,8 @@ pub struct AttendanceRowRecord {
     pub status: AttendanceStatus,
     pub note: String,
     pub guest: bool,
+    /// a guest who makes up for a session of their own team
+    pub makeup: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -207,13 +212,14 @@ pub struct SeriesBand {
     pub weekday: u8,
     pub time: String,
     pub duration_min: u16,
+    /// the id of the gym of this band, if any
+    pub venue: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct SeriesDraft {
     pub from: String,
     pub to: String,
-    pub location: String,
     pub bands: Vec<SeriesBand>,
 }
 
@@ -241,7 +247,9 @@ pub struct SeriesResult {
 /// What changes in a series: only what is `Some`.
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct SeriesChange {
-    pub location: Option<String>,
+    /// the id of the gym to set; with `clear_venue` the gym goes instead
+    pub venue: Option<String>,
+    pub clear_venue: bool,
     /// `HH:MM`
     pub time: Option<String>,
     pub duration_min: Option<u16>,
@@ -318,7 +326,6 @@ pub enum AgendaItemRecord {
     Session {
         id: String,
         title: String,
-        location: String,
         status: SessionStatus,
         to_close: bool,
     },
@@ -340,6 +347,18 @@ pub struct AgendaEventRecord {
     pub start: String,
     pub minutes: u16,
     pub item: AgendaItemRecord,
+    pub venue: Option<VenueRefRecord>,
+    /// another team holds the same gym at the same time
+    pub shared_venue: bool,
+}
+
+/// The gym of an event.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct VenueRefRecord {
+    pub id: String,
+    pub name: String,
+    /// removed: the sessions and matches keep it
+    pub deleted: bool,
 }
 
 /// A day of the agenda, empty too.
@@ -454,7 +473,7 @@ fn session_record(s: &TrainingSession, now: NaiveDateTime) -> SessionRecord {
         start: moment(s.start),
         duration_min: s.duration_min,
         actual_duration_min: s.actual_duration_min,
-        location: s.location.clone(),
+        venue_id: s.venue_id.map(|id| id.to_string()),
         title: s.title.clone(),
         objectives: s.objectives.clone(),
         notes: s.notes.clone(),
@@ -497,6 +516,7 @@ fn attendance_record(r: &AttendanceRow) -> AttendanceRowRecord {
         status: r.status,
         note: r.note.clone(),
         guest: r.guest,
+        makeup: r.makeup,
     }
 }
 
@@ -546,13 +566,11 @@ fn event_record(e: &AgendaEvent) -> AgendaEventRecord {
             AgendaItem::Session {
                 id,
                 title,
-                location,
                 status,
                 to_close,
             } => AgendaItemRecord::Session {
                 id: id.to_string(),
                 title: title.clone(),
-                location: location.clone(),
                 status: *status,
                 to_close: *to_close,
             },
@@ -576,6 +594,12 @@ fn event_record(e: &AgendaEvent) -> AgendaEventRecord {
                 },
             },
         },
+        venue: e.venue.as_ref().map(|v| VenueRefRecord {
+            id: v.id.to_string(),
+            name: v.name.clone(),
+            deleted: v.deleted,
+        }),
+        shared_venue: e.shared_venue,
     }
 }
 
@@ -645,13 +669,6 @@ impl Scout4All {
         Ok(session_record(&session, Local::now().naive_local()))
     }
 
-    /// The places of the team's sessions, the latest first, to propose.
-    pub fn training_locations(&self, team_id: String) -> Result<Vec<String>, MobileError> {
-        Ok(self
-            .runtime
-            .block_on(self.training().locations(&parse_id(&team_id)?))?)
-    }
-
     /// A form for a new session: the usual duration, planned.
     pub fn new_session_draft(&self) -> SessionDraft {
         session_draft_of(&SessionForm::default())
@@ -677,7 +694,7 @@ impl Scout4All {
             start: draft.start.as_deref().map(parse_moment).transpose()?,
             duration: draft.duration,
             actual_duration: draft.actual_duration,
-            location: draft.location,
+            venue: opt_id(&draft.venue)?,
             title: draft.title,
             objectives: draft.objectives,
             notes: draft.notes,
@@ -923,6 +940,7 @@ impl Scout4All {
                     status: r.status,
                     note: r.note,
                     guest: r.guest,
+                    makeup: r.makeup,
                 }))
             })
             .collect::<Result<Vec<_>, MobileError>>()?;
@@ -946,7 +964,6 @@ impl Scout4All {
         let input = SeriesInput {
             from: parse_day(&draft.from, TrainingField::Range)?,
             to: parse_day(&draft.to, TrainingField::Range)?,
-            location: draft.location.trim().to_string(),
             bands: draft
                 .bands
                 .iter()
@@ -955,6 +972,7 @@ impl Scout4All {
                         weekday: weekday(b.weekday)?,
                         time: parse_time(&b.time)?,
                         duration_min: b.duration_min,
+                        venue_id: opt_id(&b.venue)?,
                     })
                 })
                 .collect::<Result<Vec<_>, MobileError>>()?,
@@ -991,7 +1009,11 @@ impl Scout4All {
         change: SeriesChange,
     ) -> Result<Vec<SessionRecord>, MobileError> {
         let edit = SeriesEdit {
-            location: change.location.map(|l| l.trim().to_string()),
+            venue: match (change.clear_venue, opt_id(&change.venue)?) {
+                (true, _) => Some(None),
+                (false, Some(id)) => Some(Some(id)),
+                (false, None) => None,
+            },
             time: change.time.as_deref().map(parse_time).transpose()?,
             duration_min: change.duration_min,
         };
@@ -1346,12 +1368,14 @@ impl Scout4All {
         let team = self.read_team(&session.team_id.to_string())?;
         let activities = self.runtime.block_on(training.activities(&session.id))?;
         let sheet = self.runtime.block_on(training.attendance(&session.id))?;
+        let venues = self.venues_of(std::slice::from_ref(&session))?;
         let sheet = session_sheet(
             self.language.labels(),
             &Context {
                 team: &team.name,
                 year: team.year,
                 printed: Local::now().naive_local(),
+                venues: &venues,
             },
             &session,
             &activities,
@@ -1381,12 +1405,19 @@ impl Scout4All {
                 Ok((session, activities))
             })
             .collect::<Result<Vec<_>, AppError>>()?;
+        let venues = self.venues_of(
+            &sessions
+                .iter()
+                .map(|(session, _)| session.clone())
+                .collect::<Vec<_>>(),
+        )?;
         let sheet = microcycle_sheet(
             self.language.labels(),
             &Context {
                 team: &team.name,
                 year: team.year,
                 printed: Local::now().naive_local(),
+                venues: &venues,
             },
             &cycle,
             &sessions,
@@ -1400,6 +1431,18 @@ impl Scout4All {
     fn training(&self) -> SqliteTraining {
         SqliteTraining::new(self.db.clone())
     }
+
+    /// The gyms the sessions hold, removed or not: what a sheet names.
+    fn venues_of(&self, sessions: &[TrainingSession]) -> Result<Vec<Venue>, AppError> {
+        let venues = SqliteVenues::new(self.db.clone());
+        sessions
+            .iter()
+            .filter_map(|s| s.venue_id)
+            .collect::<std::collections::BTreeSet<_>>()
+            .iter()
+            .map(|id| venues.venue(id))
+            .collect()
+    }
 }
 
 fn session_draft_of(form: &SessionForm) -> SessionDraft {
@@ -1407,7 +1450,7 @@ fn session_draft_of(form: &SessionForm) -> SessionDraft {
         start: form.start.map(moment),
         duration: form.duration.clone(),
         actual_duration: form.actual_duration.clone(),
-        location: form.location.clone(),
+        venue: form.venue.map(|id| id.to_string()),
         title: form.title.clone(),
         objectives: form.objectives.clone(),
         notes: form.notes.clone(),
@@ -1537,6 +1580,16 @@ mod tests {
             .unwrap()
     }
 
+    /// A gym of the database, by its id.
+    fn gym(app: &Scout4All, name: &str) -> String {
+        use scout4all_core::training::venue::VenueInput;
+        SqliteVenues::new(app.db.clone())
+            .create(VenueInput::named(name).unwrap())
+            .unwrap()
+            .id
+            .to_string()
+    }
+
     #[test]
     fn a_session_is_saved_listed_and_edited() {
         let dir = tempfile::tempdir().unwrap();
@@ -1546,15 +1599,15 @@ mod tests {
         assert_eq!(first.duration_min, 90);
         assert_eq!(first.status, SessionStatus::Planned);
         assert!(!first.to_close);
+        let gym = gym(&app, "Palestra");
         let mut edit = app.session_draft(first.id.clone()).unwrap();
-        edit.location = " Palestra ".into();
+        edit.venue = Some(gym.clone());
         let saved = app
             .save_session(team.clone(), Some(first.id.clone()), edit)
             .unwrap();
         assert_eq!(saved.id, first.id);
-        assert_eq!(saved.location, "Palestra");
-        assert_eq!(app.training_sessions(team.clone()).unwrap(), vec![saved]);
-        assert_eq!(app.training_locations(team).unwrap(), vec!["Palestra"]);
+        assert_eq!(saved.venue_id, Some(gym));
+        assert_eq!(app.training_sessions(team).unwrap(), vec![saved]);
     }
 
     #[test]
@@ -1729,16 +1782,17 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let app = app(&dir);
         let team = team(&app, "Cortona");
+        let (palestra, campo) = (gym(&app, "Palestra"), gym(&app, "Campo"));
         // Mondays and Wednesdays of two weeks
         let series = SeriesDraft {
             from: "2030-03-04".into(),
             to: "2030-03-15".into(),
-            location: "Palestra".into(),
             bands: [(1, "18:30"), (3, "20:00")]
                 .map(|(weekday, time)| SeriesBand {
                     weekday,
                     time: time.into(),
                     duration_min: 90,
+                    venue: Some(palestra.clone()),
                 })
                 .into(),
         };
@@ -1757,7 +1811,8 @@ mod tests {
                 first.id.clone(),
                 SeriesScope::All,
                 SeriesChange {
-                    location: Some("Campo".into()),
+                    venue: Some(campo.clone()),
+                    clear_venue: false,
                     time: None,
                     duration_min: Some(60),
                 },
@@ -1766,7 +1821,7 @@ mod tests {
         assert!(
             moved
                 .iter()
-                .all(|s| s.location == "Campo" && s.duration_min == 60)
+                .all(|s| s.venue_id.as_ref() == Some(&campo) && s.duration_min == 60)
         );
         assert_eq!(app.remove_series(first.id, SeriesScope::All).unwrap(), 3);
         assert_eq!(app.training_sessions(team).unwrap().len(), 1);

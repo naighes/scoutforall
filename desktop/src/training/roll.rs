@@ -221,6 +221,8 @@ impl Roll {
                     status: AttendanceStatus::Present,
                     note: String::new(),
                     guest: true,
+                    // a player of another team of the user makes up by default
+                    makeup: !person.teams.is_empty(),
                 });
                 self.selected = self.rows.len().saturating_sub(1);
                 self.over = None;

@@ -110,6 +110,7 @@ mod tests {
             status,
             note: String::new(),
             guest,
+            makeup: false,
         }
     }
 
@@ -560,10 +561,228 @@ mod tests {
             late: 0,
             absent,
             unavailable: 0,
+            makeups: 0,
         };
         assert_eq!(row(1, 2).percent(), Some(33));
         assert_eq!(row(2, 1).percent(), Some(67));
         assert_eq!(row(0, 0).percent(), None);
         assert_eq!(row(3, 0).percent(), Some(100));
+    }
+
+    // the makeups: a guest line marked so makes up for an absence
+
+    /// Ada (A) is absent on the 3rd, 4th and 5th and present on the 2nd.
+    async fn ada_misses_three(p: &P) -> (TeamEntry, TeamEntry, Uuid) {
+        let mut a = team(p, "A").await;
+        let b = team(p, "B").await;
+        let ada = player(p, &mut a, "Ada", 1).await;
+        for (d, status) in [(2, Present), (3, Absent), (4, Absent), (5, Absent)] {
+            let s = completed(p, &a, day(11, d)).await;
+            mark(p, &s, vec![(ada, status)]).await;
+        }
+        (a, b, ada)
+    }
+
+    /// A session of B on the day, completed, where Ada is a guest.
+    async fn guest_of_b(
+        p: &P,
+        b: &TeamEntry,
+        ada: Uuid,
+        d: u32,
+        status: AttendanceStatus,
+        makeup: bool,
+    ) -> Uuid {
+        let s = completed(p, b, day(11, d)).await;
+        p.training
+            .save_attendance(
+                &s,
+                vec![AttendanceInput {
+                    number: Some(1),
+                    makeup,
+                    ..line(ada, status, true)
+                }],
+            )
+            .await
+            .unwrap();
+        s
+    }
+
+    async fn ada_row(
+        p: &P,
+        a: &TeamEntry,
+        scope: Scope,
+    ) -> crate::training::totals::PlayerAttendance {
+        p.training
+            .attendance_report(&a.id, scope)
+            .await
+            .unwrap()
+            .players
+            .remove(0)
+    }
+
+    #[tokio::test]
+    async fn a_makeup_takes_the_place_of_an_absence() {
+        let p = providers();
+        let (a, b, ada) = ada_misses_three(&p).await;
+        let before = ada_row(&p, &a, Scope::All).await;
+        assert_eq!((before.present, before.absent, before.makeups), (1, 3, 0));
+        assert_eq!(before.percent(), Some(25));
+        guest_of_b(&p, &b, ada, 6, Present, true).await;
+        guest_of_b(&p, &b, ada, 7, Late, true).await;
+        let after = ada_row(&p, &a, Scope::All).await;
+        assert_eq!(
+            (after.present, after.late, after.absent, after.makeups),
+            (3, 0, 1, 2)
+        );
+        assert_eq!(after.percent(), Some(75));
+    }
+
+    #[tokio::test]
+    async fn the_makeups_are_at_most_the_absences() {
+        let p = providers();
+        let (a, b, ada) = ada_misses_three(&p).await;
+        for d in 6..=10 {
+            guest_of_b(&p, &b, ada, d, Present, true).await;
+        }
+        let row = ada_row(&p, &a, Scope::All).await;
+        // three absences made up, two more makeups that make up nothing
+        assert_eq!((row.present, row.absent, row.makeups), (4, 0, 3));
+        assert_eq!(row.percent(), Some(100));
+        // with no absence, none at all
+        let mut c = team(&p, "C").await;
+        let eve = player(&p, &mut c, "Eve", 2).await;
+        let s = completed(&p, &c, day(11, 2)).await;
+        mark(&p, &s, vec![(eve, Present)]).await;
+        guest_of_b(&p, &b, eve, 11, Present, true).await;
+        let row = ada_row(&p, &c, Scope::All).await;
+        assert_eq!((row.present, row.absent, row.makeups), (1, 0, 0));
+        assert_eq!(row.percent(), Some(100));
+    }
+
+    #[tokio::test]
+    async fn only_a_present_marked_guest_line_in_a_completed_session_of_another_team_counts() {
+        let p = providers();
+        let (a, b, ada) = ada_misses_three(&p).await;
+        // not marked as a makeup
+        guest_of_b(&p, &b, ada, 6, Present, false).await;
+        // marked, but absent or unavailable
+        guest_of_b(&p, &b, ada, 7, Absent, true).await;
+        guest_of_b(&p, &b, ada, 8, Unavailable, true).await;
+        // marked and present, in a session not completed
+        let s = guest_of_b(&p, &b, ada, 9, Present, true).await;
+        p.training
+            .set_session_status(&s, SessionStatus::Cancelled)
+            .await
+            .unwrap();
+        let s = guest_of_b(&p, &b, ada, 10, Present, true).await;
+        p.training
+            .set_session_status(&s, SessionStatus::Planned)
+            .await
+            .unwrap();
+        // marked and present, in a session removed
+        let s = guest_of_b(&p, &b, ada, 11, Present, true).await;
+        p.training.remove_session(&s).await.unwrap();
+        // a person who is not of the team
+        let mut c = team(&p, "C").await;
+        let eve = player(&p, &mut c, "Eve", 2).await;
+        guest_of_b(&p, &b, eve, 12, Present, true).await;
+        let row = ada_row(&p, &a, Scope::All).await;
+        assert_eq!((row.present, row.absent, row.makeups), (1, 3, 0));
+        // the one that counts, the day after
+        guest_of_b(&p, &b, ada, 13, Present, true).await;
+        assert_eq!(ada_row(&p, &a, Scope::All).await.makeups, 1);
+    }
+
+    #[tokio::test]
+    async fn the_makeups_of_a_period_are_those_that_start_in_it() {
+        let p = providers();
+        let (a, b, ada) = ada_misses_three(&p).await;
+        guest_of_b(&p, &b, ada, 6, Present, true).await;
+        guest_of_b(&p, &b, ada, 17, Present, true).await;
+        let in_dates = |from: NaiveDate, to: NaiveDate| {
+            Scope::Dates(Window {
+                start: from,
+                end: to,
+            })
+        };
+        let made = |scope: Scope| {
+            let (p, id) = (&p, a.id);
+            async move {
+                p.training
+                    .attendance_report(&id, scope)
+                    .await
+                    .unwrap()
+                    .players
+                    .first()
+                    .map(|row| row.makeups)
+                    .unwrap_or(0)
+            }
+        };
+        // the sessions of A are from the 2nd to the 5th: the period has to hold
+        // them to show the player; the makeups are those that start in it
+        assert_eq!(made(in_dates(day(11, 2), day(11, 9))).await, 1);
+        assert_eq!(made(in_dates(day(11, 2), day(11, 6))).await, 0);
+        assert_eq!(made(Scope::All).await, 2);
+        assert_eq!(made(in_dates(day(11, 9), day(11, 20))).await, 0);
+    }
+
+    #[tokio::test]
+    async fn the_window_of_a_cycle_is_the_period_of_its_makeups() {
+        let p = providers();
+        let (a, b, ada) = ada_misses_three(&p).await;
+        // the week of the 2nd holds the sessions of A, the makeup is on the 6th (Friday)
+        let micro = p
+            .training
+            .create_cycle(
+                &a.id,
+                Level::Microcycle,
+                cycle(None, day(11, 2), Span::Weeks(1)),
+                vec![],
+            )
+            .await
+            .unwrap();
+        let sessions = p.training.sessions(&a.id).await.unwrap();
+        p.training
+            .add_children(
+                Level::Microcycle,
+                &micro.id,
+                sessions.iter().map(|s| s.id).collect(),
+            )
+            .await
+            .unwrap();
+        guest_of_b(&p, &b, ada, 6, Present, true).await;
+        guest_of_b(&p, &b, ada, 17, Present, true).await;
+        let row = ada_row(&p, &a, Scope::Cycle(Level::Microcycle, micro.id)).await;
+        assert_eq!((row.present, row.absent, row.makeups), (2, 2, 1));
+        // the cycle of another team gives nothing
+        let other = p
+            .training
+            .attendance_report(&b.id, Scope::Cycle(Level::Microcycle, micro.id))
+            .await
+            .unwrap();
+        assert!(other.players.is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_makeup_is_kept_only_for_a_guest() {
+        let p = providers();
+        let (a, b, ada) = ada_misses_three(&p).await;
+        let s = completed(&p, &a, day(11, 9)).await;
+        p.training
+            .save_attendance(
+                &s,
+                vec![AttendanceInput {
+                    makeup: true,
+                    ..line(ada, Present, false)
+                }],
+            )
+            .await
+            .unwrap();
+        assert!(!p.training.attendance(&s).await.unwrap().rows[0].makeup);
+        let g = guest_of_b(&p, &b, ada, 6, Present, true).await;
+        let sheet = p.training.attendance(&g).await.unwrap();
+        assert!(sheet.rows[0].guest && sheet.rows[0].makeup);
+        // and the same line gives back what was saved
+        assert!(AttendanceInput::from(&sheet.rows[0]).makeup);
     }
 }

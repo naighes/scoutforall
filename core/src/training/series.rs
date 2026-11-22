@@ -7,6 +7,7 @@
 
 use crate::training::{SessionStatus, TrainingSession, overlap::Slot};
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use uuid::Uuid;
 
 /// The most sessions a repetition makes.
 pub const MAX_SESSIONS: usize = 400;
@@ -14,21 +15,21 @@ pub const MAX_SESSIONS: usize = 400;
 /// The most days a repetition spans (bounds the walk over the dates).
 const MAX_DAYS: i64 = 3660;
 
-/// The time and length of the session of a weekday.
+/// The time, length and gym of the session of a weekday: the gym is of the
+/// band (Terontola on Monday and Wednesday, Montecchio on Thursday).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Band {
     pub weekday: Weekday,
     pub time: NaiveTime,
     pub duration_min: u16,
+    pub venue_id: Option<Uuid>,
 }
 
-/// What the user asked: bands between two dates, both included, in one
-/// place.
+/// What the user asked: bands between two dates, both included.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SeriesInput {
     pub from: NaiveDate,
     pub to: NaiveDate,
-    pub location: String,
     pub bands: Vec<Band>,
 }
 
@@ -46,6 +47,14 @@ pub enum SeriesError {
 }
 
 impl SeriesInput {
+    /// The gym of the session that starts at `start`: that of its band.
+    pub fn venue_of(&self, start: NaiveDateTime) -> Option<Uuid> {
+        self.bands
+            .iter()
+            .find(|b| b.weekday == start.date().weekday())
+            .and_then(|b| b.venue_id)
+    }
+
     /// The sessions it makes: start and minutes, by start.
     pub fn generate(&self) -> Result<Vec<(NaiveDateTime, u16)>, SeriesError> {
         let days = (self.to - self.from).num_days();
@@ -106,11 +115,12 @@ pub enum SeriesScope {
     All,
 }
 
-/// A group change: location, time of day, duration; never the date. What is
-/// none stays as it is, so the time is rewritten only when it's changed.
+/// A group change: gym, time of day, duration; never the date. What is
+/// none stays as it is, so the time is rewritten only when it's changed;
+/// `Some(None)` takes the gym away.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SeriesEdit {
-    pub location: Option<String>,
+    pub venue: Option<Option<Uuid>>,
     pub time: Option<NaiveTime>,
     pub duration_min: Option<u16>,
 }
@@ -148,16 +158,13 @@ pub fn select(
 
 impl SeriesEdit {
     /// The session as changed: same day, the new time and duration if any.
-    pub fn apply(&self, session: &TrainingSession) -> (NaiveDateTime, u16, String) {
+    pub fn apply(&self, session: &TrainingSession) -> (NaiveDateTime, u16, Option<Uuid>) {
         (
             self.time
                 .map(|t| session.start.date().and_time(t))
                 .unwrap_or(session.start),
             self.duration_min.unwrap_or(session.duration_min),
-            self.location
-                .as_ref()
-                .map(|l| l.trim().to_string())
-                .unwrap_or_else(|| session.location.clone()),
+            self.venue.unwrap_or(session.venue_id),
         )
     }
 }

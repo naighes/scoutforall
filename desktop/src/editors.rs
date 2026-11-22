@@ -933,6 +933,7 @@ impl Editor {
             home: court == COURT_HOME,
             max_substitutions: f.text(MATCH_SUBSTITUTIONS),
             notes: f.text(MATCH_NOTES),
+            venue: m.data.venue,
             roster: m.data.roster.clone(),
             opponent_team: m.data.opponent_team,
             create_opponent: checked(MATCH_CREATE_OPPONENT),

@@ -297,7 +297,7 @@ pub(crate) fn match_rows(tx: &Transaction, match_id: Uuid) -> Result<Option<Matc
         .query_row(
             "SELECT id, team_a, team_b, team_b_name, home, scouting, start, duration_min,
                     friendly, competition_id, stage, round, max_substitutions, notes, source,
-                    video_clock, legacy_id, legacy_team, deleted
+                    video_clock, legacy_id, legacy_team, deleted, venue_id
              FROM matches WHERE id = ?1 AND deleted = 0",
             [Sql(match_id)],
             |r| {
@@ -325,6 +325,7 @@ pub(crate) fn match_rows(tx: &Transaction, match_id: Uuid) -> Result<Option<Matc
                         source: r.get(14)?,
                         video_clock: r.get(15)?,
                         legacy,
+                        venue_id: some_id(r, 19)?,
                         deleted: r.get(18)?,
                     },
                 ))
@@ -488,9 +489,9 @@ pub(crate) fn insert_match(tx: &Transaction, rows: &MatchRows) -> Result<(), App
     tx.execute(
         "INSERT INTO matches (id, team_a, team_b, team_b_name, home, scouting, start,
              duration_min, friendly, competition_id, stage, round, max_substitutions, notes,
-             source, video_clock, legacy_id, legacy_team, deleted)
+             source, video_clock, legacy_id, legacy_team, deleted, venue_id)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
-             ?18, ?19)",
+             ?18, ?19, ?20)",
         params![
             Sql(m.id),
             Sql(m.team_a),
@@ -510,7 +511,8 @@ pub(crate) fn insert_match(tx: &Transaction, rows: &MatchRows) -> Result<(), App
             m.video_clock,
             m.legacy.as_ref().map(|l| l.id.as_str()),
             m.legacy.as_ref().map(|l| Sql(l.team)),
-            m.deleted
+            m.deleted,
+            m.venue_id.map(Sql)
         ],
     )
     .map_err(sqlite)?;

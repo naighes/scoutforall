@@ -9,6 +9,22 @@
 -- derived. Dates are `YYYY-MM-DD`; the time of a session is local, without
 -- offset, `YYYY-MM-DDTHH:MM`, the one the user wrote.
 
+-- A gym, common to every team: where sessions and matches are held. Only the
+-- name is needed; the coordinates come together or not at all. `pinned` is
+-- the evidence of the gyms the user trains in, the same on every device.
+CREATE TABLE venues (
+    id        TEXT PRIMARY KEY CHECK (length(id) = 36),
+    name      TEXT NOT NULL CHECK (name <> ''),
+    address   TEXT NOT NULL DEFAULT '',
+    map_url   TEXT NOT NULL DEFAULT '',
+    latitude  REAL CHECK (latitude IS NULL OR latitude BETWEEN -90 AND 90),
+    longitude REAL CHECK (longitude IS NULL OR longitude BETWEEN -180 AND 180),
+    notes     TEXT NOT NULL DEFAULT '',
+    pinned    INTEGER NOT NULL DEFAULT 0 CHECK (pinned IN (0, 1)),
+    deleted   INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
+    CHECK ((latitude IS NULL) = (longitude IS NULL))
+) STRICT;
+
 CREATE TABLE training_programs (
     id          TEXT PRIMARY KEY CHECK (length(id) = 36),
     team_id     TEXT NOT NULL REFERENCES teams (id),
@@ -59,7 +75,7 @@ CREATE TABLE training_sessions (
     duration_min        INTEGER NOT NULL CHECK (duration_min BETWEEN 1 AND 65535),
     actual_duration_min INTEGER CHECK (actual_duration_min IS NULL
                                        OR actual_duration_min BETWEEN 1 AND 65535),
-    location            TEXT NOT NULL DEFAULT '',
+    venue_id            TEXT REFERENCES venues (id),
     title               TEXT NOT NULL DEFAULT '',
     objectives          TEXT NOT NULL DEFAULT '',
     notes               TEXT NOT NULL DEFAULT '',
@@ -71,6 +87,8 @@ CREATE TABLE training_sessions (
 CREATE INDEX training_sessions_by_team ON training_sessions (team_id, start_local);
 CREATE INDEX training_sessions_by_microcycle ON training_sessions (microcycle_id)
     WHERE microcycle_id IS NOT NULL;
+CREATE INDEX training_sessions_by_venue ON training_sessions (venue_id)
+    WHERE venue_id IS NOT NULL;
 CREATE INDEX training_sessions_by_series ON training_sessions (series_id)
     WHERE series_id IS NOT NULL;
 
@@ -101,6 +119,8 @@ CREATE TABLE training_attendance (
     note        TEXT NOT NULL DEFAULT '',
     number      INTEGER CHECK (number IS NULL OR number BETWEEN 0 AND 255),
     guest       INTEGER NOT NULL DEFAULT 0 CHECK (guest IN (0, 1)),
+    -- a guest who makes up for a session of their own team they missed
+    makeup      INTEGER NOT NULL DEFAULT 0 CHECK (makeup IN (0, 1)),
     deleted     INTEGER NOT NULL DEFAULT 0 CHECK (deleted IN (0, 1)),
     PRIMARY KEY (session_id, person_id)
 ) STRICT;

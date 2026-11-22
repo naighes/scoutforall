@@ -8,6 +8,7 @@ mod tests {
     use crate::reporting::training::{Context, SessionOptions, microcycle_sheet, session_sheet};
     use crate::shapes::enums::LanguageEnum;
     use crate::training::cycles::{Cycle, Level, Span, Window};
+    use crate::training::venue::Venue;
     use crate::training::{
         Activity, ActivityStatus, AttendanceRow, AttendanceStatus, SessionStatus, TrainingSession,
     };
@@ -20,6 +21,8 @@ mod tests {
             .unwrap_or_default()
     }
 
+    const GYM: Uuid = Uuid::from_u128(7);
+
     fn session(day: u32, status: SessionStatus) -> TrainingSession {
         TrainingSession {
             id: Uuid::new_v4(),
@@ -29,7 +32,7 @@ mod tests {
             start: at(day, 18),
             duration_min: 90,
             actual_duration_min: None,
-            location: "Palestra Łódź".into(),
+            venue_id: Some(GYM),
             title: "Ricezione".into(),
             objectives: "serve\nreception".into(),
             notes: "bring the balls".into(),
@@ -60,6 +63,7 @@ mod tests {
             status,
             note: "SECRET player note".into(),
             guest,
+            makeup: false,
         }
     }
 
@@ -68,6 +72,16 @@ mod tests {
             team: "東京 Volley",
             year: 2026,
             printed: at(22, 9),
+            venues: Box::leak(Box::new(vec![Venue {
+                id: GYM,
+                name: "Palestra Łódź".into(),
+                address: String::new(),
+                map_url: String::new(),
+                coordinates: None,
+                notes: String::new(),
+                pinned: false,
+                deleted: false,
+            }])),
         }
     }
 

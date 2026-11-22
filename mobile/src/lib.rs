@@ -117,6 +117,7 @@ pub mod sender;
 pub use analysis::*;
 pub mod strip;
 pub mod training;
+pub mod venues;
 pub mod video;
 
 // the types of the core the app sees as they are
@@ -379,6 +380,8 @@ pub struct MatchForm {
     pub numbers: Vec<RosterNumber>,
     #[uniffi(default = false)]
     pub both: bool,
+    #[uniffi(default = None)]
+    pub venue: Option<Uuid>,
 }
 
 /// The form of a competition: edited in their list, created in the form

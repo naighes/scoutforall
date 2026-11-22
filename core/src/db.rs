@@ -26,6 +26,8 @@ pub const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0004_scouting_rules_v4.sql"),
     // v5: TODO/021, the training of a team
     include_str!("migrations/0005_training.sql"),
+    // v6: TODO/021 §13, the gym of a match
+    include_str!("migrations/0006_match_venue.sql"),
 ];
 
 /// The version of the schema this app writes.

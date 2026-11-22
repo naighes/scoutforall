@@ -889,7 +889,14 @@ impl SessionPage {
                     line(s.date, when),
                     line(s.session_duration, duration),
                     line("", state),
-                    line(s.session_location, r.location.clone()),
+                    line(
+                        s.session_location,
+                        r.venue_id
+                            .as_ref()
+                            .and_then(|id| self.core.venue(id.clone()).ok())
+                            .map(|v| v.name)
+                            .unwrap_or_default(),
+                    ),
                     line(s.objectives, r.objectives.clone()),
                     line(s.notes, r.notes.clone()),
                     line(s.final_remarks, r.final_remarks.clone()),

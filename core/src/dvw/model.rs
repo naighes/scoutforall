@@ -35,6 +35,8 @@ pub struct DvwFile {
     pub generator: Option<String>,
     pub last_change: Option<String>,
     pub match_info: MatchInfo,
+    /// Where it was played, from `[3MORE]`.
+    pub venue: Option<Hall>,
     pub home: Team,
     pub visiting: Team,
     pub sets: Vec<SetResult>,
@@ -84,6 +86,13 @@ pub struct MatchInfo {
     pub day_number: Option<String>,
     /// The code page declared by the file, e.g. `1250`, or `UTF-8`.
     pub text_encoding: Option<String>,
+}
+
+/// The city and the hall of `[3MORE]`, as written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Hall {
+    pub city: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]

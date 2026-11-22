@@ -887,7 +887,6 @@ impl TrainingScreen {
                 .color(c.muted)
                 .width(Length::Fixed(190.0)),
             ui::name(title),
-            text(r.location.clone()).size(SIZE_SMALL).color(c.muted),
             text(format!("{} {}", r.duration_min, s.min_short))
                 .size(SIZE_SMALL)
                 .color(c.muted),

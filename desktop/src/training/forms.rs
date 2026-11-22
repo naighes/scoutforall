@@ -68,22 +68,48 @@ pub(super) fn microcycle_options(
     options
 }
 
-/// The places written before that fit what is written (all, when the
-/// arrow of the drop-down opened them).
-pub(super) fn location_suggestions(
-    locations: &[String],
-    written: &str,
-    all: bool,
-) -> Vec<Suggestion> {
-    let needle = written.to_lowercase();
-    locations
-        .iter()
-        .filter(|l| all || needle.is_empty() || l.to_lowercase().contains(&needle))
-        .map(|l| Suggestion {
-            label: l.clone(),
-            value: l.clone(),
-        })
-        .collect()
+/// The gyms a form of the team offers, and the one `current` even when it
+/// was removed: id and name, in the order of the choice (pinned first, then
+/// the ones the team used).
+pub(super) fn venue_options(
+    core: &Scout4All,
+    team_id: &str,
+    current: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut options: Vec<(String, String)> = core
+        .venue_choices(team_id.to_string(), String::new())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|v| (v.id, v.name))
+        .collect();
+    if let Some(kept) = current
+        .filter(|id| !options.iter().any(|(o, _)| o == id))
+        .and_then(|id| core.venue(id.to_string()).ok())
+    {
+        options.push((kept.id, kept.name));
+    }
+    options
+}
+
+/// The choice of a gym: the empty one, then `options`; `current` is the
+/// one chosen.
+pub(super) fn venue_value(options: &[(String, String)], current: Option<&str>) -> Value {
+    Value::Choice {
+        options: std::iter::once(EMPTY.to_string())
+            .chain(options.iter().map(|(_, name)| name.clone()))
+            .collect(),
+        index: current
+            .and_then(|id| options.iter().position(|(o, _)| o == id))
+            .map_or(0, |at| at + 1),
+    }
+}
+
+/// The id of the gym at the position `index` of a choice made by `venue_value`.
+pub(super) fn venue_at(options: &[(String, String)], index: usize) -> Option<String> {
+    index
+        .checked_sub(1)
+        .and_then(|at| options.get(at))
+        .map(|(id, _)| id.clone())
 }
 
 /// The choice of a microcycle: the empty one, then `options`; `chosen` is
@@ -125,7 +151,7 @@ pub struct SessionEditor {
     team_id: String,
     id: Option<String>,
     status: SessionStatus,
-    locations: Vec<String>,
+    venues: Vec<(String, String)>,
     /// the microcycles of the choice after the empty one: id and name
     microcycles: Vec<(String, String)>,
 }
@@ -143,7 +169,7 @@ impl SessionEditor {
             Some(id) => core.session_draft(id.clone())?,
             None => core.new_session_draft(),
         };
-        let locations = core.training_locations(team_id.clone())?;
+        let venues = venue_options(core, &team_id, draft.venue.as_deref());
         let (date, time) = split(&draft.start);
         let date = match (&id, day) {
             (None, Some(day)) => day.format("%Y-%m-%d").to_string(),
@@ -153,7 +179,10 @@ impl SessionEditor {
             Field::masked(s.date, &date, Mask::Date, s.date_placeholder),
             Field::masked(s.time, &time, Mask::Time, s.time_placeholder),
             Field::text(s.session_duration, draft.duration.clone()),
-            Field::dropdown(s.session_location, draft.location.clone()),
+            Field {
+                value: venue_value(&venues, draft.venue.as_deref()),
+                ..Field::choice(s.session_location, vec![], 0)
+            },
             Field::text(s.session_title, draft.title.clone()),
             Field::text(s.objectives, draft.objectives.clone()),
             Field::text(s.notes, draft.notes.clone()),
@@ -172,21 +201,11 @@ impl SessionEditor {
             team_id,
             id,
             status: draft.status,
-            locations,
+            venues,
             microcycles: vec![],
         };
-        editor.offer_locations();
         editor.offer_microcycles(core, draft.microcycle.as_deref());
         Ok(editor)
-    }
-
-    fn offer_locations(&mut self) {
-        let offered = location_suggestions(
-            &self.locations,
-            &self.form.text(LOCATION),
-            self.form.browsing(LOCATION),
-        );
-        self.form.suggest(LOCATION, offered);
     }
 
     /// The microcycles that hold the day written, and the one the session is
@@ -232,10 +251,6 @@ impl SessionEditor {
                 self.offer_microcycles(core, current.as_deref());
                 Edited::Stay
             }
-            Outcome::Changed(LOCATION) => {
-                self.offer_locations();
-                Edited::Stay
-            }
             Outcome::Changed(_) => Edited::Stay,
             Outcome::Save => self.save(core),
         }
@@ -248,7 +263,7 @@ impl SessionEditor {
                 .then(|| format!("{}T{}", date.trim(), time.trim())),
             duration: self.form.text(DURATION),
             actual_duration: self.form.text(ACTUAL),
-            location: self.form.text(LOCATION),
+            venue: venue_at(&self.venues, self.form.index(LOCATION)),
             title: self.form.text(TITLE),
             objectives: self.form.text(OBJECTIVES),
             notes: self.form.text(NOTES),

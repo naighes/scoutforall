@@ -2,7 +2,7 @@
 //! one list (TODO/021 §5). Pure: the provider reads the events, this says
 //! which days the periods cover and how the events fall into them.
 
-use crate::training::SessionStatus;
+use crate::training::{SessionStatus, venue::VenueRef};
 use chrono::{Datelike, Days, Months, NaiveDate, NaiveDateTime};
 use uuid::Uuid;
 
@@ -55,7 +55,6 @@ pub enum AgendaItem {
     Session {
         id: Uuid,
         title: String,
-        location: String,
         status: SessionStatus,
         /// Planned and over: to complete or cancel.
         to_close: bool,
@@ -67,6 +66,15 @@ pub enum AgendaItem {
         opponent_team: Option<Uuid>,
         state: MatchState,
     },
+}
+
+impl AgendaItem {
+    /// The id of the session or of the match.
+    pub fn id(&self) -> Uuid {
+        match self {
+            AgendaItem::Session { id, .. } | AgendaItem::Match { id, .. } => *id,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,6 +94,10 @@ pub struct AgendaEvent {
     /// programma its duration, or the usual one.
     pub minutes: u16,
     pub item: AgendaItem,
+    /// the gym of the session or match, if any
+    pub venue: Option<VenueRef>,
+    /// another team holds the same gym at the same time: allowed, but shown
+    pub shared_venue: bool,
 }
 
 /// The sets of the team of the event and of the opponent, from A's side.

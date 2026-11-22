@@ -343,7 +343,6 @@ fn event_row<'a>(
     let (icon, title, detail, trailing) = match &event.item {
         AgendaItemRecord::Session {
             title,
-            location,
             status,
             to_close,
             ..
@@ -361,11 +360,15 @@ fn event_row<'a>(
                     true => s.training.to_string(),
                     false => title.clone(),
                 },
-                [location.clone()]
-                    .into_iter()
-                    .chain(flags)
-                    .filter(|d| !d.is_empty())
-                    .collect::<Vec<_>>(),
+                [event
+                    .venue
+                    .as_ref()
+                    .map(|v| v.name.clone())
+                    .unwrap_or_default()]
+                .into_iter()
+                .chain(flags)
+                .filter(|d| !d.is_empty())
+                .collect::<Vec<_>>(),
                 String::new(),
             )
         }

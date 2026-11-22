@@ -629,7 +629,7 @@ impl TrainingCycles for SqliteTraining {
                                 start,
                                 duration_min: s.duration_min,
                                 actual_duration_min: None,
-                                location: s.location.clone(),
+                                venue_id: s.venue_id,
                                 title: s.title.clone(),
                                 objectives: match input.copy_objectives {
                                     true => s.objectives.clone(),

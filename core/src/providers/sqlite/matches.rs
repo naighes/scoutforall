@@ -23,6 +23,7 @@ use crate::{
             summary::{cached, competition_of, forget, refresh, save},
             teams::read_team,
             training::check_match,
+            venues::find_or_create,
             video::forget_video,
         },
     },
@@ -611,6 +612,7 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
         round,
         // chosen at the creation, never changed
         scouting: _,
+        venue_id,
     } = input;
     let rows = match_rows(tx, id)?.ok_or_else(|| not_found(&format!("match {id}")))?;
     let team = read_team(tx, &rows.row.team_a)?;
@@ -633,7 +635,7 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
     tx.execute(
         "UPDATE matches SET team_b = ?2, team_b_name = ?3, start = ?4, home = ?5,
                  max_substitutions = ?6, notes = ?7, friendly = ?8, competition_id = ?9,
-                 stage = ?10, round = ?11
+                 stage = ?10, round = ?11, venue_id = ?12
              WHERE id = ?1",
         params![
             Sql(id),
@@ -646,7 +648,8 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
             friendly,
             competition_id.map(Sql),
             stage,
-            round
+            round,
+            venue_id.map(Sql)
         ],
     )
     .map_err(sqlite)?;
@@ -743,6 +746,7 @@ impl MatchWriter for SqliteMatchWriter {
                     stage: input.stage,
                     round: input.round,
                     scouting: input.scouting,
+                    venue_id: input.venue_id,
                     ..rows.row
                 },
                 ..rows
@@ -865,6 +869,28 @@ impl MatchWriter for SqliteMatchWriter {
                 (0, _) => Err(not_found(&format!("match {}", m.id))),
                 (_, ScoutingMode::A) => without_side_b(tx, id),
                 (_, ScoutingMode::Both) => Ok(()),
+            }
+        })
+    }
+
+    async fn save_venue_named(
+        &self,
+        m: &MatchEntry,
+        name: &str,
+        city: &str,
+    ) -> Result<(), AppError> {
+        let id = match_uuid(&m.id)?;
+        self.0.write(|tx| {
+            let venue = find_or_create(tx, name, city)?;
+            match tx
+                .execute(
+                    "UPDATE matches SET venue_id = ?2 WHERE id = ?1 AND deleted = 0",
+                    params![Sql(id), Sql(venue.id)],
+                )
+                .map_err(sqlite)?
+            {
+                0 => Err(not_found(&format!("match {}", m.id))),
+                _ => Ok(()),
             }
         })
     }

@@ -13,10 +13,6 @@ pub trait TrainingReader {
     /// The session, or an error when it's removed or there's none.
     async fn session(&self, session_id: &Uuid) -> Result<TrainingSession, AppError>;
 
-    /// The places the team trained in, the one of the latest session first:
-    /// what the form of a session proposes.
-    async fn locations(&self, team_id: &Uuid) -> Result<Vec<String>, AppError>;
-
     /// The activities of the session not removed, in order. Empty when the
     /// session is removed.
     async fn activities(&self, session_id: &Uuid) -> Result<Vec<Activity>, AppError>;

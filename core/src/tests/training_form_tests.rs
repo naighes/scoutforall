@@ -117,7 +117,6 @@ mod tests {
     fn the_texts_are_trimmed() {
         let micro = Uuid::new_v4();
         let f = SessionForm {
-            location: "  Palazzetto ".into(),
             title: " Difesa ".into(),
             objectives: "\nbattuta\n".into(),
             notes: " n ".into(),
@@ -129,13 +128,12 @@ mod tests {
         let input = f.validate().unwrap();
         assert_eq!(
             (
-                input.location.as_str(),
                 input.title.as_str(),
                 input.objectives.as_str(),
                 input.notes.as_str(),
                 input.final_remarks.as_str(),
             ),
-            ("Palazzetto", "Difesa", "battuta", "n", "f")
+            ("Difesa", "battuta", "n", "f")
         );
         assert_eq!(input.microcycle_id, Some(micro));
         assert_eq!(input.status, SessionStatus::Completed);
@@ -144,6 +142,7 @@ mod tests {
 
     #[test]
     fn the_form_of_a_session_gives_it_back() {
+        let gym = Uuid::new_v4();
         let session = TrainingSession {
             id: Uuid::new_v4(),
             team_id: Uuid::new_v4(),
@@ -152,7 +151,7 @@ mod tests {
             start: start(),
             duration_min: 120,
             actual_duration_min: Some(100),
-            location: "Gym".into(),
+            venue_id: Some(gym),
             title: "t".into(),
             objectives: "o".into(),
             notes: "n".into(),
@@ -165,7 +164,7 @@ mod tests {
         assert_eq!(input.duration_min, 120);
         assert_eq!(input.actual_duration_min, Some(100));
         assert_eq!(input.status, SessionStatus::Cancelled);
-        assert_eq!(input.location, "Gym");
+        assert_eq!(input.venue_id, Some(gym));
     }
 
     #[test]

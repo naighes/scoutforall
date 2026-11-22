@@ -36,6 +36,7 @@ pub mod training_archive;
 pub mod training_cycles;
 pub mod training_totals;
 pub mod upload;
+pub mod venues;
 pub mod video;
 
 use crate::errors::{AppError, IOError};

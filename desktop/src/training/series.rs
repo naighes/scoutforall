@@ -4,7 +4,8 @@
 
 use {
     super::forms::{
-        Edited, day_of, location_suggestions, microcycle_options, microcycle_value, split,
+        Edited, day_of, microcycle_options, microcycle_value, split, venue_at, venue_options,
+        venue_value,
     },
     crate::{
         form::{self, Field, Form, Outcome, Value},
@@ -147,7 +148,7 @@ const fn band_time(d: usize) -> usize {
 pub struct SeriesEditor {
     pub form: Form,
     team_id: String,
-    locations: Vec<String>,
+    venues: Vec<(String, String)>,
     /// the sessions that overlap, written, when the dialog is open
     pub conflicts: Vec<String>,
 }
@@ -159,7 +160,7 @@ impl SeriesEditor {
         team_id: String,
         day: Option<NaiveDate>,
     ) -> Result<SeriesEditor, MobileError> {
-        let locations = core.training_locations(team_id.clone())?;
+        let venues = venue_options(core, &team_id, None);
         let minutes = core.new_session_draft().duration;
         let from = day
             .map(|d| d.format("%Y-%m-%d").to_string())
@@ -167,7 +168,10 @@ impl SeriesEditor {
         let mut fields = vec![
             Field::masked(s.from_day, &from, form::Mask::Date, s.date_placeholder),
             Field::masked(s.to_day, "", form::Mask::Date, s.date_placeholder),
-            Field::dropdown(s.session_location, ""),
+            Field {
+                value: venue_value(&venues, None),
+                ..Field::choice(s.session_location, vec![], 0)
+            },
         ];
         let mut sections = vec![];
         for (d, name) in s.weekdays.iter().enumerate() {
@@ -182,30 +186,20 @@ impl SeriesEditor {
         }
         let mut form = Form::new(s.repeat_sessions, fields);
         form.sections = sections;
-        let mut editor = SeriesEditor {
+        let editor = SeriesEditor {
             form,
             team_id,
-            locations,
+            venues,
             conflicts: vec![],
         };
-        editor.offer_locations();
         Ok(editor)
     }
 
-    fn offer_locations(&mut self) {
-        let offered = location_suggestions(
-            &self.locations,
-            &self.form.text(LOCATION),
-            self.form.browsing(LOCATION),
-        );
-        self.form.suggest(LOCATION, offered);
-    }
-
     fn draft(&self) -> SeriesDraft {
+        let venue = venue_at(&self.venues, self.form.index(LOCATION));
         SeriesDraft {
             from: self.form.text(FROM),
             to: self.form.text(TO),
-            location: self.form.text(LOCATION),
             bands: (0..7)
                 .filter_map(|d| {
                     let time = self.form.text(band_time(d));
@@ -213,6 +207,7 @@ impl SeriesEditor {
                         weekday: u8::try_from(d + 1).unwrap_or(1),
                         time,
                         duration_min: self.form.text(band_time(d) + 1).trim().parse().unwrap_or(0),
+                        venue: venue.clone(),
                     })
                 })
                 .collect(),
@@ -259,10 +254,6 @@ impl SeriesEditor {
         match outcome {
             Outcome::Stay => Edited::Stay,
             Outcome::Cancel => Edited::Cancel,
-            Outcome::Changed(LOCATION) => {
-                self.offer_locations();
-                Edited::Stay
-            }
             Outcome::Changed(_) => Edited::Stay,
             Outcome::Save => {
                 self.form.error = None;
@@ -363,8 +354,8 @@ const SCOPES: [SeriesScope; 3] = [
 pub struct SeriesChangeEditor {
     pub form: Form,
     session_id: String,
-    locations: Vec<String>,
-    location: String,
+    venues: Vec<(String, String)>,
+    venue: Option<String>,
     time: String,
     minutes: String,
 }
@@ -377,7 +368,7 @@ impl SeriesChangeEditor {
         session_id: String,
     ) -> Result<SeriesChangeEditor, MobileError> {
         let record = core.training_session(session_id.clone())?;
-        let locations = core.training_locations(team_id.clone())?;
+        let venues = venue_options(core, &team_id, record.venue_id.as_deref());
         let time = record.start.get(11..16).unwrap_or_default().to_string();
         let minutes = record.duration_min.to_string();
         let fields = vec![
@@ -390,30 +381,23 @@ impl SeriesChangeEditor {
                 ],
                 2,
             ),
-            Field::dropdown(s.session_location, record.location.clone()),
+            Field {
+                value: venue_value(&venues, record.venue_id.as_deref()),
+                ..Field::choice(s.session_location, vec![], 0)
+            },
             Field::masked(s.time, &time, form::Mask::Time, s.time_placeholder),
             Field::text(s.session_duration, minutes.clone()),
             Field::check(s.remove_series_check, false, false),
         ];
-        let mut editor = SeriesChangeEditor {
+        let editor = SeriesChangeEditor {
             form: Form::new(s.edit_series, fields),
             session_id,
-            locations,
-            location: record.location,
+            venues,
+            venue: record.venue_id,
             time,
             minutes,
         };
-        editor.offer_locations();
         Ok(editor)
-    }
-
-    fn offer_locations(&mut self) {
-        let offered = location_suggestions(
-            &self.locations,
-            &self.form.text(CHANGE_LOCATION),
-            self.form.browsing(CHANGE_LOCATION),
-        );
-        self.form.suggest(CHANGE_LOCATION, offered);
     }
 
     fn scope(&self) -> SeriesScope {
@@ -429,8 +413,11 @@ impl SeriesChangeEditor {
             let new = self.form.text(field);
             (new.trim() != old).then(|| new.trim().to_string())
         };
+        let venue = venue_at(&self.venues, self.form.index(CHANGE_LOCATION));
         SeriesChange {
-            location: differs(CHANGE_LOCATION, &self.location),
+            // the gym goes when the empty choice is made, and changes when another is
+            clear_venue: venue.is_none() && self.venue.is_some(),
+            venue: venue.filter(|v| self.venue.as_ref() != Some(v)),
             time: differs(CHANGE_TIME, &self.time),
             duration_min: differs(CHANGE_MINUTES, &self.minutes).map(|m| m.parse().unwrap_or(0)),
         }
@@ -458,10 +445,6 @@ impl SeriesChangeEditor {
         match outcome {
             Outcome::Stay => Edited::Stay,
             Outcome::Cancel => Edited::Cancel,
-            Outcome::Changed(CHANGE_LOCATION) => {
-                self.offer_locations();
-                Edited::Stay
-            }
             Outcome::Changed(_) => Edited::Stay,
             Outcome::Save => self.save(core),
         }

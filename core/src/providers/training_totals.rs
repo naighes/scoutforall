@@ -13,7 +13,10 @@ pub trait TrainingTotals {
     async fn totals(&self, team_id: &Uuid, scope: Scope) -> Result<Totals, AppError>;
 
     /// The attendance of the players in the scope: only the completed
-    /// sessions with the attendance taken count; guests never.
+    /// sessions with the attendance taken count; guests never, but the
+    /// makeups of a player (guest lines of theirs in completed sessions of
+    /// other teams in the period: the window of a cycle, the dates of the
+    /// scope, the whole season for all) take the place of their absences.
     async fn attendance_report(
         &self,
         team_id: &Uuid,

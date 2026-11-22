@@ -11,7 +11,7 @@ mod tests {
         match_form::{MatchInput, Opponent},
         providers::{
             match_writer::MatchWriter,
-            sqlite::training::SqliteTraining,
+            sqlite::{training::SqliteTraining, venues::SqliteVenues},
             team_writer::{TeamInput, TeamWriter},
             training_reader::TrainingReader,
             training_writer::TrainingWriter,
@@ -27,6 +27,7 @@ mod tests {
             form::SessionForm,
             overlap::{Slot, SlotKind},
             series::{Band, SeriesEdit, SeriesError, SeriesInput, SeriesScope, select},
+            venue::VenueInput,
         },
     };
     use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
@@ -49,16 +50,23 @@ mod tests {
             weekday,
             time: time(h, m),
             duration_min: minutes,
+            venue_id: None,
         }
     }
 
     fn input(from: NaiveDate, to: NaiveDate, bands: Vec<Band>) -> SeriesInput {
-        SeriesInput {
-            from,
-            to,
-            location: " Gym ".into(),
-            bands,
-        }
+        SeriesInput { from, to, bands }
+    }
+
+    /// The bands in the gym.
+    fn in_gym(bands: Vec<Band>, venue: Uuid) -> Vec<Band> {
+        bands
+            .into_iter()
+            .map(|b| Band {
+                venue_id: Some(venue),
+                ..b
+            })
+            .collect()
     }
 
     fn mon_wed() -> Vec<Band> {
@@ -198,7 +206,7 @@ mod tests {
             start,
             duration_min: 90,
             actual_duration_min: None,
-            location: String::new(),
+            venue_id: None,
             title: String::new(),
             objectives: String::new(),
             notes: String::new(),
@@ -249,12 +257,20 @@ mod tests {
     struct World {
         p: Sqlite,
         training: SqliteTraining,
+        gym: Uuid,
+        arena: Uuid,
+        hall: Uuid,
     }
 
     fn world() -> World {
         let p = Sqlite::new();
+        let venues = SqliteVenues::new(p.db.clone());
+        let venue = |name: &str| venues.create(VenueInput::named(name).unwrap()).unwrap().id;
         World {
             training: SqliteTraining::new(p.db.clone()),
+            gym: venue("Gym"),
+            arena: venue("Arena"),
+            hall: venue("Hall"),
             p,
         }
     }
@@ -305,7 +321,11 @@ mod tests {
             .training
             .create_series(
                 &t.id,
-                input(day(2026, 11, 23), day(2026, 12, 6), mon_wed()),
+                input(
+                    day(2026, 11, 23),
+                    day(2026, 12, 6),
+                    in_gym(mon_wed(), w.gym),
+                ),
                 false,
             )
             .await
@@ -316,7 +336,7 @@ mod tests {
         for s in &out.created {
             assert_eq!(s.series_id, Some(series));
             assert_eq!(s.status, SessionStatus::Planned);
-            assert_eq!(s.location, "Gym");
+            assert_eq!(s.venue_id, Some(w.gym));
             assert_eq!(s.microcycle_id, None);
             assert_eq!((s.title.as_str(), s.objectives.as_str()), ("", ""));
             assert!(w.training.activities(&s.id).await.unwrap().is_empty());
@@ -455,7 +475,11 @@ mod tests {
             .training
             .create_series(
                 &t.id,
-                input(day(2026, 11, 23), day(2026, 12, 6), mon_wed()),
+                input(
+                    day(2026, 11, 23),
+                    day(2026, 12, 6),
+                    in_gym(mon_wed(), w.gym),
+                ),
                 false,
             )
             .await
@@ -468,7 +492,7 @@ mod tests {
         let w = world();
         let (_, list) = four(&w).await;
         let edit = SeriesEdit {
-            location: Some("Arena".into()),
+            venue: Some(Some(w.arena)),
             time: None,
             duration_min: Some(75),
         };
@@ -483,7 +507,7 @@ mod tests {
         // keep their date and their time (it was not touched)
         assert_eq!(now[0], list[0]);
         for (before, after) in list[1..].iter().zip(&now[1..]) {
-            assert_eq!(after.location, "Arena");
+            assert_eq!(after.venue_id, Some(w.arena));
             assert_eq!(after.duration_min, 75);
             assert_eq!(after.start, before.start);
             assert_eq!(after.series_id, before.series_id);
@@ -509,7 +533,7 @@ mod tests {
         for (before, after) in list.iter().zip(&now) {
             assert_eq!(after.start, before.start.date().and_time(time(21, 0)));
             assert_eq!(after.duration_min, before.duration_min);
-            assert_eq!(after.location, before.location);
+            assert_eq!(after.venue_id, before.venue_id);
         }
         // "this" only
         w.training
@@ -517,7 +541,7 @@ mod tests {
                 &list[2].id,
                 SeriesScope::This,
                 SeriesEdit {
-                    location: Some("Hall".into()),
+                    venue: Some(Some(w.hall)),
                     ..SeriesEdit::default()
                 },
             )
@@ -525,8 +549,8 @@ mod tests {
             .unwrap();
         let now = w.training.sessions(&t.id).await.unwrap();
         assert_eq!(
-            now.iter().map(|s| s.location.as_str()).collect::<Vec<_>>(),
-            ["Gym", "Gym", "Hall", "Gym"]
+            now.iter().map(|s| s.venue_id).collect::<Vec<_>>(),
+            [Some(w.gym), Some(w.gym), Some(w.hall), Some(w.gym)]
         );
     }
 
@@ -548,7 +572,7 @@ mod tests {
                 &list[0].id,
                 SeriesScope::All,
                 SeriesEdit {
-                    location: Some("Arena".into()),
+                    venue: Some(Some(w.arena)),
                     ..SeriesEdit::default()
                 },
             )
@@ -557,8 +581,8 @@ mod tests {
         assert_eq!(done.len(), 2);
         let now = w.training.sessions(&t.id).await.unwrap();
         assert_eq!(
-            now.iter().map(|s| s.location.as_str()).collect::<Vec<_>>(),
-            ["Arena", "Gym", "Gym", "Arena"]
+            now.iter().map(|s| s.venue_id).collect::<Vec<_>>(),
+            [Some(w.arena), Some(w.gym), Some(w.gym), Some(w.arena)]
         );
         // removing too: the cancelled and the completed stay
         let removed = w

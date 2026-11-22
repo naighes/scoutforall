@@ -5,13 +5,14 @@ use crate::{
     domain::sql::Sql,
     errors::AppError,
     providers::{
-        sqlite::{sqlite, training::SqliteTraining},
+        sqlite::{sqlite, training::SqliteTraining, venues::occupations},
         training_agenda::TrainingAgenda,
     },
     training::{
         SessionStatus,
         agenda::{AgendaEvent, AgendaItem, MatchState, Period, played_minutes, score_of},
         overlap::DEFAULT_MATCH_MINUTES,
+        venue::{VenueRef, shared},
     },
 };
 use async_trait::async_trait;
@@ -26,9 +27,10 @@ fn sessions(
     now: NaiveDateTime,
 ) -> Result<Vec<AgendaEvent>, AppError> {
     tx.prepare(
-        "SELECT s.id, s.team_id, t.name, s.start_local, s.duration_min, s.title, s.location,
-                s.status
+        "SELECT s.id, s.team_id, t.name, s.start_local, s.duration_min, s.title, s.status,
+                v.id, v.name, v.deleted
          FROM training_sessions s JOIN teams t ON t.id = s.team_id
+              LEFT JOIN venues v ON v.id = s.venue_id
          WHERE s.deleted = 0 AND t.deleted = 0 AND (?1 IS NULL OR s.team_id = ?1)
            AND substr(s.start_local, 1, 10) >= ?2 AND substr(s.start_local, 1, 10) < ?3",
     )
@@ -38,7 +40,7 @@ fn sessions(
         |row| {
             let start = row.get::<_, Sql<NaiveDateTime>>(3)?.0;
             let minutes: u16 = row.get(4)?;
-            let status: SessionStatus = row.get(7)?;
+            let status: SessionStatus = row.get(6)?;
             Ok(AgendaEvent {
                 team_id: row.get::<_, Sql<Uuid>>(1)?.0,
                 team_name: row.get(2)?,
@@ -47,11 +49,12 @@ fn sessions(
                 item: AgendaItem::Session {
                     id: row.get::<_, Sql<Uuid>>(0)?.0,
                     title: row.get(5)?,
-                    location: row.get(6)?,
                     status,
                     to_close: status == SessionStatus::Planned
                         && start + Duration::minutes(i64::from(minutes)) < now,
                 },
+                venue: venue_ref(row, 7)?,
+                shared_venue: false,
             })
         },
     )
@@ -61,6 +64,19 @@ fn sessions(
 }
 
 type Side = (Uuid, String);
+
+/// The gym of a row: its id, name and removal, from column `first`.
+fn venue_ref(row: &rusqlite::Row, first: usize) -> rusqlite::Result<Option<VenueRef>> {
+    row.get::<_, Option<Sql<Uuid>>>(first)?
+        .map(|id| -> rusqlite::Result<VenueRef> {
+            Ok(VenueRef {
+                id: id.0,
+                name: row.get(first + 1)?,
+                deleted: row.get::<_, u8>(first + 2)? == 1,
+            })
+        })
+        .transpose()
+}
 
 struct MatchRow {
     id: Uuid,
@@ -72,6 +88,7 @@ struct MatchRow {
     played: bool,
     wins: Option<(u8, u8)>,
     span: Option<(NaiveDateTime, NaiveDateTime)>,
+    venue: Option<VenueRef>,
 }
 
 fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError> {
@@ -85,8 +102,10 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
                   WHERE e.match_id = m.id AND e.deleted = 0 AND s.deleted = 0),
                 (SELECT MAX(e.timestamp) FROM events e JOIN sets s
                    ON s.match_id = e.match_id AND s.number = e.set_number
-                  WHERE e.match_id = m.id AND e.deleted = 0 AND s.deleted = 0)
+                  WHERE e.match_id = m.id AND e.deleted = 0 AND s.deleted = 0),
+                v.id, v.name, v.deleted
          FROM matches m
+           LEFT JOIN venues v ON v.id = m.venue_id
            JOIN teams ta ON ta.id = m.team_a
            LEFT JOIN teams tb ON tb.id = m.team_b
            LEFT JOIN match_summary ms ON ms.match_id = m.id
@@ -125,6 +144,7 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
             played: row.get(8)?,
             wins,
             span,
+            venue: venue_ref(row, 13)?,
         })
     })
     .map_err(sqlite)?
@@ -156,6 +176,8 @@ fn event_of(m: &MatchRow, me: &Side, a_side: bool, other: Option<&Side>) -> Agen
             opponent_team: other.map(|o| o.0),
             state,
         },
+        venue: m.venue.clone(),
+        shared_venue: false,
     }
 }
 
@@ -184,6 +206,10 @@ impl TrainingAgenda for SqliteTraining {
         self.db().read(|tx| {
             let mut events = sessions(tx, team_id, &period, now)?;
             events.extend(match_events(&matches(tx, &period)?, team_id));
+            let sharing = shared(&occupations(tx, None, Some(&period))?);
+            events.iter_mut().for_each(|e| {
+                e.shared_venue = e.venue.is_some() && sharing.contains(&e.item.id());
+            });
             events.sort_by_key(|e| (e.start, e.minutes, e.team_name.clone()));
             Ok(events)
         })

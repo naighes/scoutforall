@@ -579,8 +579,9 @@ mod tests {
     }
 
     /// The training of the team stays on the device (TODO/021 §2): with
-    /// sessions, activities and attendance of the team in the database, the
-    /// upload of a match is the same, byte for byte.
+    /// sessions, activities and attendance of the team in the database, and
+    /// the gym of the sessions and of the match (§13), the upload of a match
+    /// is the same, byte for byte.
     #[tokio::test]
     async fn the_training_does_not_go_in_the_upload() {
         let db = migrated_v018().await;
@@ -595,6 +596,11 @@ mod tests {
                                                 final_remarks)
                      VALUES ('bbbbbbbb-0000-4000-8000-000000000001', '{TEAM}',
                              '2025-10-03T18:00', 90, 'secret note', 'secret remark');
+                 INSERT INTO venues (id, name, address, notes)
+                     VALUES ('eeeeeeee-0000-4000-8000-000000000001', 'secret gym', 'secret street',
+                             'secret key');
+                 UPDATE training_sessions SET venue_id = 'eeeeeeee-0000-4000-8000-000000000001';
+                 UPDATE matches SET venue_id = 'eeeeeeee-0000-4000-8000-000000000001';
                  INSERT INTO training_activities (id, session_id, position, name)
                      VALUES ('dddddddd-0000-4000-8000-000000000001',
                              'bbbbbbbb-0000-4000-8000-000000000001', 0, 'secret drill');

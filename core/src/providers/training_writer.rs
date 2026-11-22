@@ -39,7 +39,7 @@ pub trait TrainingWriter {
         create_others: bool,
     ) -> Result<SeriesOutcome, AppError>;
 
-    /// Changes location, time or duration of the planned sessions `scope`
+    /// Changes gym, time or duration of the planned sessions `scope`
     /// reaches from `session_id` (the date never changes). A change that
     /// overlaps something stops the whole group: nothing is written.
     async fn update_series(
@@ -55,7 +55,7 @@ pub trait TrainingWriter {
     -> Result<usize, AppError>;
 
     /// A new session of the same team on another date: planned, in no
-    /// series, with the title, location and planned duration of the
+    /// series, with the title, gym and planned duration of the
     /// original, and its objectives and planned activities when the input
     /// says so. It overlaps nothing, or nothing is written.
     async fn duplicate_session(

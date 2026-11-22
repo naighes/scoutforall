@@ -9,7 +9,7 @@ use crate::{
     domain::{ScoutingMode, Side as DomainSide},
     dvw::{
         both::{BothSet, translate_both},
-        model::{DvwFile, DvwRole, MatchDate, Player, SetResult, Side, Skill},
+        model::{DvwFile, DvwRole, Hall, MatchDate, Player, SetResult, Side, Skill},
         translate::{
             Impossible, Issue, Mappings, TranslateError, Untranslatable, Us, has_video_clock,
             translate_set,
@@ -505,6 +505,20 @@ pub struct MatchPlan {
     /// The players of team B in the file with their numbers, when B is a
     /// team: its roster of the match.
     pub roster_b: Vec<RosterNumber>,
+    /// Where it was played, as `[3MORE]` tells: the gym is found by its name
+    /// or made when the match is saved.
+    pub venue: Option<Hall>,
+}
+
+impl MatchPlan {
+    /// The name and the address of the gym: the hall, in its city; the
+    /// city alone when there is no hall.
+    pub fn venue_names(&self) -> Option<(String, String)> {
+        self.venue.as_ref().map(|h| match h.name.is_empty() {
+            true => (h.city.clone(), String::new()),
+            false => (h.name.clone(), h.city.clone()),
+        })
+    }
 }
 
 /// What `[3MATCH]` tells of the competition (D12): the league a
@@ -724,6 +738,7 @@ pub fn match_plan(
             sides,
             input,
             roster_b,
+            venue: file.venue.clone(),
         }),
         _ => Err(MatchIssue::Unfinished),
     }
@@ -885,6 +900,9 @@ pub async fn save_import(
         .save_source(&created, entry.source, entry.video_clock)
         .await?;
     match_writer.save_scouting(&m, scouting).await?;
+    if let Some((name, address)) = plan.venue_names() {
+        match_writer.save_venue_named(&m, &name, &address).await?;
+    }
     for set_number in 1..=5u8 {
         let set = plan.entry.sets.iter().find(|s| s.set_number == set_number);
         let both = match &plan.sides {

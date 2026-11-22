@@ -56,7 +56,7 @@ mod tests {
                     start: Some(at(11, 24, 18)),
                     duration: "120".into(),
                     actual_duration: "100".into(),
-                    location: "Gym".into(),
+                    venue: Some(crate::tests::gym(t.db())),
                     title: "Serve".into(),
                     objectives: "Reception".into(),
                     notes: "a note".into(),
@@ -113,12 +113,8 @@ mod tests {
         assert_eq!(copy.team_id, team.id);
         assert_eq!(copy.start, at(12, 1, 18));
         assert_eq!(
-            (
-                copy.duration_min,
-                copy.location.as_str(),
-                copy.title.as_str()
-            ),
-            (120, "Gym", "Serve")
+            (copy.duration_min, copy.venue_id, copy.title.as_str()),
+            (120, Some(crate::tests::gym(t.db())), "Serve")
         );
         assert_eq!(copy.objectives, "Reception");
         assert_eq!(copy.status, SessionStatus::Planned);
@@ -186,12 +182,8 @@ mod tests {
         assert_eq!(copy.objectives, "");
         assert!(t.activities(&copy.id).await.unwrap().is_empty());
         assert_eq!(
-            (
-                copy.duration_min,
-                copy.location.as_str(),
-                copy.title.as_str()
-            ),
-            (120, "Gym", "Serve")
+            (copy.duration_min, copy.venue_id, copy.title.as_str()),
+            (120, Some(crate::tests::gym(t.db())), "Serve")
         );
     }
 

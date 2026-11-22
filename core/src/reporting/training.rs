@@ -3,6 +3,7 @@
 
 use crate::localization::Labels;
 use crate::training::cycles::Cycle;
+use crate::training::venue::Venue;
 use crate::training::{Activity, AttendanceRow, AttendanceStatus, SessionStatus, TrainingSession};
 use chrono::{Datelike, NaiveDateTime};
 use serde::Serialize;
@@ -84,6 +85,19 @@ pub struct Context<'a> {
     pub team: &'a str,
     pub year: u16,
     pub printed: NaiveDateTime,
+    /// the gyms the sessions may hold, to name them
+    pub venues: &'a [Venue],
+}
+
+impl Context<'_> {
+    /// The name of the gym of a session, empty when it has none.
+    fn venue_name(&self, session: &TrainingSession) -> String {
+        session
+            .venue_id
+            .and_then(|id| self.venues.iter().find(|v| v.id == id))
+            .map(|v| v.name.clone())
+            .unwrap_or_default()
+    }
 }
 
 fn sheet_labels(labels: &Labels) -> SheetLabels {
@@ -139,6 +153,7 @@ fn sheet_activities(labels: &Labels, activities: &[Activity]) -> Vec<SheetActivi
 
 fn sheet_session(
     labels: &Labels,
+    ctx: &Context,
     session: &TrainingSession,
     activities: &[Activity],
     participants: Option<Vec<Participant>>,
@@ -151,7 +166,7 @@ fn sheet_session(
             session.start.format("%d/%m")
         ),
         time: session.start.format("%H:%M").to_string(),
-        location: session.location.clone(),
+        location: ctx.venue_name(session),
         title: session.title.clone(),
         objectives: session.objectives.clone(),
         cancelled: session.status == SessionStatus::Cancelled,
@@ -200,9 +215,8 @@ pub fn session_sheet(
     attendance: Option<&[AttendanceRow]>,
     options: SessionOptions,
 ) -> Sheet {
-    let place = [session.location.as_str()]
-        .into_iter()
-        .filter(|l| !l.is_empty());
+    let venue = ctx.venue_name(session);
+    let place = [venue.as_str()].into_iter().filter(|l| !l.is_empty());
     let subtitle = once_joined(
         std::iter::once(format!(
             "{} {} · {}",
@@ -220,7 +234,9 @@ pub fn session_sheet(
         title: session.title.clone(),
         subtitle,
         objectives: session.objectives.clone(),
-        sessions: vec![sheet_session(labels, session, activities, people, notes)],
+        sessions: vec![sheet_session(
+            labels, ctx, session, activities, people, notes,
+        )],
         ..base(labels, ctx, labels.sheet_session)
     }
 }
@@ -245,7 +261,7 @@ pub fn microcycle_sheet(
         table: true,
         sessions: sessions
             .iter()
-            .map(|(s, a)| sheet_session(labels, s, a, None, None))
+            .map(|(s, a)| sheet_session(labels, ctx, s, a, None, None))
             .collect(),
         ..base(labels, ctx, labels.sheet_microcycle)
     }
