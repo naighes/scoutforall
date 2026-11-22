@@ -7,6 +7,7 @@ use {
     super::{
         cycles::{self, CyclesTab, Leave},
         forms::{Edited, SessionEditor},
+        history::{self, HistoryTab},
         series::SeriesEditor,
         session::{self, SessionPage},
     },
@@ -16,7 +17,7 @@ use {
         theme::{Colors, SIZE_SMALL},
         ui,
     },
-    chrono::NaiveDate,
+    chrono::{Datelike, Local, Months, NaiveDate},
     iced::{
         Alignment, Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
@@ -58,6 +59,21 @@ const FILTERS: [Filter; 6] = [
     Filter::NoAttendance,
 ];
 
+/// The tabs, the one shown chosen.
+fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> {
+    row([
+        (Tab::Sessions, s.sessions),
+        (Tab::Cycles, s.cycles),
+        (Tab::History, s.history),
+    ]
+    .map(|(tab, label)| {
+        let go = (tab != shown).then_some(Message::Tab(tab));
+        ui::pill(label, tab == shown, go, c)
+    }))
+    .spacing(6)
+    .into()
+}
+
 fn filter_name(s: &Strings, filter: Filter) -> &'static str {
     match filter {
         Filter::All => s.filter_all,
@@ -69,10 +85,67 @@ fn filter_name(s: &Strings, filter: Filter) -> &'static str {
     }
 }
 
+/// The days the list is kept to.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Period {
+    Any,
+    Week,
+    Month,
+    PreviousMonth,
+    NextMonth,
+}
+
+const PERIODS: [Period; 5] = [
+    Period::Any,
+    Period::Week,
+    Period::Month,
+    Period::PreviousMonth,
+    Period::NextMonth,
+];
+
+fn period_name(s: &Strings, period: Period) -> &'static str {
+    match period {
+        Period::Any => s.period_any,
+        Period::Week => s.this_week,
+        Period::Month => s.this_month,
+        Period::PreviousMonth => s.previous_month,
+        Period::NextMonth => s.next_month,
+    }
+}
+
+impl Period {
+    /// The first and the last day, both included; none for any date.
+    pub fn days(self, today: NaiveDate) -> Option<(NaiveDate, NaiveDate)> {
+        let month = |shift: i32| {
+            let first = today.with_day(1)?;
+            let first = match shift {
+                0 => first,
+                s if s < 0 => first.checked_sub_months(Months::new(s.unsigned_abs()))?,
+                s => first.checked_add_months(Months::new(s.unsigned_abs()))?,
+            };
+            let last = first.checked_add_months(Months::new(1))?.pred_opt()?;
+            Some((first, last))
+        };
+        match self {
+            Period::Any => None,
+            Period::Week => {
+                let monday = today.checked_sub_days(chrono::Days::new(
+                    today.weekday().num_days_from_monday().into(),
+                ))?;
+                Some((monday, monday.checked_add_days(chrono::Days::new(6))?))
+            }
+            Period::Month => month(0),
+            Period::PreviousMonth => month(-1),
+            Period::NextMonth => month(1),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tab {
     Sessions,
     Cycles,
+    History,
 }
 
 enum Mode {
@@ -87,6 +160,7 @@ enum Mode {
 #[derive(Debug, Clone)]
 pub enum Message {
     Filter(Filter),
+    Period(Period),
     Row(usize),
     New,
     Repeat,
@@ -97,6 +171,7 @@ pub enum Message {
     Page(session::Message),
     Tab(Tab),
     Cycles(cycles::Message),
+    History(history::Message),
     /// the sessions marked, in a new microcycle
     Create,
 }
@@ -116,11 +191,13 @@ pub struct TrainingScreen {
     /// the completed ones with their attendance written
     recorded: HashSet<String>,
     filter: Filter,
+    period: Period,
     selected: usize,
     /// the sessions marked to make a microcycle
     marked: HashSet<String>,
     tab: Tab,
     cycles: CyclesTab,
+    history: HistoryTab,
     mode: Mode,
     error: Option<String>,
 }
@@ -135,12 +212,14 @@ impl TrainingScreen {
         let team_name = core.team(team_id.clone())?.name;
         let mut screen = TrainingScreen {
             cycles: CyclesTab::new(core.clone(), team_id.clone()),
+            history: HistoryTab::new(core.clone(), team_id.clone()),
             core,
             team_id,
             team_name,
             sessions: vec![],
             recorded: HashSet::new(),
             filter: Filter::All,
+            period: Period::Any,
             selected: 0,
             marked: HashSet::new(),
             tab: Tab::Sessions,
@@ -183,6 +262,7 @@ impl TrainingScreen {
     pub fn scroll(&self) -> Option<(Id, f32)> {
         match self.mode {
             Mode::List if self.tab == Tab::Cycles => self.cycles.scroll(),
+            Mode::List if self.tab == Tab::History => self.history.scroll(),
             Mode::List => {
                 let last = self.shown().len().saturating_sub(1).max(1);
                 Some((Id::new(LIST), self.selected as f32 / last as f32))
@@ -215,16 +295,24 @@ impl TrainingScreen {
     }
 
     fn matches(&self, r: &SessionRecord) -> bool {
-        match self.filter {
-            Filter::All => true,
-            Filter::Planned => r.status == SessionStatus::Planned,
-            Filter::ToClose => r.to_close,
-            Filter::Completed => r.status == SessionStatus::Completed,
-            Filter::Cancelled => r.status == SessionStatus::Cancelled,
-            Filter::NoAttendance => {
-                r.status == SessionStatus::Completed && !self.recorded.contains(&r.id)
+        let days = self.period.days(Local::now().date_naive());
+        let inside = days.is_none_or(|(from, to)| {
+            r.start
+                .get(..10)
+                .and_then(|d| d.parse::<NaiveDate>().ok())
+                .is_some_and(|d| from <= d && d <= to)
+        });
+        inside
+            && match self.filter {
+                Filter::All => true,
+                Filter::Planned => r.status == SessionStatus::Planned,
+                Filter::ToClose => r.to_close,
+                Filter::Completed => r.status == SessionStatus::Completed,
+                Filter::Cancelled => r.status == SessionStatus::Cancelled,
+                Filter::NoAttendance => {
+                    r.status == SessionStatus::Completed && !self.recorded.contains(&r.id)
+                }
             }
-        }
     }
 
     /// The sessions the filter lets through.
@@ -237,6 +325,15 @@ impl TrainingScreen {
         match tab {
             Tab::Sessions => self.reload(),
             Tab::Cycles => self.cycles.reload(),
+            Tab::History => self.history.reload(),
+        }
+    }
+
+    /// The tab after (or before) the one shown, around.
+    fn step_tab(&mut self, forward: bool) {
+        const TABS: [Tab; 3] = [Tab::Sessions, Tab::Cycles, Tab::History];
+        if let Some(next) = ui::cycle(&TABS, &self.tab, forward) {
+            self.set_tab(next);
         }
     }
 
@@ -397,6 +494,11 @@ impl TrainingScreen {
                 let leave = self.cycles.update(s, m);
                 return self.cycled(leave);
             }
+            (Mode::List, Message::History(m)) if self.tab == Tab::History => self.history.update(m),
+            (Mode::List, Message::Period(period)) => {
+                self.period = period;
+                self.selected = 0;
+            }
             (Mode::List, Message::Create) => self.create_microcycle(s),
             (Mode::List, Message::Filter(filter)) => {
                 self.filter = filter;
@@ -435,12 +537,17 @@ impl TrainingScreen {
             },
             Mode::List if self.tab == Tab::Cycles => {
                 if self.cycles.on_list() && (ck == key!(tab) || ck == key!(shift - tab)) {
-                    self.set_tab(Tab::Sessions);
+                    self.step_tab(ck == key!(tab));
                     return Outcome::Stay;
                 }
                 let leave = self.cycles.key(s, ck);
                 return self.cycled(leave);
             }
+            Mode::List if self.tab == Tab::History => match ck {
+                k if k == BACK_KEY => return Outcome::Back,
+                k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
+                k => self.history.key(k),
+            },
             Mode::List => return self.list_key(s, ck),
         }
         Outcome::Stay
@@ -457,7 +564,8 @@ impl TrainingScreen {
             k if k == key!(f) || k == key!(right) => self.step_filter(true),
             k if k == key!(left) => self.step_filter(false),
             k if k == key!(enter) => self.open_selected(),
-            k if k == key!(tab) || k == key!(shift - tab) => self.set_tab(Tab::Cycles),
+            k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
+            k if k == key!(p) => self.step_period(),
             k if k == key!(space) => self.toggle_mark(),
             k if k == key!(m) => self.create_microcycle(s),
             k if k == key!(n) => self.new_session(s),
@@ -471,6 +579,13 @@ impl TrainingScreen {
     fn step_filter(&mut self, forward: bool) {
         if let Some(next) = ui::cycle(&FILTERS, &self.filter, forward) {
             self.filter = next;
+            self.selected = 0;
+        }
+    }
+
+    fn step_period(&mut self) {
+        if let Some(next) = ui::cycle(&PERIODS, &self.period, true) {
+            self.period = next;
             self.selected = 0;
         }
     }
@@ -489,6 +604,7 @@ impl TrainingScreen {
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             Mode::List if self.tab == Tab::Cycles => self.cycles.hints(s),
+            Mode::List if self.tab == Tab::History => self.history.hints(s),
             Mode::List => vec![
                 ("↑ ↓".to_string(), String::new()),
                 ("space".to_string(), s.select_row.to_string()),
@@ -496,6 +612,7 @@ impl TrainingScreen {
                 ("⇥".to_string(), s.cycles.to_string()),
                 ("Enter".to_string(), s.open.to_string()),
                 ("← → f".to_string(), s.filter.to_string()),
+                ("p".to_string(), s.period.to_string()),
                 ("n".to_string(), s.new_session.to_string()),
                 ("r".to_string(), s.repeat_sessions.to_string()),
                 ("⌫".to_string(), s.delete_forever.to_string()),
@@ -533,28 +650,36 @@ impl TrainingScreen {
                 Message::Dismiss,
                 c,
             ),
-            Mode::List if self.tab == Tab::Cycles => {
-                let tabs = row![
-                    ui::pill(s.sessions, false, Some(Message::Tab(Tab::Sessions)), c),
-                    ui::pill(s.cycles, true, None, c)
-                ]
-                .spacing(6);
-                column![tabs, self.cycles.view(s, c).map(Message::Cycles)]
-                    .spacing(10)
-                    .height(Length::Fill)
-                    .into()
-            }
+            Mode::List if self.tab == Tab::Cycles => column![
+                tabs(s, Tab::Cycles, c),
+                self.cycles.view(s, c).map(Message::Cycles)
+            ]
+            .spacing(10)
+            .height(Length::Fill)
+            .into(),
+            Mode::List if self.tab == Tab::History => column![
+                tabs(s, Tab::History, c),
+                self.history.view(s, c).map(Message::History)
+            ]
+            .spacing(10)
+            .height(Length::Fill)
+            .into(),
             Mode::List => self.list(s, c),
         };
         column![error, body].spacing(10).into()
     }
 
     fn list<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let tabs = row![
-            ui::pill(s.sessions, true, None, c),
-            ui::pill(s.cycles, false, Some(Message::Tab(Tab::Cycles)), c)
-        ]
-        .spacing(6);
+        let periods = row(PERIODS.iter().map(|p| {
+            ui::pill(
+                period_name(s, *p),
+                *p == self.period,
+                Some(Message::Period(*p)),
+                c,
+            )
+        }))
+        .spacing(6)
+        .wrap();
         let filters = row(FILTERS.iter().map(|f| {
             ui::pill(
                 filter_name(s, *f),
@@ -594,8 +719,13 @@ impl TrainingScreen {
             ui::pill(s.delete_forever, false, Some(Message::Delete), c),
         ];
         column![
-            tabs,
-            ui::panel_with(s.sessions, add, column![filters, list].spacing(12), c)
+            tabs(s, Tab::Sessions, c),
+            ui::panel_with(
+                s.sessions,
+                add,
+                column![filters, periods, list].spacing(12),
+                c
+            )
         ]
         .spacing(10)
         .height(Length::Fill)
@@ -736,6 +866,69 @@ mod tests {
         assert!(matches!(&screen.mode, Mode::Page(p) if p.id == second));
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Stay));
         assert!(matches!(screen.mode, Mode::List));
+        assert!(matches!(screen.key(s, BACK_KEY), Outcome::Back));
+    }
+
+    /// The period keeps the sessions of its days, both ends included; a
+    /// month before and after reads the right ends; `p` steps through them.
+    #[test]
+    fn the_period_keeps_the_sessions_of_its_days() {
+        let day = |d: &str| d.parse::<NaiveDate>().unwrap();
+        let today = day("2026-03-11");
+        assert_eq!(Period::Any.days(today), None);
+        assert_eq!(
+            Period::Week.days(today),
+            Some((day("2026-03-09"), day("2026-03-15")))
+        );
+        assert_eq!(
+            Period::Month.days(today),
+            Some((day("2026-03-01"), day("2026-03-31")))
+        );
+        assert_eq!(
+            Period::PreviousMonth.days(day("2026-03-31")),
+            Some((day("2026-02-01"), day("2026-02-28")))
+        );
+        assert_eq!(
+            Period::NextMonth.days(day("2025-12-31")),
+            Some((day("2026-01-01"), day("2026-01-31")))
+        );
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let now = Local::now().date_naive();
+        let far = now.checked_add_months(Months::new(24)).unwrap();
+        let near = session(&core, &team, &format!("{now}T03:00"), "Oggi");
+        let later = session(&core, &team, &format!("{far}T18:00"), "Lontana");
+        let mut screen = TrainingScreen::new(core, s, team, Open::Sessions).unwrap();
+        let ids = |screen: &TrainingScreen| -> Vec<String> {
+            screen.shown().iter().map(|r| r.id.clone()).collect()
+        };
+        assert_eq!(ids(&screen), vec![later.clone(), near.clone()]);
+        screen.key(s, key!(p));
+        assert_eq!(screen.period, Period::Week);
+        assert_eq!(ids(&screen), vec![near.clone()]);
+        screen.update(s, Message::Period(Period::NextMonth));
+        assert!(ids(&screen).is_empty() || ids(&screen) == vec![near.clone()]);
+        screen.update(s, Message::Period(Period::Any));
+        assert_eq!(ids(&screen).len(), 2);
+    }
+
+    /// Tab goes round sessions, cycles, history and back; the history has
+    /// nothing to change.
+    #[test]
+    fn tab_goes_round_the_three_tabs() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let mut screen = TrainingScreen::new(core, s, team, Open::Sessions).unwrap();
+        for tab in [Tab::Cycles, Tab::History, Tab::Sessions] {
+            screen.key(s, key!(tab));
+            assert_eq!(screen.tab, tab);
+        }
+        screen.key(s, key!(shift - tab));
+        assert_eq!(screen.tab, Tab::History);
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Back));
     }
 

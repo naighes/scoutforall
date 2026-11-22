@@ -4,6 +4,7 @@
 
 mod cycles;
 mod forms;
+mod history;
 mod roll;
 pub mod screen;
 mod series;
