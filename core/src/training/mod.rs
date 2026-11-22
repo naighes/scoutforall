@@ -8,6 +8,7 @@ pub mod duplicate;
 pub mod form;
 pub mod overlap;
 pub mod series;
+pub mod totals;
 
 use chrono::{Duration, NaiveDateTime};
 use uuid::Uuid;

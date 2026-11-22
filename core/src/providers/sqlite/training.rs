@@ -36,10 +36,11 @@ impl SqliteTraining {
     }
 }
 
-const SESSION_COLUMNS: &str = "id, team_id, microcycle_id, series_id, start_local, duration_min,
+pub(crate) const SESSION_COLUMNS: &str =
+    "id, team_id, microcycle_id, series_id, start_local, duration_min,
      actual_duration_min, location, title, objectives, notes, final_remarks, status";
 
-fn session_from_row(row: &Row) -> rusqlite::Result<TrainingSession> {
+pub(crate) fn session_from_row(row: &Row) -> rusqlite::Result<TrainingSession> {
     Ok(TrainingSession {
         id: row.get::<_, Sql<Uuid>>(0)?.0,
         team_id: row.get::<_, Sql<Uuid>>(1)?.0,

@@ -89,6 +89,7 @@ mod training_schema_tests;
 mod training_series_tests;
 mod training_session_tests;
 mod training_status_tests;
+mod training_totals_tests;
 mod upload_queue_tests;
 mod upload_tests;
 mod video_seconds_tests;

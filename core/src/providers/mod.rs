@@ -10,4 +10,5 @@ pub mod team_writer;
 pub mod training_agenda;
 pub mod training_cycles;
 pub mod training_reader;
+pub mod training_totals;
 pub mod training_writer;
