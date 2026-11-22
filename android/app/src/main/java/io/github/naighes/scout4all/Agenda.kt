@@ -49,11 +49,16 @@ fun rememberAgenda(teamId: String?, span: AgendaSpan, day: LocalDate, refresh: A
 }
 
 /** The events of today, only when there is something: a title and the rows. */
-fun LazyListScope.agendaToday(days: List<AgendaDay>, withTeam: Boolean, onMatch: (teamId: String, matchId: String) -> Unit) {
+fun LazyListScope.agendaToday(
+    days: List<AgendaDay>,
+    withTeam: Boolean,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+    onSession: (teamId: String, sessionId: String) -> Unit = { _, _ -> },
+) {
     val events = days.flatMap { it.events }
     if (events.isEmpty()) return
     item(key = "agenda-today") { AgendaTitle(R.string.agenda_today) }
-    items(events, key = { "today/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch) }
+    items(events, key = { "today/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch, onSession) }
 }
 
 /** The week of [monday]: every day, the empty ones too, with the buttons
@@ -66,6 +71,7 @@ fun LazyListScope.agendaWeek(
     onNext: () -> Unit,
     onToday: () -> Unit,
     onMatch: (teamId: String, matchId: String) -> Unit,
+    onSession: (teamId: String, sessionId: String) -> Unit = { _, _ -> },
 ) {
     item(key = "agenda-week") {
         Row(
@@ -103,7 +109,7 @@ fun LazyListScope.agendaWeek(
     busy.forEach { day ->
         val date = LocalDate.parse(day.date)
         item(key = "day/${day.date}") { DayHeader(date, date == today) }
-        items(day.events, key = { "${day.date}/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch) }
+        items(day.events, key = { "${day.date}/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch, onSession) }
     }
 }
 
@@ -132,12 +138,18 @@ private fun DayHeader(date: LocalDate, today: Boolean) = Text(
 
 /** A session or a match: the time, what, where; the match opens. */
 @Composable
-private fun EventRow(e: AgendaEventRecord, withTeam: Boolean, onMatch: (teamId: String, matchId: String) -> Unit) {
+private fun EventRow(
+    e: AgendaEventRecord,
+    withTeam: Boolean,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+    onSession: (teamId: String, sessionId: String) -> Unit,
+) {
     val time = e.start.substringAfter('T', "").take(5)
     when (val i = e.item) {
         is AgendaItemRecord.Session -> {
             val cancelled = i.status == SessionStatus.CANCELLED
             ListItem(
+                modifier = Modifier.clickable { onSession(e.teamId, i.id) },
                 overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam }).joinToString(" · ")) },
                 headlineContent = {
                     Text(

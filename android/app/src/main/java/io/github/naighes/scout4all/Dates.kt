@@ -16,6 +16,10 @@ import androidx.compose.material3.SelectableDates
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDatePickerState
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.rememberTimePickerState
+import java.time.LocalTime
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -108,5 +112,65 @@ internal fun DayField(
                 TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
             },
         ) { DatePicker(picker) }
+    }
+}
+
+/** The field of a time of day, as `DayField` is of a day: written as the
+ * phone writes it, a tap opens the clock. `clear` (its description) lets
+ * the time be taken away. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun TimeField(
+    label: String,
+    time: LocalTime?,
+    onTime: (LocalTime?) -> Unit,
+    modifier: Modifier = Modifier.fillMaxWidth(),
+    error: String? = null,
+    clear: String? = null,
+) {
+    var picking by rememberSaveable { mutableStateOf(false) }
+    val presses = remember { MutableInteractionSource() }
+    LaunchedEffect(presses) {
+        presses.interactions.collect { if (it is PressInteraction.Release) picking = true }
+    }
+    OutlinedTextField(
+        value = time?.format(DateTimeFormatter.ofLocalizedTime(FormatStyle.SHORT)).orEmpty(),
+        onValueChange = {},
+        modifier = modifier,
+        readOnly = true,
+        label = { Text(label) },
+        trailingIcon = {
+            when {
+                time != null && clear != null -> IconButton(onClick = { onTime(null) }) {
+                    Icon(Icons.Filled.Clear, contentDescription = clear)
+                }
+                else -> Icon(Icons.Filled.DateRange, contentDescription = null)
+            }
+        },
+        singleLine = true,
+        isError = error != null,
+        supportingText = error?.let { { Text(it) } },
+        interactionSource = presses,
+    )
+    if (picking) {
+        val at = time ?: LocalTime.of(18, 0)
+        val picker = rememberTimePickerState(
+            initialHour = at.hour,
+            initialMinute = at.minute,
+            is24Hour = android.text.format.DateFormat.is24HourFormat(androidx.compose.ui.platform.LocalContext.current),
+        )
+        AlertDialog(
+            onDismissRequest = { picking = false },
+            text = { TimePicker(picker) },
+            confirmButton = {
+                TextButton(onClick = {
+                    onTime(LocalTime.of(picker.hour, picker.minute))
+                    picking = false
+                }) { Text(stringResource(R.string.ok)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
+            },
+        )
     }
 }

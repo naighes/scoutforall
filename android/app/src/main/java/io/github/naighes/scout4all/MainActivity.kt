@@ -196,6 +196,7 @@ private fun Navigation(
                 },
                 onDvw = { nav.navigate("dvw") },
                 onCompetitions = { nav.navigate("competitions") },
+                onSession = { team, session -> nav.navigate("team/$team/training/$session") },
             )
         }
         composable("competitions") { entry ->
@@ -249,8 +250,11 @@ private fun Navigation(
                 onAnalysis = { nav.navigate("team/$id/analysis") },
                 onDeleted = { nav.back(entry) },
                 onNewSeason = { nav.navigate("team/$id/new-season") },
+                onTraining = { nav.navigate("team/$id/training") },
+                onSession = { nav.navigate("team/$id/training/$it") },
             )
         }
+        trainingRoutes(nav)
         composable("team/{id}/new-season") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             // saved, the new team in place of the form; back from it, the

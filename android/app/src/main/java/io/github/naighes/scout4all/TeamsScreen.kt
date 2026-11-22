@@ -110,6 +110,7 @@ fun TeamsScreen(
     onResume: (teamId: String, matchId: String, next: NextSetKind) -> Unit = { _, _, _ -> },
     onDvw: (() -> Unit)? = null,
     onCompetitions: () -> Unit = {},
+    onSession: (teamId: String, sessionId: String) -> Unit = { _, _ -> },
 ) {
     val state by teams.state.collectAsState()
     // back from a team, which may have changed
@@ -161,13 +162,14 @@ fun TeamsScreen(
                     val week by rememberAgenda(null, AgendaSpan.WEEK, day, s.home)
                     val now by rememberAgenda(null, AgendaSpan.DAY, today, s.home)
                     LazyColumn(modifier, list, contentPadding = PaddingValues(bottom = 88.dp)) {
-                    agendaToday(now, withTeam = true, onMatch = onMatch)
+                    agendaToday(now, withTeam = true, onMatch = onMatch, onSession = onSession)
                     agendaWeek(
                         week, today, withTeam = true,
                         onPrevious = { day = day.minusWeeks(1) },
                         onNext = { day = day.plusWeeks(1) },
                         onToday = { day = LocalDate.now() },
                         onMatch = onMatch,
+                        onSession = onSession,
                     )
                     // a section only with something in it
                     section(R.string.home_in_progress, s.home.inProgress) {

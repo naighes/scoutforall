@@ -112,6 +112,106 @@ class ScreensLayoutTest(private val screen: Size) {
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
+    /** The training screens fit every screen: the sessions, a session with
+     * its activities, the forms, the attendance. */
+    private fun trainingWithActivities(team: String): String {
+        val session = core {
+            it.saveSession(
+                team, null,
+                it.newSessionDraft().copy(
+                    start = java.time.LocalDate.now().plusDays(1).toString() + "T18:00",
+                    duration = "90", title = "Ricezione e attacco", location = "Palestra comunale",
+                    objectives = "Ricezione a tre, cambio palla", notes = "Portare i palloni leggeri",
+                ),
+            )
+        }
+        listOf("Palleggio a coppie", "Bagher contro il muro", "Partitella a tema con servizio float").forEach { name ->
+            core { it.saveActivity(session.id, null, it.newActivityDraft().copy(name = name, planned = "20")) }
+        }
+        return session.id
+    }
+
+    @Test
+    fun theSessionsOfTheTeam() {
+        val team = saveNationalTeam()
+        trainingWithActivities(team)
+        assertFits("sessions", "Ricezione e attacco", null) {
+            SessionsScreen(team, onBack = {}, onSession = {}, onNew = {}, onSeries = {})
+        }
+    }
+
+    @Test
+    fun aSession() {
+        val team = saveNationalTeam()
+        val session = trainingWithActivities(team)
+        assertFits("session", string(R.string.tr_activities), string(R.string.tr_complete_session)) {
+            SessionScreen(team, session, onBack = {}, onEdit = {}, onActivity = {}, onAttendance = {}, onDuplicate = {}, onSeries = {})
+        }
+    }
+
+    @Test
+    fun theFormOfASession() {
+        val team = saveNationalTeam()
+        assertFits("session-form", string(R.string.tr_session_duration), string(R.string.save)) {
+            SessionFormScreen(team, null, onBack = {}, onSaved = {})
+        }
+    }
+
+    @Test
+    fun theFormOfAnActivity() {
+        val team = saveNationalTeam()
+        val session = trainingWithActivities(team)
+        assertFits("activity-form", string(R.string.tr_copy_activity), string(R.string.save)) {
+            ActivityFormScreen(team, session, null, onBack = {}, onDone = {})
+        }
+    }
+
+    @Test
+    fun theAttendanceOfASession() {
+        val team = saveNationalTeam()
+        val session = trainingWithActivities(team)
+        assertFits("attendance", "Alessia Orro", string(R.string.save)) {
+            AttendanceScreen(team, session, onBack = {})
+        }
+    }
+
+    @Test
+    fun theCopyOfASession() {
+        val team = saveNationalTeam()
+        val session = trainingWithActivities(team)
+        assertFits("duplicate", string(R.string.tr_copy_objectives), string(R.string.tr_duplicate_session)) {
+            DuplicateScreen(team, session, onBack = {}, onDuplicated = {})
+        }
+    }
+
+    @Test
+    fun theChangeOfASeries() {
+        val team = saveNationalTeam()
+        val first = java.time.LocalDate.now().plusDays(1)
+        val made = core {
+            it.createSeries(
+                team,
+                io.github.naighes.scout4all.core.SeriesDraft(
+                    first.toString(), first.plusWeeks(3).toString(), "Palestra",
+                    listOf(io.github.naighes.scout4all.core.SeriesBand(first.dayOfWeek.value.toUByte(), "20:30", 90.toUShort())),
+                ),
+                false,
+            )
+        }
+        val session = made.created.first().id
+        assertFits("series-change", string(R.string.tr_series_scope), string(R.string.save)) {
+            SeriesChangeScreen(team, session, onBack = {}, onDone = {})
+        }
+    }
+
+    @Test
+    fun theFormOfASeries() {
+        val team = saveNationalTeam()
+        assertFits("series", string(R.string.tr_band_hint), string(R.string.save)) {
+            SeriesScreen(team, onBack = {}, onDone = {})
+        }
+    }
+
     @Test
     fun theMatch() {
         val team = saveNationalTeam()
