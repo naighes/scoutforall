@@ -700,7 +700,7 @@ impl TrainingScreen {
             ],
             Mode::Series(_) => Form::hints(s),
             Mode::Delete(_) => vec![
-                ("Enter".to_string(), s.delete_forever.to_string()),
+                ("Enter".to_string(), s.delete.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             Mode::List if self.tab == Tab::Cycles => self.cycles.hints(s),
@@ -718,7 +718,7 @@ impl TrainingScreen {
                 ("n".to_string(), s.new_session.to_string()),
                 ("r".to_string(), s.repeat_sessions.to_string()),
                 ("x".to_string(), s.export_training.to_string()),
-                ("⌫".to_string(), s.delete_forever.to_string()),
+                ("⌫".to_string(), s.delete.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
             ],
         }
@@ -1474,6 +1474,48 @@ mod tests {
         );
         assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 2);
         assert_eq!(attached(&core), 0);
+        assert!(screen.cycles.on_list());
+    }
+
+    /// The sheet of a cycle names what it edits and what it adds by its
+    /// level; the deletion asks first, and `a` deletes what it contains too.
+    #[test]
+    fn the_sheet_names_its_level_and_a_deletion_can_take_the_children() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        session(&core, &team, "2026-03-02T18:00", "Lunedì");
+        session(&core, &team, "2026-03-04T18:00", "Mercoledì");
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        screen.update(s, Message::Mark(0));
+        screen.update(s, Message::Mark(1));
+        screen.update(s, Message::Create);
+        screen.key(s, key!(enter));
+        let hints = |screen: &TrainingScreen| -> Vec<String> {
+            screen.hints(s).into_iter().map(|(_, what)| what).collect()
+        };
+        let shown = hints(&screen);
+        assert!(shown.iter().any(|h| h == s.edit_microcycle));
+        assert!(shown.iter().any(|h| h == s.add_sessions));
+        assert!(shown.iter().any(|h| h == s.delete));
+        // asked: Esc keeps it
+        screen.key(s, key!(backspace));
+        assert!(hints(&screen).iter().any(|h| h == s.remove_with_children));
+        screen.key(s, BACK_KEY);
+        assert_eq!(
+            core.cycles(team.clone(), Level::Microcycle).unwrap().len(),
+            1
+        );
+        // `a`: the sessions go with it
+        screen.key(s, key!(backspace));
+        screen.key(s, key!(a));
+        assert!(
+            core.cycles(team.clone(), Level::Microcycle)
+                .unwrap()
+                .is_empty()
+        );
+        assert!(core.training_sessions(team).unwrap().is_empty());
         assert!(screen.cycles.on_list());
     }
     fn press(screen: &mut TrainingScreen, k: KeyCombination) -> Outcome {

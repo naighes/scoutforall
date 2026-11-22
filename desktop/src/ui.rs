@@ -732,7 +732,7 @@ pub fn confirm_deletion<'a, M: Clone + 'a>(
     on_no: M,
     c: Colors,
 ) -> Element<'a, M> {
-    confirm_deletion_with(s, what, vec![], s.delete_forever, on_yes, on_no, c)
+    confirm_deletion_with(s, what, vec![], s.delete, on_yes, on_no, c)
 }
 
 /// As `confirm_deletion`, with other answers before the main one, `yes`

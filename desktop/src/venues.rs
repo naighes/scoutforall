@@ -142,6 +142,8 @@ pub enum Message {
     Previous,
     Next,
     Today,
+    /// the list left, or the sheet of a gym back to the list
+    Close,
 }
 
 pub enum Outcome {
@@ -337,6 +339,8 @@ impl VenuesScreen {
             (Message::Previous, Mode::Sheet) => self.shift(-1),
             (Message::Next, Mode::Sheet) => self.shift(1),
             (Message::Today, Mode::Sheet) => self.go_today(),
+            (Message::Close, Mode::Sheet) => self.mode = Mode::Browse,
+            (Message::Close, Mode::Browse) => return Outcome::Back,
             (_, _) => {}
         }
         Outcome::Stay
@@ -491,7 +495,10 @@ impl VenuesScreen {
         container(
             container(ui::panel_with(
                 s.venues,
-                vec![ui::pill(s.new_venue, false, Some(Message::New), c)],
+                vec![
+                    ui::pill(s.new_venue, false, Some(Message::New), c),
+                    ui::pill(s.close, false, Some(Message::Close), c),
+                ],
                 container(list).height(Length::Fill),
                 c,
             ))
@@ -597,6 +604,7 @@ impl VenuesScreen {
                 c,
             ),
             ui::pill(s.edit, false, Some(Message::Edit(self.selected)), c),
+            ui::pill(s.close, false, Some(Message::Close), c),
         ];
         let content = column![
             Column::with_children(facts).spacing(2),
@@ -692,6 +700,10 @@ mod tests {
         assert_eq!(screen.week.len(), 7);
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Stay));
         assert!(matches!(screen.mode, Mode::Browse));
+        // Close: the sheet back to the list, the list left
+        screen.key(s, key!(enter));
+        assert!(matches!(screen.update(s, Message::Close), Outcome::Stay));
+        assert!(matches!(screen.mode, Mode::Browse));
         // delete: asked first, then gone
         screen.key(s, key!(backspace));
         assert!(matches!(screen.mode, Mode::Delete(0)));
@@ -700,6 +712,7 @@ mod tests {
         screen.key(s, key!(backspace));
         screen.key(s, key!(enter));
         assert_eq!(names(&screen), vec!["Montecchio"]);
+        assert!(matches!(screen.update(s, Message::Close), Outcome::Back));
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Back));
     }
 

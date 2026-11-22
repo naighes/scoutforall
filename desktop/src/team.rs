@@ -514,7 +514,7 @@ impl TeamScreen {
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             (Mode::Delete(_), _) => vec![
-                ("Enter".to_string(), s.delete_forever.to_string()),
+                ("Enter".to_string(), s.delete.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             (Mode::Browse, panel) => {
@@ -1084,11 +1084,7 @@ mod tests {
         team.key(s, key!(left));
         team.key(s, key!(backspace));
         assert!(matches!(team.mode, Mode::Delete(Deletion::Match(..))));
-        assert!(
-            team.hints(s)
-                .iter()
-                .any(|(_, what)| what == s.delete_forever)
-        );
+        assert!(team.hints(s).iter().any(|(_, what)| what == s.delete));
         team.key(s, BACK_KEY);
         assert!(matches!(team.mode, Mode::Browse));
         assert_eq!(team.matches.len(), 1);

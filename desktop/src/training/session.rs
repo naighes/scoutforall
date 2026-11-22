@@ -626,7 +626,7 @@ impl SessionPage {
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             Mode::DeleteSession | Mode::DeleteActivity(..) => vec![
-                ("Enter".to_string(), s.delete_forever.to_string()),
+                ("Enter".to_string(), s.delete.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             Mode::Browse => {
@@ -662,7 +662,7 @@ impl SessionPage {
                         false => vec![("r".to_string(), s.reopen_session.to_string())],
                     },
                     vec![
-                        ("⇧⌫".to_string(), s.delete_forever.to_string()),
+                        ("⇧⌫".to_string(), s.delete.to_string()),
                         ("Esc".to_string(), s.back.to_string()),
                     ],
                 ]
@@ -883,7 +883,7 @@ impl SessionPage {
         actions.push(
             ui::action(
                 theme::icons::DELETE,
-                s.delete_forever,
+                s.delete,
                 Message::DeleteSession,
                 false,
                 c,

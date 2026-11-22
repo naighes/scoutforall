@@ -55,6 +55,33 @@ fn create_name(s: &Strings, level: Level) -> &'static str {
     }
 }
 
+fn edit_name(s: &Strings, level: Level) -> &'static str {
+    match level {
+        Level::Program => s.edit_program,
+        Level::Mesocycle => s.edit_mesocycle,
+        Level::Microcycle => s.edit_microcycle,
+    }
+}
+
+/// What a cycle takes in: the cycles of the level below, the sessions of a
+/// microcycle.
+fn add_name(s: &Strings, level: Level) -> &'static str {
+    match level {
+        Level::Program => s.add_mesocycles,
+        Level::Mesocycle => s.add_microcycles,
+        Level::Microcycle => s.add_sessions,
+    }
+}
+
+/// What a cycle shows when it contains nothing yet.
+fn empty_name(s: &Strings, level: Level) -> &'static str {
+    match level {
+        Level::Program => s.no_mesocycles,
+        Level::Mesocycle => s.no_microcycles,
+        Level::Microcycle => s.no_sessions,
+    }
+}
+
 const TITLE: usize = 0;
 const START: usize = 1;
 /// the weeks of a mesocycle or a microcycle, the last day of a program
@@ -142,16 +169,12 @@ impl CycleEditor {
                 chosen.map_or(0, |at| at + 1),
             ));
         }
-        let title = format!(
-            "{} · {}",
-            match id {
-                Some(_) => s.edit_cycle,
-                None => s.new_cycle,
-            },
-            level_name(s, level)
-        );
+        let title = match id {
+            Some(_) => edit_name(s, level),
+            None => create_name(s, level),
+        };
         Ok(CycleEditor {
-            form: Form::new(&title, fields),
+            form: Form::new(title, fields),
             team_id,
             level,
             id,
@@ -253,7 +276,16 @@ enum Kind {
     /// the free children to put in: their ids, in the order of the checks
     Add(Vec<String>),
     Duplicate,
-    Remove,
+}
+
+/// The question before a cycle is deleted.
+struct Deletion {
+    level: Level,
+    id: String,
+    /// its name and window, to say which
+    what: String,
+    /// it contains something: it can go too
+    children: bool,
 }
 
 /// A small form over the cycle of the sheet.
@@ -314,6 +346,7 @@ enum Mode {
     Card,
     Editor(Box<CycleEditor>),
     Overlay(Box<Overlay>),
+    Delete(Deletion),
 }
 
 #[derive(Debug, Clone)]
@@ -331,6 +364,9 @@ pub enum Message {
     /// the box of a row clicked: the cycle marked or no more
     Mark(usize),
     Form(form::Message),
+    /// the deletion confirmed, what it contains too or not
+    Confirm(bool),
+    Cancel,
 }
 
 pub enum Leave {
@@ -397,7 +433,7 @@ impl CyclesTab {
         match &self.mode {
             Mode::Editor(e) => Some(e.form.focus_id()),
             Mode::Overlay(o) => Some(o.form.focus_id()),
-            Mode::List | Mode::Card => None,
+            Mode::List | Mode::Card | Mode::Delete(_) => None,
         }
     }
 
@@ -614,7 +650,7 @@ impl CyclesTab {
                     .map(|c| Field::check(&s.window(&c.first_day, &c.last_day), false, false))
                     .collect();
                 self.mode = Mode::Overlay(Box::new(Overlay {
-                    form: Form::new(s.add_children, fields),
+                    form: Form::new(add_name(s, level), fields),
                     kind: Kind::Add(free.into_iter().map(|c| c.id).collect()),
                     warned: false,
                 }));
@@ -645,15 +681,48 @@ impl CyclesTab {
     }
 
     fn start_remove(&mut self, s: &Strings) {
-        if self.card.is_none() && self.selected_id().is_none() {
+        let Some((level, id)) = self.target() else {
             return;
+        };
+        let what = match self.core.cycle(level, id.clone()) {
+            Ok(record) => format!("{} · {}", level_name(s, level), cycle_label(s, &record)),
+            Err(e) => {
+                self.error = Some(e.to_string());
+                return;
+            }
+        };
+        let children = self
+            .core
+            .cycle_children(level, id.clone())
+            .is_ok_and(|c| !c.is_empty());
+        self.mode = Mode::Delete(Deletion {
+            level,
+            id,
+            what,
+            children,
+        });
+    }
+
+    /// The cycle of the question deleted, what it contains too when asked.
+    fn remove(&mut self, with_children: bool) {
+        let Mode::Delete(deletion) = &self.mode else {
+            return;
+        };
+        let with_children = with_children && deletion.children;
+        match self
+            .core
+            .remove_cycle(deletion.level, deletion.id.clone(), with_children)
+        {
+            Ok(_) => {
+                self.card = None;
+                self.mode = Mode::List;
+                self.reload();
+            }
+            Err(e) => {
+                self.error = Some(e.to_string());
+                self.close_forms();
+            }
         }
-        let fields = vec![Field::check(s.remove_with_children, false, false)];
-        self.mode = Mode::Overlay(Box::new(Overlay {
-            form: Form::new(s.delete_forever, fields),
-            kind: Kind::Remove,
-            warned: false,
-        }));
     }
 
     /// The cycle in front: the sheet's, or the one chosen in the list.
@@ -729,26 +798,12 @@ impl CyclesTab {
                             .then(|| ui::fill(s.copies_free, &[free.to_string()]))
                     })
             }
-            Kind::Remove => self
-                .core
-                .remove_cycle(level, id.clone(), checked(&overlay.form, 0))
-                .map(|_| None),
         };
         match done {
             Ok(notice) => {
-                let removed = matches!(overlay.kind, Kind::Remove);
                 self.notice = notice;
-                match removed {
-                    true => {
-                        self.card = None;
-                        self.mode = Mode::List;
-                        self.reload();
-                    }
-                    false => {
-                        self.mode = Mode::Card;
-                        self.refresh();
-                    }
-                }
+                self.mode = Mode::Card;
+                self.refresh();
             }
             Err(e) => overlay.form.error = Some(e.to_string()),
         }
@@ -796,6 +851,8 @@ impl CyclesTab {
                 let outcome = overlay.form.update(m);
                 self.overlay_done(s, outcome);
             }
+            (Mode::Delete(_), Message::Confirm(with_children)) => self.remove(with_children),
+            (Mode::Delete(_), Message::Cancel) => self.close_forms(),
             (Mode::List, Message::Level(level)) => self.set_level(level),
             (Mode::List, Message::Row(i)) => {
                 self.selected = i;
@@ -829,6 +886,12 @@ impl CyclesTab {
                 let outcome = overlay.form.key(ck);
                 self.overlay_done(s, outcome);
             }
+            Mode::Delete(deletion) => match ck {
+                k if k == key!(enter) => self.remove(false),
+                k if k == key!(a) && deletion.children => self.remove(true),
+                k if k == BACK_KEY => self.close_forms(),
+                _ => {}
+            },
             Mode::Card => return self.card_key(s, ck),
             Mode::List => return self.list_key(s, ck),
         }
@@ -906,22 +969,27 @@ impl CyclesTab {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
             Mode::Editor(_) | Mode::Overlay(_) => Form::hints(s),
+            Mode::Delete(deletion) => {
+                let mut hints = vec![("Enter".to_string(), s.delete.to_string())];
+                if deletion.children {
+                    hints.push(("a".to_string(), s.remove_with_children.to_string()));
+                }
+                hints.push(("Esc".to_string(), s.cancel.to_string()));
+                hints
+            }
             Mode::Card => {
+                let level = self.card.as_ref().map_or(self.level, |c| c.record.level);
                 let mut hints = vec![
                     ("↑ ↓".to_string(), String::new()),
                     ("Enter".to_string(), s.open.to_string()),
-                    ("e".to_string(), s.edit_cycle.to_string()),
-                    ("a".to_string(), s.add_children.to_string()),
+                    ("e".to_string(), edit_name(s, level).to_string()),
+                    ("a".to_string(), add_name(s, level).to_string()),
                 ];
-                if self
-                    .card
-                    .as_ref()
-                    .is_some_and(|c| c.record.level == Level::Microcycle)
-                {
+                if level == Level::Microcycle {
                     hints.push(("d".to_string(), s.duplicate_microcycle.to_string()));
                     hints.push(("p".to_string(), s.plan_pdf.to_string()));
                 }
-                hints.push(("⌫".to_string(), s.delete_forever.to_string()));
+                hints.push(("⌫".to_string(), s.delete.to_string()));
                 hints.push(("Esc".to_string(), s.back.to_string()));
                 hints
             }
@@ -936,7 +1004,7 @@ impl CyclesTab {
                     hints.push(("space".to_string(), s.select_row.to_string()));
                     hints.push(("m".to_string(), create_name(s, up).to_string()));
                 }
-                hints.push(("⌫".to_string(), s.delete_forever.to_string()));
+                hints.push(("⌫".to_string(), s.delete.to_string()));
                 hints.push(("Esc".to_string(), s.back.to_string()));
                 hints
             }
@@ -958,6 +1026,29 @@ impl CyclesTab {
         let body: Element<'a, Message> = match &self.mode {
             Mode::Editor(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Overlay(o) => centered(o.form.view(s, c, Message::Form, None)),
+            Mode::Delete(d) => {
+                let what = match d.children {
+                    true => format!("{}\n{}", d.what, s.delete_cycle_keeps),
+                    false => d.what.clone(),
+                };
+                let others = match d.children {
+                    true => vec![(
+                        theme::icons::DELETE,
+                        s.remove_with_children,
+                        Message::Confirm(true),
+                    )],
+                    false => vec![],
+                };
+                ui::confirm_deletion_with(
+                    s,
+                    &what,
+                    others,
+                    s.delete,
+                    Message::Confirm(false),
+                    Message::Cancel,
+                    c,
+                )
+            }
             Mode::Card => self.card_view(s, c),
             Mode::List => self.list(s, c),
         };
@@ -981,7 +1072,10 @@ impl CyclesTab {
             .map(|(i, cycle)| self.cycle_row(s, cycle, i, c))
             .collect();
         let list: Element<'a, Message> = match rows.is_empty() {
-            true => text(s.no_cycles).size(SIZE_SMALL).color(c.muted).into(),
+            true => container(text(s.no_cycles).size(SIZE_SMALL).color(c.muted))
+                .width(Length::Fill)
+                .height(Length::Fill)
+                .into(),
             false => scrollable(Column::with_children(rows).spacing(3))
                 .id(Id::new(LIST))
                 .height(Length::Fill)
@@ -1087,12 +1181,24 @@ impl CyclesTab {
             .map(|p| cycle_label(s, &p))
             .unwrap_or_default();
         let mut actions: Vec<Element<'a, Message>> = vec![
-            ui::action(theme::icons::EDIT, s.edit_cycle, Message::Edit, false, c)
-                .width(Length::Fill)
-                .into(),
-            ui::action(theme::icons::ADD, s.add_children, Message::Add, false, c)
-                .width(Length::Fill)
-                .into(),
+            ui::action(
+                theme::icons::EDIT,
+                edit_name(s, r.level),
+                Message::Edit,
+                false,
+                c,
+            )
+            .width(Length::Fill)
+            .into(),
+            ui::action(
+                theme::icons::ADD,
+                add_name(s, r.level),
+                Message::Add,
+                false,
+                c,
+            )
+            .width(Length::Fill)
+            .into(),
         ];
         if r.level == Level::Microcycle {
             actions.push(
@@ -1115,15 +1221,9 @@ impl CyclesTab {
             );
         }
         actions.push(
-            ui::action(
-                theme::icons::DELETE,
-                s.delete_forever,
-                Message::Delete,
-                false,
-                c,
-            )
-            .width(Length::Fill)
-            .into(),
+            ui::action(theme::icons::DELETE, s.delete, Message::Delete, false, c)
+                .width(Length::Fill)
+                .into(),
         );
         let info = ui::panel(
             Some(level_name(s, r.level)),
@@ -1136,9 +1236,13 @@ impl CyclesTab {
                 line(s.cycle_totals, counts),
                 line(s.planned_time, time(t.planned_minutes)),
                 line(s.actual_time, time(t.actual_minutes)),
+                // the actions at the bottom: the panel fills the height
+                space::vertical(),
                 Column::with_children(actions).spacing(8),
             ]
-            .spacing(10),
+            .spacing(10)
+            .width(Length::Fill)
+            .height(Length::Fill),
             c,
         );
         let rows: Vec<Element<'a, Message>> = card
@@ -1154,20 +1258,35 @@ impl CyclesTab {
                 )
             })
             .collect();
+        // empty, the panel says what is missing and how to add it, in the
+        // middle of the space it fills
         let children: Element<'a, Message> = match rows.is_empty() {
-            true => text(match r.level {
-                Level::Microcycle => s.no_sessions,
-                _ => s.no_cycles,
-            })
-            .size(SIZE_SMALL)
-            .color(c.muted)
+            true => container(
+                column![
+                    ui::body(empty_name(s, r.level)).color(c.muted),
+                    ui::action(
+                        theme::icons::ADD,
+                        add_name(s, r.level),
+                        Message::Add,
+                        false,
+                        c
+                    ),
+                ]
+                .spacing(12)
+                .align_x(Alignment::Center),
+            )
+            .center_x(Length::Fill)
+            .center_y(Length::Fill)
             .into(),
             false => scrollable(Column::with_children(rows).spacing(3))
+                .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
         };
         row![
-            container(info).width(Length::FillPortion(3)),
+            container(info)
+                .width(Length::FillPortion(3))
+                .height(Length::Fill),
             container(ui::panel(Some(s.cycle_contains), children, c))
                 .width(Length::FillPortion(4))
                 .height(Length::Fill),
