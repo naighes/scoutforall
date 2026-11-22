@@ -5,6 +5,7 @@
 
 use {
     super::{
+        cycles::{self, CyclesTab, Leave},
         forms::{Edited, SessionEditor},
         series::SeriesEditor,
         session::{self, SessionPage},
@@ -20,7 +21,7 @@ use {
         Alignment, Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
     },
-    scout4all_core::training::SessionStatus,
+    scout4all_core::training::{SessionStatus, cycles::Level},
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{MobileError, Scout4All, training::SessionRecord},
     std::{collections::HashSet, sync::Arc},
@@ -68,6 +69,12 @@ fn filter_name(s: &Strings, filter: Filter) -> &'static str {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Tab {
+    Sessions,
+    Cycles,
+}
+
 enum Mode {
     List,
     Page(Box<SessionPage>),
@@ -88,6 +95,10 @@ pub enum Message {
     Dismiss,
     Form(form::Message),
     Page(session::Message),
+    Tab(Tab),
+    Cycles(cycles::Message),
+    /// the sessions marked, in a new microcycle
+    Create,
 }
 
 pub enum Outcome {
@@ -106,6 +117,10 @@ pub struct TrainingScreen {
     recorded: HashSet<String>,
     filter: Filter,
     selected: usize,
+    /// the sessions marked to make a microcycle
+    marked: HashSet<String>,
+    tab: Tab,
+    cycles: CyclesTab,
     mode: Mode,
     error: Option<String>,
 }
@@ -119,6 +134,7 @@ impl TrainingScreen {
     ) -> Result<TrainingScreen, MobileError> {
         let team_name = core.team(team_id.clone())?.name;
         let mut screen = TrainingScreen {
+            cycles: CyclesTab::new(core.clone(), team_id.clone()),
             core,
             team_id,
             team_name,
@@ -126,6 +142,8 @@ impl TrainingScreen {
             recorded: HashSet::new(),
             filter: Filter::All,
             selected: 0,
+            marked: HashSet::new(),
+            tab: Tab::Sessions,
             mode: Mode::List,
             error: None,
         };
@@ -156,6 +174,7 @@ impl TrainingScreen {
             Mode::New(editor) => Some(editor.form.focus_id()),
             Mode::Series(editor) if editor.conflicts.is_empty() => Some(editor.form.focus_id()),
             Mode::Series(_) => None,
+            Mode::List if self.tab == Tab::Cycles => self.cycles.focus_id(),
             Mode::List | Mode::Delete(_) => None,
         }
     }
@@ -163,6 +182,7 @@ impl TrainingScreen {
     /// Where the list is, to keep the session chosen in sight.
     pub fn scroll(&self) -> Option<(Id, f32)> {
         match self.mode {
+            Mode::List if self.tab == Tab::Cycles => self.cycles.scroll(),
             Mode::List => {
                 let last = self.shown().len().saturating_sub(1).max(1);
                 Some((Id::new(LIST), self.selected as f32 / last as f32))
@@ -210,6 +230,55 @@ impl TrainingScreen {
     /// The sessions the filter lets through.
     fn shown(&self) -> Vec<&SessionRecord> {
         self.sessions.iter().filter(|r| self.matches(r)).collect()
+    }
+
+    fn set_tab(&mut self, tab: Tab) {
+        self.tab = tab;
+        match tab {
+            Tab::Sessions => self.reload(),
+            Tab::Cycles => self.cycles.reload(),
+        }
+    }
+
+    /// The marked sessions in a new microcycle, made on the cycles tab.
+    fn create_microcycle(&mut self, s: &Strings) {
+        let ids: Vec<String> = self
+            .sessions
+            .iter()
+            .filter(|r| self.marked.contains(&r.id))
+            .map(|r| r.id.clone())
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        self.marked.clear();
+        self.tab = Tab::Cycles;
+        self.cycles.create_from(s, Level::Microcycle, ids);
+    }
+
+    fn toggle_mark(&mut self) {
+        let free = self
+            .shown()
+            .get(self.selected)
+            .filter(|r| r.microcycle_id.is_none())
+            .map(|r| r.id.clone());
+        if let Some(id) = free.filter(|id| !self.marked.remove(id)) {
+            self.marked.insert(id);
+        }
+    }
+
+    /// What the cycles tab did.
+    fn cycled(&mut self, leave: Leave) -> Outcome {
+        match leave {
+            Leave::Stay => Outcome::Stay,
+            Leave::Back => Outcome::Back,
+            Leave::Session(id) => {
+                self.tab = Tab::Sessions;
+                self.reload();
+                self.open_session(&id);
+                Outcome::Stay
+            }
+        }
     }
 
     fn open_session(&mut self, id: &str) {
@@ -323,6 +392,12 @@ impl TrainingScreen {
             }
             (Mode::Delete(_), Message::Confirm) => self.delete(),
             (Mode::Delete(_), Message::Dismiss) => self.mode = Mode::List,
+            (Mode::List, Message::Tab(tab)) => self.set_tab(tab),
+            (Mode::List, Message::Cycles(m)) if self.tab == Tab::Cycles => {
+                let leave = self.cycles.update(s, m);
+                return self.cycled(leave);
+            }
+            (Mode::List, Message::Create) => self.create_microcycle(s),
             (Mode::List, Message::Filter(filter)) => {
                 self.filter = filter;
                 self.selected = 0;
@@ -358,6 +433,14 @@ impl TrainingScreen {
                 k if k == BACK_KEY => self.mode = Mode::List,
                 _ => {}
             },
+            Mode::List if self.tab == Tab::Cycles => {
+                if self.cycles.on_list() && (ck == key!(tab) || ck == key!(shift - tab)) {
+                    self.set_tab(Tab::Sessions);
+                    return Outcome::Stay;
+                }
+                let leave = self.cycles.key(s, ck);
+                return self.cycled(leave);
+            }
             Mode::List => return self.list_key(s, ck),
         }
         Outcome::Stay
@@ -374,6 +457,9 @@ impl TrainingScreen {
             k if k == key!(f) || k == key!(right) => self.step_filter(true),
             k if k == key!(left) => self.step_filter(false),
             k if k == key!(enter) => self.open_selected(),
+            k if k == key!(tab) || k == key!(shift - tab) => self.set_tab(Tab::Cycles),
+            k if k == key!(space) => self.toggle_mark(),
+            k if k == key!(m) => self.create_microcycle(s),
             k if k == key!(n) => self.new_session(s),
             k if k == key!(r) => self.repeat(s),
             k if (k == key!(backspace) || k == key!(delete)) && count > 0 => self.ask_deletion(),
@@ -402,8 +488,12 @@ impl TrainingScreen {
                 ("Enter".to_string(), s.delete_forever.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
+            Mode::List if self.tab == Tab::Cycles => self.cycles.hints(s),
             Mode::List => vec![
                 ("↑ ↓".to_string(), String::new()),
+                ("space".to_string(), s.select_row.to_string()),
+                ("m".to_string(), s.create_microcycle.to_string()),
+                ("⇥".to_string(), s.cycles.to_string()),
                 ("Enter".to_string(), s.open.to_string()),
                 ("← → f".to_string(), s.filter.to_string()),
                 ("n".to_string(), s.new_session.to_string()),
@@ -443,13 +533,28 @@ impl TrainingScreen {
                 Message::Dismiss,
                 c,
             ),
+            Mode::List if self.tab == Tab::Cycles => {
+                let tabs = row![
+                    ui::pill(s.sessions, false, Some(Message::Tab(Tab::Sessions)), c),
+                    ui::pill(s.cycles, true, None, c)
+                ]
+                .spacing(6);
+                column![tabs, self.cycles.view(s, c).map(Message::Cycles)]
+                    .spacing(10)
+                    .height(Length::Fill)
+                    .into()
+            }
             Mode::List => self.list(s, c),
         };
         column![error, body].spacing(10).into()
     }
 
     fn list<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let tabs = row![ui::pill(s.sessions, true, None, c)].spacing(6);
+        let tabs = row![
+            ui::pill(s.sessions, true, None, c),
+            ui::pill(s.cycles, false, Some(Message::Tab(Tab::Cycles)), c)
+        ]
+        .spacing(6);
         let filters = row(FILTERS.iter().map(|f| {
             ui::pill(
                 filter_name(s, *f),
@@ -480,6 +585,12 @@ impl TrainingScreen {
                 .into(),
             ui::pill(s.new_session, false, Some(Message::New), c),
             ui::pill(s.repeat_sessions, false, Some(Message::Repeat), c),
+            ui::pill(
+                s.create_microcycle,
+                false,
+                (!self.marked.is_empty()).then_some(Message::Create),
+                c,
+            ),
             ui::pill(s.delete_forever, false, Some(Message::Delete), c),
         ];
         column![
@@ -522,6 +633,15 @@ impl TrainingScreen {
             flags.push(s.to_close.to_string());
         }
         let line = row![
+            text(
+                match (r.microcycle_id.is_none(), self.marked.contains(&r.id)) {
+                    (true, true) => "☑",
+                    (true, false) => "☐",
+                    _ => " ",
+                }
+            )
+            .size(SIZE_SMALL)
+            .color(c.muted),
             text(when)
                 .size(SIZE_SMALL)
                 .color(c.muted)
@@ -558,7 +678,9 @@ mod tests {
             Mode::Page(p) => (true, p.mode_name() == "roll"),
             _ => (false, false),
         };
+        let cycles = screen.tab == Tab::Cycles && !page;
         let wrap = |m: FormMessage| match (page, roll) {
+            _ if cycles => Message::Cycles(cycles::Message::Form(m)),
             (true, true) => {
                 Message::Page(session::Message::Roll(super::super::roll::Message::Form(m)))
             }
@@ -875,5 +997,120 @@ mod tests {
         screen.key(s, key!(enter));
         assert!(matches!(screen.mode, Mode::List));
         assert_eq!(core.training_sessions(team).unwrap().len(), 1);
+    }
+    /// Sessions marked with space become a microcycle (window proposed from
+    /// the first Monday); the sheet gives the totals; the microcycle is
+    /// duplicated and the two marked make a mesocycle.
+    #[test]
+    fn marked_sessions_make_a_microcycle_and_microcycles_a_mesocycle() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        session(&core, &team, "2026-03-02T18:00", "Lunedì");
+        session(&core, &team, "2026-03-04T18:00", "Mercoledì");
+        let mut screen =
+            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        screen.key(s, key!(space));
+        screen.key(s, key!(down));
+        screen.key(s, key!(space));
+        screen.key(s, key!(m));
+        assert_eq!(screen.tab, Tab::Cycles);
+        assert!(screen.focus_id().is_some());
+        screen.key(s, key!(enter));
+        let micros = core.cycles(team.clone(), Level::Microcycle).unwrap();
+        assert_eq!(micros.len(), 1);
+        assert_eq!(micros[0].first_day, "2026-03-02");
+        assert!(
+            core.training_sessions(team.clone())
+                .unwrap()
+                .iter()
+                .all(|r| r.microcycle_id.as_deref() == Some(micros[0].id.as_str()))
+        );
+        // the sheet: totals and the two sessions
+        let (totals, children) = screen.cycles.card_totals().unwrap();
+        assert_eq!(totals.planned, 2);
+        assert_eq!(totals.planned_minutes, 180);
+        assert_eq!(children, 2);
+        // duplicated a week later
+        screen.key(s, key!(d));
+        screen.key(s, key!(enter));
+        assert_eq!(
+            core.cycles(team.clone(), Level::Microcycle).unwrap().len(),
+            2
+        );
+        // the two free microcycles make a mesocycle
+        screen.key(s, BACK_KEY);
+        screen.key(s, key!(space));
+        screen.key(s, key!(down));
+        screen.key(s, key!(space));
+        screen.key(s, key!(m));
+        screen.key(s, key!(enter));
+        let mesos = core.cycles(team.clone(), Level::Mesocycle).unwrap();
+        assert_eq!(mesos.len(), 1);
+        assert_eq!(mesos[0].weeks, Some(2));
+        assert!(
+            core.cycles(team, Level::Microcycle)
+                .unwrap()
+                .iter()
+                .all(|c| c.parent_id.as_deref() == Some(mesos[0].id.as_str()))
+        );
+    }
+
+    /// A shorter window that leaves a child out stops the save and says so;
+    /// Enter again detaches it. Deleting a microcycle frees its sessions.
+    #[test]
+    fn a_shorter_window_detaches_what_falls_out_and_a_deletion_frees_children() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        session(&core, &team, "2026-03-02T18:00", "Prima");
+        session(&core, &team, "2026-03-09T18:00", "Seconda");
+        let mut screen =
+            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        screen.key(s, key!(space));
+        screen.key(s, key!(down));
+        screen.key(s, key!(space));
+        screen.key(s, key!(m));
+        screen.key(s, key!(enter));
+        assert_eq!(
+            core.cycles(team.clone(), Level::Microcycle).unwrap()[0].weeks,
+            Some(2)
+        );
+        // one week only: the second session falls out
+        screen.key(s, key!(e));
+        type_in(&mut screen, 2, "1");
+        screen.key(s, key!(enter));
+        let Mode::List = screen.mode else {
+            panic!("the list")
+        };
+        assert!(screen.cycles.form_error().is_some());
+        assert_eq!(
+            core.cycles(team.clone(), Level::Microcycle).unwrap()[0].weeks,
+            Some(2)
+        );
+        screen.key(s, key!(enter));
+        let micro = core.cycles(team.clone(), Level::Microcycle).unwrap();
+        assert_eq!(micro[0].weeks, Some(1));
+        let attached = |core: &Scout4All| {
+            core.training_sessions(team.clone())
+                .unwrap()
+                .iter()
+                .filter(|r| r.microcycle_id.is_some())
+                .count()
+        };
+        assert_eq!(attached(&core), 1);
+        // deleted: the session left is free, not gone
+        screen.key(s, key!(backspace));
+        screen.key(s, key!(enter));
+        assert!(
+            core.cycles(team.clone(), Level::Microcycle)
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 2);
+        assert_eq!(attached(&core), 0);
+        assert!(screen.cycles.on_list());
     }
 }

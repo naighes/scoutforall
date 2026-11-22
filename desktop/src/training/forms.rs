@@ -112,7 +112,7 @@ pub(super) fn day_of(text: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d").ok()
 }
 
-fn cycle_label(cycle: &CycleRecord) -> String {
+pub(super) fn cycle_label(cycle: &CycleRecord) -> String {
     match cycle.title.is_empty() {
         true => cycle.window.clone(),
         false => format!("{} ({})", cycle.title, cycle.window),
