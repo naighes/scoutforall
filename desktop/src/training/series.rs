@@ -4,10 +4,11 @@
 
 use {
     super::forms::{
-        Edited, clash_warning, day_of, microcycle_options, microcycle_value, split, venue_at, venue_options,
-        venue_value,
+        Edited, clash_warning, day_of, microcycle_options, microcycle_value, split, venue_at,
+        venue_options, venue_value,
     },
     crate::{
+        calendar::text_of,
         form::{self, Field, Form, Outcome, Value},
         strings::Strings,
         theme::{self, Colors},
@@ -49,13 +50,14 @@ pub struct DuplicateEditor {
     /// another team holds the gym then and the user was told: Enter again
     /// saves
     warned: bool,
-    anyway_hint: String,
+    /// the words of the forms (the choices are written again on a change)
+    s: &'static Strings,
 }
 
 impl DuplicateEditor {
     pub fn new(
         core: &Scout4All,
-        s: &Strings,
+        s: &'static Strings,
         team_id: String,
         session_id: String,
     ) -> Result<DuplicateEditor, MobileError> {
@@ -74,14 +76,15 @@ impl DuplicateEditor {
             session_id,
             microcycles: vec![],
             warned: false,
-            anyway_hint: s.save_anyway_hint.to_string(),
+            s,
         };
         editor.offer_microcycles(core, proposed.microcycle_id.as_deref());
         Ok(editor)
     }
 
     fn offer_microcycles(&mut self, core: &Scout4All, current: Option<&str>) {
-        let options = microcycle_options(core, &self.team_id, &self.form.text(DATE), current);
+        let options =
+            microcycle_options(self.s, core, &self.team_id, &self.form.text(DATE), current);
         let chosen = current.and_then(|id| options.iter().position(|(o, _)| o == id));
         if let Some(field) = self.form.fields.get_mut(MICROCYCLE) {
             field.value = microcycle_value(&options, chosen);
@@ -107,7 +110,7 @@ impl DuplicateEditor {
         };
         if !self.warned {
             let warning = clash_warning(
-                &self.anyway_hint,
+                self.s.save_anyway_hint,
                 core.duplicate_venue_clashes(self.session_id.clone(), draft.clone()),
             );
             self.warned = warning.is_some();
@@ -184,11 +187,9 @@ impl SeriesEditor {
         team_id: String,
         day: Option<NaiveDate>,
     ) -> Result<SeriesEditor, MobileError> {
-        let venues = venue_options(core, &team_id, None);
+        let venues = venue_options(s, core, &team_id, None);
         let minutes = core.new_session_draft().duration;
-        let from = day
-            .map(|d| d.format("%Y-%m-%d").to_string())
-            .unwrap_or_default();
+        let from = day.map(text_of).unwrap_or_default();
         let mut fields = vec![
             Field::masked(s.from_day, &from, form::Mask::Date, s.date_placeholder),
             Field::masked(s.to_day, "", form::Mask::Date, s.date_placeholder),
@@ -409,7 +410,7 @@ impl SeriesChangeEditor {
         session_id: String,
     ) -> Result<SeriesChangeEditor, MobileError> {
         let record = core.training_session(session_id.clone())?;
-        let venues = venue_options(core, &team_id, record.venue_id.as_deref());
+        let venues = venue_options(s, core, &team_id, record.venue_id.as_deref());
         let time = record.start.get(11..16).unwrap_or_default().to_string();
         let minutes = record.duration_min.to_string();
         let fields = vec![

@@ -12,8 +12,6 @@ mod calendar;
 mod charts;
 mod compare;
 mod competitions;
-mod venue_choice;
-mod venues;
 mod countries;
 mod court;
 mod dvw;
@@ -41,6 +39,8 @@ mod training;
 mod transfer;
 mod ui;
 mod update;
+mod venue_choice;
+mod venues;
 mod video;
 
 use {
@@ -480,7 +480,9 @@ impl App {
                 .map(|home| Screen::Home(Box::new(HomeScreen::new(&core, home)))),
             Go::Competitions => competitions::CompetitionsScreen::new(core)
                 .map(|screen| Screen::Competitions(Box::new(screen))),
-            Go::Venues => venues::VenuesScreen::new(core).map(|screen| Screen::Venues(Box::new(screen))),
+            Go::Venues => {
+                venues::VenuesScreen::new(core).map(|screen| Screen::Venues(Box::new(screen)))
+            }
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
             Go::Training(team, open) => {
                 training::screen::TrainingScreen::new(core, self.strings, team, open)

@@ -39,6 +39,15 @@ import java.time.format.FormatStyle
  * same everywhere ("14 novembre 2026"). */
 internal fun dayText(day: LocalDate): String = day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.LONG))
 
+/** The window of a cycle (days as saved, the last included) written as
+ * the sessions write their days; one day alone. */
+internal fun windowText(first: String, last: String): String {
+    val written = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM)
+    val days = runCatching { LocalDate.parse(first).format(written) to LocalDate.parse(last).format(written) }
+        .getOrDefault(first to last)
+    return if (first == last) days.first else "${days.first} – ${days.second}"
+}
+
 /** The field of a day, the same in every form (the match, the birth of a
  * player, a match imported without its date): the day written in the
  * language of the phone, a tap opens the calendar. Configured by the use:

@@ -9,6 +9,7 @@
 
 use {
     crate::{
+        calendar::{day_of, text_of},
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
@@ -82,15 +83,6 @@ pub struct CalendarTab {
     error: Option<String>,
 }
 
-fn parse(day: &str) -> Option<NaiveDate> {
-    day.get(..10)
-        .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-}
-
-fn text_of(day: NaiveDate) -> String {
-    day.format("%Y-%m-%d").to_string()
-}
-
 /// The Monday of the week of `day`.
 pub fn monday(day: NaiveDate) -> NaiveDate {
     day - Duration::days(day.weekday().num_days_from_monday() as i64)
@@ -128,8 +120,8 @@ pub fn segments<'a>(
     let cover = |day: &Option<NaiveDate>| {
         day.and_then(|d| {
             cycles.iter().find(|c| {
-                parse(&c.first_day).is_some_and(|f| f <= d)
-                    && parse(&c.last_day).is_some_and(|l| d <= l)
+                day_of(&c.first_day).is_some_and(|f| f <= d)
+                    && day_of(&c.last_day).is_some_and(|l| d <= l)
             })
         })
     };
@@ -224,8 +216,8 @@ impl CalendarTab {
                     .cycles(self.team_id.clone(), level)?
                     .into_iter()
                     .filter(|c| {
-                        parse(&c.first_day).is_some_and(|f| f <= last)
-                            && parse(&c.last_day).is_some_and(|l| first <= l)
+                        day_of(&c.first_day).is_some_and(|f| f <= last)
+                            && day_of(&c.last_day).is_some_and(|l| first <= l)
                     })
                     .collect();
                 Ok((days, bands))
@@ -246,7 +238,7 @@ impl CalendarTab {
     }
 
     fn day_record(&self, day: NaiveDate) -> Option<&AgendaDay> {
-        self.days.iter().find(|d| parse(&d.date) == Some(day))
+        self.days.iter().find(|d| day_of(&d.date) == Some(day))
     }
 
     fn events_of(&self, day: NaiveDate) -> usize {
@@ -570,28 +562,24 @@ impl CalendarTab {
     }
 
     fn week<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let days: Vec<Option<NaiveDate>> =
-            self.days.iter().map(|d| parse(&d.date)).collect::<Vec<_>>();
+        let days: Vec<Option<NaiveDate>> = self
+            .days
+            .iter()
+            .map(|d| day_of(&d.date))
+            .collect::<Vec<_>>();
         let columns = Row::with_children(self.days.iter().map(|day| {
-            let date = parse(&day.date);
+            let date = day_of(&day.date);
             let lit = date == Some(self.today);
             let here = date == Some(self.anchor);
             let head: Element<'a, Message> = match date {
                 Some(date) => ui::list_row(
-                    text(format!(
-                        "{} {}",
-                        s.weekdays
-                            .get(date.weekday().num_days_from_monday() as usize)
-                            .copied()
-                            .unwrap_or_default(),
-                        s.short_date(date)
-                    ))
-                    .size(SIZE_SMALL)
-                    .font(theme::fonts().bold)
-                    .color(match lit {
-                        true => c.accent,
-                        false => c.muted,
-                    }),
+                    text(format!("{} {}", s.weekday(date), s.short_date(date)))
+                        .size(SIZE_SMALL)
+                        .font(theme::fonts().bold)
+                        .color(match lit {
+                            true => c.accent,
+                            false => c.muted,
+                        }),
                     here && day.events.is_empty(),
                     Some(Message::Day(date)),
                     c,
@@ -715,7 +703,7 @@ fn event_text<'a>(
                 [event
                     .venue
                     .as_ref()
-                    .map(|v| v.name.clone())
+                    .map(|v| crate::venue_choice::venue_label(s, &v.name, v.deleted))
                     .unwrap_or_default()]
                 .into_iter()
                 .chain(flags)
@@ -751,10 +739,7 @@ fn event_text<'a>(
         (true, false, true) => " !".to_string(),
         (true, false, false) => String::new(),
     };
-    let title = match with_team {
-        true => format!("{} · {title}", event.team_name),
-        false => title,
-    };
+    let title = crate::agenda::heading(event, title, with_team);
     // another team holds the gym then: the error color and an icon
     let shared = event.shared_venue && !cancelled;
     let first = text(format!("{time} {title}{marks}"))

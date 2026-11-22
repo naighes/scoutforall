@@ -551,7 +551,7 @@ fun MicrocycleChoice(options: List<CycleRecord>, selected: String?, onSelect: (S
     if (options.isEmpty() && selected == null) return
     ChoiceField(
         stringResource(R.string.tr_microcycle),
-        listOf<Pair<String?, String>>(null to NO_CHOICE) + options.map { it.id to it.title.ifBlank { it.window } + " · " + it.window },
+        listOf<Pair<String?, String>>(null to NO_CHOICE) + options.map { o -> o.id to listOf(o.title, windowText(o.firstDay, o.lastDay)).filter { it.isNotBlank() }.joinToString(" · ") },
         selected,
         onSelect = onSelect,
     )

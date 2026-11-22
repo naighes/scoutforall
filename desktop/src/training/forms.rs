@@ -4,6 +4,7 @@
 
 use {
     crate::{
+        calendar::text_of,
         form::{self, Field, Form, Mask, Outcome, Suggestion, Value},
         strings::Strings,
     },
@@ -45,6 +46,7 @@ const MICROCYCLE: usize = 9;
 /// The microcycles of the team that hold the day written, and the one
 /// `current` even when the day is out of it: id and name.
 pub(super) fn microcycle_options(
+    s: &Strings,
     core: &Scout4All,
     team_id: &str,
     date: &str,
@@ -52,21 +54,17 @@ pub(super) fn microcycle_options(
 ) -> Vec<(String, String)> {
     let containing = day_of(date)
         .and_then(|day| {
-            core.cycles_containing(
-                team_id.to_string(),
-                Level::Microcycle,
-                day.format("%Y-%m-%d").to_string(),
-            )
-            .ok()
+            core.cycles_containing(team_id.to_string(), Level::Microcycle, text_of(day))
+                .ok()
         })
         .unwrap_or_default();
     let kept = current.and_then(|id| core.cycle(Level::Microcycle, id.to_string()).ok());
     let mut options: Vec<(String, String)> = containing
         .iter()
-        .map(|c| (c.id.clone(), cycle_label(c)))
+        .map(|c| (c.id.clone(), cycle_label(s, c)))
         .collect();
     if let Some(kept) = kept.filter(|k| !options.iter().any(|(id, _)| *id == k.id)) {
-        options.push((kept.id.clone(), cycle_label(&kept)));
+        options.push((kept.id.clone(), cycle_label(s, &kept)));
     }
     options
 }
@@ -77,17 +75,14 @@ pub(crate) fn clash_warning(
     hint: &str,
     clashes: Result<Vec<VenueClashRecord>, MobileError>,
 ) -> Option<String> {
-    clashes
-        .ok()
-        .filter(|found| !found.is_empty())
-        .map(|found| {
-            found
-                .iter()
-                .map(|c| c.message.clone())
-                .chain([hint.to_string()])
-                .collect::<Vec<_>>()
-                .join("\n")
-        })
+    clashes.ok().filter(|found| !found.is_empty()).map(|found| {
+        found
+            .iter()
+            .map(|c| c.message.clone())
+            .chain([hint.to_string()])
+            .collect::<Vec<_>>()
+            .join("\n")
+    })
 }
 
 /// The choice of a microcycle: the empty one, then `options`; `chosen` is
@@ -116,10 +111,11 @@ pub(super) fn day_of(text: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d").ok()
 }
 
-pub(super) fn cycle_label(cycle: &CycleRecord) -> String {
+pub(super) fn cycle_label(s: &Strings, cycle: &CycleRecord) -> String {
+    let window = s.window(&cycle.first_day, &cycle.last_day);
     match cycle.title.is_empty() {
-        true => cycle.window.clone(),
-        false => format!("{} ({})", cycle.title, cycle.window),
+        true => window,
+        false => format!("{} ({window})", cycle.title),
     }
 }
 
@@ -135,14 +131,15 @@ pub struct SessionEditor {
     /// another team holds the gym then and the user was told: Enter again
     /// saves
     warned: bool,
-    anyway_hint: String,
+    /// the words of the forms (the choices are written again on a change)
+    s: &'static Strings,
 }
 
 impl SessionEditor {
     /// A new session of the team (on `day` if given) or the saved one.
     pub fn new(
         core: &Scout4All,
-        s: &Strings,
+        s: &'static Strings,
         team_id: String,
         id: Option<String>,
         day: Option<NaiveDate>,
@@ -151,10 +148,10 @@ impl SessionEditor {
             Some(id) => core.session_draft(id.clone())?,
             None => core.new_session_draft(),
         };
-        let venues = venue_options(core, &team_id, draft.venue.as_deref());
+        let venues = venue_options(s, core, &team_id, draft.venue.as_deref());
         let (date, time) = split(&draft.start);
         let date = match (&id, day) {
-            (None, Some(day)) => day.format("%Y-%m-%d").to_string(),
+            (None, Some(day)) => text_of(day),
             _ => date,
         };
         let fields = vec![
@@ -186,7 +183,7 @@ impl SessionEditor {
             venues,
             microcycles: vec![],
             warned: false,
-            anyway_hint: s.save_anyway_hint.to_string(),
+            s,
         };
         editor.offer_microcycles(core, draft.microcycle.as_deref());
         Ok(editor)
@@ -197,7 +194,8 @@ impl SessionEditor {
     /// the empty choice takes it out. With none chosen, the one that holds
     /// the day is proposed.
     fn offer_microcycles(&mut self, core: &Scout4All, current: Option<&str>) {
-        let options = microcycle_options(core, &self.team_id, &self.form.text(DATE), current);
+        let options =
+            microcycle_options(self.s, core, &self.team_id, &self.form.text(DATE), current);
         let chosen = match current {
             Some(id) => options.iter().position(|(o, _)| o == id),
             None => (self.id.is_none() && !options.is_empty()).then_some(0),
@@ -271,7 +269,7 @@ impl SessionEditor {
             true => None,
             false => {
                 let warning = clash_warning(
-                    &self.anyway_hint,
+                    self.s.save_anyway_hint,
                     core.session_venue_clashes(self.team_id.clone(), venue, start, minutes),
                 );
                 self.warned = warning.is_some();

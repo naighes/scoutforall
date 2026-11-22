@@ -72,7 +72,9 @@ fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> 
     ]
     .map(|(tab, label)| {
         let go = (tab != shown).then_some(Message::Tab(tab));
-        ui::pill(label, tab == shown, go, c)
+        // the words are in the middle of sentences elsewhere: a tab starts
+        // with a capital, as on Android
+        ui::pill(&ui::capitalized(label), tab == shown, go, c)
     }))
     .spacing(6);
     let export = ui::tip(
@@ -85,7 +87,7 @@ fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> 
 
 fn filter_name(s: &Strings, filter: Filter) -> &'static str {
     match filter {
-        Filter::All => s.filter_all,
+        Filter::All => s.sessions_all,
         Filter::Planned => s.filter_planned,
         Filter::ToClose => s.filter_to_close,
         Filter::Completed => s.filter_completed,
@@ -226,7 +228,7 @@ pub struct TrainingScreen {
 impl TrainingScreen {
     pub fn new(
         core: Arc<Scout4All>,
-        s: &Strings,
+        s: &'static Strings,
         team_id: String,
         open: Open,
     ) -> Result<TrainingScreen, MobileError> {
@@ -427,7 +429,7 @@ impl TrainingScreen {
     }
 
     /// What the calendar asked for.
-    fn calendared(&mut self, s: &Strings, leave: calendar::Leave) -> Outcome {
+    fn calendared(&mut self, s: &'static Strings, leave: calendar::Leave) -> Outcome {
         match leave {
             calendar::Leave::Stay => {}
             calendar::Leave::Session(id) => {
@@ -452,7 +454,7 @@ impl TrainingScreen {
         Outcome::Stay
     }
 
-    fn new_session(&mut self, s: &Strings) {
+    fn new_session(&mut self, s: &'static Strings) {
         match SessionEditor::new(&self.core, s, self.team_id.clone(), None, None) {
             Ok(editor) => self.mode = Mode::New(Box::new(editor)),
             Err(e) => self.error = Some(e.to_string()),
@@ -527,7 +529,7 @@ impl TrainingScreen {
         Outcome::Stay
     }
 
-    pub fn update(&mut self, s: &Strings, message: Message) -> Outcome {
+    pub fn update(&mut self, s: &'static Strings, message: Message) -> Outcome {
         match (&mut self.mode, message) {
             (Mode::Page(page), Message::Page(m)) => {
                 let outcome = page.update(s, m);
@@ -590,7 +592,7 @@ impl TrainingScreen {
         Outcome::Export(crate::transfer::Export::Training(self.team_id.clone()))
     }
 
-    pub fn key(&mut self, s: &Strings, ck: KeyCombination) -> Outcome {
+    pub fn key(&mut self, s: &'static Strings, ck: KeyCombination) -> Outcome {
         // x shares the archive from any tab (the cycles one, when it isn't in a form)
         let on_tabs =
             matches!(self.mode, Mode::List) && (self.tab != Tab::Cycles || self.cycles.on_list());
@@ -646,7 +648,7 @@ impl TrainingScreen {
         Outcome::Stay
     }
 
-    fn list_key(&mut self, s: &Strings, ck: KeyCombination) -> Outcome {
+    fn list_key(&mut self, s: &'static Strings, ck: KeyCombination) -> Outcome {
         let count = self.shown().len();
         match ck {
             k if k == BACK_KEY => return Outcome::Back,

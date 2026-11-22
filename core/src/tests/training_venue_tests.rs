@@ -1026,6 +1026,39 @@ mod tests {
             .unwrap();
         let text = String::from_utf8(matches.1.clone()).unwrap();
         assert!(!text.contains("venue_id"), "{text}");
+        // and with the schema of the version before (v1.1.0: 4), or it
+        // would refuse it as newer
+        let manifest = files
+            .iter()
+            .find(|(name, _)| name == "manifest.json")
+            .unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest.1).unwrap();
+        assert_eq!(manifest["schema"], 4);
+    }
+
+    /// A match in a gym needs the schema of the gyms: the versions before
+    /// ask to update instead of losing the gym.
+    #[tokio::test]
+    async fn a_match_in_a_gym_is_archived_with_the_schema_of_the_gyms() {
+        use crate::providers::sqlite::archive::{Subject, export};
+        let w = world();
+        let a = team(&w, "A").await;
+        let gym = w
+            .venues
+            .create(VenueInput::named("Terontola").unwrap())
+            .unwrap();
+        w.p.match_writer
+            .create(&a, match_input(&w, &a, 23, Some(gym.id)))
+            .await
+            .unwrap();
+        let archive = export(&w.p.db, Subject::TeamWithMatches(a.id)).unwrap();
+        let files = crate::legacy::migrate::unzip(&archive).unwrap();
+        let manifest = files
+            .iter()
+            .find(|(name, _)| name == "manifest.json")
+            .unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&manifest.1).unwrap();
+        assert_eq!(manifest["schema"], crate::db::schema_version());
     }
 
     // the schema and the migration

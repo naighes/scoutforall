@@ -263,7 +263,8 @@ pub(crate) mod tests {
             (m.format, m.schema, m.kind, m.id, m.app_version.as_str()),
             (
                 FORMAT,
-                crate::db::schema_version(),
+                // no gyms nor training: the schema of v1.1.0, which reads it
+                4,
                 Kind::Team,
                 id,
                 env!("CARGO_PKG_VERSION")

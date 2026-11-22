@@ -6,7 +6,7 @@
 
 use {
     super::screen::{Period, period_name},
-    crate::{strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
+    crate::{calendar::text_of, strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
     chrono::{Local, NaiveDate},
     iced::{
         Alignment, Element, Length,
@@ -31,7 +31,10 @@ enum Scope {
     Cycle {
         level: Level,
         id: String,
-        name: String,
+        title: String,
+        /// the window, as saved
+        first_day: String,
+        last_day: String,
     },
 }
 
@@ -113,7 +116,9 @@ impl PresenceTab {
                 scopes.push(Scope::Cycle {
                     level,
                     id: cycle.id,
-                    name: format!("{} · {}", cycle.title, cycle.window),
+                    title: cycle.title,
+                    first_day: cycle.first_day,
+                    last_day: cycle.last_day,
                 });
             }
         }
@@ -121,12 +126,11 @@ impl PresenceTab {
     }
 
     fn training_scope(&self) -> TrainingScope {
-        let day = |d: NaiveDate| d.format("%Y-%m-%d").to_string();
         match self.scopes.get(self.scope) {
             Some(Scope::Period(period)) => match period.days(self.today) {
                 Some((from, to)) => TrainingScope::Dates {
-                    from: day(from),
-                    to: day(to),
+                    from: text_of(from),
+                    to: text_of(to),
                 },
                 None => TrainingScope::All,
             },
@@ -190,7 +194,7 @@ impl PresenceTab {
         vec![
             ("↑ ↓".to_string(), String::new()),
             ("← →".to_string(), s.period.to_string()),
-            ("⇥".to_string(), s.calendar.to_string()),
+            ("⇥".to_string(), ui::capitalized(s.calendar)),
             ("Esc".to_string(), s.back.to_string()),
         ]
     }
@@ -198,7 +202,12 @@ impl PresenceTab {
     fn scope_name(&self, s: &Strings) -> String {
         match self.scopes.get(self.scope) {
             Some(Scope::Period(period)) => period_name(s, *period).to_string(),
-            Some(Scope::Cycle { name, .. }) => name.clone(),
+            Some(Scope::Cycle {
+                title,
+                first_day,
+                last_day,
+                ..
+            }) => format!("{title} · {}", s.window(first_day, last_day)),
             _ => s.whole_season.to_string(),
         }
     }
@@ -243,16 +252,15 @@ impl PresenceTab {
                             0 => String::new(),
                             n => format!(" · {}", ui::fill(s.makeups_count, &[n.to_string()])),
                         };
+                        // the word, then the count (as on Android): "2 presente"
+                        // isn't Italian
+                        let late = match p.late {
+                            0 => String::new(),
+                            n => format!(" ({} {n})", s.late),
+                        };
                         let counts = format!(
-                            "{} {} ({} {}) · {} {} · {} {}{makeups}",
-                            p.present,
-                            s.present,
-                            p.late,
-                            s.late,
-                            p.absent,
-                            s.absent,
-                            p.unavailable,
-                            s.unavailable,
+                            "{} {}{late} · {} {} · {} {}{makeups}",
+                            s.present, p.present, s.absent, p.absent, s.unavailable, p.unavailable,
                         );
                         ui::list_row(
                             row![

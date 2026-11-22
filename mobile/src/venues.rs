@@ -1,7 +1,7 @@
 //! The gyms for the apps (TODO/021 §13): where sessions and matches are
 //! held, common to every team.
 use super::{
-    MobileError, Scout4All, MatchDate, parse_id,
+    MatchDate, MobileError, Scout4All, parse_id,
     training::{
         AgendaSpan, DuplicateCycleDraft, DuplicateDraft, SeriesDraft, TrainingField, day, moment,
         parse_day, parse_moment, series_input,
@@ -9,14 +9,14 @@ use super::{
 };
 use scout4all_core::{
     errors::AppError,
-    providers::{
-        sqlite::{persons::SqlitePersons, venues::SqliteVenues},
-    },
+    providers::sqlite::{persons::SqlitePersons, venues::SqliteVenues},
     training::{
         agenda::Period,
         duplicate::{DuplicateCycleInput, DuplicateInput},
         overlap::{DEFAULT_MATCH_MINUTES, SlotKind},
-        venue::{Occupation, Venue, VenueClash, VenueForm, VenueFormError, VenueInput, geo_uri, web_url},
+        venue::{
+            Occupation, Venue, VenueClash, VenueForm, VenueFormError, VenueInput, geo_uri, web_url,
+        },
     },
 };
 use uuid::Uuid;
@@ -246,12 +246,13 @@ impl Scout4All {
         id: Option<String>,
         draft: VenueDraft,
     ) -> Result<VenueRecord, MobileError> {
-        let input = VenueForm::from(draft)
-            .validate()
-            .map_err(|e| MobileError::InvalidTraining {
-                field: venue_field(e),
-                reason: e.message(self.language.labels()),
-            })?;
+        let input =
+            VenueForm::from(draft)
+                .validate()
+                .map_err(|e| MobileError::InvalidTraining {
+                    field: venue_field(e),
+                    reason: e.message(self.language.labels()),
+                })?;
         let venues = self.venue_provider();
         let venue = match id {
             Some(id) => venues.update(&parse_id(&id)?, input)?,
@@ -331,9 +332,7 @@ impl Scout4All {
             AgendaSpan::Week => Period::week(date),
             AgendaSpan::Month => Period::month(date),
         };
-        let found = self
-            .venue_provider()
-            .week(&parse_id(&venue_id)?, &period)?;
+        let found = self.venue_provider().week(&parse_id(&venue_id)?, &period)?;
         Ok(period
             .days()
             .into_iter()
@@ -644,28 +643,29 @@ mod tests {
                 venue: Some(gym.clone()),
             }],
         };
-        assert_eq!(app.series_venue_clashes(u17.clone(), series).unwrap().len(), 1);
-        let mine = app.save_session(
-            u17.clone(),
-            None,
-            SessionDraft {
-                start: Some("2030-02-25T18:30".into()),
-                title: "x".into(),
-                venue: Some(gym.clone()),
-                ..app.new_session_draft()
-            },
-        )
-        .unwrap();
+        assert_eq!(
+            app.series_venue_clashes(u17.clone(), series).unwrap().len(),
+            1
+        );
+        let mine = app
+            .save_session(
+                u17.clone(),
+                None,
+                SessionDraft {
+                    start: Some("2030-02-25T18:30".into()),
+                    title: "x".into(),
+                    venue: Some(gym.clone()),
+                    ..app.new_session_draft()
+                },
+            )
+            .unwrap();
         let copy = DuplicateDraft {
             start: "2030-03-04T18:30".into(),
             microcycle_id: None,
             copy_objectives: false,
             copy_activities: false,
         };
-        assert_eq!(
-            app.duplicate_venue_clashes(mine.id, copy).unwrap().len(),
-            1
-        );
+        assert_eq!(app.duplicate_venue_clashes(mine.id, copy).unwrap().len(), 1);
     }
 
     #[test]

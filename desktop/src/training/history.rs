@@ -134,7 +134,7 @@ impl HistoryTab {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         vec![
             ("↑ ↓".to_string(), String::new()),
-            ("⇥".to_string(), s.calendar.to_string()),
+            ("⇥".to_string(), ui::capitalized(s.calendar)),
             ("Esc".to_string(), s.back.to_string()),
         ]
     }
@@ -194,7 +194,9 @@ impl HistoryTab {
             .map(|(p, totals)| {
                 column![
                     ui::name(p.title.clone()),
-                    text(p.window.clone()).size(SIZE_SMALL).color(c.muted),
+                    text(s.window(&p.first_day, &p.last_day))
+                        .size(SIZE_SMALL)
+                        .color(c.muted),
                     text(summary(s, totals)).size(SIZE_SMALL),
                 ]
                 .spacing(2)

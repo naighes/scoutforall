@@ -4,12 +4,14 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
@@ -236,10 +238,14 @@ private fun PlayerRow(row: AttendanceRowRecord, onCycle: () -> Unit, onNote: () 
                 IconButton(onClick = onNote) {
                     Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.tr_attendance_note))
                 }
+                // one width for the short words, so the pencils stay in a column
+                // and a narrower padding: the name keeps its line
+                val wide = Modifier.widthIn(min = 96.dp)
+                val inside = PaddingValues(horizontal = 14.dp)
                 if (present) {
-                    Button(onClick = onCycle) { Text(row.status.label()) }
+                    Button(onClick = onCycle, modifier = wide, contentPadding = inside) { Text(row.status.label()) }
                 } else {
-                    OutlinedButton(onClick = onCycle) { Text(row.status.label()) }
+                    OutlinedButton(onClick = onCycle, modifier = wide, contentPadding = inside) { Text(row.status.label()) }
                 }
             }
         },

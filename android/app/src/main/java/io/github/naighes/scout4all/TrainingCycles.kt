@@ -123,7 +123,7 @@ fun CyclesTab(teamId: String, level: Level, onLevel: (Level) -> Unit, modifier: 
                 items(all.sortedByDescending { it.firstDay }, key = { it.id }) { c ->
                     ListItem(
                         modifier = Modifier.clickable { onCycle(level, c.id) },
-                        overlineContent = { Text(c.window) },
+                        overlineContent = { Text(windowText(c.firstDay, c.lastDay)) },
                         headlineContent = { Text(c.title.ifBlank { stringResource(level.label()) }) },
                     )
                 }
@@ -181,7 +181,7 @@ fun CycleScreen(
         LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp)) {
             item(key = "data") {
                 Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Text(c.window, style = MaterialTheme.typography.titleMedium)
+                    Text(windowText(c.firstDay, c.lastDay), style = MaterialTheme.typography.titleMedium)
                     if (c.objectives.isNotBlank()) {
                         Text(stringResource(R.string.tr_objectives), style = MaterialTheme.typography.labelMedium)
                         Text(c.objectives)
@@ -215,7 +215,7 @@ fun CycleScreen(
                 }
             }
             items(children.orEmpty(), key = { it.id }) { child ->
-                ListItem(modifier = Modifier.clickable { onChild(child.id) }, headlineContent = { Text(child.window) })
+                ListItem(modifier = Modifier.clickable { onChild(child.id) }, headlineContent = { Text(windowText(child.firstDay, child.lastDay)) })
             }
             error?.let { item(key = "error") { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) } }
         }
@@ -389,7 +389,7 @@ private fun CycleFields(
             if (level.parent() != null && (options.isNotEmpty() || parent != null)) {
                 ChoiceField(
                     stringResource(R.string.tr_cycle_parent),
-                    listOf<Pair<String?, String>>(null to NO_CHOICE) + options.map { it.id to it.title.ifBlank { it.window } + " · " + it.window },
+                    listOf<Pair<String?, String>>(null to NO_CHOICE) + options.map { o -> o.id to listOf(o.title, windowText(o.firstDay, o.lastDay)).filter { it.isNotBlank() }.joinToString(" · ") },
                     parent,
                     onSelect = { id ->
                         edit {
@@ -452,7 +452,7 @@ fun AddChildrenScreen(level: Level, cycleId: String, onBack: () -> Unit, onDone:
                 LazyColumn(Modifier.weight(1f)) {
                     items(list, key = { it.id }) { child: ChildRecord ->
                         CheckRow(
-                            child.window,
+                            windowText(child.firstDay, child.lastDay),
                             child.id in chosen,
                             onChecked = { on -> chosen = if (on) chosen + child.id else chosen - child.id },
                             modifier = Modifier.padding(horizontal = 16.dp),

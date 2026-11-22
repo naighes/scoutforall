@@ -518,6 +518,10 @@ pub struct Strings {
     pub previous_month: &'static str,
     pub history: &'static str,
     pub calendar: &'static str,
+    /// the filter of the sessions that shows them all (feminine in Italian)
+    pub sessions_all: &'static str,
+    /// a gym removed, where a session or a match still tells of it
+    pub deleted_venue: &'static str,
     pub no_earlier_seasons: &'static str,
     pub whole_season: &'static str,
     pub on_sessions: &'static str,
@@ -1100,7 +1104,7 @@ What did you expect instead?
     new_session: "New session",
     edit_session: "Edit the session",
     session_title: "Title",
-    session_location: "Place",
+    session_location: "Gym",
     venues: "Gyms",
     new_venue: "New gym",
     edit_venue: "Edit the gym",
@@ -1197,6 +1201,8 @@ What did you expect instead?
     previous_month: "last month",
     history: "history",
     calendar: "calendar",
+    sessions_all: "All",
+    deleted_venue: "deleted gym",
     no_earlier_seasons: "no earlier seasons",
     whole_season: "whole season",
     on_sessions: "on",
@@ -1776,7 +1782,7 @@ Cosa ti aspettavi invece?
     new_session: "Nuova seduta",
     edit_session: "Modifica la seduta",
     session_title: "Titolo",
-    session_location: "Luogo",
+    session_location: "Palestra",
     venues: "Palestre",
     new_venue: "Nuova palestra",
     edit_venue: "Modifica la palestra",
@@ -1873,6 +1879,8 @@ Cosa ti aspettavi invece?
     previous_month: "mese scorso",
     history: "storico",
     calendar: "calendario",
+    sessions_all: "Tutte",
+    deleted_venue: "palestra eliminata",
     no_earlier_seasons: "nessuna stagione precedente",
     whole_season: "tutta la stagione",
     on_sessions: "su",
@@ -2453,7 +2461,7 @@ O que você esperava?
     new_session: "Nova sessão",
     edit_session: "Editar a sessão",
     session_title: "Título",
-    session_location: "Local",
+    session_location: "Ginásio",
     venues: "Ginásios",
     new_venue: "Novo ginásio",
     edit_venue: "Editar o ginásio",
@@ -2550,6 +2558,8 @@ O que você esperava?
     previous_month: "mês passado",
     history: "histórico",
     calendar: "calendário",
+    sessions_all: "Todas",
+    deleted_venue: "ginásio eliminado",
     no_earlier_seasons: "nenhuma temporada anterior",
     whole_season: "toda a temporada",
     on_sessions: "em",
@@ -3129,7 +3139,7 @@ Czego się spodziewałeś(-aś)?
     new_session: "Nowa sesja",
     edit_session: "Edytuj sesję",
     session_title: "Tytuł",
-    session_location: "Miejsce",
+    session_location: "Hala",
     venues: "Hale",
     new_venue: "Nowa hala",
     edit_venue: "Edytuj halę",
@@ -3226,6 +3236,8 @@ Czego się spodziewałeś(-aś)?
     previous_month: "zeszły miesiąc",
     history: "historia",
     calendar: "kalendarz",
+    sessions_all: "Wszystkie",
+    deleted_venue: "usunięta hala",
     no_earlier_seasons: "brak wcześniejszych sezonów",
     whole_season: "cały sezon",
     on_sessions: "z",
@@ -3794,7 +3806,7 @@ const JA: Strings = Strings {
     new_session: "新しいセッション",
     edit_session: "セッションを編集",
     session_title: "タイトル",
-    session_location: "場所",
+    session_location: "体育館",
     venues: "体育館",
     new_venue: "新しい体育館",
     edit_venue: "体育館を編集",
@@ -3891,6 +3903,8 @@ const JA: Strings = Strings {
     previous_month: "先月",
     history: "履歴",
     calendar: "カレンダー",
+    sessions_all: "すべて",
+    deleted_venue: "削除された体育館",
     no_earlier_seasons: "以前のシーズンはありません",
     whole_season: "シーズン全体",
     on_sessions: "/",
@@ -4087,6 +4101,24 @@ impl Strings {
         self.dated(self.date_pattern, day)
     }
 
+    /// The window of a cycle (days as saved, the last included) as the
+    /// language writes it: "1 set 2026 – 31 mag 2027", one day alone.
+    pub fn window(&self, first: &str, last: &str) -> String {
+        match first == last {
+            true => self.day(first),
+            false => format!("{} – {}", self.day(first), self.day(last)),
+        }
+    }
+
+    /// The two letters of the weekday of `day`.
+    pub fn weekday(&self, day: chrono::NaiveDate) -> &'static str {
+        use chrono::Datelike;
+        self.weekdays
+            .get(day.weekday().num_days_from_monday() as usize)
+            .copied()
+            .unwrap_or_default()
+    }
+
     /// Day and month of `day`, in digits.
     pub fn short_date(&self, day: chrono::NaiveDate) -> String {
         self.dated(self.short_date_pattern, day)
@@ -4150,6 +4182,16 @@ mod tests {
         let d = chrono::NaiveDate::from_ymd_opt(2026, 10, 24).unwrap();
         assert_eq!(strings(En).short_date(d), "10/24");
         assert_eq!(strings(Pl).short_date(d), "24.10");
+        // the window of a cycle, and of one day
+        assert_eq!(
+            strings(It).window("2026-09-01", "2027-05-31"),
+            "1 set 2026 – 31 mag 2027"
+        );
+        assert_eq!(
+            strings(En).window("2026-03-07", "2026-03-07"),
+            "Mar 7, 2026"
+        );
+        assert_eq!(strings(It).weekday(d), "Sa");
     }
 
     #[test]

@@ -6,11 +6,12 @@
 
 use {
     crate::{
+        calendar::{day_of, text_of},
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
-    chrono::{Datelike, Duration, NaiveDate},
+    chrono::{Duration, NaiveDate},
     iced::{
         Alignment, Element, Length,
         widget::{Column, column, row, scrollable, text},
@@ -65,11 +66,6 @@ pub struct Agenda {
     error: Option<String>,
 }
 
-fn parse(day: &str) -> Option<NaiveDate> {
-    day.get(..10)
-        .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-}
-
 impl Agenda {
     /// The week of `today`, of `team` (all the teams without).
     pub fn week(core: &Scout4All, team: Option<String>, today: NaiveDate) -> Agenda {
@@ -97,11 +93,7 @@ impl Agenda {
 
     /// Read again, after a change.
     pub fn reload(&mut self, core: &Scout4All) {
-        match core.training_agenda(
-            self.team.clone(),
-            self.span,
-            self.anchor.format("%Y-%m-%d").to_string(),
-        ) {
+        match core.training_agenda(self.team.clone(), self.span, text_of(self.anchor)) {
             Ok(days) => {
                 self.days = days;
                 self.error = None;
@@ -144,7 +136,7 @@ impl Agenda {
         match self.slots().get(index).copied()? {
             Slot::Free(d) => Some(Pick::FreeDay {
                 team_id: self.team.clone(),
-                day: parse(&self.days.get(d)?.date)?,
+                day: day_of(&self.days.get(d)?.date)?,
             }),
             Slot::Event(d, e) => {
                 let event = self.days.get(d)?.events.get(e)?;
@@ -228,8 +220,8 @@ impl Agenda {
     /// The week as "3/11 – 9/11".
     fn range(&self, s: &Strings) -> String {
         let (first, last) = (
-            self.days.first().and_then(|d| parse(&d.date)),
-            self.days.last().and_then(|d| parse(&d.date)),
+            self.days.first().and_then(|d| day_of(&d.date)),
+            self.days.last().and_then(|d| day_of(&d.date)),
         );
         match (first, last) {
             (Some(a), Some(b)) if a != b => format!("{} – {}", s.short_date(a), s.short_date(b)),
@@ -248,13 +240,13 @@ impl Agenda {
         let mut rows: Vec<Element<'a, Message>> = vec![];
         let mut index = 0;
         for day in &self.days {
-            let date = parse(&day.date);
+            let date = day_of(&day.date);
             let lit = date == Some(self.today);
             if self.span == AgendaSpan::Week
                 && let Some(date) = date
             {
                 rows.push(
-                    text(format!("{} {}", weekday(s, date), s.short_date(date)))
+                    text(format!("{} {}", s.weekday(date), s.short_date(date)))
                         .size(SIZE_SMALL)
                         .font(theme::fonts().bold)
                         .color(match lit {
@@ -322,12 +314,16 @@ impl Agenda {
     }
 }
 
-/// The two letters of the weekday of `date`.
-fn weekday(s: &Strings, date: NaiveDate) -> &'static str {
-    s.weekdays
-        .get(date.weekday().num_days_from_monday() as usize)
-        .copied()
-        .unwrap_or_default()
+/// What an event is called in a line: a match "Team – Opponent" with the
+/// team, the opponent alone without; a session "Team · Title" or the title
+/// (`title` of a match is "– Opponent").
+pub fn heading(event: &AgendaEventRecord, title: String, with_team: bool) -> String {
+    match (with_team, &event.item) {
+        (true, AgendaItemRecord::Match { .. }) => format!("{} {title}", event.team_name),
+        (true, AgendaItemRecord::Session { .. }) => format!("{} · {title}", event.team_name),
+        (false, AgendaItemRecord::Match { .. }) => title.trim_start_matches("– ").to_string(),
+        (false, AgendaItemRecord::Session { .. }) => title,
+    }
 }
 
 fn event_row<'a>(
@@ -363,7 +359,7 @@ fn event_row<'a>(
                 [event
                     .venue
                     .as_ref()
-                    .map(|v| v.name.clone())
+                    .map(|v| crate::venue_choice::venue_label(s, &v.name, v.deleted))
                     .unwrap_or_default()]
                 .into_iter()
                 .chain(flags)
@@ -387,13 +383,7 @@ fn event_row<'a>(
             },
         ),
     };
-    let heading = match (with_team, &event.item) {
-        // a match reads "Team – Opponent"
-        (true, AgendaItemRecord::Match { .. }) => format!("{} {title}", event.team_name),
-        (true, AgendaItemRecord::Session { .. }) => format!("{} · {title}", event.team_name),
-        (false, AgendaItemRecord::Match { .. }) => title.trim_start_matches("– ").to_string(),
-        (false, AgendaItemRecord::Session { .. }) => title,
-    };
+    let heading = heading(event, title, with_team);
     let body = row![
         ui::icon(icon, 18.0, c.muted),
         column![

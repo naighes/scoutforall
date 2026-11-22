@@ -2,16 +2,26 @@
 //! used (TODO/021 §13).
 
 use {
-    crate::form::Value,
+    crate::{form::Value, strings::Strings},
     scout4all_mobile::Scout4All,
 };
 
 const EMPTY: &str = "–";
 
+/// The name a gym is shown by: "deleted gym" for a removed one (sessions
+/// and matches keep it, TODO/021 §13).
+pub fn venue_label(s: &Strings, name: &str, deleted: bool) -> String {
+    match deleted {
+        true => s.deleted_venue.to_string(),
+        false => name.to_string(),
+    }
+}
+
 /// The gyms a form of the team offers, and the one `current` even when it
 /// was removed: id and name, in the order of the choice (pinned first, then
 /// the ones the team used).
 pub fn venue_options(
+    s: &Strings,
     core: &Scout4All,
     team_id: &str,
     current: Option<&str>,
@@ -26,7 +36,8 @@ pub fn venue_options(
         .filter(|id| !options.iter().any(|(o, _)| o == id))
         .and_then(|id| core.venue(id.to_string()).ok())
     {
-        options.push((kept.id, kept.name));
+        let name = venue_label(s, &kept.name, kept.deleted);
+        options.push((kept.id, name));
     }
     options
 }
@@ -50,4 +61,43 @@ pub fn venue_at(options: &[(String, String)], index: usize) -> Option<String> {
         .checked_sub(1)
         .and_then(|at| options.get(at))
         .map(|(id, _)| id.clone())
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use {
+        super::*, crate::strings::strings, scout4all_core::shapes::enums::LanguageEnum,
+        scout4all_mobile::venues::VenueDraft,
+    };
+
+    /// A removed gym is offered no more, but the one a session still has
+    /// stays in its form, told as removed.
+    #[test]
+    fn a_removed_gym_is_told_as_removed() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = core.tutorial_team().unwrap();
+        let gym = core
+            .save_venue(
+                None,
+                VenueDraft {
+                    name: "Terontola".into(),
+                    ..VenueDraft::default()
+                },
+            )
+            .unwrap()
+            .id;
+        assert_eq!(
+            venue_options(s, &core, &team, None),
+            vec![(gym.clone(), "Terontola".to_string())]
+        );
+        core.remove_venue(gym.clone()).unwrap();
+        assert_eq!(venue_options(s, &core, &team, None), vec![]);
+        assert_eq!(
+            venue_options(s, &core, &team, Some(&gym)),
+            vec![(gym, s.deleted_venue.to_string())]
+        );
+    }
 }

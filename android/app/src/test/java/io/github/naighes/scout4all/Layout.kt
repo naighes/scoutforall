@@ -119,9 +119,15 @@ fun ComposeContentTestRule.crowded(): List<Pair<SemanticsNode, SemanticsNode>> {
     waitForIdle()
     val nodes = onAllNodes(hasClickAction()).fetchSemanticsNodes()
     return nodes.flatMapIndexed { i, a ->
-        nodes.drop(i + 1).filter { b -> a.parent?.id == b.parent?.id && a.crowds(b) }.map { b -> a to b }
+        nodes.drop(i + 1).filter { b -> a.parent?.id == b.parent?.id && a.crowds(b) && !(a.dayOfMonth() && b.dayOfMonth()) }
+            .map { b -> a to b }
     }
 }
+
+/** A day of a month grid: seven columns can't be 48dp apart on the
+ * narrowest phones (see `DAY_OF_MONTH`); the other checks still apply. */
+private fun SemanticsNode.dayOfMonth(): Boolean =
+    config.getOrNull(SemanticsProperties.TestTag) == DAY_OF_MONTH
 
 /** Their middles are closer than 48dp, both across and down; a border of
  * 1dp they may share. */

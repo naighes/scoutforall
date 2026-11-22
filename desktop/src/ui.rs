@@ -570,32 +570,54 @@ pub fn top_bar<'a, M: Clone + 'a>(
 }
 
 /// The bar at the bottom: the version on the left, the keys of the screen
-/// on the right.
+/// on the right; the keys that don't fit in the width go on a second line,
+/// never cut nor broken in the middle.
 pub fn bottom_bar<'a, M: 'a>(hints: Vec<(String, String)>, c: Colors) -> Element<'a, M> {
     let hints = row(hints.into_iter().map(|(key, what)| {
-        row![keycap(&key, c), text(what).size(SIZE_SMALL).color(c.muted)]
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .into()
+        row![
+            keycap(&key, c),
+            text(what)
+                .size(SIZE_SMALL)
+                .color(c.muted)
+                .wrapping(text::Wrapping::None)
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into()
     }))
-    .spacing(18);
+    .spacing(18)
+    .width(Length::Fill)
+    .wrap()
+    .vertical_spacing(4)
+    .align_x(Alignment::End);
     column![
         line(c.border, 1.0),
-        bar(
+        container(
             row![
                 text(format!("v{}", scout4all_mobile::version()))
                     .size(SIZE_SMALL)
-                    .color(c.muted),
-                space::horizontal(),
+                    .color(c.muted)
+                    .wrapping(text::Wrapping::None),
                 hints,
+                // one line high at least, as the bar on top
+                space::vertical().height(BOTTOM_LINE).width(0),
             ]
+            .spacing(18)
             .align_y(Alignment::Center),
-            36.0,
-            c,
-        ),
+        )
+        .width(Length::Fill)
+        .padding(Padding::from([BOTTOM_PADDING, 18.0]))
+        .style(move |_| container::Style {
+            background: Some(c.bar.into()),
+            ..container::Style::default()
+        }),
     ]
     .into()
 }
+
+/// The bar at the bottom is 36 high with one line of keys.
+const BOTTOM_PADDING: f32 = 4.0;
+const BOTTOM_LINE: f32 = 36.0 - 2.0 * BOTTOM_PADDING;
 
 /// Plain text of the body.
 pub fn body<'a>(s: impl ToString) -> iced::widget::Text<'a> {

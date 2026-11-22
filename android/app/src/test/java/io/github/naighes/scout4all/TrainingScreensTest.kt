@@ -187,7 +187,7 @@ class TrainingScreensTest {
         // inside the window but not attached: free
         val done = mutableListOf<Unit>()
         rule.setContent { Scout4AllTheme { AddChildrenScreen(Level.MICROCYCLE, cycle.id, onBack = {}, onDone = { done += Unit }) } }
-        rule.waitForText(core { it.freeChildren(Level.MICROCYCLE, cycle.id) }.first { c -> c.id == s.id }.window)
+        rule.waitForText(core { it.freeChildren(Level.MICROCYCLE, cycle.id) }.first { c -> c.id == s.id }.let { c -> windowText(c.firstDay, c.lastDay) })
         rule.onNode(isToggleable()).performClick()
         press(string(R.string.tr_add_children))
         rule.waitFor({ "not added" }) { done.isNotEmpty() }

@@ -7,12 +7,13 @@
 
 use {
     crate::{
+        calendar::{day_of, text_of, time_span},
         form::{self, Field, Form, Outcome as FormOutcome, Value},
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
-    chrono::{Datelike, Duration, Local, NaiveDate},
+    chrono::{Duration, Local, NaiveDate},
     iced::{
         Alignment, Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
@@ -159,11 +160,6 @@ pub struct VenuesScreen {
     error: Option<String>,
 }
 
-fn parse(day: &str) -> Option<NaiveDate> {
-    day.get(..10)
-        .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
-}
-
 impl VenuesScreen {
     pub fn new(core: Arc<Scout4All>) -> Result<VenuesScreen, MobileError> {
         let listed = core.venues()?;
@@ -196,11 +192,7 @@ impl VenuesScreen {
             .get(self.selected)
             .and_then(|v| {
                 self.core
-                    .venue_agenda(
-                        v.id.clone(),
-                        AgendaSpan::Week,
-                        self.anchor.format("%Y-%m-%d").to_string(),
-                    )
+                    .venue_agenda(v.id.clone(), AgendaSpan::Week, text_of(self.anchor))
                     .map_err(|e| self.error = Some(e.to_string()))
                     .ok()
             })
@@ -281,7 +273,11 @@ impl VenuesScreen {
             Mode::Delete(index) => self.listed.get(index),
             _ => None,
         } {
-            self.error = self.core.remove_venue(v.id.clone()).err().map(|e| e.to_string());
+            self.error = self
+                .core
+                .remove_venue(v.id.clone())
+                .err()
+                .map(|e| e.to_string());
         }
         self.reload();
     }
@@ -385,6 +381,11 @@ impl VenuesScreen {
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        // what `p` does to the gym chosen
+        let pin = match self.listed.get(self.selected).is_some_and(|v| v.pinned) {
+            true => s.unpin_venue,
+            false => s.pin_venue,
+        };
         match &self.mode {
             Mode::Edit(_) => Form::hints(s),
             Mode::Delete(_) => vec![
@@ -396,7 +397,7 @@ impl VenuesScreen {
                 ("Home".to_string(), s.today.to_string()),
                 ("↑ ↓".to_string(), s.venues.to_string()),
                 ("e".to_string(), s.edit.to_string()),
-                ("p".to_string(), s.pin_venue.to_string()),
+                ("p".to_string(), pin.to_string()),
                 ("o".to_string(), s.open_in_map.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
             ],
@@ -405,7 +406,7 @@ impl VenuesScreen {
                 ("Enter".to_string(), s.open.to_string()),
                 ("n".to_string(), s.new_venue.to_string()),
                 ("e".to_string(), s.edit.to_string()),
-                ("p".to_string(), s.pin_venue.to_string()),
+                ("p".to_string(), pin.to_string()),
                 ("o".to_string(), s.open_in_map.to_string()),
                 ("⌫".to_string(), s.delete_venue.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
@@ -519,16 +520,9 @@ impl VenuesScreen {
             );
         }
         let days = self.week.iter().map(|day| {
-            let date = parse(&day.date);
+            let date = day_of(&day.date);
             let heading = date.map_or_else(String::new, |d| {
-                format!(
-                    "{} {}",
-                    s.weekdays
-                        .get(d.weekday().num_days_from_monday() as usize)
-                        .copied()
-                        .unwrap_or_default(),
-                    d.format("%d/%m")
-                )
+                format!("{} {}", s.weekday(d), s.short_date(d))
             });
             let items: Vec<Element<'a, Message>> = match day.occupations.is_empty() {
                 true => vec![text("–").size(SIZE_SMALL).color(c.muted).into()],
@@ -542,7 +536,6 @@ impl VenuesScreen {
                             .map(|t| t.name.clone())
                             .collect::<Vec<_>>()
                             .join(" – ");
-                        let from = o.start.get(11..16).unwrap_or_default();
                         let color = match o.overlapping {
                             true => c.danger,
                             false => c.text,
@@ -556,7 +549,7 @@ impl VenuesScreen {
                                 16.0,
                                 color
                             ),
-                            text(format!("{from}+{} · {teams}", o.minutes))
+                            text(format!("{} · {teams}", time_span(&o.start, o.minutes)))
                                 .size(SIZE_BODY)
                                 .color(color),
                             text(match o.overlapping {
@@ -573,7 +566,10 @@ impl VenuesScreen {
                     .collect(),
             };
             row![
-                text(heading).size(SIZE_BODY).font(bold).width(Length::Fixed(90.0)),
+                text(heading)
+                    .size(SIZE_BODY)
+                    .font(bold)
+                    .width(Length::Fixed(90.0)),
                 Column::with_children(items).spacing(2),
             ]
             .spacing(10)
@@ -581,7 +577,11 @@ impl VenuesScreen {
         });
         let actions = vec![
             ui::pill(s.today, false, Some(Message::Today), c),
-            ui::tip(ui::pill("‹", false, Some(Message::Previous), c), s.previous_week, c),
+            ui::tip(
+                ui::pill("‹", false, Some(Message::Previous), c),
+                s.previous_week,
+                c,
+            ),
             ui::tip(ui::pill("›", false, Some(Message::Next), c), s.next_week, c),
             ui::pill(s.open_in_map, false, Some(Message::Map(self.selected)), c),
             ui::pill(
@@ -656,16 +656,30 @@ mod tests {
         // no name: told, nothing made
         screen.update(s, Message::Form(form::Message::Save));
         assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.error.is_some()));
-        screen.update(s, Message::Form(form::Message::Input(NAME, "Terontola".into())));
+        screen.update(
+            s,
+            Message::Form(form::Message::Input(NAME, "Terontola".into())),
+        );
         screen.update(s, Message::Form(form::Message::Save));
         assert!(matches!(screen.mode, Mode::Browse));
         let names = |screen: &VenuesScreen| -> Vec<String> {
             screen.listed.iter().map(|v| v.name.clone()).collect()
         };
         assert_eq!(names(&screen), vec!["Montecchio", "Terontola"]);
+        // the key of the pin says what it does to the one chosen
+        let pin_hint = |screen: &VenuesScreen| -> String {
+            screen
+                .hints(s)
+                .into_iter()
+                .find(|(k, _)| k == "p")
+                .map(|(_, what)| what)
+                .unwrap_or_default()
+        };
         // the new one is on it; pinned, it goes first
         assert_eq!(screen.listed[screen.selected].name, "Terontola");
+        assert_eq!(pin_hint(&screen), s.pin_venue);
         screen.key(s, key!(p));
+        assert_eq!(pin_hint(&screen), s.unpin_venue);
         assert_eq!(names(&screen), vec!["Terontola", "Montecchio"]);
         assert_eq!(screen.listed[screen.selected].name, "Terontola");
         assert!(core.venues().unwrap()[0].pinned);

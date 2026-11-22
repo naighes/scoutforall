@@ -14,6 +14,7 @@ use {
         strings::Strings,
         theme::{self, Colors, SIZE_SMALL},
         ui,
+        venue_choice::venue_label,
     },
     iced::{
         Alignment, Element, Length,
@@ -24,6 +25,7 @@ use {
     scout4all_mobile::{
         MobileError, Scout4All,
         training::{ActivityRecord, AttendanceSheetRecord, SessionRecord},
+        venues::VenueRecord,
     },
     std::sync::Arc,
 };
@@ -97,12 +99,22 @@ pub struct SessionPage {
     team_id: String,
     pub id: String,
     record: SessionRecord,
+    /// the gym of the session, read with it (not at every frame)
+    venue: Option<VenueRecord>,
     activities: Vec<ActivityRecord>,
     attendance: AttendanceSheetRecord,
     panel: Panel,
     activity: usize,
     mode: Mode,
     error: Option<String>,
+}
+
+/// The gym of a session, removed too.
+fn venue_of(core: &Scout4All, record: &SessionRecord) -> Option<VenueRecord> {
+    record
+        .venue_id
+        .as_ref()
+        .and_then(|id| core.venue(id.clone()).ok())
 }
 
 impl SessionPage {
@@ -114,11 +126,13 @@ impl SessionPage {
         let record = core.training_session(id.clone())?;
         let activities = core.session_activities(id.clone())?;
         let attendance = core.session_attendance(id.clone())?;
+        let venue = venue_of(&core, &record);
         Ok(SessionPage {
             core,
             team_id,
             id,
             record,
+            venue,
             activities,
             attendance,
             panel: Panel::Activities,
@@ -174,6 +188,7 @@ impl SessionPage {
         );
         match read {
             (Ok(record), Ok(activities), Ok(attendance)) => {
+                self.venue = venue_of(&self.core, &record);
                 self.record = record;
                 self.activities = activities;
                 self.attendance = attendance;
@@ -192,7 +207,7 @@ impl SessionPage {
         self.mode = Mode::Browse;
     }
 
-    fn edit_session(&mut self, s: &Strings) {
+    fn edit_session(&mut self, s: &'static Strings) {
         match SessionEditor::new(
             &self.core,
             s,
@@ -205,7 +220,7 @@ impl SessionPage {
         }
     }
 
-    fn duplicate(&mut self, s: &Strings) {
+    fn duplicate(&mut self, s: &'static Strings) {
         match DuplicateEditor::new(&self.core, s, self.team_id.clone(), self.id.clone()) {
             Ok(editor) => self.mode = Mode::Duplicate(Box::new(editor)),
             Err(e) => self.error = Some(e.to_string()),
@@ -397,7 +412,7 @@ impl SessionPage {
         }
     }
 
-    pub fn update(&mut self, s: &Strings, message: Message) -> Outcome {
+    pub fn update(&mut self, s: &'static Strings, message: Message) -> Outcome {
         match (&mut self.mode, message) {
             (Mode::Session(e), Message::Form(m)) => {
                 let edited = e.update(&self.core, m);
@@ -441,7 +456,7 @@ impl SessionPage {
         Outcome::Stay
     }
 
-    fn browse(&mut self, s: &Strings, message: Message) -> Outcome {
+    fn browse(&mut self, s: &'static Strings, message: Message) -> Outcome {
         match message {
             Message::Panel(panel) => self.panel = panel,
             Message::Activity(i) => {
@@ -478,7 +493,7 @@ impl SessionPage {
         Outcome::Stay
     }
 
-    pub fn key(&mut self, s: &Strings, ck: KeyCombination) -> Outcome {
+    pub fn key(&mut self, s: &'static Strings, ck: KeyCombination) -> Outcome {
         match &mut self.mode {
             Mode::Session(e) => {
                 let edited = e.key(&self.core, ck);
@@ -538,7 +553,7 @@ impl SessionPage {
         Outcome::Stay
     }
 
-    fn browse_key(&mut self, s: &Strings, ck: KeyCombination) -> Outcome {
+    fn browse_key(&mut self, s: &'static Strings, ck: KeyCombination) -> Outcome {
         let count = self.activities.len();
         let switch = [
             key!(left),
@@ -886,15 +901,15 @@ impl SessionPage {
                     })
                     .size(22)
                     .font(theme::fonts().bold),
+                    // the state under the title, as the lists show it
+                    text(state).size(SIZE_SMALL).color(c.accent),
                     line(s.date, when),
                     line(s.session_duration, duration),
-                    line("", state),
                     line(
                         s.session_location,
-                        r.venue_id
+                        self.venue
                             .as_ref()
-                            .and_then(|id| self.core.venue(id.clone()).ok())
-                            .map(|v| v.name)
+                            .map(|v| venue_label(s, &v.name, v.deleted))
                             .unwrap_or_default(),
                     ),
                     line(s.objectives, r.objectives.clone()),
@@ -966,16 +981,26 @@ impl SessionPage {
                 .height(Length::Fill)
                 .into(),
         };
+        // the panel is a third of the window: the title keeps the new one
+        // only, the rest go under the list, on two lines if they must
+        let tools = iced::widget::Row::with_children([
+            ui::pill(s.copy_activity, false, Some(Message::CopyActivity), c),
+            ui::pill("↑", false, Some(Message::MoveUp), c),
+            ui::pill("↓", false, Some(Message::MoveDown), c),
+            ui::pill(s.remove, false, Some(Message::DeleteActivity), c),
+        ])
+        .spacing(8)
+        .wrap()
+        .vertical_spacing(8);
         ui::panel_with(
             s.activities,
-            vec![
-                ui::pill("↑", false, Some(Message::MoveUp), c),
-                ui::pill("↓", false, Some(Message::MoveDown), c),
-                ui::pill(s.remove, false, Some(Message::DeleteActivity), c),
-                ui::pill(s.new_activity, false, Some(Message::NewActivity), c),
-                ui::pill(s.copy_activity, false, Some(Message::CopyActivity), c),
-            ],
-            list,
+            vec![ui::pill(
+                s.new_activity,
+                false,
+                Some(Message::NewActivity),
+                c,
+            )],
+            column![list, tools].spacing(10),
             c,
         )
     }

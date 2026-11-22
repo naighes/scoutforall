@@ -771,6 +771,7 @@ impl Editor {
         let formats = core.competition_formats();
         let stages = core.stages();
         let venues = venue_options(
+            s,
             core,
             &team_id,
             data.venue.map(|v| v.to_string()).as_deref(),

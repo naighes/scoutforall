@@ -6,6 +6,7 @@
 use {
     super::forms::{Edited, clash_warning, cycle_label, day_of},
     crate::{
+        calendar::text_of,
         form::{self, Field, Form, Mask, Outcome, Value},
         strings::Strings,
         theme::{self, Colors, SIZE_SMALL},
@@ -20,8 +21,8 @@ use {
     scout4all_mobile::{
         MobileError, Scout4All,
         training::{
-            CycleDraft, CycleRecord, DuplicateCycleDraft, TotalsRecord, TrainingField,
-            TrainingScope,
+            CycleDraft, CycleRecord, DuplicateCycleDraft, SessionRecord, TotalsRecord,
+            TrainingField, TrainingScope,
         },
     },
     std::{collections::HashSet, sync::Arc},
@@ -98,14 +99,14 @@ impl CycleEditor {
             Some(up) => core
                 .cycles(team_id.clone(), up)?
                 .iter()
-                .map(|c| (c.id.clone(), cycle_label(c)))
+                .map(|c| (c.id.clone(), cycle_label(s, c)))
                 .collect(),
             None => vec![],
         };
         // a new cycle is proposed in the one that holds its first day
         let proposed = match (&draft.parent, &id, parent_level, day_of(&start)) {
             (None, None, Some(up), Some(day)) => core
-                .cycles_containing(team_id.clone(), up, day.format("%Y-%m-%d").to_string())
+                .cycles_containing(team_id.clone(), up, text_of(day))
                 .ok()
                 .and_then(|found| found.into_iter().next())
                 .map(|c| c.id),
@@ -175,7 +176,7 @@ impl CycleEditor {
     fn draft(&self) -> CycleDraft {
         let start = self.form.text(START);
         let span = self.form.text(SPAN);
-        let valid = |text: &str| day_of(text).map(|d| d.format("%Y-%m-%d").to_string());
+        let valid = |text: &str| day_of(text).map(text_of);
         CycleDraft {
             title: self.form.text(TITLE),
             start: valid(&start),
@@ -274,7 +275,30 @@ fn checked(form: &Form, field: usize) -> bool {
 /// A row of what a cycle contains: a cycle, or a session of a microcycle.
 struct Child {
     id: String,
-    label: String,
+    shown: Shown,
+}
+
+/// What a child is shown by, written in the language when drawn.
+enum Shown {
+    Cycle(CycleRecord),
+    Session(SessionRecord),
+    /// not read: its window
+    Window(String, String),
+}
+
+impl Shown {
+    fn label(&self, s: &Strings) -> String {
+        match self {
+            Shown::Cycle(k) => cycle_label(s, k),
+            Shown::Session(k) => format!(
+                "{} {} · {}",
+                s.day(&k.start),
+                k.start.get(11..16).unwrap_or_default(),
+                k.title
+            ),
+            Shown::Window(first, last) => s.window(first, last),
+        }
+    }
 }
 
 /// The sheet of a cycle.
@@ -476,19 +500,12 @@ impl CyclesTab {
             .cycle_children(level, id.to_string())?
             .into_iter()
             .map(|c| {
-                let label = match level.child() {
-                    Some(down) => self
-                        .core
-                        .cycle(down, c.id.clone())
-                        .map(|k| cycle_label(&k))
-                        .unwrap_or(c.window),
-                    None => self
-                        .core
-                        .training_session(c.id.clone())
-                        .map(|k| format!("{} · {}", k.start.replace('T', " "), k.title))
-                        .unwrap_or(c.window),
-                };
-                Child { id: c.id, label }
+                let shown = match level.child() {
+                    Some(down) => self.core.cycle(down, c.id.clone()).map(Shown::Cycle),
+                    None => self.core.training_session(c.id.clone()).map(Shown::Session),
+                }
+                .unwrap_or_else(|_| Shown::Window(c.first_day.clone(), c.last_day.clone()));
+                Child { id: c.id, shown }
             })
             .collect();
         Ok(Card {
@@ -595,7 +612,7 @@ impl CyclesTab {
             Ok(free) => {
                 let fields = free
                     .iter()
-                    .map(|c| Field::check(&c.window, false, false))
+                    .map(|c| Field::check(&s.window(&c.first_day, &c.last_day), false, false))
                     .collect();
                 self.mode = Mode::Overlay(Box::new(Overlay {
                     form: Form::new(s.add_children, fields),
@@ -696,7 +713,8 @@ impl CyclesTab {
                 if !overlay.warned {
                     let warning = clash_warning(
                         s.save_anyway_hint,
-                        self.core.microcycle_venue_clashes(id.clone(), draft.clone()),
+                        self.core
+                            .microcycle_venue_clashes(id.clone(), draft.clone()),
                     );
                     overlay.warned = warning.is_some();
                     if warning.is_some() {
@@ -958,7 +976,7 @@ impl CyclesTab {
             .cycles
             .iter()
             .enumerate()
-            .map(|(i, cycle)| self.cycle_row(cycle, i, c))
+            .map(|(i, cycle)| self.cycle_row(s, cycle, i, c))
             .collect();
         let list: Element<'a, Message> = match rows.is_empty() {
             true => text(s.no_cycles).size(SIZE_SMALL).color(c.muted).into(),
@@ -986,7 +1004,13 @@ impl CyclesTab {
         ui::panel_with(s.cycles, actions, column![levels, list].spacing(12), c)
     }
 
-    fn cycle_row<'a>(&self, cycle: &CycleRecord, index: usize, c: Colors) -> Element<'a, Message> {
+    fn cycle_row<'a>(
+        &self,
+        s: &Strings,
+        cycle: &CycleRecord,
+        index: usize,
+        c: Colors,
+    ) -> Element<'a, Message> {
         let mark = match (self.level.parent(), cycle.parent_id.is_none()) {
             (Some(_), true) => match self.marked.contains(&cycle.id) {
                 true => "☑",
@@ -1001,12 +1025,12 @@ impl CyclesTab {
                 self.core
                     .cycle(self.level.parent()?, id.clone())
                     .ok()
-                    .map(|p| cycle_label(&p))
+                    .map(|p| cycle_label(s, &p))
             })
             .unwrap_or_default();
         let line = row![
             text(mark).size(SIZE_SMALL).color(c.muted),
-            text(cycle.window.clone())
+            text(s.window(&cycle.first_day, &cycle.last_day))
                 .size(SIZE_SMALL)
                 .color(c.muted)
                 .width(Length::Fixed(230.0)),
@@ -1036,16 +1060,22 @@ impl CyclesTab {
         };
         let time = |minutes: u32| format!("{} h {:02} {}", minutes / 60, minutes % 60, s.min_short);
         let t = &card.totals;
+        // the word, then the count: "2 completata" isn't Italian
         let counts = format!(
             "{} {} · {} {} · {} {}",
-            t.planned, s.status_planned, t.completed, s.status_completed, t.cancelled, s.cancelled
+            s.filter_planned,
+            t.planned,
+            s.filter_completed,
+            t.completed,
+            s.filter_cancelled,
+            t.cancelled
         );
         let parent = r
             .parent_id
             .as_ref()
             .zip(r.level.parent())
             .and_then(|(id, up)| self.core.cycle(up, id.clone()).ok())
-            .map(|p| cycle_label(&p))
+            .map(|p| cycle_label(s, &p))
             .unwrap_or_default();
         let mut actions: Vec<Element<'a, Message>> = vec![
             ui::action(theme::icons::EDIT, s.edit_cycle, Message::Edit, false, c)
@@ -1090,7 +1120,7 @@ impl CyclesTab {
             Some(level_name(s, r.level)),
             column![
                 line(s.session_title, r.title.clone()),
-                line(s.cycle_start, r.window.clone()),
+                line(s.period, s.window(&r.first_day, &r.last_day)),
                 line(s.cycle_parent, parent),
                 line(s.objectives, r.objectives.clone()),
                 line(s.notes, r.notes.clone()),
@@ -1108,7 +1138,7 @@ impl CyclesTab {
             .enumerate()
             .map(|(i, child)| {
                 ui::list_row(
-                    ui::body(child.label.clone()),
+                    ui::body(child.shown.label(s)),
                     i == card.selected,
                     Some(Message::Child(i)),
                     c,

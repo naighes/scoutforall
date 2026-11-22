@@ -47,6 +47,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -292,6 +293,11 @@ private fun MonthGrid(month: YearMonth, selected: LocalDate, today: LocalDate, b
     }
 }
 
+/** The tag of a day of the month: seven in a row, a seventh of the width
+ * each (45dp apart on a phone 320dp wide, as the days of Material's date
+ * picker): the 48dp between neighbours can't hold there. */
+internal const val DAY_OF_MONTH = "day-of-month"
+
 @Composable
 private fun DayCell(date: LocalDate, selected: Boolean, today: Boolean, events: List<AgendaEventRecord>, modifier: Modifier, onClick: () -> Unit) {
     val items = events.map { it.item }
@@ -308,6 +314,8 @@ private fun DayCell(date: LocalDate, selected: Boolean, today: Boolean, events: 
                 if (selected) MaterialTheme.colorScheme.primaryContainer else androidx.compose.ui.graphics.Color.Transparent,
                 MaterialTheme.shapes.small,
             )
+            // outside `readAs`, which clears what is inside it
+            .testTag(DAY_OF_MONTH)
             .clickable(onClick = onClick)
             .readAs(spoken),
         horizontalAlignment = Alignment.CenterHorizontally,
