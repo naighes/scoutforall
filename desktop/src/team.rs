@@ -214,14 +214,12 @@ impl TeamScreen {
         self.edit(editor);
     }
 
-    /// What the row picked in the week opens: a match, a session, or a new
-    /// session on a free day.
+    /// What the row picked in the week opens: a match or a session.
     fn picked(pick: Option<Pick>) -> Outcome {
         use crate::training::screen::Open;
         match pick {
             Some(Pick::Match { id, .. }) => Outcome::OpenMatch(id),
             Some(Pick::Session { id, .. }) => Outcome::Training(Open::Session(id)),
-            Some(Pick::FreeDay { day, .. }) => Outcome::Training(Open::NewSession(day)),
             None => Outcome::Stay,
         }
     }
@@ -1536,22 +1534,11 @@ mod tests {
                 .filter_map(|i| team.week.pick(i))
                 .collect()
         };
-        let todays: Vec<Pick> = rows(&team)
-            .into_iter()
-            .filter(|p| !matches!(p, Pick::FreeDay { .. }))
-            .collect();
+        // only the events: the days without anything aren't rows
         assert!(matches!(
-            todays.as_slice(),
+            rows(&team).as_slice(),
             [Pick::Session { .. }, Pick::Match { id, .. }] if id == &m
         ));
-        // down to the match (after the days before today that are free)
-        let first_event = rows(&team)
-            .iter()
-            .position(|p| !matches!(p, Pick::FreeDay { .. }))
-            .unwrap();
-        for _ in 0..first_event {
-            team.key(s, key!(down));
-        }
         // the session opens on its sheet
         assert!(matches!(
             team.key(s, key!(enter)),
@@ -1559,17 +1546,11 @@ mod tests {
         ));
         team.key(s, key!(down));
         assert!(matches!(team.key(s, key!(enter)), Outcome::OpenMatch(id) if id == m));
-        // a week on: nothing planned, the rows are free days
+        // a week on: nothing planned, no rows, Enter does nothing
         team.key(s, key!(pagedown));
-        assert!(
-            rows(&team)
-                .iter()
-                .all(|p| matches!(p, Pick::FreeDay { .. }))
-        );
-        assert!(matches!(
-            team.key(s, key!(enter)),
-            Outcome::Training(crate::training::screen::Open::NewSession(_))
-        ));
+        assert!(team.week.is_empty());
+        assert!(rows(&team).is_empty());
+        assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
         team.key(s, key!(home));
         assert!(rows(&team).iter().any(|p| matches!(p, Pick::Match { .. })));
     }

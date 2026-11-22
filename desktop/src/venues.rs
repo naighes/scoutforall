@@ -151,6 +151,8 @@ pub enum Outcome {
 
 pub struct VenuesScreen {
     core: Arc<Scout4All>,
+    /// the team whose training opened the gyms, to go back to
+    pub back_to: Option<String>,
     listed: Vec<VenueRecord>,
     selected: usize,
     mode: Mode,
@@ -165,6 +167,7 @@ impl VenuesScreen {
         let listed = core.venues()?;
         Ok(VenuesScreen {
             core,
+            back_to: None,
             listed,
             selected: 0,
             mode: Mode::Browse,

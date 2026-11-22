@@ -1,7 +1,7 @@
-//! The agenda of the training and the matches, as a panel: a week (seven
-//! days, today lit, a day without anything planned a row of its own) or a
-//! single day. ↑ ↓ between the rows, Enter picks the event or, on a free day,
-//! the day; ‹ › (or PgUp PgDn) change the week, Home goes back to today.
+//! The agenda of the training and the matches, as a panel: a week (only
+//! the days with something planned, today lit; "nothing planned" when no
+//! day has) or a single day. ↑ ↓ between the events, Enter opens one;
+//! ‹ › (or PgUp PgDn) change the week, Home goes back to today.
 //! The home shows every team (with its name), the team only its own.
 
 use {
@@ -40,19 +40,11 @@ pub enum Pick {
     Session { team_id: String, id: String },
     /// a match, to open
     Match { team_id: String, id: String },
-    /// a day with nothing planned: a session to create
-    FreeDay {
-        team_id: Option<String>,
-        day: NaiveDate,
-    },
 }
 
-/// A row: an event of a day, or a day without any.
+/// A row: the event `.1` of the day `.0`.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Slot {
-    Event(usize, usize),
-    Free(usize),
-}
+struct Slot(usize, usize);
 
 pub struct Agenda {
     /// one team, or all
@@ -115,10 +107,7 @@ impl Agenda {
         self.days
             .iter()
             .enumerate()
-            .flat_map(|(d, day)| match day.events.is_empty() {
-                true => vec![Slot::Free(d)],
-                false => (0..day.events.len()).map(|e| Slot::Event(d, e)).collect(),
-            })
+            .flat_map(|(d, day)| (0..day.events.len()).map(move |e| Slot(d, e)))
             .collect()
     }
 
@@ -133,25 +122,18 @@ impl Agenda {
     }
 
     fn pick_of(&self, index: usize) -> Option<Pick> {
-        match self.slots().get(index).copied()? {
-            Slot::Free(d) => Some(Pick::FreeDay {
-                team_id: self.team.clone(),
-                day: day_of(&self.days.get(d)?.date)?,
-            }),
-            Slot::Event(d, e) => {
-                let event = self.days.get(d)?.events.get(e)?;
-                Some(match &event.item {
-                    AgendaItemRecord::Session { id, .. } => Pick::Session {
-                        team_id: event.team_id.clone(),
-                        id: id.clone(),
-                    },
-                    AgendaItemRecord::Match { id, .. } => Pick::Match {
-                        team_id: event.team_id.clone(),
-                        id: id.clone(),
-                    },
-                })
-            }
-        }
+        let Slot(d, e) = self.slots().get(index).copied()?;
+        let event = self.days.get(d)?.events.get(e)?;
+        Some(match &event.item {
+            AgendaItemRecord::Session { id, .. } => Pick::Session {
+                team_id: event.team_id.clone(),
+                id: id.clone(),
+            },
+            AgendaItemRecord::Match { id, .. } => Pick::Match {
+                team_id: event.team_id.clone(),
+                id: id.clone(),
+            },
+        })
     }
 
     fn shift(&mut self, core: &Scout4All, weeks: i64) {
@@ -239,7 +221,17 @@ impl Agenda {
     ) -> Element<'a, Message> {
         let mut rows: Vec<Element<'a, Message>> = vec![];
         let mut index = 0;
-        for day in &self.days {
+        // a day without anything isn't shown: the week says it only when
+        // no day has anything
+        if self.is_empty() {
+            rows.push(
+                text(s.nothing_planned)
+                    .size(SIZE_SMALL)
+                    .color(c.muted)
+                    .into(),
+            );
+        }
+        for day in self.days.iter().filter(|d| !d.events.is_empty()) {
             let date = day_of(&day.date);
             let lit = date == Some(self.today);
             if self.span == AgendaSpan::Week
@@ -256,29 +248,16 @@ impl Agenda {
                         .into(),
                 );
             }
-            match day.events.is_empty() {
-                true => {
-                    rows.push(ui::list_row(
-                        text(s.nothing_planned).size(SIZE_SMALL).color(c.muted),
-                        active && self.selected == index,
-                        Some(Message::Row(index)),
-                        c,
-                    ));
-                    index += 1;
-                }
-                false => {
-                    for event in &day.events {
-                        rows.push(event_row(
-                            event,
-                            s,
-                            c,
-                            with_team,
-                            active && self.selected == index,
-                            index,
-                        ));
-                        index += 1;
-                    }
-                }
+            for event in &day.events {
+                rows.push(event_row(
+                    event,
+                    s,
+                    c,
+                    with_team,
+                    active && self.selected == index,
+                    index,
+                ));
+                index += 1;
             }
         }
         let body: Element<'a, Message> = match &self.error {

@@ -141,9 +141,12 @@ pub fn pill<'a, M: Clone + 'a>(
                 true => Some(Background::Color(c.accent)),
                 false => None,
             },
-            text_color: match chosen {
-                true => c.on_accent,
-                false => c.text,
+            // a pill that does nothing looks like it: a click on it was
+            // taken for a broken button
+            text_color: match (chosen, status) {
+                (true, _) => c.on_accent,
+                (false, button::Status::Disabled) => c.muted,
+                (false, _) => c.text,
             },
             border: border(
                 match (chosen, hovered) {
@@ -156,6 +159,32 @@ pub fn pill<'a, M: Clone + 'a>(
             ),
             ..button::Style::default()
         }
+    })
+    .into()
+}
+
+/// The room of `mark_box`, kept by the rows that can't be marked.
+pub const MARK_WIDTH: f32 = 28.0;
+
+/// The box that marks a row, beside it: a click toggles it.
+pub fn mark_box<'a, M: Clone + 'a>(marked: bool, message: M, c: Colors) -> Element<'a, M> {
+    button(
+        text(match marked {
+            true => "☑",
+            false => "☐",
+        })
+        .size(SIZE_BODY)
+        .align_x(Alignment::Center),
+    )
+    .width(Length::Fixed(MARK_WIDTH))
+    .padding(Padding::from([2, 4]))
+    .on_press(message)
+    .style(move |_, status| button::Style {
+        text_color: match (marked, status) {
+            (true, _) | (false, button::Status::Hovered | button::Status::Pressed) => c.accent,
+            (false, _) => c.muted,
+        },
+        ..button::Style::default()
     })
     .into()
 }

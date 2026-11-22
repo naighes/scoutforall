@@ -80,6 +80,8 @@ pub struct CalendarTab {
     all_teams: bool,
     /// the gym the events are limited to: id and name
     venue: Option<(String, String)>,
+    /// the gyms there are: the filter shows only with some
+    venues: Vec<(String, String)>,
     error: Option<String>,
 }
 
@@ -150,6 +152,7 @@ impl CalendarTab {
             bands: vec![],
             all_teams: false,
             venue: None,
+            venues: vec![],
             error: None,
         };
         tab.reload();
@@ -188,6 +191,21 @@ impl CalendarTab {
 
     /// Read again, after a change or a move.
     pub fn reload(&mut self) {
+        self.venues = self
+            .core
+            .venues()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| (v.id, v.name))
+            .collect();
+        // a gym removed meanwhile filters no more
+        if self
+            .venue
+            .as_ref()
+            .is_some_and(|(id, _)| !self.venues.iter().any(|(v, _)| v == id))
+        {
+            self.venue = None;
+        }
         let span = match self.view {
             View::Week => AgendaSpan::Week,
             View::Month => AgendaSpan::Month,
@@ -296,15 +314,15 @@ impl CalendarTab {
 
     /// The next gym of the filter: none, then each of them, then none.
     fn next_venue(&mut self) {
-        let venues = self.core.venues().unwrap_or_default();
+        let venues = &self.venues;
         self.venue = match &self.venue {
             None => venues.first(),
             Some((id, _)) => venues
                 .iter()
-                .position(|v| v.id == *id)
+                .position(|(v, _)| v == id)
                 .and_then(|at| venues.get(at + 1)),
         }
-        .map(|v| (v.id.clone(), v.name.clone()));
+        .cloned();
         self.slot = 0;
         self.reload();
     }
@@ -428,8 +446,10 @@ impl CalendarTab {
             ("n".to_string(), s.new_session.to_string()),
             ("r".to_string(), s.repeat_sessions.to_string()),
             ("t".to_string(), s.all_teams.to_string()),
-            ("v".to_string(), s.venues.to_string()),
         ];
+        if !self.venues.is_empty() {
+            hints.push(("v".to_string(), s.venues.to_string()));
+        }
         hints.push(("⇥".to_string(), s.sessions.to_string()));
         hints.push(("Esc".to_string(), s.back.to_string()));
         hints
@@ -496,12 +516,15 @@ impl CalendarTab {
             Some(Message::AllTeams),
             c,
         ));
-        controls.push(ui::pill(
-            self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
-            self.venue.is_some(),
-            Some(Message::NextVenue),
-            c,
-        ));
+        // without gyms there is nothing to filter by
+        if !self.venues.is_empty() {
+            controls.push(ui::pill(
+                self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
+                self.venue.is_some(),
+                Some(Message::NextVenue),
+                c,
+            ));
+        }
         controls.push(ui::pill(s.new_session, false, Some(Message::New), c));
         controls.push(ui::pill(s.repeat_sessions, false, Some(Message::Repeat), c));
         let body: Element<'a, Message> = match &self.error {
@@ -770,4 +793,53 @@ fn event_text<'a>(
         ));
     }
     line.into()
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use {
+        super::*, crate::strings::strings, scout4all_core::shapes::enums::LanguageEnum,
+        scout4all_mobile::venues::VenueDraft,
+    };
+
+    fn offers_venues(tab: &CalendarTab) -> bool {
+        let s = strings(LanguageEnum::It);
+        tab.hints(s).iter().any(|(k, _)| k == "v")
+    }
+
+    /// Without gyms there is no filter by gym (a button that did nothing);
+    /// with one, `v` goes from all the gyms to it and back; a gym removed
+    /// meanwhile filters no more.
+    #[test]
+    fn the_gym_filter_is_there_only_with_gyms() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = core.tutorial_team().unwrap();
+        let mut tab = CalendarTab::new(core.clone(), team);
+        assert!(!offers_venues(&tab));
+        tab.key(key!(v));
+        assert!(tab.venue.is_none());
+        let gym = core
+            .save_venue(
+                None,
+                VenueDraft {
+                    name: "Terontola".into(),
+                    ..VenueDraft::default()
+                },
+            )
+            .unwrap()
+            .id;
+        tab.reload();
+        assert!(offers_venues(&tab));
+        tab.key(key!(v));
+        assert_eq!(tab.venue.as_ref().map(|(id, _)| id), Some(&gym));
+        tab.key(key!(v));
+        assert!(tab.venue.is_none());
+        tab.key(key!(v));
+        core.remove_venue(gym).unwrap();
+        tab.reload();
+        assert!(tab.venue.is_none());
+        assert!(!offers_venues(&tab));
+    }
 }

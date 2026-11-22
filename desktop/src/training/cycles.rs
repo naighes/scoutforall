@@ -328,6 +328,8 @@ pub enum Message {
     Pdf,
     Delete,
     Child(usize),
+    /// the box of a row clicked: the cycle marked or no more
+    Mark(usize),
     Form(form::Message),
 }
 
@@ -554,11 +556,8 @@ impl CyclesTab {
         };
     }
 
-    fn toggle_mark(&mut self) {
-        let free = self
-            .cycles
-            .get(self.selected)
-            .filter(|c| c.parent_id.is_none());
+    fn toggle_mark(&mut self, index: usize) {
+        let free = self.cycles.get(index).filter(|c| c.parent_id.is_none());
         if let Some(c) = free {
             let id = c.id.clone();
             if !self.marked.remove(&id) {
@@ -804,7 +803,10 @@ impl CyclesTab {
             }
             (Mode::List, Message::New) => self.new_cycle(s),
             (Mode::List, Message::Create) => self.create_container(s),
-            (Mode::List, Message::Delete) => self.start_remove(s),
+            (Mode::List, Message::Mark(i)) => {
+                self.selected = i;
+                self.toggle_mark(i);
+            }
             (Mode::Card, Message::Edit) => self.edit_card(s),
             (Mode::Card, Message::Add) => self.start_add(s),
             (Mode::Card, Message::Duplicate) => self.start_duplicate(s),
@@ -886,7 +888,7 @@ impl CyclesTab {
             k if k == key!(right) => self.step_level(true),
             k if k == key!(left) => self.step_level(false),
             k if k == key!(enter) => self.open_selected(),
-            k if k == key!(space) => self.toggle_mark(),
+            k if k == key!(space) => self.toggle_mark(self.selected),
             k if k == key!(m) => self.create_container(s),
             k if k == key!(n) => self.new_cycle(s),
             k if (k == key!(backspace) || k == key!(delete)) && count > 0 => self.start_remove(s),
@@ -928,7 +930,7 @@ impl CyclesTab {
                     ("↑ ↓".to_string(), String::new()),
                     ("Enter".to_string(), s.open.to_string()),
                     ("← →".to_string(), s.cycles.to_string()),
-                    ("n".to_string(), s.new_cycle.to_string()),
+                    ("n".to_string(), create_name(s, self.level).to_string()),
                 ];
                 if let Some(up) = self.level.parent() {
                     hints.push(("space".to_string(), s.select_row.to_string()));
@@ -990,17 +992,20 @@ impl CyclesTab {
                 .size(SIZE_SMALL)
                 .color(c.muted)
                 .into(),
-            ui::pill(s.new_cycle, false, Some(Message::New), c),
+            // a new cycle of the level shown, named: "new cycle" next to
+            // "create mesocycle" didn't say which made what
+            ui::pill(create_name(s, self.level), false, Some(Message::New), c),
         ];
-        if let Some(up) = self.level.parent() {
+        // the level above only from the cycles marked, and only then: a
+        // cycle is deleted from its sheet (or ⌫ on its row)
+        if let Some(up) = self.level.parent().filter(|_| !self.marked.is_empty()) {
             actions.push(ui::pill(
-                create_name(s, up),
-                false,
-                (!self.marked.is_empty()).then_some(Message::Create),
+                &format!("{} ({})", create_name(s, up), self.marked.len()),
+                true,
+                Some(Message::Create),
                 c,
             ));
         }
-        actions.push(ui::pill(s.delete_forever, false, Some(Message::Delete), c));
         ui::panel_with(s.cycles, actions, column![levels, list].spacing(12), c)
     }
 
@@ -1011,12 +1016,11 @@ impl CyclesTab {
         index: usize,
         c: Colors,
     ) -> Element<'a, Message> {
-        let mark = match (self.level.parent(), cycle.parent_id.is_none()) {
-            (Some(_), true) => match self.marked.contains(&cycle.id) {
-                true => "☑",
-                false => "☐",
-            },
-            _ => " ",
+        let mark: Element<'a, Message> = match (self.level.parent(), cycle.parent_id.is_none()) {
+            (Some(_), true) => {
+                ui::mark_box(self.marked.contains(&cycle.id), Message::Mark(index), c)
+            }
+            _ => space::horizontal().width(ui::MARK_WIDTH).into(),
         };
         let parent = cycle
             .parent_id
@@ -1029,7 +1033,6 @@ impl CyclesTab {
             })
             .unwrap_or_default();
         let line = row![
-            text(mark).size(SIZE_SMALL).color(c.muted),
             text(s.window(&cycle.first_day, &cycle.last_day))
                 .size(SIZE_SMALL)
                 .color(c.muted)
@@ -1039,7 +1042,13 @@ impl CyclesTab {
         ]
         .spacing(14)
         .align_y(Alignment::Center);
-        ui::list_row(line, index == self.selected, Some(Message::Row(index)), c)
+        row![
+            mark,
+            ui::list_row(line, index == self.selected, Some(Message::Row(index)), c)
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into()
     }
 
     fn card_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {

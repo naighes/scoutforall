@@ -38,8 +38,6 @@ pub enum Open {
     Sessions,
     /// the sheet of a session
     Session(String),
-    /// a new session, on a day
-    NewSession(NaiveDate),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -82,7 +80,12 @@ fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> 
         s.training_notes_warning,
         c,
     );
-    row![pills, space::horizontal(), export].into()
+    // the gyms are where sessions are held: they're added from here too,
+    // not only from the home
+    let venues = ui::pill(s.venues, false, Some(Message::Venues), c);
+    row![pills, space::horizontal(), venues, export]
+        .spacing(6)
+        .into()
 }
 
 fn filter_name(s: &Strings, filter: Filter) -> &'static str {
@@ -177,7 +180,8 @@ pub enum Message {
     Row(usize),
     New,
     Repeat,
-    Delete,
+    /// the box of a row clicked: the session marked or no more
+    Mark(usize),
     Confirm,
     Dismiss,
     Form(form::Message),
@@ -191,6 +195,8 @@ pub enum Message {
     Create,
     /// the archive of the training of the team
     Export,
+    /// the gyms, to add or change one
+    Venues,
 }
 
 pub enum Outcome {
@@ -201,6 +207,8 @@ pub enum Outcome {
     Back,
     /// a file to share: the archive, a sheet
     Export(crate::transfer::Export),
+    /// the gyms: the ones of the sessions are added there
+    Venues,
 }
 
 pub struct TrainingScreen {
@@ -228,7 +236,6 @@ pub struct TrainingScreen {
 impl TrainingScreen {
     pub fn new(
         core: Arc<Scout4All>,
-        s: &'static Strings,
         team_id: String,
         open: Open,
     ) -> Result<TrainingScreen, MobileError> {
@@ -255,12 +262,6 @@ impl TrainingScreen {
         match open {
             Open::Sessions => {}
             Open::Session(id) => screen.open_session(&id),
-            Open::NewSession(day) => {
-                match SessionEditor::new(&screen.core, s, screen.team_id.clone(), None, Some(day)) {
-                    Ok(editor) => screen.mode = Mode::New(Box::new(editor)),
-                    Err(e) => screen.error = Some(e.to_string()),
-                }
-            }
         }
         Ok(screen)
     }
@@ -388,10 +389,10 @@ impl TrainingScreen {
         self.cycles.create_from(s, Level::Microcycle, ids);
     }
 
-    fn toggle_mark(&mut self) {
+    fn toggle_mark(&mut self, index: usize) {
         let free = self
             .shown()
-            .get(self.selected)
+            .get(index)
             .filter(|r| r.microcycle_id.is_none())
             .map(|r| r.id.clone());
         if let Some(id) = free.filter(|id| !self.marked.remove(id)) {
@@ -572,6 +573,7 @@ impl TrainingScreen {
             }
             (Mode::List, Message::Create) => self.create_microcycle(s),
             (Mode::List, Message::Export) => return self.export_outcome(),
+            (Mode::List, Message::Venues) => return Outcome::Venues,
             (Mode::List, Message::Filter(filter)) => {
                 self.filter = filter;
                 self.selected = 0;
@@ -582,7 +584,10 @@ impl TrainingScreen {
             }
             (Mode::List, Message::New) => self.new_session(s),
             (Mode::List, Message::Repeat) => self.repeat(s),
-            (Mode::List, Message::Delete) => self.ask_deletion(),
+            (Mode::List, Message::Mark(i)) => {
+                self.selected = i;
+                self.toggle_mark(i);
+            }
             _ => {}
         }
         Outcome::Stay
@@ -661,7 +666,7 @@ impl TrainingScreen {
             k if k == key!(enter) => self.open_selected(),
             k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
             k if k == key!(p) => self.step_period(),
-            k if k == key!(space) => self.toggle_mark(),
+            k if k == key!(space) => self.toggle_mark(self.selected),
             k if k == key!(m) => self.create_microcycle(s),
             k if k == key!(n) => self.new_session(s),
             k if k == key!(r) => self.repeat(s),
@@ -815,21 +820,24 @@ impl TrainingScreen {
                 .height(Length::Fill)
                 .into(),
         };
-        let add: Vec<Element<'a, Message>> = vec![
+        // only what can be done now: the microcycle once sessions are
+        // marked; a session is deleted from its sheet (or ⌫ on its row)
+        let mut add: Vec<Element<'a, Message>> = vec![
             text(ui::fill(s.sessions_of, &[shown.len().to_string()]))
                 .size(SIZE_SMALL)
                 .color(c.muted)
                 .into(),
             ui::pill(s.new_session, false, Some(Message::New), c),
             ui::pill(s.repeat_sessions, false, Some(Message::Repeat), c),
-            ui::pill(
-                s.create_microcycle,
-                false,
-                (!self.marked.is_empty()).then_some(Message::Create),
-                c,
-            ),
-            ui::pill(s.delete_forever, false, Some(Message::Delete), c),
         ];
+        if !self.marked.is_empty() {
+            add.push(ui::pill(
+                &format!("{} ({})", s.create_microcycle, self.marked.len()),
+                true,
+                Some(Message::Create),
+                c,
+            ));
+        }
         column![
             tabs(s, Tab::Sessions, c),
             ui::panel_with(
@@ -875,15 +883,6 @@ impl TrainingScreen {
             flags.push(s.to_close.to_string());
         }
         let line = row![
-            text(
-                match (r.microcycle_id.is_none(), self.marked.contains(&r.id)) {
-                    (true, true) => "☑",
-                    (true, false) => "☐",
-                    _ => " ",
-                }
-            )
-            .size(SIZE_SMALL)
-            .color(c.muted),
             text(when)
                 .size(SIZE_SMALL)
                 .color(c.muted)
@@ -896,7 +895,19 @@ impl TrainingScreen {
         ]
         .spacing(14)
         .align_y(Alignment::Center);
-        ui::list_row(line, index == self.selected, Some(Message::Row(index)), c)
+        // the box of a free session marks it with a click too, not only
+        // with space: the row itself opens the session
+        let mark = match (r.microcycle_id.is_none(), self.marked.contains(&r.id)) {
+            (true, marked) => ui::mark_box(marked, Message::Mark(index), c),
+            (false, _) => space::horizontal().width(ui::MARK_WIDTH).into(),
+        };
+        row![
+            mark,
+            ui::list_row(line, index == self.selected, Some(Message::Row(index)), c)
+        ]
+        .spacing(4)
+        .align_y(Alignment::Center)
+        .into()
     }
 }
 
@@ -956,8 +967,7 @@ mod tests {
         core.set_session_status(first.clone(), SessionStatus::Cancelled)
             .unwrap();
         core.complete_session(second.clone(), vec![]).unwrap();
-        let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
         let ids = |screen: &TrainingScreen| -> Vec<String> {
             screen.shown().iter().map(|r| r.id.clone()).collect()
         };
@@ -1011,7 +1021,7 @@ mod tests {
         let far = now.checked_add_months(Months::new(24)).unwrap();
         let near = session(&core, &team, &format!("{now}T03:00"), "Oggi");
         let later = session(&core, &team, &format!("{far}T18:00"), "Lontana");
-        let mut screen = TrainingScreen::new(core, s, team, Open::Sessions).unwrap();
+        let mut screen = TrainingScreen::new(core, team, Open::Sessions).unwrap();
         let ids = |screen: &TrainingScreen| -> Vec<String> {
             screen.shown().iter().map(|r| r.id.clone()).collect()
         };
@@ -1033,7 +1043,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         let team = core.tutorial_team().unwrap();
-        let mut screen = TrainingScreen::new(core, s, team, Open::Sessions).unwrap();
+        let mut screen = TrainingScreen::new(core, team, Open::Sessions).unwrap();
         for tab in [
             Tab::Cycles,
             Tab::Presence,
@@ -1049,7 +1059,7 @@ mod tests {
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Back));
     }
 
-    /// A free day of the week opens a new session on that day; saved, it
+    /// A day of the calendar opens a new session on that day; saved, it
     /// opens on its sheet; an overlap is told on the form, not saved.
     #[test]
     fn a_new_session_on_a_day_opens_on_its_sheet_and_an_overlap_is_refused() {
@@ -1059,8 +1069,8 @@ mod tests {
         let team = core.tutorial_team().unwrap();
         session(&core, &team, "2026-03-02T18:00", "Prima");
         let day = NaiveDate::from_ymd_opt(2026, 3, 2).unwrap();
-        let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::NewSession(day)).unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        screen.calendared(s, calendar::Leave::NewSession(day));
         let Mode::New(editor) = &screen.mode else {
             panic!("the form")
         };
@@ -1101,7 +1111,7 @@ mod tests {
             .unwrap();
         }
         let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Session(id.clone())).unwrap();
+            TrainingScreen::new(core.clone(), team.clone(), Open::Session(id.clone())).unwrap();
         let names = |core: &Scout4All| -> Vec<String> {
             core.session_activities(id.clone())
                 .unwrap()
@@ -1162,7 +1172,7 @@ mod tests {
         let id = session(&core, &team, "2026-03-02T18:00", "Prima");
         assert!(!core.session_attendance(id.clone()).unwrap().recorded);
         let mut screen =
-            TrainingScreen::new(core.clone(), s, team, Open::Session(id.clone())).unwrap();
+            TrainingScreen::new(core.clone(), team, Open::Session(id.clone())).unwrap();
         // to the attendance, the roll open
         screen.key(s, key!(right));
         screen.key(s, key!(enter));
@@ -1207,7 +1217,7 @@ mod tests {
         .unwrap();
         let busy = session(&core, &team, "2026-03-09T18:30", "Occupata");
         let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Session(id.clone())).unwrap();
+            TrainingScreen::new(core.clone(), team.clone(), Open::Session(id.clone())).unwrap();
         screen.key(s, key!(d));
         let Mode::Page(page) = &screen.mode else {
             panic!("the sheet")
@@ -1239,8 +1249,7 @@ mod tests {
         let core = app(&dir);
         let team = core.tutorial_team().unwrap();
         session(&core, &team, "2026-03-09T20:00", "Occupata");
-        let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
         screen.key(s, key!(r));
         assert!(matches!(screen.mode, Mode::Series(_)));
         type_in(&mut screen, 0, "2026-03-02");
@@ -1274,8 +1283,7 @@ mod tests {
             .id
             .clone();
         let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Session(last.clone()))
-                .unwrap();
+            TrainingScreen::new(core.clone(), team.clone(), Open::Session(last.clone())).unwrap();
         screen.key(s, key!(g));
         screen.update(
             s,
@@ -1292,13 +1300,9 @@ mod tests {
         assert!(starts.contains(&"2026-03-02T20:30".to_string()));
         assert!(starts.contains(&"2026-03-16T19:00".to_string()));
         // removed from the first on: the sheet closes
-        let mut screen = TrainingScreen::new(
-            core.clone(),
-            s,
-            team.clone(),
-            Open::Session(first.id.clone()),
-        )
-        .unwrap();
+        let mut screen =
+            TrainingScreen::new(core.clone(), team.clone(), Open::Session(first.id.clone()))
+                .unwrap();
         screen.key(s, key!(g));
         screen.update(
             s,
@@ -1319,8 +1323,7 @@ mod tests {
         let team = core.tutorial_team().unwrap();
         session(&core, &team, "2026-03-02T18:00", "Lunedì");
         session(&core, &team, "2026-03-04T18:00", "Mercoledì");
-        let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
         screen.key(s, key!(space));
         screen.key(s, key!(down));
         screen.key(s, key!(space));
@@ -1367,6 +1370,57 @@ mod tests {
         );
     }
 
+    /// The same with the mouse: a click on the box of a row marks it (the
+    /// row itself opens the session), Create makes the microcycle only
+    /// from what is marked; on the cycles tab the same for the mesocycle.
+    #[test]
+    fn the_boxes_mark_with_a_click_and_create_needs_something_marked() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        session(&core, &team, "2026-03-02T18:00", "Lunedì");
+        session(&core, &team, "2026-03-04T18:00", "Mercoledì");
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        // nothing marked: Create does nothing
+        screen.update(s, Message::Create);
+        assert_eq!(screen.tab, Tab::Sessions);
+        // a box clicked twice is no more marked; a click marks without
+        // opening the session
+        screen.update(s, Message::Mark(0));
+        screen.update(s, Message::Mark(0));
+        assert!(screen.marked.is_empty());
+        screen.update(s, Message::Mark(0));
+        screen.update(s, Message::Mark(1));
+        assert!(matches!(screen.mode, Mode::List));
+        assert_eq!(screen.marked.len(), 2);
+        screen.update(s, Message::Create);
+        assert_eq!(screen.tab, Tab::Cycles);
+        screen.key(s, key!(enter));
+        assert_eq!(
+            core.cycles(team.clone(), Level::Microcycle).unwrap().len(),
+            1
+        );
+        // the cycles tab: a new microcycle, empty, then the two marked by
+        // click make a mesocycle
+        screen.key(s, BACK_KEY);
+        screen.update(s, Message::Cycles(cycles::Message::New));
+        type_in(&mut screen, 1, "2026-03-16");
+        screen.key(s, key!(enter));
+        screen.key(s, BACK_KEY);
+        screen.update(s, Message::Cycles(cycles::Message::Create));
+        assert!(
+            core.cycles(team.clone(), Level::Mesocycle)
+                .unwrap()
+                .is_empty()
+        );
+        screen.update(s, Message::Cycles(cycles::Message::Mark(0)));
+        screen.update(s, Message::Cycles(cycles::Message::Mark(1)));
+        screen.update(s, Message::Cycles(cycles::Message::Create));
+        screen.key(s, key!(enter));
+        assert_eq!(core.cycles(team, Level::Mesocycle).unwrap().len(), 1);
+    }
+
     /// A shorter window that leaves a child out stops the save and says so;
     /// Enter again detaches it. Deleting a microcycle frees its sessions.
     #[test]
@@ -1377,8 +1431,7 @@ mod tests {
         let team = core.tutorial_team().unwrap();
         session(&core, &team, "2026-03-02T18:00", "Prima");
         session(&core, &team, "2026-03-09T18:00", "Seconda");
-        let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
         screen.key(s, key!(space));
         screen.key(s, key!(down));
         screen.key(s, key!(space));
@@ -1511,13 +1564,11 @@ mod tests {
     /// the day; in the month Enter goes to the week of the day.
     #[test]
     fn the_calendar_opens_events_and_creates_on_a_day() {
-        let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         let team = core.tutorial_team().unwrap();
         let id = session(&core, &team, "2026-03-10T18:00", "Martedì");
-        let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
         screen.calendar = super::super::calendar::CalendarTab::at(
             core.clone(),
             team.clone(),
@@ -1566,8 +1617,7 @@ mod tests {
         let team = core.tutorial_team().unwrap();
         let id = session(&core, &team, "2026-03-10T18:00", "Martedì");
         microcycle(&core, &team, "Settimana", "2026-03-09");
-        let mut screen =
-            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
         let Outcome::Export(export) = press(&mut screen, key!(x)) else {
             panic!("x shares the archive");
         };

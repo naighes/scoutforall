@@ -144,15 +144,14 @@ impl HomeScreen {
         }
     }
 
-    /// What the row picked in an agenda opens: a match or a session; a free
-    /// day of all the teams has no team to plan in.
+    /// What the row picked in an agenda opens: a match or a session.
     fn picked(pick: Option<Pick>) -> Outcome {
         match pick {
             Some(Pick::Match { team_id, id }) => Outcome::Match(team_id, id),
             Some(Pick::Session { team_id, id }) => {
                 Outcome::Training(team_id, crate::training::screen::Open::Session(id))
             }
-            Some(Pick::FreeDay { .. }) | None => Outcome::Stay,
+            None => Outcome::Stay,
         }
     }
 
