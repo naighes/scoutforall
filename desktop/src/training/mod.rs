@@ -6,6 +6,7 @@ mod calendar;
 mod cycles;
 mod forms;
 mod history;
+mod presence;
 mod roll;
 pub mod screen;
 mod series;

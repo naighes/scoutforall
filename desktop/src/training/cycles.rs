@@ -298,6 +298,7 @@ pub enum Message {
     Edit,
     Add,
     Duplicate,
+    Pdf,
     Delete,
     Child(usize),
     Form(form::Message),
@@ -309,6 +310,8 @@ pub enum Leave {
     Back,
     /// the sheet of a session
     Session(String),
+    /// the PDF of the plan of the microcycle, to share
+    Export(crate::transfer::Export),
 }
 
 pub struct CyclesTab {
@@ -767,6 +770,7 @@ impl CyclesTab {
             (Mode::Card, Message::Edit) => self.edit_card(s),
             (Mode::Card, Message::Add) => self.start_add(s),
             (Mode::Card, Message::Duplicate) => self.start_duplicate(s),
+            (Mode::Card, Message::Pdf) => return self.plan_pdf(),
             (Mode::Card, Message::Delete) => self.start_remove(s),
             (Mode::Card, Message::Child(i)) => return self.open_child(i),
             _ => {}
@@ -816,10 +820,21 @@ impl CyclesTab {
             k if k == key!(e) => self.edit_card(s),
             k if k == key!(a) => self.start_add(s),
             k if k == key!(d) => self.start_duplicate(s),
+            k if k == key!(p) => return self.plan_pdf(),
             k if k == key!(backspace) || k == key!(delete) => self.start_remove(s),
             _ => {}
         }
         Leave::Stay
+    }
+
+    /// The PDF of the plan of the card, when it is a microcycle's.
+    fn plan_pdf(&self) -> Leave {
+        match &self.card {
+            Some(card) if card.record.level == Level::Microcycle => {
+                Leave::Export(crate::transfer::Export::Microcycle(card.record.id.clone()))
+            }
+            _ => Leave::Stay,
+        }
     }
 
     fn list_key(&mut self, s: &Strings, ck: KeyCombination) -> Leave {
@@ -864,6 +879,7 @@ impl CyclesTab {
                     .is_some_and(|c| c.record.level == Level::Microcycle)
                 {
                     hints.push(("d".to_string(), s.duplicate_microcycle.to_string()));
+                    hints.push(("p".to_string(), s.plan_pdf.to_string()));
                 }
                 hints.push(("⌫".to_string(), s.delete_forever.to_string()));
                 hints.push(("Esc".to_string(), s.back.to_string()));
@@ -1030,6 +1046,13 @@ impl CyclesTab {
                 )
                 .width(Length::Fill)
                 .into(),
+            );
+        }
+        if r.level == Level::Microcycle {
+            actions.push(
+                ui::action(theme::icons::SAVE, s.plan_pdf, Message::Pdf, false, c)
+                    .width(Length::Fill)
+                    .into(),
             );
         }
         actions.push(

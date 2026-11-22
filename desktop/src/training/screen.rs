@@ -9,6 +9,7 @@ use {
         cycles::{self, CyclesTab, Leave},
         forms::{Edited, SessionEditor},
         history::{self, HistoryTab},
+        presence::{self, PresenceTab},
         series::SeriesEditor,
         session::{self, SessionPage},
     },
@@ -62,18 +63,24 @@ const FILTERS: [Filter; 6] = [
 
 /// The tabs, the one shown chosen.
 fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> {
-    row([
+    let pills = row([
         (Tab::Calendar, s.calendar),
         (Tab::Sessions, s.sessions),
         (Tab::Cycles, s.cycles),
+        (Tab::Presence, s.attendance),
         (Tab::History, s.history),
     ]
     .map(|(tab, label)| {
         let go = (tab != shown).then_some(Message::Tab(tab));
         ui::pill(label, tab == shown, go, c)
     }))
-    .spacing(6)
-    .into()
+    .spacing(6);
+    let export = ui::tip(
+        ui::pill(s.export_training, false, Some(Message::Export), c),
+        s.training_notes_warning,
+        c,
+    );
+    row![pills, space::horizontal(), export].into()
 }
 
 fn filter_name(s: &Strings, filter: Filter) -> &'static str {
@@ -105,7 +112,7 @@ const PERIODS: [Period; 5] = [
     Period::NextMonth,
 ];
 
-fn period_name(s: &Strings, period: Period) -> &'static str {
+pub(super) fn period_name(s: &Strings, period: Period) -> &'static str {
     match period {
         Period::Any => s.period_any,
         Period::Week => s.this_week,
@@ -148,6 +155,7 @@ pub enum Tab {
     Calendar,
     Sessions,
     Cycles,
+    Presence,
     History,
 }
 
@@ -175,9 +183,12 @@ pub enum Message {
     Tab(Tab),
     Cycles(cycles::Message),
     History(history::Message),
+    Presence(presence::Message),
     Calendar(calendar::Message),
     /// the sessions marked, in a new microcycle
     Create,
+    /// the archive of the training of the team
+    Export,
 }
 
 pub enum Outcome {
@@ -186,6 +197,8 @@ pub enum Outcome {
     Match(String),
     /// back to the team
     Back,
+    /// a file to share: the archive, a sheet
+    Export(crate::transfer::Export),
 }
 
 pub struct TrainingScreen {
@@ -205,6 +218,7 @@ pub struct TrainingScreen {
     calendar: CalendarTab,
     cycles: CyclesTab,
     history: HistoryTab,
+    presence: PresenceTab,
     mode: Mode,
     error: Option<String>,
 }
@@ -221,6 +235,7 @@ impl TrainingScreen {
             calendar: CalendarTab::new(core.clone(), team_id.clone()),
             cycles: CyclesTab::new(core.clone(), team_id.clone()),
             history: HistoryTab::new(core.clone(), team_id.clone()),
+            presence: PresenceTab::new(core.clone(), team_id.clone()),
             core,
             team_id,
             team_name,
@@ -271,6 +286,7 @@ impl TrainingScreen {
         match self.mode {
             Mode::List if self.tab == Tab::Cycles => self.cycles.scroll(),
             Mode::List if self.tab == Tab::History => self.history.scroll(),
+            Mode::List if self.tab == Tab::Presence => self.presence.scroll(),
             Mode::List => {
                 let last = self.shown().len().saturating_sub(1).max(1);
                 Some((Id::new(LIST), self.selected as f32 / last as f32))
@@ -335,13 +351,20 @@ impl TrainingScreen {
             Tab::Calendar => self.calendar.reload(),
             Tab::Sessions => self.reload(),
             Tab::Cycles => self.cycles.reload(),
+            Tab::Presence => self.presence.reload(),
             Tab::History => self.history.reload(),
         }
     }
 
     /// The tab after (or before) the one shown, around.
     fn step_tab(&mut self, forward: bool) {
-        const TABS: [Tab; 4] = [Tab::Calendar, Tab::Sessions, Tab::Cycles, Tab::History];
+        const TABS: [Tab; 5] = [
+            Tab::Calendar,
+            Tab::Sessions,
+            Tab::Cycles,
+            Tab::Presence,
+            Tab::History,
+        ];
         if let Some(next) = ui::cycle(&TABS, &self.tab, forward) {
             self.set_tab(next);
         }
@@ -379,6 +402,7 @@ impl TrainingScreen {
         match leave {
             Leave::Stay => Outcome::Stay,
             Leave::Back => Outcome::Back,
+            Leave::Export(export) => Outcome::Export(export),
             Leave::Session(id) => {
                 self.tab = Tab::Sessions;
                 self.reload();
@@ -487,9 +511,10 @@ impl TrainingScreen {
         }
     }
 
-    fn paged(&mut self, outcome: session::Outcome) {
+    fn paged(&mut self, outcome: session::Outcome) -> Outcome {
         match outcome {
             session::Outcome::Stay => {}
+            session::Outcome::Export(export) => return Outcome::Export(export),
             session::Outcome::Back => {
                 self.mode = Mode::List;
                 self.reload();
@@ -499,13 +524,14 @@ impl TrainingScreen {
                 self.open_session(&id);
             }
         }
+        Outcome::Stay
     }
 
     pub fn update(&mut self, s: &Strings, message: Message) -> Outcome {
         match (&mut self.mode, message) {
             (Mode::Page(page), Message::Page(m)) => {
                 let outcome = page.update(s, m);
-                self.paged(outcome);
+                return self.paged(outcome);
             }
             (Mode::New(editor), Message::Form(m)) => {
                 let edited = editor.update(&self.core, m);
@@ -531,6 +557,9 @@ impl TrainingScreen {
                 return self.cycled(leave);
             }
             (Mode::List, Message::History(m)) if self.tab == Tab::History => self.history.update(m),
+            (Mode::List, Message::Presence(m)) if self.tab == Tab::Presence => {
+                self.presence.update(m)
+            }
             (Mode::List, Message::Calendar(m)) if self.tab == Tab::Calendar => {
                 let leave = self.calendar.update(m);
                 return self.calendared(s, leave);
@@ -540,6 +569,7 @@ impl TrainingScreen {
                 self.selected = 0;
             }
             (Mode::List, Message::Create) => self.create_microcycle(s),
+            (Mode::List, Message::Export) => return self.export_outcome(),
             (Mode::List, Message::Filter(filter)) => {
                 self.filter = filter;
                 self.selected = 0;
@@ -556,11 +586,21 @@ impl TrainingScreen {
         Outcome::Stay
     }
 
+    fn export_outcome(&self) -> Outcome {
+        Outcome::Export(crate::transfer::Export::Training(self.team_id.clone()))
+    }
+
     pub fn key(&mut self, s: &Strings, ck: KeyCombination) -> Outcome {
+        // x shares the archive from any tab (the cycles one, when it isn't in a form)
+        let on_tabs =
+            matches!(self.mode, Mode::List) && (self.tab != Tab::Cycles || self.cycles.on_list());
+        if on_tabs && ck == key!(x) {
+            return self.export_outcome();
+        }
         match &mut self.mode {
             Mode::Page(page) => {
                 let outcome = page.key(s, ck);
-                self.paged(outcome);
+                return self.paged(outcome);
             }
             Mode::New(editor) => {
                 let edited = editor.key(&self.core, ck);
@@ -590,6 +630,11 @@ impl TrainingScreen {
                     let leave = self.calendar.key(k);
                     return self.calendared(s, leave);
                 }
+            },
+            Mode::List if self.tab == Tab::Presence => match ck {
+                k if k == BACK_KEY => return Outcome::Back,
+                k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
+                k => self.presence.key(k),
             },
             Mode::List if self.tab == Tab::History => match ck {
                 k if k == BACK_KEY => return Outcome::Back,
@@ -653,6 +698,7 @@ impl TrainingScreen {
             ],
             Mode::List if self.tab == Tab::Cycles => self.cycles.hints(s),
             Mode::List if self.tab == Tab::Calendar => self.calendar.hints(s),
+            Mode::List if self.tab == Tab::Presence => self.presence.hints(s),
             Mode::List if self.tab == Tab::History => self.history.hints(s),
             Mode::List => vec![
                 ("↑ ↓".to_string(), String::new()),
@@ -664,6 +710,7 @@ impl TrainingScreen {
                 ("p".to_string(), s.period.to_string()),
                 ("n".to_string(), s.new_session.to_string()),
                 ("r".to_string(), s.repeat_sessions.to_string()),
+                ("x".to_string(), s.export_training.to_string()),
                 ("⌫".to_string(), s.delete_forever.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
             ],
@@ -709,6 +756,13 @@ impl TrainingScreen {
             Mode::List if self.tab == Tab::Calendar => column![
                 tabs(s, Tab::Calendar, c),
                 self.calendar.view(s, c).map(Message::Calendar)
+            ]
+            .spacing(10)
+            .height(Length::Fill)
+            .into(),
+            Mode::List if self.tab == Tab::Presence => column![
+                tabs(s, Tab::Presence, c),
+                self.presence.view(s, c).map(Message::Presence)
             ]
             .spacing(10)
             .height(Length::Fill)
@@ -973,13 +1027,19 @@ mod tests {
     /// Tab goes round sessions, cycles, history, calendar and back; the
     /// history has nothing to change.
     #[test]
-    fn tab_goes_round_the_four_tabs() {
+    fn tab_goes_round_the_five_tabs() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         let team = core.tutorial_team().unwrap();
         let mut screen = TrainingScreen::new(core, s, team, Open::Sessions).unwrap();
-        for tab in [Tab::Cycles, Tab::History, Tab::Calendar, Tab::Sessions] {
+        for tab in [
+            Tab::Cycles,
+            Tab::Presence,
+            Tab::History,
+            Tab::Calendar,
+            Tab::Sessions,
+        ] {
             screen.key(s, key!(tab));
             assert_eq!(screen.tab, tab);
         }
@@ -1491,5 +1551,49 @@ mod tests {
             super::super::calendar::View::Week
         );
         assert!(matches!(press(&mut screen, BACK_KEY), Outcome::Back));
+    }
+
+    /// x shares the archive of the training from the list; p on a session
+    /// asks for the options of its sheet and shares the PDF; p on a
+    /// microcycle shares its plan. The files are really made.
+    #[test]
+    fn the_archive_and_the_pdfs_are_shared() {
+        use crate::transfer::{self, Export};
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let id = session(&core, &team, "2026-03-10T18:00", "Martedì");
+        microcycle(&core, &team, "Settimana", "2026-03-09");
+        let mut screen =
+            TrainingScreen::new(core.clone(), s, team.clone(), Open::Sessions).unwrap();
+        let Outcome::Export(export) = press(&mut screen, key!(x)) else {
+            panic!("x shares the archive");
+        };
+        assert!(matches!(&export, Export::Training(t) if *t == team));
+        let (name, bytes) = transfer::archive(&core, &export).unwrap();
+        assert!(name.ends_with(".zip") && !bytes.is_empty());
+        // the sheet
+        screen.key(s, key!(enter));
+        assert!(matches!(press(&mut screen, key!(p)), Outcome::Stay));
+        press(&mut screen, key!(space));
+        let Outcome::Export(export) = press(&mut screen, key!(enter)) else {
+            panic!("Enter shares the sheet");
+        };
+        assert!(matches!(&export, Export::SessionSheet(i, true, false) if *i == id));
+        let (name, bytes) = transfer::archive(&core, &export).unwrap();
+        assert!(name.ends_with(".pdf") && bytes.starts_with(b"%PDF"));
+        // Esc closes the options without sharing
+        press(&mut screen, key!(p));
+        assert!(matches!(press(&mut screen, BACK_KEY), Outcome::Stay));
+        // the plan of the microcycle
+        press(&mut screen, BACK_KEY);
+        screen.update(s, Message::Tab(Tab::Cycles));
+        press(&mut screen, key!(enter));
+        let Outcome::Export(export) = press(&mut screen, key!(p)) else {
+            panic!("p shares the plan");
+        };
+        let (_, bytes) = transfer::archive(&core, &export).unwrap();
+        assert!(bytes.starts_with(b"%PDF"));
     }
 }

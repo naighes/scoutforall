@@ -49,6 +49,8 @@ enum Mode {
     Duplicate(Box<DuplicateEditor>),
     Series(Box<SeriesChangeEditor>),
     Roll(Box<Roll>),
+    /// the options of the PDF of the sheet
+    Pdf(Box<Form>),
     Complete(Checklist),
     DeleteSession,
     /// id and name
@@ -68,6 +70,7 @@ pub enum Message {
     EditSession,
     Duplicate,
     EditSeries,
+    Pdf,
     Complete,
     CancelSession,
     Reopen,
@@ -85,6 +88,8 @@ pub enum Outcome {
     Back,
     /// the sheet of another session (the duplicate)
     Opened(String),
+    /// the PDF of the sheet, to share
+    Export(crate::transfer::Export),
 }
 
 pub struct SessionPage {
@@ -133,6 +138,7 @@ impl SessionPage {
             Mode::Duplicate(_) => "duplicate",
             Mode::Series(_) => "series",
             Mode::Roll(_) => "roll",
+            Mode::Pdf(_) => "pdf",
             Mode::Complete(_) => "complete",
             Mode::DeleteSession | Mode::DeleteActivity(..) => "delete",
         }
@@ -154,6 +160,7 @@ impl SessionPage {
             Mode::Duplicate(e) => Some(e.form.focus_id()),
             Mode::Series(e) => Some(e.form.focus_id()),
             Mode::Roll(r) => r.focus_id(),
+            Mode::Pdf(f) => Some(f.focus_id()),
             _ => None,
         }
     }
@@ -309,6 +316,34 @@ impl SessionPage {
         }
     }
 
+    /// The form with the two options of the PDF of the sheet.
+    fn ask_pdf(&mut self, s: &Strings) {
+        let fields = vec![
+            form::Field::check(s.sheet_participants, false, false),
+            form::Field::check(s.sheet_notes, false, false),
+        ];
+        self.mode = Mode::Pdf(Box::new(Form::new(s.session_sheet_pdf, fields)));
+    }
+
+    fn pdf_outcome(&mut self, outcome: form::Outcome) -> Outcome {
+        match (&self.mode, outcome) {
+            (Mode::Pdf(f), form::Outcome::Save) => {
+                let on = |i: usize| {
+                    matches!(
+                        f.fields.get(i).map(|x| &x.value),
+                        Some(form::Value::Check { on: true, .. })
+                    )
+                };
+                let export = crate::transfer::Export::SessionSheet(self.id.clone(), on(0), on(1));
+                self.mode = Mode::Browse;
+                return Outcome::Export(export);
+            }
+            (_, form::Outcome::Cancel) => self.mode = Mode::Browse,
+            _ => {}
+        }
+        Outcome::Stay
+    }
+
     fn confirm(&mut self) -> Outcome {
         match &self.mode {
             Mode::Complete(_) => self.complete(),
@@ -384,6 +419,10 @@ impl SessionPage {
                 let edited = e.update(&self.core, m);
                 return self.edited(s, edited);
             }
+            (Mode::Pdf(f), Message::Form(m)) => {
+                let outcome = f.update(m);
+                return self.pdf_outcome(outcome);
+            }
             (Mode::Roll(r), Message::Roll(m)) => {
                 let done = r.update(&self.core, s, m);
                 self.rolled(done);
@@ -425,6 +464,7 @@ impl SessionPage {
             Message::EditSession => self.edit_session(s),
             Message::Duplicate => self.duplicate(s),
             Message::EditSeries => self.edit_series(s),
+            Message::Pdf => self.ask_pdf(s),
             Message::Complete => self.ask_completion(),
             Message::CancelSession => self.set_status(SessionStatus::Cancelled),
             Message::Reopen => self.set_status(SessionStatus::Planned),
@@ -459,6 +499,10 @@ impl SessionPage {
             Mode::Series(e) => {
                 let edited = e.key(&self.core, ck);
                 return self.edited(s, edited);
+            }
+            Mode::Pdf(f) => {
+                let outcome = f.key(ck);
+                return self.pdf_outcome(outcome);
             }
             Mode::Roll(r) => {
                 let done = r.key(&self.core, s, ck);
@@ -516,6 +560,7 @@ impl SessionPage {
             (_, k) if k == key!(e) => self.edit_session(s),
             (_, k) if k == key!(d) => self.duplicate(s),
             (_, k) if k == key!(g) => self.edit_series(s),
+            (_, k) if k == key!(p) => self.ask_pdf(s),
             (_, k) if k == key!(c) => self.ask_completion(),
             (_, k) if k == key!(x) => self.set_status(SessionStatus::Cancelled),
             (_, k) if k == key!(r) => self.set_status(SessionStatus::Planned),
@@ -556,7 +601,8 @@ impl SessionPage {
             | Mode::Activity(_)
             | Mode::Copy(_)
             | Mode::Duplicate(_)
-            | Mode::Series(_) => Form::hints(s),
+            | Mode::Series(_)
+            | Mode::Pdf(_) => Form::hints(s),
             Mode::Roll(r) => r.hints(s),
             Mode::Complete(_) => vec![
                 ("↑ ↓".to_string(), String::new()),
@@ -587,6 +633,7 @@ impl SessionPage {
                     vec![
                         ("e".to_string(), s.edit_session.to_string()),
                         ("d".to_string(), s.duplicate_session.to_string()),
+                        ("p".to_string(), s.session_sheet_pdf.to_string()),
                     ],
                     match self.record.series_id {
                         Some(_) => vec![("g".to_string(), s.edit_series.to_string())],
@@ -616,6 +663,7 @@ impl SessionPage {
             Mode::Copy(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Duplicate(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Series(e) => centered(e.form.view(s, c, Message::Form, None)),
+            Mode::Pdf(f) => centered(f.view(s, c, Message::Form, None)),
             Mode::Roll(r) => r.view(s, c).map(Message::Roll),
             Mode::Complete(list) => self.completion(list, s, c),
             Mode::DeleteSession => ui::confirm_deletion(
@@ -750,6 +798,17 @@ impl SessionPage {
                 theme::icons::ADD,
                 s.duplicate_session,
                 Message::Duplicate,
+                false,
+                c,
+            )
+            .width(Length::Fill)
+            .into(),
+        );
+        actions.push(
+            ui::action(
+                theme::icons::SAVE,
+                s.session_sheet_pdf,
+                Message::Pdf,
                 false,
                 c,
             )

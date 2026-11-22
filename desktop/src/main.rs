@@ -634,6 +634,9 @@ impl App {
             transfer::Export::Team(_) => s.export_team,
             transfer::Export::Match(..) => s.export_match,
             transfer::Export::Report(..) => s.match_report,
+            transfer::Export::Training(_) => s.export_training,
+            transfer::Export::SessionSheet(..) => s.session_sheet_pdf,
+            transfer::Export::Microcycle(_) => s.plan_pdf,
         };
         match transfer::archive(&self.core, &export) {
             Ok((name, bytes)) => self.offer(transfer::Sharing {
@@ -1696,6 +1699,7 @@ fn training_go(team_id: &str, outcome: training::screen::Outcome) -> Go {
         training::screen::Outcome::Stay => Go::Stay,
         training::screen::Outcome::Back => Go::Team(team_id.to_string()),
         training::screen::Outcome::Match(id) => Go::Match(team_id.to_string(), id),
+        training::screen::Outcome::Export(export) => Go::Export(export),
     }
 }
 
