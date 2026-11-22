@@ -216,7 +216,7 @@ fn overlap(slot: &Slot, others: Vec<Slot>) -> Result<(), AppError> {
 
 /// A session of the team in this window overlaps no other session of the
 /// team, nor a match in programma of it.
-fn check_session(
+pub(crate) fn check_session(
     tx: &Transaction,
     team_id: &Uuid,
     except: Option<&Uuid>,

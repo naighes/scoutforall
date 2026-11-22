@@ -206,6 +206,22 @@ impl TeamWriter for SqliteTeamWriter {
                 [Sql(*team_id)],
             )
             .map_err(sqlite)?;
+            // its training goes with it (TODO/021 §2)
+            [
+                "training_sessions",
+                "microcycles",
+                "mesocycles",
+                "training_programs",
+            ]
+            .iter()
+            .try_for_each(|table| {
+                tx.execute(
+                    &format!("UPDATE {table} SET deleted = 1 WHERE team_id = ?1"),
+                    [Sql(*team_id)],
+                )
+                .map(|_| ())
+                .map_err(sqlite)
+            })?;
             forget_team(tx, *team_id)
         })
     }
@@ -240,6 +256,8 @@ pub struct TeamRemoval {
     pub kept: usize,
     /// against a name: removed with the team
     pub removed: usize,
+    /// the sessions of training, removed with the team
+    pub sessions: usize,
 }
 
 impl SqliteTeamReader {
@@ -250,6 +268,15 @@ impl SqliteTeamReader {
             Ok(TeamRemoval {
                 kept: count(AS_A_AGAINST_A_TEAM)? + count(AS_B)?,
                 removed: count(AGAINST_A_NAME)?,
+                sessions: usize::try_from(
+                    tx.query_row(
+                        "SELECT count(*) FROM training_sessions WHERE team_id = ?1 AND deleted = 0",
+                        [Sql(*team_id)],
+                        |row| row.get::<_, i64>(0),
+                    )
+                    .map_err(sqlite)?,
+                )
+                .unwrap_or_default(),
             })
         })
     }

@@ -4930,6 +4930,9 @@ impl Scout4All {
                     m.status.them_wins,
                     vec![choice(&m.team)],
                 ),
+                // the archives of the training have no screen yet (TODO/021
+                // steps 15, 21, 24): they aren't offered for import
+                Preview::Training(_) => return Err(failed(labels.invalid_archive)),
             },
             // up to v0.9.0 the id only in the name of the file
             Opened::LegacyTeam { team, id } => {

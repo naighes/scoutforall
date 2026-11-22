@@ -578,6 +578,40 @@ mod tests {
         assert_eq!(in_database(&db).await.len(), 1);
     }
 
+    /// The training of the team stays on the device (TODO/021 §2): with
+    /// sessions, activities and attendance of the team in the database, the
+    /// upload of a match is the same, byte for byte.
+    #[tokio::test]
+    async fn the_training_does_not_go_in_the_upload() {
+        let db = migrated_v018().await;
+        let team = id(TEAM);
+        let m = in_database(&db).await[0].1.clone();
+        let source = SqliteUploads::new(db.clone(), en());
+        let before = archive(&source.read(&team, &m).await.unwrap());
+        execute(
+            &db,
+            &format!(
+                "INSERT INTO training_sessions (id, team_id, start_local, duration_min, notes,
+                                                final_remarks)
+                     VALUES ('bbbbbbbb-0000-4000-8000-000000000001', '{TEAM}',
+                             '2025-10-03T18:00', 90, 'secret note', 'secret remark');
+                 INSERT INTO training_activities (id, session_id, position, name)
+                     VALUES ('dddddddd-0000-4000-8000-000000000001',
+                             'bbbbbbbb-0000-4000-8000-000000000001', 0, 'secret drill');
+                 INSERT INTO training_attendance (session_id, person_id, status, note)
+                     SELECT 'bbbbbbbb-0000-4000-8000-000000000001', person_id, 'absent',
+                            'secret' FROM team_members WHERE team_id = '{TEAM}' LIMIT 1;"
+            ),
+        );
+        let after = archive(&source.read(&team, &m).await.unwrap());
+        assert_eq!(after, before);
+        assert!(
+            after
+                .iter()
+                .all(|(_, data)| !String::from_utf8_lossy(data).contains("secret"))
+        );
+    }
+
     /// Team B scouted too (`"both"`), and a neutral venue: A's files are
     /// as before (B's touches leave A's stream as it was), `home` is false,
     /// `neutral` true; B goes in files of its own, by its random id, with

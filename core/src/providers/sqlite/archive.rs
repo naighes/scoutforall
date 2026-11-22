@@ -17,6 +17,9 @@
 //!   removed from a team that a match of the archive tells of; a person
 //!   removed from every team of the archive shows only the name (the
 //!   person keeps the rest for the other teams, as `player_form::removed`);
+//! - the **training** of a team is an archive of its own (`contents:
+//!   "training"` in the manifest, `training_archive`): the training rows of
+//!   the team, its row, the persons of the attendance;
 //! - not the video (paths of a computer), the upload queue (of a device),
 //!   the cache of the lists (derived).
 //!
@@ -49,7 +52,8 @@ use crate::{
     legacy::migrate::{same, unzip},
     localization::{Labels, Language},
     providers::sqlite::{
-        Database, matches::replayed, not_found, rows::match_rows, sqlite, summary, teams::read_team,
+        Database, matches::replayed, not_found, rows::match_rows, sqlite, summary,
+        teams::read_team, training_archive,
     },
     shapes::{
         r#match::{MatchEntry, MatchStatus},
@@ -81,6 +85,15 @@ pub enum Kind {
     Match,
 }
 
+/// What an archive of a team holds besides the usual: the manifest of
+/// versions before it doesn't tell, and reads as an archive of the team.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Contents {
+    /// only the training of the team (TODO/021 §7)
+    Training,
+}
+
 /// What an archive tells of itself.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -88,6 +101,9 @@ pub struct Manifest {
     /// the version of the schema of its rows
     pub schema: i64,
     pub kind: Kind,
+    /// what it holds, when not what `kind` says (absent: as before)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub contents: Option<Contents>,
     /// the team or the match
     pub id: Uuid,
     /// the version of the app that exported it
@@ -102,6 +118,8 @@ pub enum Subject {
     Team(Uuid),
     /// the team and the matches it plays, as A or as B
     TeamWithMatches(Uuid),
+    /// the training of the team, apart (`training_archive`)
+    Training(Uuid),
 }
 
 /// What an import did with the rows of a kind already here or not.
@@ -129,6 +147,20 @@ pub struct Imported {
     pub matches: usize,
     /// matches already here, left as they are
     pub matches_here: usize,
+    /// the training of an archive of it
+    pub training: TrainingMerged,
+}
+
+/// What an import of the training did.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TrainingMerged {
+    /// programs, mesocycles and microcycles
+    pub cycles: Merged,
+    /// not added: they overlap another here
+    pub cycles_overlapping: usize,
+    pub sessions: Merged,
+    /// not added: they overlap another session or a match here
+    pub sessions_overlapping: usize,
 }
 
 impl Imported {
@@ -143,6 +175,20 @@ impl Imported {
         let lines: Vec<String> = [
             (labels.import_matches_added, added),
             (labels.import_matches_here, self.matches_here),
+            (labels.import_sessions_added, self.training.sessions.added),
+            (
+                labels.import_sessions_kept,
+                self.training.sessions.kept_local,
+            ),
+            (
+                labels.import_sessions_overlap,
+                self.training.sessions_overlapping,
+            ),
+            (labels.import_cycles_kept, self.training.cycles.kept_local),
+            (
+                labels.import_cycles_overlap,
+                self.training.cycles_overlapping,
+            ),
             (labels.import_teams_kept, self.teams.kept_local),
             (labels.import_players_kept, self.persons.kept_local),
             (labels.import_numbers_kept, self.members.kept_local),
@@ -156,7 +202,7 @@ impl Imported {
 }
 
 /// A row of a table, by the names of its columns.
-type Row = Map<String, Json>;
+pub(crate) type Row = Map<String, Json>;
 
 /// The tables of an archive, in the order they're written (the foreign
 /// keys), each with the order of its rows.
@@ -178,32 +224,37 @@ const MATCH_TABLES: [&str; 4] = ["match_roster", "sets", "set_lineups", "events"
 // the ids exported, as JSON arrays: ?1 the matches, ?2 the teams, ?3 the
 // persons the matches tell of
 const MATCHES: &str = "(SELECT value FROM json_each(?1))";
-const TEAMS: &str = "(SELECT value FROM json_each(?2))";
-const CITED: &str = "(SELECT value FROM json_each(?3))";
+pub(crate) const TEAMS: &str = "(SELECT value FROM json_each(?2))";
+pub(crate) const CITED: &str = "(SELECT value FROM json_each(?3))";
 
-fn invalid(labels: &Labels, why: impl std::fmt::Display) -> AppError {
+pub(crate) fn invalid(labels: &Labels, why: impl std::fmt::Display) -> AppError {
     AppError::IO(IOError::Msg(format!("{}: {why}", labels.invalid_archive)))
 }
 
 /// The archive of `subject`, as zip bytes.
 pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
-    let (kind, id) = match subject {
-        Subject::Match(id) => (Kind::Match, id),
-        Subject::Team(id) | Subject::TeamWithMatches(id) => (Kind::Team, id),
+    let (kind, id, contents) = match subject {
+        Subject::Match(id) => (Kind::Match, id, None),
+        Subject::Team(id) | Subject::TeamWithMatches(id) => (Kind::Team, id, None),
+        Subject::Training(id) => (Kind::Team, id, Some(Contents::Training)),
     };
-    let tables = db.read(|tx| {
-        let ids = selection(tx, subject)?;
-        TABLES
-            .iter()
-            .map(|(table, order)| {
-                dump(tx, table, filter(table), order, &ids).map(|rows| (*table, rows))
-            })
-            .collect::<Result<Vec<_>, _>>()
-    })?;
+    let tables = match subject {
+        Subject::Training(team) => training_archive::tables(db, team)?,
+        _ => db.read(|tx| {
+            let ids = selection(tx, subject)?;
+            TABLES
+                .iter()
+                .map(|(table, order)| {
+                    dump(tx, table, filter(table), order, &ids).map(|rows| (*table, rows))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })?,
+    };
     let manifest = Manifest {
         format: FORMAT,
         schema: db::schema_version(),
         kind,
+        contents,
         id,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         exported_at: Utc::now(),
@@ -215,7 +266,7 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
     zip_files(&files, Deflated)
 }
 
-fn pretty<T: Serialize>(value: &T) -> Result<Vec<u8>, AppError> {
+pub(crate) fn pretty<T: Serialize>(value: &T) -> Result<Vec<u8>, AppError> {
     serde_json::to_vec_pretty(value).map_err(|e| AppError::IO(IOError::from(e)))
 }
 
@@ -233,6 +284,7 @@ fn selection(tx: &Transaction, subject: Subject) -> Result<[String; 3], AppError
             true => Ok((ids_json(&[id]), None)),
             false => Err(not_found(&format!("match {id}"))),
         },
+        Subject::Training(_) => Err(not_found("training")),
         Subject::Team(id) | Subject::TeamWithMatches(id) => {
             let matches = match subject {
                 Subject::TeamWithMatches(_) => ids(
@@ -284,12 +336,12 @@ fn ids_json(ids: &[Uuid]) -> String {
     json_of_ids(&ids.iter().map(Uuid::to_string).collect::<Vec<_>>())
 }
 
-fn json_of_ids(ids: &[String]) -> String {
+pub(crate) fn json_of_ids(ids: &[String]) -> String {
     Json::from(ids.to_vec()).to_string()
 }
 
 /// The texts of the first column.
-fn ids(tx: &Connection, sql: &str, params: &[String]) -> Result<Vec<String>, AppError> {
+pub(crate) fn ids(tx: &Connection, sql: &str, params: &[String]) -> Result<Vec<String>, AppError> {
     tx.prepare(sql)
         .and_then(|mut statement| {
             let count = statement.parameter_count();
@@ -340,7 +392,7 @@ fn key_of_match(table: &str) -> &'static str {
 
 /// The rows of the table chosen by `filter`, in `order`; a person removed
 /// from every team exported shows only the name.
-fn dump(
+pub(crate) fn dump(
     tx: &Connection,
     table: &str,
     filter: String,
@@ -385,12 +437,12 @@ fn only_name(mut row: Row) -> Row {
     row
 }
 
-fn text<'a>(row: &'a Row, column: &str) -> Option<&'a str> {
+pub(crate) fn text<'a>(row: &'a Row, column: &str) -> Option<&'a str> {
     row.get(column).and_then(Json::as_str)
 }
 
 /// The rows of a query, by the names of their columns.
-fn select(tx: &Connection, sql: &str, params: &[String]) -> Result<Vec<Row>, AppError> {
+pub(crate) fn select(tx: &Connection, sql: &str, params: &[String]) -> Result<Vec<Row>, AppError> {
     let mut statement = tx.prepare(sql).map_err(sqlite)?;
     let names: Vec<String> = statement.column_names().map(String::from).collect();
     let count = statement.parameter_count();
@@ -435,7 +487,7 @@ fn value(column: &str, json: &Json) -> Result<Value, String> {
 }
 
 /// The names of the columns of the table.
-fn columns(tx: &Connection, table: &str) -> Result<Vec<String>, AppError> {
+pub(crate) fn columns(tx: &Connection, table: &str) -> Result<Vec<String>, AppError> {
     tx.prepare(&format!("SELECT name FROM pragma_table_info('{table}')"))
         .and_then(|mut statement| {
             statement
@@ -446,7 +498,12 @@ fn columns(tx: &Connection, table: &str) -> Result<Vec<String>, AppError> {
 }
 
 /// The row added to the table: only its known columns.
-fn insert(tx: &Connection, table: &str, known: &[String], row: &Row) -> Result<(), String> {
+pub(crate) fn insert(
+    tx: &Connection,
+    table: &str,
+    known: &[String],
+    row: &Row,
+) -> Result<(), String> {
     let unknown = row.keys().find(|column| !known.contains(column));
     match unknown {
         Some(column) => Err(format!("{table}: column {column:?}")),
@@ -487,6 +544,16 @@ pub fn manifest(archive: &[u8]) -> Option<Manifest> {
 pub enum Preview {
     Team(TeamEntry),
     Match(Box<MatchPreview>),
+    /// the training of a team
+    Training(TrainingPreview),
+}
+
+/// The training of an archive: the team it belongs to and how much of it.
+#[derive(Debug)]
+pub struct TrainingPreview {
+    pub team: TeamEntry,
+    pub sessions: usize,
+    pub cycles: usize,
 }
 
 /// The match of an archive as its team A sees it, with its status.
@@ -503,9 +570,10 @@ pub fn preview(archive: &[u8], language: &Language) -> Result<Preview, AppError>
     let (manifest, staging) = staged(archive, language.labels())?;
     let staged = Database::new(staging);
     let missing = || not_found(&format!("{:?} {}", manifest.kind, manifest.id));
-    staged.read(|tx| match manifest.kind {
-        Kind::Team => read_team(tx, &manifest.id).map(Preview::Team),
-        Kind::Match => {
+    staged.read(|tx| match (manifest.kind, manifest.contents) {
+        (Kind::Team, Some(Contents::Training)) => training_archive::preview(tx, &manifest.id),
+        (Kind::Team, None) => read_team(tx, &manifest.id).map(Preview::Team),
+        (Kind::Match, _) => {
             let rows = match_rows(tx, manifest.id)?.ok_or_else(missing)?;
             let team = read_team(tx, &rows.row.team_a)?;
             let (entry, status) = replayed(tx, &team, &manifest.id.to_string(), language)?;
@@ -521,7 +589,12 @@ pub fn preview(archive: &[u8], language: &Language) -> Result<Preview, AppError>
 /// Adds what the archive holds that isn't here: see the module.
 pub fn import(db: &Database, archive: &[u8], language: &Language) -> Result<Imported, AppError> {
     let (manifest, mut staging) = staged(archive, language.labels())?;
-    merge_staged(db, &mut staging, manifest.kind, manifest.id, language)
+    match manifest.contents {
+        Some(Contents::Training) => {
+            training_archive::merge(db, &mut staging, manifest.id, language)
+        }
+        None => merge_staged(db, &mut staging, manifest.kind, manifest.id, language),
+    }
 }
 
 /// The rows of the archive in a database in memory with the schema of
@@ -613,6 +686,7 @@ pub(crate) fn merge_staged(
             competitions,
             matches: 0,
             matches_here: 0,
+            training: TrainingMerged::default(),
         };
         for m in of("matches") {
             let added = merge_match(tx, &staged, m, &of)?;
@@ -679,17 +753,20 @@ fn load(
     files: &[(String, Vec<u8>)],
     labels: &Labels,
 ) -> Result<(), AppError> {
-    TABLES.iter().try_for_each(|(table, _)| {
-        let name = format!("{table}.json");
-        let rows: Vec<Row> = match files.iter().find(|(file, _)| *file == name) {
-            Some((_, data)) => serde_json::from_slice(data).map_err(|e| invalid(labels, e)),
-            None => Ok(vec![]),
-        }?;
-        let known = columns(staging, table)?;
-        rows.iter()
-            .try_for_each(|row| insert(staging, table, &known, row))
-            .map_err(|e| invalid(labels, e))
-    })
+    TABLES
+        .iter()
+        .chain(training_archive::OWN.iter())
+        .try_for_each(|(table, _)| {
+            let name = format!("{table}.json");
+            let rows: Vec<Row> = match files.iter().find(|(file, _)| *file == name) {
+                Some((_, data)) => serde_json::from_slice(data).map_err(|e| invalid(labels, e)),
+                None => Ok(vec![]),
+            }?;
+            let known = columns(staging, table)?;
+            rows.iter()
+                .try_for_each(|row| insert(staging, table, &known, row))
+                .map_err(|e| invalid(labels, e))
+        })
 }
 
 /// The values of the key of a row of the table.
@@ -701,7 +778,7 @@ fn key(table: &str) -> &'static [&'static str] {
 }
 
 /// The row here with the key of `row`, removed or not.
-fn local(tx: &Connection, table: &str, row: &Row) -> Result<Option<Row>, AppError> {
+pub(crate) fn local(tx: &Connection, table: &str, row: &Row) -> Result<Option<Row>, AppError> {
     let key = key(table);
     let clause: Vec<String> = key
         .iter()
@@ -720,13 +797,13 @@ fn local(tx: &Connection, table: &str, row: &Row) -> Result<Option<Row>, AppErro
     .map(|rows| rows.into_iter().next())
 }
 
-fn deleted(row: &Row) -> bool {
+pub(crate) fn deleted(row: &Row) -> bool {
     row.get("deleted") == Some(&Json::from(1))
 }
 
 /// A person of the archive agrees with the one here when it's the same but
 /// for the details it lacks (exported with only the name).
-fn agrees_person(local: &Row, row: &Row) -> bool {
+pub(crate) fn agrees_person(local: &Row, row: &Row) -> bool {
     row.iter().all(|(column, value)| {
         let lacking = matches!(
             (column.as_str(), value),
@@ -739,7 +816,7 @@ fn agrees_person(local: &Row, row: &Row) -> bool {
 /// The rows of a table with a key of their own (persons, teams,
 /// competitions) here: added when missing or removed here, otherwise the
 /// local ones win.
-fn merge(
+pub(crate) fn merge(
     tx: &Connection,
     table: &str,
     rows: &[Row],
@@ -772,7 +849,7 @@ fn merge(
 }
 
 /// The row here as the archive has it.
-fn update(tx: &Connection, table: &str, row: &Row) -> Result<(), String> {
+pub(crate) fn update(tx: &Connection, table: &str, row: &Row) -> Result<(), String> {
     let key = key(table);
     let values = row
         .iter()

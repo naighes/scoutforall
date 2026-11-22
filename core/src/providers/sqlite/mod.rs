@@ -32,6 +32,7 @@ pub(crate) mod summary;
 pub mod teams;
 pub mod training;
 pub mod training_agenda;
+pub mod training_archive;
 pub mod training_cycles;
 pub mod training_totals;
 pub mod upload;

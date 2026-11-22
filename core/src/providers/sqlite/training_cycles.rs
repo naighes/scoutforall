@@ -83,7 +83,7 @@ fn cycle_from_row(level: Level, row: &Row) -> rusqlite::Result<Cycle> {
     })
 }
 
-fn read_cycle(tx: &Transaction, level: Level, id: &Uuid) -> Result<Cycle, AppError> {
+pub(crate) fn read_cycle(tx: &Transaction, level: Level, id: &Uuid) -> Result<Cycle, AppError> {
     tx.query_row(
         &format!(
             "SELECT {} FROM {} WHERE id = ?1 AND deleted = 0",
@@ -177,7 +177,7 @@ fn execute(tx: &Transaction, sql: &str, params: impl rusqlite::Params) -> Result
 
 /// The cycle of `level` can be at `window`, under `parent`: inside it, and
 /// overlapping no other cycle of the team of the level but `except`.
-fn check_cycle(
+pub(crate) fn check_cycle(
     tx: &Transaction,
     level: Level,
     team_id: &Uuid,

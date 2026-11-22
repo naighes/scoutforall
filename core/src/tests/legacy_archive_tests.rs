@@ -161,6 +161,7 @@ pub(crate) mod tests {
             competitions: Merged::default(),
             matches: added,
             matches_here: 0,
+            training: Default::default(),
         }
     }
 

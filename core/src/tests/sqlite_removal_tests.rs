@@ -373,21 +373,24 @@ mod tests {
             p.teams.removal(&a.id).unwrap(),
             TeamRemoval {
                 kept: 2,
-                removed: 2
+                removed: 2,
+                ..TeamRemoval::default()
             }
         );
         assert_eq!(
             p.teams.removal(&b.id).unwrap(),
             TeamRemoval {
                 kept: 1,
-                removed: 0
+                removed: 0,
+                ..TeamRemoval::default()
             }
         );
         assert_eq!(
             p.teams.removal(&c.id).unwrap(),
             TeamRemoval {
                 kept: 1,
-                removed: 1
+                removed: 1,
+                ..TeamRemoval::default()
             }
         );
         assert_eq!(
