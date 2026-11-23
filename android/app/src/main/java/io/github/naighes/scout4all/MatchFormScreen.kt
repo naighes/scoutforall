@@ -231,7 +231,7 @@ class MatchFormViewModel(
                         competitions = core.competitions(),
                         stages = core.stages(),
                         formats = core.competitionFormats(),
-                        roles = core.roles(teamId),
+                        roles = core.roles(),
                     )
                 }
             } catch (e: MobileException) {
@@ -280,7 +280,7 @@ class MatchFormViewModel(
                 try {
                     val (roster, opponents, roles) = app.core { core ->
                         val form = editing.form.copy(roster = null, numbers = emptyList())
-                        Triple(core.matchRoster(id, matchId, form, null), core.opponentChoices(id), core.roles(id))
+                        Triple(core.matchRoster(id, matchId, form, null), core.opponentChoices(id), core.roles())
                     }
                     update { s ->
                         val chosen = s.copy(teamId = id, opponents = opponents, roles = roles, players = roster.players)

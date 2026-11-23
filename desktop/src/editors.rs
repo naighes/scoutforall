@@ -536,7 +536,7 @@ impl Editor {
         id: Option<String>,
         start: PlayerForm,
     ) -> Editor {
-        let roles = core.roles(team_id.clone());
+        let roles = core.roles();
         // a new player may be a person of the registry; one saved may play
         // in other teams too, with the same details
         let existing = match &id {
@@ -1076,15 +1076,10 @@ impl Editor {
         else {
             return;
         };
-        let team = match &self.kind {
-            Kind::Match(m) => m
-                .created
-                .as_ref()
-                .map_or_else(|| m.team_id.clone(), |(_, b)| b.clone()),
-            Kind::Season(t) => t.team_id.clone(),
-            Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) => return,
-        };
-        let roles = core.roles(team);
+        if let Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) = &self.kind {
+            return;
+        }
+        let roles = core.roles();
         let fields = vec![
             Field::text(s.number, p.number.to_string()),
             Field::choice(
@@ -1118,7 +1113,7 @@ impl Editor {
         let Some((_, b)) = m.created.clone() else {
             return;
         };
-        let roles = core.roles(b.clone());
+        let roles = core.roles();
         let number = core
             .new_player_form(b)
             .map(|f| f.number)
@@ -2819,7 +2814,7 @@ mod tests {
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
         assert!(correcting(&e).and_then(|c| c.form.error.clone()).is_some());
         let opposite = core
-            .roles(cortona.clone())
+            .roles()
             .iter()
             .position(|r| r.value == RoleEnum::OppositeHitter)
             .unwrap();

@@ -121,7 +121,7 @@ class PlayerFormViewModel(
                     PlayerFormState.Editing(
                         // a new one: the first number free
                         form = player?.form ?: core.newPlayerForm(teamId),
-                        roles = core.roles(teamId),
+                        roles = core.roles(),
                         savedName = player?.name.orEmpty(),
                         savedNumber = player?.number?.toInt() ?: 0,
                         existing = if (playerId == null) core.existingPlayers(teamId) else emptyList(),

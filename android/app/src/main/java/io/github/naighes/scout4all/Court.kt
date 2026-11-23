@@ -73,9 +73,7 @@ data class CourtSlot(
     val number: Int?,
     val name: String?,
     val setter: Boolean = false,
-    /** of a women's team: the setter named in the feminine */
-    val women: Boolean = false,
-    val libero: Boolean = false,
+        val libero: Boolean = false,
     /** being chosen, in the color of the actions */
     val highlighted: Boolean = false,
     /** a position that can't be touched now is dimmed */
@@ -460,13 +458,10 @@ private fun Spot(position: Int, slot: CourtSlot, showPosition: Boolean, scale: F
         }
     }
 
-/** The name of the setter, in the feminine for a women's team. */
-fun setterName(women: Boolean): Int = if (women) R.string.setter_women else R.string.setter
-
 /** What the badges of the jersey say, in words. */
 @Composable
 private fun badges(slot: CourtSlot): String = listOfNotNull(
-    stringResource(setterName(slot.women)).takeIf { slot.setter },
+    stringResource(R.string.setter).takeIf { slot.setter },
     stringResource(R.string.serving).takeIf { slot.serving },
     slot.touchName?.let { stringResource(R.string.last_touch, it) },
     slot.spotlight.takeIf { it }?.let {

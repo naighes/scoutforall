@@ -81,7 +81,6 @@
     <string name="serving_team">Zagrywka</string>
     <string name="position_n">Poz %d</string>
     <string name="setter">Rozgrywający</string>
-    <string name="setter_women">Rozgrywająca</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Drugi libero</string>
     <string name="none">Brak</string>
