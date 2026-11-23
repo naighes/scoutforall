@@ -407,7 +407,7 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
                             } catch (_: MobileException) {
                             }
                         }
-                    }) { Text(stringResource(R.string.delete_forever), color = MaterialTheme.colorScheme.error) }
+                    }) { Text(stringResource(R.string.delete), color = MaterialTheme.colorScheme.error) }
                 },
                 dismissButton = { TextButton(onClick = { asking = false }) { Text(stringResource(R.string.cancel)) } },
             )

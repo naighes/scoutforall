@@ -301,7 +301,7 @@ fun ActivityFormScreen(teamId: String, sessionId: String, activityId: String?, o
                 actions = {
                     if (activityId != null) {
                         IconButton(onClick = { deleting = true }) {
-                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete_forever))
+                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete))
                         }
                     }
                 },
@@ -809,6 +809,6 @@ private fun SeriesChangeFields(
             },
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
-        ) { Text(stringResource(if (remove) R.string.delete_forever else R.string.save)) }
+        ) { Text(stringResource(if (remove) R.string.delete else R.string.save)) }
     }
 }

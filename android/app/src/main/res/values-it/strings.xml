@@ -28,7 +28,7 @@
     <string name="remove_player">Rimuovi giocatore</string>
     <string name="delete_team">Elimina squadra</string>
     <string name="delete_match">Elimina partita</string>
-    <string name="delete_forever">Elimina per sempre</string>
+    <string name="delete">Elimina</string>
     <string name="permanent_deletion">Eliminazione definitiva</string>
     <string name="irreversible">L\'eliminazione è PERMANENTE: non si può annullare.</string>
     <string name="delete_team_text">La squadra %1$s sarà eliminata con le sue partite (%2$d): scouting, report e statistiche. I suoi giocatori restano nell\'anagrafica.</string>
@@ -677,7 +677,6 @@
     <string name="tr_add_sessions">Aggiungi sedute esistenti</string>
     <string name="tr_no_mesocycles">Nessun mesociclo</string>
     <string name="tr_no_microcycles">Nessun microciclo</string>
-    <string name="tr_delete">Elimina</string>
     <string name="tr_delete_cycle_keeps">Ciò che contiene non viene eliminato: resta, libero, a meno che tu non scelga «Elimina anche ciò che contiene».</string>
     <string name="tr_zero_programs">nessun programma</string>
     <string name="tr_zero_mesocycles">nessun mesociclo</string>

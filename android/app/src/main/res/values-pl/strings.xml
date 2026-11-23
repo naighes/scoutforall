@@ -28,7 +28,7 @@
     <string name="remove_player">Usuń zawodnika</string>
     <string name="delete_team">Usuń drużynę</string>
     <string name="delete_match">Usuń mecz</string>
-    <string name="delete_forever">Usuń na zawsze</string>
+    <string name="delete">Usuń</string>
     <string name="permanent_deletion">Trwałe usunięcie</string>
     <string name="irreversible">Usunięcie jest TRWAŁE: nie można go cofnąć.</string>
     <string name="delete_team_text">Drużyna %1$s zostanie usunięta wraz ze swoimi meczami (%2$d): scouting, raporty i statystyki. Jej zawodnicy pozostają w rejestrze.</string>
@@ -681,7 +681,6 @@
     <string name="tr_add_sessions">Dodaj istniejące sesje</string>
     <string name="tr_no_mesocycles">Brak mezocykli</string>
     <string name="tr_no_microcycles">Brak mikrocykli</string>
-    <string name="tr_delete">Usuń</string>
     <string name="tr_delete_cycle_keeps">To, co zawiera, nie zostanie usunięte: pozostaje wolne, chyba że wybierzesz „Usuń też to, co zawiera”.</string>
     <string name="tr_zero_programs">brak programów</string>
     <string name="tr_zero_mesocycles">brak mezocykli</string>

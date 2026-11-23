@@ -47,7 +47,7 @@ class DeletionTest {
         rule.onNodeWithText(string(R.string.cancel)).performClick()
         assertEquals(listOf("Italia", "Serbia"), teams())
         rule.onNodeWithContentDescription(string(R.string.delete_team)).performClick()
-        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
+        rule.onNodeWithText(string(R.string.delete)).performClick()
         rule.waitFor { deleted == 1 }
         assertEquals(listOf("Serbia"), teams())
     }
@@ -72,7 +72,7 @@ class DeletionTest {
         rule.onNodeWithContentDescription(string(R.string.delete_team)).performClick()
         val text = string(R.string.delete_team_text, "Italia", 1) + " " + string(R.string.delete_team_kept, 1, "Italia")
         rule.waitForText(text)
-        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
+        rule.onNodeWithText(string(R.string.delete)).performClick()
         rule.waitFor { deleted == 1 }
         assertEquals(listOf("Serbia"), teams())
         assertEquals(1, core { it.matches(serbia) }.size)
@@ -92,7 +92,7 @@ class DeletionTest {
         }
         rule.waitForText(string(R.string.resume_set_n, 1))
         rule.onNodeWithContentDescription(string(R.string.delete_match)).performClick()
-        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
+        rule.onNodeWithText(string(R.string.delete)).performClick()
         rule.waitFor { deleted == 1 }
         assertEquals(emptyList<MatchListing>(), core { it.matches(team) })
         // the team and its players stay
@@ -119,7 +119,7 @@ class DeletionTest {
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performClick()
         rule.waitForText(string(R.string.unreadable_match))
         rule.onNodeWithText(string(R.string.unreadable_match)).performClick()
-        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
+        rule.onNodeWithText(string(R.string.delete)).performClick()
         rule.waitForText(string(R.string.no_matches))
         assertEquals(emptyList<MatchListing>(), core { it.matches(team) })
     }

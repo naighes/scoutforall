@@ -276,7 +276,7 @@ fun CycleScreen(
                     IconButton(onClick = onEdit) {
                         Icon(Icons.Filled.Edit, contentDescription = stringResource(level.editName()))
                     }
-                    DeleteIcon(stringResource(R.string.tr_delete)) { deleting = true }
+                    DeleteIcon(stringResource(R.string.delete)) { deleting = true }
                 },
             )
         },
@@ -399,7 +399,7 @@ fun CycleScreen(
                             error = e.failure().text
                         }
                     }
-                }) { Text(stringResource(R.string.delete_forever)) }
+                }) { Text(stringResource(R.string.delete)) }
             },
             dismissButton = { TextButton(onClick = { deleting = false }) { Text(stringResource(R.string.cancel)) } },
         )

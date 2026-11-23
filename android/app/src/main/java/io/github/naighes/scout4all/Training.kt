@@ -255,7 +255,7 @@ fun SessionScreen(
                         IconButton(onClick = onEdit) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.tr_edit_session))
                         }
-                        DeleteIcon(stringResource(R.string.delete_forever)) { deleting = true }
+                        DeleteIcon(stringResource(R.string.delete)) { deleting = true }
                     }
                 },
             )

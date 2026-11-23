@@ -28,7 +28,7 @@
     <string name="remove_player">選手を削除</string>
     <string name="delete_team">チームを削除</string>
     <string name="delete_match">試合を削除</string>
-    <string name="delete_forever">完全に削除</string>
+    <string name="delete">削除</string>
     <string name="permanent_deletion">完全な削除</string>
     <string name="irreversible">この削除は永久的で、元に戻せません。</string>
     <string name="delete_team_text">チーム%1$sを試合（%2$d）とともに削除します：スカウティング、レポート、統計。選手は登録に残ります。</string>
@@ -675,7 +675,6 @@
     <string name="tr_add_sessions">既存のセッションを追加</string>
     <string name="tr_no_mesocycles">メゾサイクルなし</string>
     <string name="tr_no_microcycles">マイクロサイクルなし</string>
-    <string name="tr_delete">削除</string>
     <string name="tr_delete_cycle_keeps">含まれるものは削除されず、そのまま残ります（「含まれるものも削除」を選んだ場合を除く）。</string>
     <string name="tr_zero_programs">プログラムなし</string>
     <string name="tr_zero_mesocycles">メゾサイクルなし</string>

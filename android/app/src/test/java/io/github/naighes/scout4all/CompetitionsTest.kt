@@ -49,7 +49,7 @@ class CompetitionsTest {
         rule.waitForText("Serie A1")
         rule.onNode(hasContentDescription("${string(R.string.delete_competition)}: Serie A1") and hasClickAction()).performClick()
         rule.waitForText(string(R.string.delete_competition_text, "Serie A1", 1))
-        rule.onNodeWithText(string(R.string.delete_forever)).performClick()
+        rule.onNodeWithText(string(R.string.delete)).performClick()
         rule.waitForText(string(R.string.no_competitions))
         assertEquals("", core { it.matchForm(team, match) }.competition)
         assertEquals(1, core { it.matches(team) }.size)

@@ -29,7 +29,7 @@
     <string name="remove_player">Remove player</string>
     <string name="delete_team">Delete team</string>
     <string name="delete_match">Delete match</string>
-    <string name="delete_forever">Delete for good</string>
+    <string name="delete">Delete</string>
     <string name="permanent_deletion">Permanent deletion</string>
     <string name="irreversible">This deletion is PERMANENT: it can\'t be undone.</string>
     <string name="delete_team_text">The team %1$s will be deleted with its matches (%2$d): scouting, reports and statistics. Its players stay in the registry.</string>
@@ -679,7 +679,6 @@
     <string name="tr_add_sessions">Add existing sessions</string>
     <string name="tr_no_mesocycles">No mesocycles</string>
     <string name="tr_no_microcycles">No microcycles</string>
-    <string name="tr_delete">Delete</string>
     <string name="tr_delete_cycle_keeps">What it contains is not deleted: it stays, free, unless you choose “Delete what it contains too”.</string>
     <string name="tr_zero_programs">no programs</string>
     <string name="tr_zero_mesocycles">no mesocycles</string>
