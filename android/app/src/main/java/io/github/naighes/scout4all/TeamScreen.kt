@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material3.AlertDialog
@@ -153,12 +154,23 @@ fun TeamScreen(
                                 onDvw = onDvw,
                             )
                         }
-                        ExportButton(stringResource(R.string.export_team)) { it.exportTeam(id) }
-                        IconButton(onClick = onEdit) {
-                            Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_team))
+                        // the statistics of the matches together: nothing without matches
+                        if ((matches as? MatchesState.Loaded)?.matches?.isNotEmpty() == true) {
+                            IconButton(onClick = onAnalysis) {
+                                Icon(painterResource(R.drawable.ic_stats), contentDescription = stringResource(R.string.analysis))
+                            }
+                        }
+                        IconButton(onClick = onTraining) {
+                            Icon(painterResource(R.drawable.ic_calendar), contentDescription = stringResource(R.string.tr_programming))
                         }
                         val name = (state as? TeamState.Loaded)?.team?.name.orEmpty()
-                        TeamDeleteButton(id, name, onDeleted)
+                        val exporter = rememberExporter { it.exportTeam(id) }
+                        val delete = rememberTeamDeletion(id, name, onDeleted)
+                        MoreMenu { close ->
+                            ExportEntries(exporter, close)
+                            MenuEntry(stringResource(R.string.edit_team), Icons.Filled.Edit, close, onEdit)
+                            MenuEntry(stringResource(R.string.delete_team), Icons.Filled.Delete, close, delete)
+                        }
                     }
                 },
             )
@@ -204,7 +216,7 @@ fun TeamScreen(
                 val content = Modifier.fillMaxSize()
                 when (tab) {
                     PLAYERS_TAB -> Players(s.team, onPlayer, onNewSeason, content)
-                    else -> Matches(id, matches, onMatch, onAnalysis, onTraining, onSession, content, onUnreadable = { unreadable = it })
+                    else -> Matches(id, matches, onMatch, onSession, content, onUnreadable = { unreadable = it })
                 }
             }
         }
@@ -239,8 +251,6 @@ private fun Matches(
     teamId: String,
     state: MatchesState,
     onMatch: (String) -> Unit,
-    onAnalysis: () -> Unit,
-    onTraining: () -> Unit,
     onSession: (String) -> Unit,
     modifier: Modifier,
     onUnreadable: (String) -> Unit,
@@ -261,17 +271,9 @@ private fun Matches(
                 onMatch = { _, m -> onMatch(m) },
                 onSession = { _, s -> onSession(s) },
             )
-            // the training plan of the team, under its week
-            item(key = "training") {
-                ScreenButton(R.drawable.ic_calendar, stringResource(R.string.tr_programming), onTraining)
-            }
             if (state.matches.isEmpty()) {
                 item { Text(stringResource(R.string.no_matches), Modifier.padding(16.dp)) }
             } else {
-                // the statistics of the matches together, first
-                item {
-                    ScreenButton(R.drawable.ic_stats, stringResource(R.string.analysis), onAnalysis)
-                }
                 items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
             }
         }
@@ -386,26 +388,15 @@ fun rememberFormBack(changed: Boolean, onBack: () -> Unit): () -> Unit {
     return { if (changed) asking = true else onBack() }
 }
 
-/** The button that deletes the team, once confirmed with what happens to
- * its matches (D16): the ones against a name go with it, the ones against
- * another team stay to that team. */
+/** What deletes the team, once confirmed with what happens to its matches
+ * (D16): the ones against a name go with it, the ones against another team
+ * stay to that team. It is the call that starts the question. */
 @Composable
-private fun TeamDeleteButton(id: String, name: String, onDeleted: () -> Unit) {
+private fun rememberTeamDeletion(id: String, name: String, onDeleted: () -> Unit): () -> Unit {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
     var counts by remember { mutableStateOf<TeamRemovalCounts?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    IconButton(onClick = {
-        scope.launch {
-            try {
-                counts = app.core { it.teamRemoval(id) }
-            } catch (e: MobileException) {
-                error = e.reason
-            }
-        }
-    }) {
-        Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.delete_team))
-    }
     val text = counts?.let { c ->
         val removed = stringResource(R.string.delete_team_text, name, c.removed.toInt())
         when (c.kept) {
@@ -426,5 +417,15 @@ private fun TeamDeleteButton(id: String, name: String, onDeleted: () -> Unit) {
             text = { Text(it) },
             confirmButton = { TextButton(onClick = { error = null }) { Text(stringResource(android.R.string.ok)) } },
         )
+    }
+    return {
+        scope.launch {
+            try {
+                counts = app.core { it.teamRemoval(id) }
+            } catch (e: MobileException) {
+                error = e.reason
+            }
+        }
+        Unit
     }
 }

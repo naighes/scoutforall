@@ -9,6 +9,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -54,16 +55,17 @@ import kotlinx.coroutines.withContext
 /** The archives are the zip of the CLI. */
 const val ZIP = "application/zip"
 
-/** Shares the archive `export` makes (Quick Share, WhatsApp, e-mail…) or
- * saves it to a file the user chooses (Download, Drive, a USB stick), from a
- * button of the top bar. The archive is made again for each, so it has the
- * latest data. */
+/** What shares the archive `export` makes (Quick Share, WhatsApp, e-mail…)
+ * or saves it to a file the user chooses (Download, Drive, a USB stick). The
+ * archive is made again for each, so it has the latest data. */
+class Exporter(val share: () -> Unit, val save: () -> Unit)
+
+/** The `Exporter` of `export`, with the dialog of what goes wrong. */
 @Composable
-fun ExportButton(description: String, export: (Scout4All) -> ExportedArchive) = Box {
+fun rememberExporter(export: (Scout4All) -> ExportedArchive): Exporter {
     val context = LocalContext.current
     val app = context.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
-    var open by rememberSaveable { mutableStateOf(false) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     error?.let { ErrorDialog(it) { error = null } }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ZIP)) { uri ->
@@ -77,36 +79,43 @@ fun ExportButton(description: String, export: (Scout4All) -> ExportedArchive) = 
             }
         }
     }
+    return Exporter(
+        share = {
+            scope.launch {
+                context.report({ error = it }) {
+                    context.share(app.core(export))
+                    null
+                }
+            }
+        },
+        save = {
+            scope.launch {
+                context.report({ error = it }) {
+                    save.launch(app.core(export).fileName)
+                    null
+                }
+            }
+        },
+    )
+}
+
+/** The entries of a `MoreMenu` that export: share, or save to a file. */
+@Composable
+fun ColumnScope.ExportEntries(exporter: Exporter, close: () -> Unit) {
+    MenuEntry(stringResource(R.string.share), Icons.Filled.Share, close, exporter.share)
+    MenuEntry(stringResource(R.string.save_to_file), painterResource(R.drawable.ic_save), close, exporter.save)
+}
+
+/** Exports from a button of the top bar: a menu to share or save. */
+@Composable
+fun ExportButton(description: String, export: (Scout4All) -> ExportedArchive) = Box {
+    val exporter = rememberExporter(export)
+    var open by rememberSaveable { mutableStateOf(false) }
     IconButton(onClick = { open = true }) {
         Icon(Icons.Filled.Share, contentDescription = description)
     }
     Menu(expanded = open, onDismissRequest = { open = false }) {
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.share)) },
-            leadingIcon = { Icon(Icons.Filled.Share, contentDescription = null) },
-            onClick = {
-                open = false
-                scope.launch {
-                    context.report({ error = it }) {
-                        context.share(app.core(export))
-                        null
-                    }
-                }
-            },
-        )
-        DropdownMenuItem(
-            text = { Text(stringResource(R.string.save_to_file)) },
-            leadingIcon = { Icon(painterResource(R.drawable.ic_save), contentDescription = null) },
-            onClick = {
-                open = false
-                scope.launch {
-                    context.report({ error = it }) {
-                        save.launch(app.core(export).fileName)
-                        null
-                    }
-                }
-            },
-        )
+        ExportEntries(exporter) { open = false }
     }
 }
 

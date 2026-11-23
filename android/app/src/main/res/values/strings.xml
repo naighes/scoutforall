@@ -365,6 +365,7 @@
     <string name="dvw_sets">sets</string>
     <string name="dvw_next">Next</string>
     <!-- the analysis of a team over several matches -->
+    <string name="more_actions">More actions</string>
     <string name="analysis">Analysis</string>
     <string name="period">Period</string>
     <string name="last_month">Last month</string>

@@ -353,11 +353,9 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
                                 openVenueMap(app, geo, web)
                             }
                         }) { Icon(Icons.Filled.Place, contentDescription = stringResource(R.string.venue_open_map)) }
-                        IconButton(onClick = onEdit) {
-                            Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.venue_edit))
-                        }
-                        IconButton(onClick = { asking = true }) {
-                            Icon(Icons.Filled.Delete, contentDescription = stringResource(R.string.venue_delete))
+                        MoreMenu { close ->
+                            MenuEntry(stringResource(R.string.venue_edit), Icons.Filled.Edit, close, onEdit)
+                            MenuEntry(stringResource(R.string.venue_delete), Icons.Filled.Delete, close) { asking = true }
                         }
                     }
                 },

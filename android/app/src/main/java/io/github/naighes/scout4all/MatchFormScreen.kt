@@ -435,7 +435,7 @@ class MatchFormViewModel(
             val b = core.matchForm(editing.teamId, id).opponentTeam.orEmpty()
             // only the roster of B is left in the form
             val form = MatchForm(opponent = "", date = null, home = false, maxSubstitutions = "", both = true)
-            Triple(b, core.rosterOfB(editing.teamId, id, form, null), core.roles(b))
+            Triple(b, core.rosterOfB(editing.teamId, id, form, null), core.roles())
         }
         editing.copy(
             busy = false,

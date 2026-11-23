@@ -63,7 +63,7 @@ class PlayScreenshots {
         // the team, its analysis: each figure match by match
         touch(hasText(teamName()) and hasClickAction())
         touch(hasText(text(R.string.matches)) and hasClickAction())
-        touch(hasText(text(R.string.analysis)) and hasClickAction())
+        touch(hasContentDescription(text(R.string.analysis)) and hasClickAction())
         touch(hasText(text(R.string.stats_trend)) and hasClickAction())
         // not the last month: it moves with the day the shots are taken
         touch(hasText(text(R.string.last_matches, 5)) and hasClickAction())

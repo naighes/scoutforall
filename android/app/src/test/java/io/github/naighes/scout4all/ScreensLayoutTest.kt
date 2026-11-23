@@ -79,7 +79,7 @@ class ScreensLayoutTest(private val screen: Size) {
         rule.waitForText("Ekaterina Antropova")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         // today, always in the week, may push the match below a short screen
-        rule.waitForText(string(R.string.tr_programming))
+        rule.waitForText(string(R.string.agenda_week))
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Cortona"))
         rule.waitForText("Cortona")
         rule.shot("screen-team-matches-$screen")

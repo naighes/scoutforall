@@ -363,6 +363,7 @@
     <string name="dvw_sets">セット</string>
     <string name="dvw_next">次へ</string>
     <!-- the analysis of a team over several matches -->
+    <string name="more_actions">その他の操作</string>
     <string name="analysis">分析</string>
     <string name="period">期間</string>
     <string name="last_month">直近1か月</string>
