@@ -127,40 +127,74 @@ pub fn pill<'a, M: Clone + 'a>(
     message: Option<M>,
     c: Colors,
 ) -> Element<'a, M> {
-    button(
+    pill_of(
         text(label.to_string())
             .size(SIZE_SMALL)
-            .align_x(Alignment::Center),
+            .align_x(Alignment::Center)
+            .into(),
+        chosen,
+        message,
+        c,
     )
-    .padding(Padding::from([4, 14]))
-    .on_press_maybe(message)
-    .style(move |_, status| {
-        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-        button::Style {
-            background: match chosen {
-                true => Some(Background::Color(c.accent)),
-                false => None,
-            },
-            // a pill that does nothing looks like it: a click on it was
-            // taken for a broken button
-            text_color: match (chosen, status) {
-                (true, _) => c.on_accent,
-                (false, button::Status::Disabled) => c.muted,
-                (false, _) => c.text,
-            },
-            border: border(
-                match (chosen, hovered) {
-                    (true, _) => c.accent,
-                    (false, true) => Color { a: 0.7, ..c.accent },
-                    (false, false) => c.border,
+}
+
+/// A `pill` with an icon before its words, for a place to go (the gyms).
+pub fn icon_pill<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    message: M,
+    c: Colors,
+) -> Element<'a, M> {
+    pill_of(
+        row![
+            icon(icon_bytes, SIZE_SMALL + 2.0, c.text),
+            text(label.to_string()).size(SIZE_SMALL)
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into(),
+        false,
+        Some(message),
+        c,
+    )
+}
+
+fn pill_of<'a, M: Clone + 'a>(
+    content: Element<'a, M>,
+    chosen: bool,
+    message: Option<M>,
+    c: Colors,
+) -> Element<'a, M> {
+    button(content)
+        .padding(Padding::from([4, 14]))
+        .on_press_maybe(message)
+        .style(move |_, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: match chosen {
+                    true => Some(Background::Color(c.accent)),
+                    false => None,
                 },
-                BORDER,
-                RADIUS_PILL,
-            ),
-            ..button::Style::default()
-        }
-    })
-    .into()
+                // a pill that does nothing looks like it: a click on it was
+                // taken for a broken button
+                text_color: match (chosen, status) {
+                    (true, _) => c.on_accent,
+                    (false, button::Status::Disabled) => c.muted,
+                    (false, _) => c.text,
+                },
+                border: border(
+                    match (chosen, hovered) {
+                        (true, _) => c.accent,
+                        (false, true) => Color { a: 0.7, ..c.accent },
+                        (false, false) => c.border,
+                    },
+                    BORDER,
+                    RADIUS_PILL,
+                ),
+                ..button::Style::default()
+            }
+        })
+        .into()
 }
 
 /// The room of `mark_box`, kept by the rows that can't be marked.

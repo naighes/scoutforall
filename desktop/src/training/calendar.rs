@@ -31,7 +31,7 @@ use {
     scout4all_core::{training::SessionStatus, training::cycles::Level},
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{
-        Scout4All,
+        MobileError, Scout4All,
         training::{AgendaDay, AgendaEventRecord, AgendaItemRecord, AgendaSpan, CycleRecord},
     },
     std::{collections::HashSet, sync::Arc},
@@ -150,7 +150,18 @@ pub struct CalendarTab {
     free: HashSet<String>,
     /// the completed sessions shown whose attendance is written
     recorded: HashSet<String>,
+    /// the calendar of a cycle's sheet: its days, a week at a time, and
+    /// only its sessions
+    window: Option<Window>,
     error: Option<String>,
+}
+
+/// The days of a microcycle and the sessions it holds: the sheet draws
+/// them as the week of the calendar.
+struct Window {
+    first: NaiveDate,
+    last: NaiveDate,
+    sessions: HashSet<String>,
 }
 
 /// The Monday of the week of `day`.
@@ -226,10 +237,112 @@ impl CalendarTab {
             marked: HashSet::new(),
             free: HashSet::new(),
             recorded: HashSet::new(),
+            window: None,
             error: None,
         };
         tab.reload();
         tab
+    }
+
+    /// The week of the calendar over the days of a microcycle, from
+    /// `first` to `last` (included) seven at a time, with only `sessions`
+    /// and the matches of the team: the sheet of the microcycle.
+    pub fn of_window(
+        core: Arc<Scout4All>,
+        team_id: String,
+        first: NaiveDate,
+        last: NaiveDate,
+        sessions: HashSet<String>,
+        today: NaiveDate,
+    ) -> CalendarTab {
+        let mut tab = CalendarTab::new(core, team_id);
+        tab.today = today;
+        // today when the microcycle holds it, its first day otherwise
+        tab.anchor = match first <= today && today <= last {
+            true => today,
+            false => first,
+        };
+        tab.window = Some(Window {
+            first,
+            last,
+            sessions,
+        });
+        tab.reload();
+        tab
+    }
+
+    /// The days shown: the week of the view, or the seven of the window
+    /// the cursor is in.
+    fn span(&self) -> (NaiveDate, NaiveDate) {
+        match &self.window {
+            Some(w) => {
+                let weeks = (self.anchor - w.first).num_days().max(0) / 7;
+                let from = w.first + Duration::days(weeks * 7);
+                (from, (from + Duration::days(6)).min(w.last))
+            }
+            None => period(self.view, self.anchor),
+        }
+    }
+
+    /// The days of the window around the cursor, empty ones too, with only
+    /// the sessions of the microcycle and the matches of the team.
+    fn read_window(&self, w: &Window) -> Result<Vec<AgendaDay>, MobileError> {
+        let (from, to) = self.span();
+        let busy = self.core.training_agenda_between(
+            Some(self.team_id.clone()),
+            Some(text_of(from)),
+            Some(text_of(to)),
+        )?;
+        Ok(from
+            .iter_days()
+            .take_while(|d| *d <= to)
+            .map(|day| AgendaDay {
+                date: text_of(day),
+                events: busy
+                    .iter()
+                    .find(|b| day_of(&b.date) == Some(day))
+                    .map(|b| {
+                        b.events
+                            .iter()
+                            .filter(|e| match &e.item {
+                                AgendaItemRecord::Session { id, .. } => w.sessions.contains(id),
+                                AgendaItemRecord::Match { .. } => true,
+                            })
+                            .cloned()
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            })
+            .collect())
+    }
+
+    /// The hours of the week: the day's in the calendar; in a sheet only
+    /// the busy ones and one around them, so an evening session is in
+    /// sight without scrolling.
+    fn hours_shown(&self) -> (u32, u32) {
+        let spans: Vec<(u32, u32)> = self
+            .days
+            .iter()
+            .flat_map(|d| &d.events)
+            .filter_map(|e| {
+                minute_of(&e.start).map(|m| (m / 60, (m + u32::from(e.minutes)).div_ceil(60)))
+            })
+            .collect();
+        match (&self.window, spans.is_empty()) {
+            (Some(_), false) => {
+                let first = spans.iter().map(|(f, _)| *f).min().unwrap_or(FIRST_HOUR);
+                let last = spans.iter().map(|(_, l)| *l).max().unwrap_or(LAST_HOUR);
+                (first.saturating_sub(1), (last + 1).min(24))
+            }
+            _ => hours(&self.days),
+        }
+    }
+
+    /// Whether the window has more than a week: then it moves.
+    fn window_weeks(&self) -> bool {
+        self.window
+            .as_ref()
+            .is_some_and(|w| (w.last - w.first).num_days() >= 7)
     }
 
     /// The tab on a given day (the tests'), instead of the real today.
@@ -292,6 +405,20 @@ impl CalendarTab {
 
     /// Read again, after a change or a move.
     pub fn reload(&mut self) {
+        if let Some(w) = &self.window {
+            match self.read_window(w) {
+                Ok(days) => {
+                    self.days = days;
+                    self.error = None;
+                }
+                Err(e) => {
+                    self.days = vec![];
+                    self.error = Some(e.to_string());
+                }
+            }
+            self.settle();
+            return;
+        }
         self.venues = self
             .core
             .venues()
@@ -577,7 +704,12 @@ impl CalendarTab {
 
     /// Move the cursor to `day`, reading again when the period changes.
     fn go_to(&mut self, day: NaiveDate) {
-        let (first, last) = period(self.view, self.anchor);
+        let (first, last) = self.span();
+        // the window holds the cursor within its days
+        let day = match &self.window {
+            Some(w) => day.clamp(w.first, w.last),
+            None => day,
+        };
         self.anchor = day;
         self.slot = 0;
         // the list holds its period whatever the day
@@ -587,6 +719,19 @@ impl CalendarTab {
     }
 
     fn shift(&mut self, forward: bool) {
+        if let Some(w) = &self.window {
+            let (from, _) = self.span();
+            let day = match forward {
+                true => from + Duration::days(7),
+                false => from - Duration::days(7),
+            };
+            if w.first <= day && day <= w.last {
+                self.anchor = day;
+                self.slot = 0;
+                self.reload();
+            }
+            return;
+        }
         let day = match (self.view, forward) {
             (View::Week, true) => self.anchor.checked_add_days(Days::new(7)),
             (View::Week, false) => self.anchor.checked_sub_days(Days::new(7)),
@@ -770,6 +915,87 @@ impl CalendarTab {
             _ => {}
         }
         Leave::Stay
+    }
+
+    /// The day of the cursor: where a new session goes.
+    pub fn cursor_day(&self) -> NaiveDate {
+        self.anchor
+    }
+
+    /// The cursor of `other` (the same window read before a change) kept.
+    pub fn keep_cursor(&mut self, other: &CalendarTab) {
+        self.anchor = other.anchor;
+        self.slot = other.slot;
+        self.reload();
+    }
+
+    /// The keys of the week of a microcycle's sheet: ← → the day, ↑ ↓ the
+    /// event, PgUp PgDn its weeks, Enter opens; `None` for the others.
+    pub fn window_key(&mut self, ck: KeyCombination) -> Option<Leave> {
+        let by_day = |tab: &mut CalendarTab, forward: bool| {
+            let next = match forward {
+                true => tab.anchor.checked_add_days(Days::new(1)),
+                false => tab.anchor.checked_sub_days(Days::new(1)),
+            };
+            if let Some(day) = next {
+                tab.go_to(day);
+            }
+        };
+        match ck {
+            k if k == key!(left) => by_day(self, false),
+            k if k == key!(right) => by_day(self, true),
+            k if k == key!(up) => self.slot = self.slot.saturating_sub(1),
+            k if k == key!(down) => {
+                self.slot = (self.slot + 1).min(self.events_of(self.anchor).saturating_sub(1))
+            }
+            k if k == key!(pagedown) => self.shift(true),
+            k if k == key!(pageup) => self.shift(false),
+            k if k == key!(enter) => return Some(self.pick(self.anchor, self.slot)),
+            _ => return None,
+        }
+        Some(Leave::Stay)
+    }
+
+    /// The hints of `window_key`.
+    pub fn window_hints(&self, s: &Strings) -> Vec<(String, String)> {
+        let mut hints = vec![
+            ("← →".to_string(), String::new()),
+            ("↑ ↓".to_string(), String::new()),
+        ];
+        if self.window_weeks() {
+            hints.push(("PgUp PgDn".to_string(), s.week.to_string()));
+        }
+        hints.push(("Enter".to_string(), s.open.to_string()));
+        hints
+    }
+
+    /// The sheet's calendar: the week of the window, with the arrows
+    /// between its weeks when it holds more than one.
+    pub fn window_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let body: Element<'a, Message> = match &self.error {
+            Some(e) => ui::body(e.clone()).color(c.danger).into(),
+            None => self.week(s, c),
+        };
+        match self.window_weeks() {
+            false => body,
+            true => {
+                let (from, to) = self.span();
+                let moves = row![
+                    ui::tip(
+                        ui::pill("‹", false, Some(Message::Previous), c),
+                        s.previous_week,
+                        c
+                    ),
+                    text(format!("{} – {}", s.short_date(from), s.short_date(to)))
+                        .size(SIZE_BODY)
+                        .font(theme::fonts().bold),
+                    ui::tip(ui::pill("›", false, Some(Message::Next), c), s.next_week, c),
+                ]
+                .spacing(6)
+                .align_y(Alignment::Center);
+                column![moves, body].spacing(10).height(Length::Fill).into()
+            }
+        }
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
@@ -1123,14 +1349,18 @@ impl CalendarTab {
     /// as it lasts, the ones at the same time side by side.
     fn week<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let dates: Vec<Option<NaiveDate>> = self.days.iter().map(|d| day_of(&d.date)).collect();
-        let (first, last) = hours(&self.days);
+        let (first, last) = self.hours_shown();
         let gutter = || space::horizontal().width(Length::Fixed(GUTTER));
         let heads = Row::with_children(
             std::iter::once(gutter().into())
                 .chain(dates.iter().map(|date| self.day_head(*date, s, c))),
         )
         .spacing(1);
-        let band = row![gutter(), self.band(&dates, s, c)];
+        // the sheet of a microcycle is the band itself
+        let band: Element<'a, Message> = match self.window {
+            Some(_) => space::vertical().height(0).into(),
+            None => row![gutter(), self.band(&dates, s, c)].into(),
+        };
         let labels = Column::with_children((first..last).map(|hour| {
             container(text(format!("{hour}:00")).size(SIZE_SMALL).color(c.muted))
                 .width(Length::Fixed(GUTTER))

@@ -220,13 +220,9 @@ impl PresenceTab {
             ui::pill("‹", false, Some(Message::Previous), c),
             ui::name(self.scope_name(s)),
             ui::pill("›", false, Some(Message::Next), c),
-            text(format!(
-                "{} {}",
-                self.report.sessions,
-                s.sessions.to_lowercase()
-            ))
-            .size(SIZE_SMALL)
-            .color(c.muted),
+            text(s.count(s.sessions_of, self.report.sessions as usize))
+                .size(SIZE_SMALL)
+                .color(c.muted),
         ]
         .spacing(10)
         .align_y(Alignment::Center);

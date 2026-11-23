@@ -416,7 +416,7 @@ impl HomeScreen {
                 s.recent,
                 vec![
                     ui::pill(s.competitions, false, Some(Message::Competitions), c),
-                    ui::pill(s.venues, false, Some(Message::Venues), c),
+                    ui::icon_pill(theme::icons::GYM, s.venues, Message::Venues, c),
                 ],
                 recent,
                 s.no_matches,

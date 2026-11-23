@@ -59,7 +59,7 @@ fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> 
     );
     // the gyms are where sessions are held: they're added from here too,
     // not only from the home
-    let venues = ui::pill(s.venues, false, Some(Message::Venues), c);
+    let venues = ui::icon_pill(crate::theme::icons::GYM, s.venues, Message::Venues, c);
     row![pills, space::horizontal(), venues, export]
         .spacing(6)
         .into()
@@ -284,9 +284,8 @@ impl TrainingScreen {
                 }
                 Outcome::Stay
             }
+            // Esc on the session comes back to the sheet it was opened from
             Leave::Session(id) => {
-                self.tab = Tab::Calendar;
-                self.reload();
                 self.open_session(&id);
                 Outcome::Stay
             }
@@ -375,6 +374,9 @@ impl TrainingScreen {
             session::Outcome::Back => {
                 self.mode = Mode::List;
                 self.reload();
+                if self.tab == Tab::Cycles {
+                    self.cycles.refresh();
+                }
             }
             session::Outcome::Opened(id) => {
                 self.reload();
@@ -1234,6 +1236,73 @@ mod tests {
         assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 2);
         assert_eq!(attached(&core), 0);
         assert!(screen.cycles.on_list());
+    }
+
+    /// The sheet of a microcycle draws its sessions as the week of the
+    /// calendar, a week at a time (PgDn to the next), without the free
+    /// ones; Enter opens a session, `n` makes one on the day chosen.
+    #[test]
+    fn the_sheet_of_a_microcycle_is_a_week_of_the_calendar() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let first = session(&core, &team, "2026-03-03T18:00", "Prima");
+        let second = session(&core, &team, "2026-03-10T18:00", "Seconda");
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        for id in [&first, &second] {
+            screen.update(s, Message::Calendar(calendar::Message::Mark(id.clone())));
+        }
+        screen.update(s, Message::Calendar(calendar::Message::Create));
+        screen.key(s, key!(enter));
+        // a free one in the window stays out of the sheet
+        session(&core, &team, "2026-03-05T18:00", "Libera");
+        screen.key(s, BACK_KEY);
+        screen.key(s, key!(enter));
+        let week = |screen: &TrainingScreen| -> Vec<(String, usize)> {
+            screen
+                .cycles
+                .card_week()
+                .map(|w| {
+                    w.days()
+                        .iter()
+                        .map(|d| (d.date.clone(), d.events.len()))
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let days = week(&screen);
+        assert_eq!(days.len(), 7);
+        assert_eq!(days[0].0, "2026-03-02");
+        assert_eq!(days.iter().map(|(_, n)| n).sum::<usize>(), 1);
+        assert_eq!(days[1].1, 1);
+        // the second week
+        screen.key(s, key!(pagedown));
+        let days = week(&screen);
+        assert_eq!(days[0].0, "2026-03-09");
+        assert_eq!(days[1].1, 1);
+        // the session of the day chosen opens
+        screen.key(s, key!(right));
+        let Outcome::Stay = screen.key(s, key!(enter)) else {
+            panic!("the sheet of the session")
+        };
+        assert!(matches!(screen.mode, Mode::Page(_)));
+        screen.key(s, BACK_KEY);
+        assert!(screen.cycles.on_card());
+        // a new session on the day chosen, in the microcycle
+        screen.key(s, key!(right));
+        screen.key(s, key!(n));
+        screen.update(s, Message::Form(FormMessage::Focus(1)));
+        screen.update(s, Message::Form(FormMessage::Input(1, "18:00".into())));
+        screen.key(s, key!(enter));
+        let made = core
+            .training_sessions(team.clone())
+            .unwrap()
+            .into_iter()
+            .find(|r| r.start.starts_with("2026-03-11"))
+            .expect("the new session");
+        assert!(made.microcycle_id.is_some());
+        assert_eq!(week(&screen)[2].1, 1);
     }
 
     /// The sheet of a cycle names what it edits and what it makes by its

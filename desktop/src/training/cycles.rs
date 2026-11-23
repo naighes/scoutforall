@@ -4,7 +4,10 @@
 //! fill, duplicate and delete them.
 
 use {
-    super::forms::{Edited, clash_warning, cycle_label, day_of},
+    super::{
+        calendar::{self, CalendarTab},
+        forms::{Edited, clash_warning, cycle_label, day_of},
+    },
     crate::{
         calendar::text_of,
         form::{self, Field, Form, Mask, Outcome, Value},
@@ -352,6 +355,8 @@ struct Card {
     /// the free ones that fit in it: without them nothing is offered to add
     free: usize,
     selected: usize,
+    /// a microcycle's sessions drawn as the week of the calendar
+    week: Option<CalendarTab>,
 }
 
 enum Mode {
@@ -376,6 +381,8 @@ pub enum Message {
     Pdf,
     Delete,
     Child(usize),
+    /// the week of a microcycle's sheet
+    Week(calendar::Message),
     /// the box of a row clicked: the cycle marked or no more
     Mark(usize),
     Form(form::Message),
@@ -429,6 +436,12 @@ impl CyclesTab {
         };
         tab.reload();
         tab
+    }
+
+    /// The week of a microcycle's sheet.
+    #[cfg(test)]
+    pub fn card_week(&self) -> Option<&CalendarTab> {
+        self.card.as_ref().and_then(|c| c.week.as_ref())
     }
 
     #[cfg(test)]
@@ -558,7 +571,7 @@ impl CyclesTab {
                 id: id.to_string(),
             },
         )?;
-        let children = self
+        let children: Vec<Child> = self
             .core
             .cycle_children(level, id.to_string())?
             .into_iter()
@@ -572,12 +585,26 @@ impl CyclesTab {
             })
             .collect();
         let free = self.core.free_children(level, id.to_string())?.len();
+        // a microcycle is a week or a few: its sessions as the calendar
+        // draws them
+        let week = match (level, day_of(&record.first_day), day_of(&record.last_day)) {
+            (Level::Microcycle, Some(first), Some(last)) => Some(CalendarTab::of_window(
+                self.core.clone(),
+                self.team_id.clone(),
+                first,
+                last,
+                children.iter().map(|c: &Child| c.id.clone()).collect(),
+                chrono::Local::now().date_naive(),
+            )),
+            _ => None,
+        };
         Ok(Card {
             record,
             totals,
             children,
             free,
             selected: 0,
+            week,
         })
     }
 
@@ -585,13 +612,16 @@ impl CyclesTab {
     pub fn refresh(&mut self) {
         let at = self
             .card
-            .as_ref()
-            .map(|c| (c.record.level, c.record.id.clone(), c.selected));
+            .take()
+            .map(|c| (c.record.level, c.record.id.clone(), c.selected, c.week));
         self.reload();
-        if let Some((level, id, selected)) = at {
+        if let Some((level, id, selected, week)) = at {
             match self.build_card(level, &id) {
                 Ok(mut card) => {
                     card.selected = selected.min(card.children.len().saturating_sub(1));
+                    if let (Some(new), Some(old)) = (&mut card.week, &week) {
+                        new.keep_cursor(old);
+                    }
                     self.card = Some(card);
                 }
                 Err(_) => {
@@ -681,7 +711,14 @@ impl CyclesTab {
                 }
                 Leave::Stay
             }
-            (None, Some(day)) => Leave::NewSession(day),
+            // on the day chosen in the week of the sheet
+            (None, Some(day)) => Leave::NewSession(
+                card.week
+                    .as_ref()
+                    .map(|w| w.cursor_day())
+                    .filter(|d| *d >= day)
+                    .unwrap_or(day),
+            ),
             (None, None) => Leave::Stay,
         }
     }
@@ -940,6 +977,14 @@ impl CyclesTab {
             (Mode::Card, Message::Pdf) => return self.plan_pdf(),
             (Mode::Card, Message::Delete) => self.start_remove(s),
             (Mode::Card, Message::Child(i)) => return self.open_child(i),
+            (Mode::Card, Message::Week(m)) => {
+                let leave = self
+                    .card
+                    .as_mut()
+                    .and_then(|c| c.week.as_mut())
+                    .map(|w| w.update(m));
+                return self.week_leave(leave);
+            }
             _ => {}
         }
         Leave::Stay
@@ -968,8 +1013,25 @@ impl CyclesTab {
         Leave::Stay
     }
 
+    /// What the week of a microcycle's sheet asks: a session opened, or a
+    /// new one on an empty day.
+    fn week_leave(&mut self, leave: Option<calendar::Leave>) -> Leave {
+        match leave {
+            Some(calendar::Leave::Session(id)) => Leave::Session(id),
+            Some(calendar::Leave::NewSession(day)) => Leave::NewSession(day),
+            _ => Leave::Stay,
+        }
+    }
+
     fn card_key(&mut self, s: &Strings, ck: KeyCombination) -> Leave {
         let count = self.card.as_ref().map_or(0, |c| c.children.len());
+        // the week of a microcycle takes the arrows and Enter
+        if ck != BACK_KEY {
+            let week = self.card.as_mut().and_then(|c| c.week.as_mut());
+            if let Some(leave) = week.and_then(|w| w.window_key(ck)) {
+                return self.week_leave(Some(leave));
+            }
+        }
         match ck {
             k if k == BACK_KEY => {
                 self.card = None;
@@ -1054,12 +1116,17 @@ impl CyclesTab {
             Mode::Card => {
                 let level = self.card.as_ref().map_or(self.level, |c| c.record.level);
                 let free = self.card.as_ref().is_some_and(|c| c.free > 0);
-                let mut hints = vec![
-                    ("↑ ↓".to_string(), String::new()),
-                    ("Enter".to_string(), s.open.to_string()),
+                let mut hints = match self.card.as_ref().and_then(|c| c.week.as_ref()) {
+                    Some(week) => week.window_hints(s),
+                    None => vec![
+                        ("↑ ↓".to_string(), String::new()),
+                        ("Enter".to_string(), s.open.to_string()),
+                    ],
+                };
+                hints.extend([
                     ("e".to_string(), edit_name(s, level).to_string()),
                     ("n".to_string(), new_child_name(s, level).to_string()),
-                ];
+                ]);
                 if free {
                     hints.push(("a".to_string(), add_name(s, level).to_string()));
                 }
@@ -1334,16 +1401,23 @@ impl CyclesTab {
         let info = ui::panel(
             Some(level_name(s, r.level)),
             column![
-                line(s.session_title, r.title.clone()),
-                line(s.period, s.window(&r.first_day, &r.last_day)),
-                line(s.cycle_parent, parent),
-                line(s.objectives, r.objectives.clone()),
-                line(s.notes, r.notes.clone()),
-                line(s.cycle_totals, counts),
-                line(s.planned_time, time(t.planned_minutes)),
-                line(s.actual_time, time(t.actual_minutes)),
-                // the actions at the bottom: the panel fills the height
-                space::vertical(),
+                // the data scroll when long, the actions at the bottom are
+                // never cut (at 800 points "delete" was)
+                scrollable(
+                    column![
+                        line(s.session_title, r.title.clone()),
+                        line(s.period, s.window(&r.first_day, &r.last_day)),
+                        line(s.cycle_parent, parent),
+                        line(s.objectives, r.objectives.clone()),
+                        line(s.notes, r.notes.clone()),
+                        line(s.cycle_totals, counts),
+                        line(s.planned_time, time(t.planned_minutes)),
+                        line(s.actual_time, time(t.actual_minutes)),
+                    ]
+                    .spacing(10)
+                    .width(Length::Fill)
+                )
+                .height(Length::Fill),
                 Column::with_children(actions).spacing(8),
             ]
             .spacing(10)
@@ -1366,8 +1440,9 @@ impl CyclesTab {
             .collect();
         // empty, the panel says what is missing and how to add it, in the
         // middle of the space it fills
-        let children: Element<'a, Message> = match rows.is_empty() {
-            true => container(
+        let children: Element<'a, Message> = match (&card.week, rows.is_empty()) {
+            (Some(week), _) => week.window_view(s, c).map(Message::Week),
+            (None, true) => container(
                 column![
                     ui::body(empty_name(s, r.level)).color(c.muted),
                     ui::action(
@@ -1393,16 +1468,21 @@ impl CyclesTab {
             .center_x(Length::Fill)
             .center_y(Length::Fill)
             .into(),
-            false => scrollable(Column::with_children(rows).spacing(3))
+            (None, false) => scrollable(Column::with_children(rows).spacing(3))
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
+        };
+        // named by what it holds: "sessions", "microcycles", "mesocycles"
+        let held = match r.level.child() {
+            Some(down) => level_plural(s, down),
+            None => s.sessions,
         };
         row![
             container(info)
                 .width(Length::FillPortion(3))
                 .height(Length::Fill),
-            container(ui::panel(Some(s.cycle_contains), children, c))
+            container(ui::panel(Some(held), children, c))
                 .width(Length::FillPortion(4))
                 .height(Length::Fill),
         ]
