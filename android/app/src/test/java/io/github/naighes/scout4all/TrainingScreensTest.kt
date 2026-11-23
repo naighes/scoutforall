@@ -17,12 +17,16 @@ import io.github.naighes.scout4all.core.ActivityStatus
 import io.github.naighes.scout4all.core.AttendanceStatus
 import io.github.naighes.scout4all.core.Level
 import io.github.naighes.scout4all.core.SessionStatus
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.onLast
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
 import java.time.LocalDate
 
 /** The training on the phone: a session written in its form, its activities
@@ -157,6 +161,30 @@ class TrainingScreensTest {
         assertTrue(saved.recorded)
         assertEquals(AttendanceStatus.LATE, saved.rows.single { it.personId == first.personId }.status)
         assertEquals(saved.rows.size - 1, saved.rows.count { it.status == AttendanceStatus.PRESENT })
+    }
+
+    // the dialog of the guests never gets idle under Robolectric on SDK 28
+    // (it was so before the new person): TODO/021 29g, step 2
+    @Test
+    @Config(sdk = [37])
+    fun aNewPersonIsAGuestAndMakesUpFromTheNote() {
+        val s = session()
+        val back = mutableListOf<Unit>()
+        rule.setContent { Scout4AllTheme { AttendanceScreen(team, s, onBack = { back += Unit }) } }
+        rule.waitForText("Alessia Orro")
+        rule.onNodeWithContentDescription(string(R.string.tr_add_guest)).performClick()
+        rule.onNode(hasSetTextAction() and hasText(string(R.string.tr_search))).performTextReplacement("Zoe Esterna")
+        press(string(R.string.tr_new_person, "Zoe Esterna"))
+        rule.waitForText("Zoe Esterna")
+        // a person in no team doesn't make up by default: the note ticks it
+        rule.onAllNodesWithContentDescription(string(R.string.tr_attendance_note)).onLast().performClick()
+        press(string(R.string.tr_makeup))
+        press(string(R.string.ok))
+        rule.waitForText(string(R.string.tr_guest) + " · " + string(R.string.tr_makeup))
+        rule.save()
+        rule.waitFor({ "not saved" }) { back.isNotEmpty() }
+        val zoe = core { it.sessionAttendance(s) }.rows.single { it.name == "Zoe Esterna" }
+        assertTrue(zoe.guest && zoe.makeup)
     }
 
     private fun hub(part: Part, onNewOn: (LocalDate) -> Unit = {}, onNewCycle: (Level) -> Unit = {}) = rule.setContent {

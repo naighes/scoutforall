@@ -570,6 +570,8 @@
     <string name="tr_late">late</string>
     <string name="tr_unavailable">unavailable</string>
     <string name="tr_guest">guest</string>
+    <string name="tr_makeup">makeup session</string>
+    <string name="tr_new_person">New person: %1$s</string>
     <string name="tr_add_guest">Add a guest</string>
     <string name="tr_add_missing">Add the new players</string>
     <string name="tr_attendance_note">Note</string>

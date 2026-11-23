@@ -568,6 +568,8 @@
     <string name="tr_late">in ritardo</string>
     <string name="tr_unavailable">non disponibile</string>
     <string name="tr_guest">ospite</string>
+    <string name="tr_makeup">recupero</string>
+    <string name="tr_new_person">Nuova persona: %1$s</string>
     <string name="tr_add_guest">Aggiungi un ospite</string>
     <string name="tr_add_missing">Aggiungi i nuovi giocatori</string>
     <string name="tr_attendance_note">Nota</string>

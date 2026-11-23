@@ -572,6 +572,8 @@
     <string name="tr_late">spóźniony</string>
     <string name="tr_unavailable">niedostępny</string>
     <string name="tr_guest">gość</string>
+    <string name="tr_makeup">odrabianie</string>
+    <string name="tr_new_person">Nowa osoba: %1$s</string>
     <string name="tr_add_guest">Dodaj gościa</string>
     <string name="tr_add_missing">Dodaj nowych zawodników</string>
     <string name="tr_attendance_note">Notatka</string>

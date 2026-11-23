@@ -566,6 +566,8 @@
     <string name="tr_late">遅刻</string>
     <string name="tr_unavailable">不可</string>
     <string name="tr_guest">ゲスト</string>
+    <string name="tr_makeup">補講</string>
+    <string name="tr_new_person">新しい人:%1$s</string>
     <string name="tr_add_guest">ゲストを追加</string>
     <string name="tr_add_missing">新しい選手を追加</string>
     <string name="tr_attendance_note">メモ</string>

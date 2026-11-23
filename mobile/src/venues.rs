@@ -3,8 +3,8 @@
 use super::{
     MatchDate, MobileError, Scout4All, parse_id,
     training::{
-        AgendaSpan, DuplicateCycleDraft, DuplicateDraft, SeriesDraft, TrainingField, day, moment,
-        parse_day, parse_moment, series_input,
+        AgendaSpan, DuplicateCycleDraft, DuplicateDraft, GuestChoice, SeriesDraft, TrainingField,
+        day, moment, parse_day, parse_moment, series_input,
     },
 };
 use scout4all_core::{
@@ -440,21 +440,16 @@ impl Scout4All {
     // ---- guests
 
     /// A person with the name only, to be a guest of a session when they
-    /// aren't in any team: its id, for `save_attendance` (guest row).
-    pub fn create_guest(&self, name: String) -> Result<GuestChoiceRecord, MobileError> {
+    /// aren't in any team: as the search of the guests offers them (no
+    /// team), for `save_attendance` (guest row).
+    pub fn create_guest(&self, name: String) -> Result<GuestChoice, MobileError> {
         let person = SqlitePersons::new(self.db.clone()).create(&name)?;
-        Ok(GuestChoiceRecord {
+        Ok(GuestChoice {
             person_id: person.id.to_string(),
             name: person.name,
+            teams: vec![],
         })
     }
-}
-
-/// A person just made.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct GuestChoiceRecord {
-    pub person_id: String,
-    pub name: String,
 }
 
 #[cfg(test)]

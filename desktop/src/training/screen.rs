@@ -104,9 +104,7 @@ impl Period {
         match self {
             Period::Any => None,
             Period::Week => {
-                let monday = today.checked_sub_days(chrono::Days::new(
-                    today.weekday().num_days_from_monday().into(),
-                ))?;
+                let monday = super::calendar::monday(today);
                 Some((monday, monday.checked_add_days(chrono::Days::new(6))?))
             }
             Period::Month => month(0),
@@ -843,6 +841,34 @@ mod tests {
             scout4all_core::training::AttendanceStatus::Late
         );
         assert_eq!(sheet.rows[1].note, "dal medico");
+    }
+
+    /// A person in no team comes in as a guest from the name written (the
+    /// last offer of the search), without makeup; `r` ticks it.
+    #[test]
+    fn a_new_person_is_a_guest_and_r_marks_the_makeup() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let id = session(&core, &team, "2026-03-02T18:00", "Prima");
+        let mut screen =
+            TrainingScreen::new(core.clone(), team, Open::Session(id.clone())).unwrap();
+        screen.key(s, key!(right));
+        screen.key(s, key!(enter));
+        screen.key(s, key!(g));
+        type_in(&mut screen, 0, "Zoe Esterna");
+        screen.key(s, key!(enter));
+        screen.key(s, key!(r));
+        screen.key(s, key!(enter));
+        let sheet = core.session_attendance(id).unwrap();
+        let zoe = sheet
+            .rows
+            .iter()
+            .find(|r| r.name == "Zoe Esterna")
+            .unwrap_or_else(|| panic!("the guest in {:?}", sheet.rows));
+        assert!(zoe.guest && zoe.makeup);
+        assert_eq!(zoe.number, None);
     }
 
     /// The duplicate: a week later, the activities copied; it opens on the

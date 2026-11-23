@@ -1,6 +1,7 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -45,6 +47,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.AttendanceRowRecord
@@ -174,8 +177,8 @@ fun AttendanceScreen(teamId: String, sessionId: String, onBack: () -> Unit) {
             NoteDialog(
                 rows[i],
                 onDismiss = { noting = null },
-                onSave = { note ->
-                    rows[i] = rows[i].copy(note = note)
+                onSave = { note, makeup ->
+                    rows[i] = rows[i].copy(note = note, makeup = makeup)
                     changed = true
                     noting = null
                 },
@@ -203,7 +206,8 @@ fun AttendanceScreen(teamId: String, sessionId: String, onBack: () -> Unit) {
                             AttendanceStatus.PRESENT,
                             "",
                             true,
-                            false,
+                            // a player of another team of the user makes up by default
+                            choice.teams.isNotEmpty(),
                         ),
                     )
                     changed = true
@@ -229,6 +233,7 @@ private fun PlayerRow(row: AttendanceRowRecord, onCycle: () -> Unit, onNote: () 
         supportingContent = {
             val line = listOfNotNull(
                 stringResource(R.string.tr_guest).takeIf { row.guest },
+                stringResource(R.string.tr_makeup).takeIf { row.guest && row.makeup },
                 row.note.takeIf { it.isNotBlank() },
             ).joinToString(" · ")
             if (line.isNotEmpty()) Text(line)
@@ -253,21 +258,39 @@ private fun PlayerRow(row: AttendanceRowRecord, onCycle: () -> Unit, onNote: () 
 }
 
 @Composable
-private fun NoteDialog(row: AttendanceRowRecord, onDismiss: () -> Unit, onSave: (String) -> Unit, onRemove: (() -> Unit)?) {
+private fun NoteDialog(
+    row: AttendanceRowRecord,
+    onDismiss: () -> Unit,
+    onSave: (String, Boolean) -> Unit,
+    onRemove: (() -> Unit)?,
+) {
     var note by rememberSaveable { mutableStateOf(row.note) }
+    // a guest can make up for a session of their own team
+    var makeup by rememberSaveable { mutableStateOf(row.makeup) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(row.name) },
         text = {
-            OutlinedTextField(
-                note,
-                { note = it },
-                Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.tr_attendance_note)) },
-                minLines = 2,
-            )
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    note,
+                    { note = it },
+                    Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.tr_attendance_note)) },
+                    minLines = 2,
+                )
+                if (row.guest) {
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp).toggleable(makeup, role = Role.Checkbox) { makeup = it },
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(makeup, onCheckedChange = null)
+                        Text(stringResource(R.string.tr_makeup), Modifier.padding(start = 8.dp))
+                    }
+                }
+            }
         },
-        confirmButton = { TextButton(onClick = { onSave(note.trim()) }) { Text(stringResource(R.string.ok)) } },
+        confirmButton = { TextButton(onClick = { onSave(note.trim(), makeup) }) { Text(stringResource(R.string.ok)) } },
         dismissButton = {
             Row {
                 onRemove?.let { TextButton(onClick = it) { Text(stringResource(R.string.tr_remove_guest)) } }
@@ -277,7 +300,7 @@ private fun NoteDialog(row: AttendanceRowRecord, onDismiss: () -> Unit, onSave: 
     )
 }
 
-/** The players of other teams (the registry) to ask as guests. */
+/** The players of other teams (the registry) to ask as guests, or a new person in no team with the name written. */
 @Composable
 private fun GuestDialog(teamId: String, taken: Set<String>, onDismiss: () -> Unit, onPick: (GuestChoice) -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
@@ -288,6 +311,8 @@ private fun GuestDialog(teamId: String, taken: Set<String>, onDismiss: () -> Uni
             emptyList()
         }
     }
+    val scope = rememberCoroutineScope()
+    var error by remember { mutableStateOf<String?>(null) }
     var query by rememberSaveable { mutableStateOf("") }
     val shown = choices.filter { it.personId !in taken && it.name.contains(query.trim(), ignoreCase = true) }.take(8)
     AlertDialog(
@@ -311,6 +336,23 @@ private fun GuestDialog(teamId: String, taken: Set<String>, onDismiss: () -> Uni
                         },
                     )
                 }
+                val written = query.trim()
+                if (written.isNotEmpty()) {
+                    ListItem(
+                        modifier = Modifier.clickable {
+                            scope.launch {
+                                try {
+                                    onPick(app.core { it.createGuest(written) })
+                                } catch (e: MobileException) {
+                                    error = e.reason
+                                }
+                            }
+                        },
+                        leadingContent = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.tr_new_person, written)) },
+                    )
+                }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
             }
         },
         confirmButton = {},

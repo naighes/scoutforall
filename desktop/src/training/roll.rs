@@ -1,7 +1,9 @@
 //! The attendance of a session: a row for each player, their state changed
 //! with a key (p present, l late, a absent, u unavailable) or a click, a
-//! note on each, guests of other teams and the players that joined later
-//! added. Saved as it is: the list is the one written, from then on.
+//! note on each, guests of other teams (or a new person, in no team) and
+//! the players that joined later added; a guest can make up for a session
+//! of their own team (r, or the box). Saved as it is: the list is the one
+//! written, from then on.
 
 use {
     crate::{
@@ -24,11 +26,17 @@ use {
 
 const GUESTS_OFFERED: usize = 20;
 
+/// What the guest search offers last, for a person in no team made from
+/// the name written.
+const NEW_PERSON: &str = "";
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Row(usize),
     /// the state of a row, to the next one
     Cycle(usize),
+    /// the makeup box of a guest row
+    Makeup(usize),
     Note,
     AddGuest,
     AddMissing,
@@ -123,7 +131,7 @@ impl Roll {
         match core.guest_choices(self.team_id.clone()) {
             Ok(choices) => {
                 let mut roll_form = Form::new(s.add_guest, vec![Field::search(s.name, "")]);
-                let offered = Roll::offer(&mut roll_form, &choices, &self.rows);
+                let offered = Roll::offer(s, &mut roll_form, &choices, &self.rows);
                 self.over = Some(Over::Guest {
                     form: roll_form,
                     choices,
@@ -135,14 +143,16 @@ impl Roll {
         }
     }
 
-    /// The people that match the name written, not in the list yet; the ids
-    /// in the order the form offers them.
+    /// The people that match the name written, not in the list yet, then a
+    /// new person with that name; the ids in the order the form offers them.
     fn offer(
+        s: &Strings,
         form: &mut Form,
         choices: &[GuestChoice],
         rows: &[AttendanceRowRecord],
     ) -> Vec<String> {
-        let needle = form.text(0).to_lowercase();
+        let written = form.text(0).trim().to_string();
+        let needle = written.to_lowercase();
         let found: Vec<&GuestChoice> = choices
             .iter()
             .filter(|c| !rows.iter().any(|r| r.person_id == c.person_id))
@@ -165,9 +175,23 @@ impl Roll {
                     ),
                     value: c.name.clone(),
                 })
+                .chain((!written.is_empty()).then(|| Suggestion {
+                    label: ui::fill(s.new_person, std::slice::from_ref(&written)),
+                    value: written.clone(),
+                }))
                 .collect(),
         );
-        found.iter().map(|c| c.person_id.clone()).collect()
+        found
+            .iter()
+            .map(|c| c.person_id.clone())
+            .chain((!written.is_empty()).then(|| NEW_PERSON.to_string()))
+            .collect()
+    }
+
+    fn toggle_makeup(&mut self, i: usize) {
+        if let Some(row) = self.rows.get_mut(i).filter(|r| r.guest) {
+            row.makeup = !row.makeup;
+        }
     }
 
     fn add_missing(&mut self, core: &Scout4All) {
@@ -200,39 +224,57 @@ impl Roll {
         }
     }
 
-    /// The guest taken, in the list.
-    fn add_guest(&mut self, taken: Option<usize>) -> bool {
+    /// The guest taken, in the list: one of the registry, or a new person
+    /// with the name written.
+    fn add_guest(&mut self, core: &Scout4All, taken: Option<usize>) -> bool {
         let Some(Over::Guest {
-            choices, offered, ..
+            form,
+            choices,
+            offered,
+            ..
         }) = &self.over
         else {
             return false;
         };
-        let person = taken
+        let id = taken
             .or((!offered.is_empty()).then_some(0))
-            .and_then(|at| offered.get(at))
-            .and_then(|id| choices.iter().find(|c| &c.person_id == id));
-        match person {
-            Some(person) => {
-                self.rows.push(AttendanceRowRecord {
-                    person_id: person.person_id.clone(),
-                    name: person.name.clone(),
-                    number: person.teams.first().map(|t| t.number),
-                    status: AttendanceStatus::Present,
-                    note: String::new(),
-                    guest: true,
-                    // a player of another team of the user makes up by default
-                    makeup: !person.teams.is_empty(),
-                });
+            .and_then(|at| offered.get(at));
+        let row = |person: &GuestChoice| AttendanceRowRecord {
+            person_id: person.person_id.clone(),
+            name: person.name.clone(),
+            number: person.teams.first().map(|t| t.number),
+            status: AttendanceStatus::Present,
+            note: String::new(),
+            guest: true,
+            // a player of another team of the user makes up by default
+            makeup: !person.teams.is_empty(),
+        };
+        let made = match id.map(String::as_str) {
+            None => return false,
+            Some(NEW_PERSON) => core
+                .create_guest(form.text(0))
+                .map(|person| row(&person))
+                .map_err(|e| e.to_string()),
+            Some(id) => match choices.iter().find(|c| c.person_id == id) {
+                Some(person) => Ok(row(person)),
+                None => return false,
+            },
+        };
+        self.over = None;
+        match made {
+            Ok(made) => {
+                self.rows.push(made);
                 self.selected = self.rows.len().saturating_sub(1);
-                self.over = None;
                 true
             }
-            None => false,
+            Err(e) => {
+                self.error = Some(e);
+                false
+            }
         }
     }
 
-    fn over_outcome(&mut self, outcome: Outcome) {
+    fn over_outcome(&mut self, core: &Scout4All, s: &Strings, outcome: Outcome) {
         match (outcome, &mut self.over) {
             (Outcome::Cancel, _) => self.over = None,
             (Outcome::Save, Some(Over::Note(form))) => {
@@ -244,7 +286,7 @@ impl Roll {
             }
             (Outcome::Save, Some(Over::Guest { taken, .. })) => {
                 let taken = *taken;
-                self.add_guest(taken);
+                self.add_guest(core, taken);
             }
             (
                 Outcome::Changed(0),
@@ -256,7 +298,7 @@ impl Roll {
                 }),
             ) => {
                 *taken = None;
-                *offered = Roll::offer(form, choices, &self.rows);
+                *offered = Roll::offer(s, form, choices, &self.rows);
             }
             _ => {}
         }
@@ -274,12 +316,17 @@ impl Roll {
                         form.update(m)
                     }
                 };
-                self.over_outcome(outcome);
+                self.over_outcome(core, s, outcome);
                 Done::Stay
             }
             (_, Some(_)) => Done::Stay,
             (Message::Row(i), None) => {
                 self.selected = i;
+                Done::Stay
+            }
+            (Message::Makeup(i), None) => {
+                self.selected = i;
+                self.toggle_makeup(i);
                 Done::Stay
             }
             (Message::Cycle(i), None) => {
@@ -317,7 +364,7 @@ impl Roll {
             Some(Over::Guest { form, .. }) if ck == key!(enter) && form.offering() => form.lit(),
             _ => None,
         };
-        if entered.is_some() && self.add_guest(entered) {
+        if entered.is_some() && self.add_guest(core, entered) {
             return Done::Stay;
         }
         if let Some(over) = &mut self.over {
@@ -330,7 +377,7 @@ impl Roll {
                     form.key(ck)
                 }
             };
-            self.over_outcome(outcome);
+            self.over_outcome(core, s, outcome);
             return Done::Stay;
         }
         let count = self.rows.len();
@@ -353,6 +400,7 @@ impl Roll {
             k if k == key!(n) => self.open_note(s),
             k if k == key!(g) => self.open_guest(core, s),
             k if k == key!(m) => self.add_missing(core),
+            k if k == key!(r) => self.toggle_makeup(self.selected),
             k if k == key!(backspace) || k == key!(delete) => self.remove(),
             _ => {}
         }
@@ -372,6 +420,7 @@ impl Roll {
                 ("n".to_string(), s.attendance_note.to_string()),
                 ("g".to_string(), s.add_guest.to_string()),
                 ("m".to_string(), s.add_missing.to_string()),
+                ("r".to_string(), s.makeup.to_string()),
                 ("⌫".to_string(), s.remove.to_string()),
                 ("Enter".to_string(), s.save.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
@@ -411,6 +460,17 @@ impl Roll {
                 if r.guest {
                     name = format!("{name} ({})", s.guest);
                 }
+                // the box of a guest, the room of it on the others
+                let makeup: Element<'a, Message> = match r.guest {
+                    true => row![
+                        ui::mark_box(r.makeup, Message::Makeup(i), c),
+                        text(s.makeup).size(SIZE_SMALL).color(c.muted),
+                    ]
+                    .align_y(Alignment::Center)
+                    .width(150)
+                    .into(),
+                    false => space::horizontal().width(150).into(),
+                };
                 let line = row![
                     text(number).size(SIZE_SMALL).color(c.muted).width(46),
                     ui::name(name),
@@ -418,6 +478,7 @@ impl Roll {
                         .size(SIZE_SMALL)
                         .color(c.muted)
                         .width(Length::FillPortion(2)),
+                    makeup,
                     iced::widget::button(
                         text(status_name(s, r.status))
                             .size(SIZE_SMALL)
