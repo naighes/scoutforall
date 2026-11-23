@@ -990,6 +990,19 @@ impl CopyEditor {
     }
 }
 
+/// The days of the team that already hold a session or a match, to mark in
+/// the calendars of the forms.
+pub(super) fn busy_days(
+    core: &Scout4All,
+    team_id: &str,
+) -> std::collections::HashSet<chrono::NaiveDate> {
+    core.training_agenda_between(Some(team_id.to_string()), None, None)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|d| crate::calendar::day_of(&d.date))
+        .collect()
+}
+
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::unreachable)]
 mod tests {
@@ -1082,17 +1095,4 @@ mod tests {
             Edited::Saved(_)
         ));
     }
-}
-
-/// The days of the team that already hold a session or a match, to mark in
-/// the calendars of the forms.
-pub(super) fn busy_days(
-    core: &Scout4All,
-    team_id: &str,
-) -> std::collections::HashSet<chrono::NaiveDate> {
-    core.training_agenda_between(Some(team_id.to_string()), None, None)
-        .unwrap_or_default()
-        .iter()
-        .filter_map(|d| crate::calendar::day_of(&d.date))
-        .collect()
 }

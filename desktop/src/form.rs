@@ -1164,8 +1164,7 @@ impl Form {
             arrow("›", 1),
         ]
         .align_y(Alignment::Center);
-        let first =
-            month - chrono::Duration::days(i64::from(month.weekday().num_days_from_monday()));
+        let first = scout4all_core::training::cycles::monday(month);
         let weeks =
             (i64::from(month.weekday().num_days_from_monday()) + i64::from(days_in(month)) + 6) / 7;
         let letters = Row::with_children(s.weekdays.iter().map(|w| {
@@ -1176,7 +1175,9 @@ impl Form {
         }));
         let rows = (0..weeks).map(|w| {
             Row::with_children((0..7).map(|d| {
-                let day = first + chrono::Duration::days(w * 7 + d);
+                let day = first
+                    .checked_add_days(chrono::Days::new(u64::try_from(w * 7 + d).unwrap_or(0)))
+                    .unwrap_or(first);
                 let (here, picked, busy) = (
                     day.month() == month.month(),
                     Some(day) == chosen,

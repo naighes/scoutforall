@@ -166,10 +166,8 @@ struct Window {
     sessions: HashSet<String>,
 }
 
-/// The Monday of the week of `day`.
-pub fn monday(day: NaiveDate) -> NaiveDate {
-    day - Duration::days(day.weekday().num_days_from_monday() as i64)
-}
+/// The Monday of the week of a day (the core's, without panics).
+pub use scout4all_core::training::cycles::monday;
 
 /// The weeks of the month of `day`, Monday first, `None` out of the month.
 pub fn month_weeks(day: NaiveDate) -> Vec<[Option<NaiveDate>; 7]> {
