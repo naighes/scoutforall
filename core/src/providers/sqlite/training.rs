@@ -369,20 +369,6 @@ fn busy_but(tx: &Transaction, team_id: &Uuid, free: &HashSet<Uuid>) -> Result<Ve
     Ok(busy)
 }
 
-/// The sessions the scope reaches from `session_id`, and the busy slots of
-/// its team without them.
-fn series_targets(
-    tx: &Transaction,
-    session_id: &Uuid,
-    scope: SeriesScope,
-) -> Result<(Vec<TrainingSession>, Vec<Slot>), AppError> {
-    let anchor = read_session(tx, session_id)?;
-    let targets = series_members(tx, &anchor, scope)?;
-    let ids: HashSet<Uuid> = targets.iter().map(|s| s.id).collect();
-    let busy = busy_but(tx, &anchor.team_id, &ids)?;
-    Ok((targets, busy))
-}
-
 /// The overlaps of a group, each slot once: the error that stops it.
 fn group_overlap(conflicts: Vec<series::SeriesConflict>) -> AppError {
     let mut hit: Vec<Slot> = conflicts.into_iter().flat_map(|c| c.with).collect();
@@ -744,41 +730,6 @@ impl TrainingWriter for SqliteTraining {
         })
     }
 
-    async fn update_series(
-        &self,
-        session_id: &Uuid,
-        scope: SeriesScope,
-        edit: SeriesEdit,
-    ) -> Result<Vec<TrainingSession>, AppError> {
-        match edit.duration_min {
-            Some(0) => Err(AppError::IO(IOError::Msg("invalid duration".into()))),
-            _ => self.0.write(|tx| {
-                let (targets, busy) = series_targets(tx, session_id, scope)?;
-                let moved: Vec<(NaiveDateTime, u16, Option<Uuid>)> =
-                    targets.iter().map(|s| edit.apply(s)).collect();
-                let windows: Vec<(NaiveDateTime, u16)> =
-                    moved.iter().map(|(start, min, _)| (*start, *min)).collect();
-                let (_, conflicts) = series::conflicts_of(&windows, busy);
-                match conflicts.is_empty() {
-                    false => Err(group_overlap(conflicts)),
-                    true => targets
-                        .iter()
-                        .zip(moved)
-                        .map(|(session, (start, minutes, venue))| {
-                            tx.execute(
-                                "UPDATE training_sessions SET start_local = ?2,
-                                     duration_min = ?3, venue_id = ?4 WHERE id = ?1",
-                                params![Sql(session.id), Sql(start), minutes, venue.map(Sql)],
-                            )
-                            .map_err(sqlite)?;
-                            read_session(tx, &session.id)
-                        })
-                        .collect(),
-                }
-            }),
-        }
-    }
-
     async fn remove_series(
         &self,
         session_id: &Uuid,
@@ -1045,10 +996,14 @@ impl TrainingWriter for SqliteTraining {
                         |r| r.get(0),
                     )
                     .map_err(sqlite)?;
+                // a person removed from the registry keeps a row already saved
                 let alive: bool = tx
                     .query_row(
-                        "SELECT EXISTS (SELECT 1 FROM persons WHERE id = ?1 AND deleted = 0)",
-                        [Sql(row.person_id)],
+                        "SELECT EXISTS (SELECT 1 FROM persons WHERE id = ?1 AND deleted = 0)
+                             OR EXISTS (SELECT 1 FROM training_attendance
+                                        WHERE session_id = ?2 AND person_id = ?1
+                                          AND deleted = 0)",
+                        params![Sql(row.person_id), Sql(*session_id)],
                         |r| r.get(0),
                     )
                     .map_err(sqlite)?;

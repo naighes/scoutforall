@@ -4,7 +4,7 @@ use crate::{
         Activity, ActivityInput, AttendanceInput, Move, SessionInput, SessionStatus,
         TrainingSession,
         duplicate::DuplicateInput,
-        series::{SeriesEdit, SeriesInput, SeriesOutcome, SeriesScope},
+        series::{SeriesInput, SeriesOutcome, SeriesScope},
     },
 };
 use async_trait::async_trait;
@@ -49,16 +49,6 @@ pub trait TrainingWriter {
         session_id: &Uuid,
         input: SessionInput,
         scope: SeriesScope,
-    ) -> Result<Vec<TrainingSession>, AppError>;
-
-    /// Changes gym, time or duration of the planned sessions `scope`
-    /// reaches from `session_id` (the date never changes). A change that
-    /// overlaps something stops the whole group: nothing is written.
-    async fn update_series(
-        &self,
-        session_id: &Uuid,
-        scope: SeriesScope,
-        edit: SeriesEdit,
     ) -> Result<Vec<TrainingSession>, AppError>;
 
     /// Removes (D7) the session and the other planned sessions `scope`

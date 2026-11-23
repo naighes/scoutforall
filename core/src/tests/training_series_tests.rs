@@ -491,6 +491,25 @@ mod tests {
         (t, out.created)
     }
 
+    /// The group edit as the dialog makes it: the session edited with the
+    /// change, the others of the scope with it.
+    async fn group_edit(
+        w: &World,
+        id: &Uuid,
+        scope: SeriesScope,
+        edit: SeriesEdit,
+    ) -> Result<Vec<TrainingSession>, crate::errors::AppError> {
+        let anchor = w.training.session(id).await?;
+        let (start, duration_min, venue_id) = edit.apply(&anchor);
+        let input = SessionInput {
+            start,
+            duration_min,
+            venue_id,
+            ..form_of(&anchor)
+        };
+        w.training.update_session_in_series(id, input, scope).await
+    }
+
     #[tokio::test]
     async fn the_group_edit_reaches_the_scope_and_never_the_date() {
         let w = world();
@@ -500,9 +519,7 @@ mod tests {
             time: None,
             duration_min: Some(75),
         };
-        let done = w
-            .training
-            .update_series(&list[1].id, SeriesScope::ThisAndFollowing, edit)
+        let done = group_edit(&w, &list[1].id, SeriesScope::ThisAndFollowing, edit)
             .await
             .unwrap();
         assert_eq!(done.len(), 3);
@@ -522,17 +539,17 @@ mod tests {
     async fn the_time_is_rewritten_only_when_it_is_changed() {
         let w = world();
         let (t, list) = four(&w).await;
-        w.training
-            .update_series(
-                &list[0].id,
-                SeriesScope::All,
-                SeriesEdit {
-                    time: Some(time(21, 0)),
-                    ..SeriesEdit::default()
-                },
-            )
-            .await
-            .unwrap();
+        group_edit(
+            &w,
+            &list[0].id,
+            SeriesScope::All,
+            SeriesEdit {
+                time: Some(time(21, 0)),
+                ..SeriesEdit::default()
+            },
+        )
+        .await
+        .unwrap();
         let now = w.training.sessions(&t.id).await.unwrap();
         for (before, after) in list.iter().zip(&now) {
             assert_eq!(after.start, before.start.date().and_time(time(21, 0)));
@@ -540,17 +557,17 @@ mod tests {
             assert_eq!(after.venue_id, before.venue_id);
         }
         // "this" only
-        w.training
-            .update_series(
-                &list[2].id,
-                SeriesScope::This,
-                SeriesEdit {
-                    venue: Some(Some(w.hall)),
-                    ..SeriesEdit::default()
-                },
-            )
-            .await
-            .unwrap();
+        group_edit(
+            &w,
+            &list[2].id,
+            SeriesScope::This,
+            SeriesEdit {
+                venue: Some(Some(w.hall)),
+                ..SeriesEdit::default()
+            },
+        )
+        .await
+        .unwrap();
         let now = w.training.sessions(&t.id).await.unwrap();
         assert_eq!(
             now.iter().map(|s| s.venue_id).collect::<Vec<_>>(),
@@ -570,18 +587,17 @@ mod tests {
             .complete_session(&list[2].id, vec![])
             .await
             .unwrap();
-        let done = w
-            .training
-            .update_series(
-                &list[0].id,
-                SeriesScope::All,
-                SeriesEdit {
-                    venue: Some(Some(w.arena)),
-                    ..SeriesEdit::default()
-                },
-            )
-            .await
-            .unwrap();
+        let done = group_edit(
+            &w,
+            &list[0].id,
+            SeriesScope::All,
+            SeriesEdit {
+                venue: Some(Some(w.arena)),
+                ..SeriesEdit::default()
+            },
+        )
+        .await
+        .unwrap();
         assert_eq!(done.len(), 2);
         let now = w.training.sessions(&t.id).await.unwrap();
         assert_eq!(
@@ -604,18 +620,17 @@ mod tests {
         let (t, list) = four(&w).await;
         // a session right where the third one would end up if it started at 18:30
         plain_session(&w, &t.id, at(2026, 11, 30, 18, 30), 60).await;
-        let e = w
-            .training
-            .update_series(
-                &list[0].id,
-                SeriesScope::All,
-                SeriesEdit {
-                    time: Some(time(18, 30)),
-                    ..SeriesEdit::default()
-                },
-            )
-            .await
-            .unwrap_err();
+        let e = group_edit(
+            &w,
+            &list[0].id,
+            SeriesScope::All,
+            SeriesEdit {
+                time: Some(time(18, 30)),
+                ..SeriesEdit::default()
+            },
+        )
+        .await
+        .unwrap_err();
         assert_eq!(overlaps(&e), [Slot::session(at(2026, 11, 30, 18, 30), 60)]);
         // nothing was written, not even the sessions before the conflict
         let now = w.training.sessions(&t.id).await.unwrap();
@@ -629,18 +644,17 @@ mod tests {
         let w = world();
         let (t, list) = four(&w).await;
         // a duration of 4000 minutes (2.7 days) makes Monday reach Wednesday
-        let e = w
-            .training
-            .update_series(
-                &list[0].id,
-                SeriesScope::All,
-                SeriesEdit {
-                    duration_min: Some(4000),
-                    ..SeriesEdit::default()
-                },
-            )
-            .await
-            .unwrap_err();
+        let e = group_edit(
+            &w,
+            &list[0].id,
+            SeriesScope::All,
+            SeriesEdit {
+                duration_min: Some(4000),
+                ..SeriesEdit::default()
+            },
+        )
+        .await
+        .unwrap_err();
         assert!(!overlaps(&e).is_empty());
         assert_eq!(w.training.sessions(&t.id).await.unwrap(), list);
     }
@@ -650,17 +664,17 @@ mod tests {
         let w = world();
         let (_, list) = four(&w).await;
         assert!(
-            w.training
-                .update_series(
-                    &list[0].id,
-                    SeriesScope::All,
-                    SeriesEdit {
-                        duration_min: Some(0),
-                        ..SeriesEdit::default()
-                    },
-                )
-                .await
-                .is_err()
+            group_edit(
+                &w,
+                &list[0].id,
+                SeriesScope::All,
+                SeriesEdit {
+                    duration_min: Some(0),
+                    ..SeriesEdit::default()
+                },
+            )
+            .await
+            .is_err()
         );
         assert!(
             w.training

@@ -323,6 +323,15 @@ mod tests {
         let gone = sheet.rows.iter().find(|r| r.person_id == ada).unwrap();
         assert!(gone.name.is_empty());
         assert_eq!(gone.number, Some(1));
+        // the sheet saves again with their row, which keeps its status
+        let mut again: Vec<AttendanceInput> =
+            sheet.rows.iter().map(AttendanceInput::from).collect();
+        again
+            .iter_mut()
+            .filter(|r| r.person_id != ada)
+            .for_each(|r| r.status = AttendanceStatus::Late);
+        p.training.save_attendance(&s, again).await.unwrap();
+        assert_eq!(p.training.attendance(&s).await.unwrap().rows.len(), 2);
         // never a removed person to add
         assert!(p.training.missing_players(&s).await.unwrap().is_empty());
         // a roster not yet saved doesn't list them
