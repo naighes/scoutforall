@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
@@ -306,9 +307,8 @@ class TrainingScreensTest {
         rule.onNode(hasContentDescription(string(R.string.tr_new_session)) and hasClickAction()).performClick()
         rule.onNodeWithText(string(R.string.tr_new_session), useUnmergedTree = true).assertExists()
         assertEquals(listOf(LocalDate.now()), days)
-        // and the day chosen offers one right under it
-        rule.onNode(hasText(string(R.string.tr_add_session)) and hasClickAction()).performScrollTo().performClick()
-        assertEquals(listOf(LocalDate.now(), LocalDate.now()), days)
+        // only there: the day chosen doesn't offer it again
+        rule.onNodeWithText("Add a session").assertDoesNotExist() // the old link, gone
     }
 
     /** The day chosen in the month offers a match on it too. */
@@ -317,8 +317,25 @@ class TrainingScreensTest {
         val days = mutableListOf<LocalDate>()
         hub(Part.CALENDAR, onNewMatch = { days += it })
         rule.waitForText(string(R.string.agenda_today))
-        rule.onNode(hasText(string(R.string.tr_add_match)) and hasClickAction()).performScrollTo().performClick()
+        rule.onNode(hasText(string(R.string.new_match)) and hasClickAction()).performScrollTo().performClick()
         assertEquals(listOf(LocalDate.now()), days)
+    }
+
+    /** The month fills its weeks with the days of the months around, in
+     * grey, as on the desktop: as many as its first and last week leave. */
+    @Test
+    fun theMonthShowsTheDaysOfTheMonthsAround() {
+        hub(Part.CALENDAR)
+        rule.waitForText(string(R.string.agenda_today))
+        val month = java.time.YearMonth.now()
+        val lead = month.atDay(1).dayOfWeek.value - 1
+        val cells = lead + month.lengthOfMonth()
+        val around = (cells + 6) / 7 * 7 - month.lengthOfMonth()
+        rule.waitForIdle()
+        assertEquals(
+            around,
+            rule.onAllNodesWithTag(DAY_AROUND, useUnmergedTree = true).fetchSemanticsNodes().size,
+        )
     }
 
     /** The day of a date picker written by hand (its text mode). */

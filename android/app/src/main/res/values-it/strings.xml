@@ -537,7 +537,6 @@
     <string name="tr_new_session">Nuova seduta</string>
     <string name="tr_edit_session">Modifica la seduta</string>
     <string name="tr_session_title">Titolo</string>
-    <string name="tr_session_location">Luogo</string>
     <string name="tr_session_duration">Durata prevista (min)</string>
     <string name="tr_session_actual">Durata effettiva (min)</string>
     <string name="tr_objectives">Obiettivi</string>
@@ -602,15 +601,11 @@
     <string name="tr_in_series_title">Seduta ripetuta</string>
     <string name="tr_scope_edit_text">Questa seduta fa parte di una serie. A quali sedute vanno ora, durata e palestra nuove?</string>
     <string name="tr_scope_delete_text">Questa seduta fa parte di una serie. Quali sedute elimini? Le altre solo se pianificate.</string>
-    <string name="tr_add_session">Aggiungi una seduta</string>
-    <string name="tr_add_match">Aggiungi una partita</string>
     <string name="tr_create_others">Crea le altre</string>
     <string name="tr_time">Ora</string>
     <string name="tr_filter_all">Tutte</string>
     <string name="tr_move_down">Sposta in giù</string>
     <string name="tr_search">Cerca</string>
-    <string name="tr_change_series_title">Modifica la serie</string>
-    <string name="tr_keep">Lascia com\'è</string>
     <string name="tr_status">Stato</string>
     <string name="tr_remove_guest">Togli</string>
     <string name="tr_cycles_intro">La programmazione divide la stagione in blocchi, dal più grande al più piccolo. Il programma copre la stagione (o metà): preparazione, campionato, riposo. Il mesociclo dura di solito da tre a sei settimane e ha un solo obiettivo: qualche settimana più pesante, poi una più leggera. Il microciclo è una settimana: le sue sedute e la partita, la seduta più pesante il più lontano possibile dalla partita. Si parte dall\'alto (il programma, poi i mesocicli e i microcicli al suo interno) o dal basso (si spuntano le sedute e si crea il microciclo).</string>
@@ -653,7 +648,6 @@
     <string name="tr_calendar">calendario</string>
     <string name="tr_month_view">Mese</string>
     <string name="tr_week_view">Settimana</string>
-    <string name="tr_free_day">Giorno libero</string>
     <string name="tr_detach_save">Stacca e salva</string>
     <string name="venue">Palestra</string>
     <string name="venues">Palestre</string>

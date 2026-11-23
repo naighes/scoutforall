@@ -541,7 +541,6 @@
     <string name="tr_new_session">Nowa sesja</string>
     <string name="tr_edit_session">Edytuj sesję</string>
     <string name="tr_session_title">Tytuł</string>
-    <string name="tr_session_location">Miejsce</string>
     <string name="tr_session_duration">Planowany czas (min)</string>
     <string name="tr_session_actual">Rzeczywisty czas (min)</string>
     <string name="tr_objectives">Cele</string>
@@ -606,15 +605,11 @@
     <string name="tr_in_series_title">Sesja powtarzana</string>
     <string name="tr_scope_edit_text">Ta sesja należy do serii. Które sesje dostają nową godzinę, czas trwania i salę?</string>
     <string name="tr_scope_delete_text">Ta sesja należy do serii. Które sesje usuwasz? Pozostałe tylko, jeśli są zaplanowane.</string>
-    <string name="tr_add_session">Dodaj sesję</string>
-    <string name="tr_add_match">Dodaj mecz</string>
     <string name="tr_create_others">Utwórz pozostałe</string>
     <string name="tr_time">Godzina</string>
     <string name="tr_filter_all">Wszystkie</string>
     <string name="tr_move_down">Przesuń w dół</string>
     <string name="tr_search">Szukaj</string>
-    <string name="tr_change_series_title">Zmień serię</string>
-    <string name="tr_keep">Bez zmian</string>
     <string name="tr_status">Status</string>
     <string name="tr_remove_guest">Usuń</string>
     <string name="tr_cycles_intro">Plan treningów dzieli sezon na bloki, od największego do najmniejszego. Program obejmuje sezon (lub jego połowę): przygotowanie, rozgrywki, odpoczynek. Mezocykl trwa zwykle od trzech do sześciu tygodni i ma jeden cel: kilka cięższych tygodni, potem lżejszy. Mikrocykl to tydzień: jego sesje i mecz, najcięższa sesja jak najdalej od meczu. Zacznij od góry (program, potem mezocykle i mikrocykle w nim) albo od dołu (zaznacz sesje i utwórz mikrocykl).</string>
@@ -657,7 +652,6 @@
     <string name="tr_calendar">kalendarz</string>
     <string name="tr_month_view">Miesiąc</string>
     <string name="tr_week_view">Tydzień</string>
-    <string name="tr_free_day">Wolny dzień</string>
     <string name="tr_detach_save">Odłącz i zapisz</string>
     <string name="venue">Hala</string>
     <string name="venues">Hale</string>

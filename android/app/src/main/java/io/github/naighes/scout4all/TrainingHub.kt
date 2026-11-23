@@ -48,6 +48,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -541,17 +542,12 @@ private fun CalendarTab(
                     }
                 }
                 items(events, key = { "${it.teamId}/${it.start}/${it.id()}" }) { open(it) }
-                // a session or a match on the day chosen, right under it
+                // a match on the day chosen, right under it, named as on the
+                // desktop; the session on it is the floating button's
                 item(key = "add") {
-                    androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 8.dp)) {
-                        TextButton(onClick = { onNewOn(selected) }) {
-                            Icon(Icons.Filled.Add, contentDescription = null)
-                            Text(stringResource(R.string.tr_add_session), Modifier.padding(start = 8.dp))
-                        }
-                        TextButton(onClick = { onNewMatch(selected) }) {
-                            Icon(Icons.Filled.Add, contentDescription = null)
-                            Text(stringResource(R.string.tr_add_match), Modifier.padding(start = 8.dp))
-                        }
+                    TextButton(onClick = { onNewMatch(selected) }, Modifier.padding(horizontal = 8.dp)) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Text(stringResource(R.string.new_match), Modifier.padding(start = 8.dp))
                     }
                 }
             }
@@ -607,7 +603,16 @@ private fun MonthGrid(month: YearMonth, selected: LocalDate, today: LocalDate, b
                 repeat(7) { c ->
                     val n = r * 7 + c - lead + 1
                     if (n < 1 || n > month.lengthOfMonth()) {
-                        Box(Modifier.weight(1f).height(52.dp))
+                        // a day of the months around: only its number, in
+                        // grey, as on the desktop
+                        Box(Modifier.weight(1f).height(52.dp), contentAlignment = Alignment.Center) {
+                            Text(
+                                "${month.atDay(1).plusDays((n - 1).toLong()).dayOfMonth}",
+                                Modifier.testTag(DAY_AROUND).clearAndSetSemantics {},
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.outline,
+                            )
+                        }
                     } else {
                         val date = month.atDay(n)
                         DayCell(date, date == selected, date == today, byDate[date.toString()]?.events.orEmpty(), Modifier.weight(1f)) { onDay(date) }
@@ -622,6 +627,9 @@ private fun MonthGrid(month: YearMonth, selected: LocalDate, today: LocalDate, b
  * each (45dp apart on a phone 320dp wide, as the days of Material's date
  * picker): the 48dp between neighbours can't hold there. */
 internal const val DAY_OF_MONTH = "day-of-month"
+
+/** The tag of a day of the months around, in grey in the month. */
+internal const val DAY_AROUND = "day-around"
 
 @Composable
 private fun DayCell(date: LocalDate, selected: Boolean, today: Boolean, events: List<AgendaEventRecord>, modifier: Modifier, onClick: () -> Unit) {

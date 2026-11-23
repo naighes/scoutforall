@@ -539,7 +539,6 @@
     <string name="tr_new_session">New session</string>
     <string name="tr_edit_session">Edit the session</string>
     <string name="tr_session_title">Title</string>
-    <string name="tr_session_location">Place</string>
     <string name="tr_session_duration">Planned duration (min)</string>
     <string name="tr_session_actual">Actual duration (min)</string>
     <string name="tr_objectives">Objectives</string>
@@ -604,15 +603,11 @@
     <string name="tr_in_series_title">Repeated session</string>
     <string name="tr_scope_edit_text">This session is part of a series. Which sessions get the new time, duration and gym?</string>
     <string name="tr_scope_delete_text">This session is part of a series. Which sessions do you delete? The others go only if planned.</string>
-    <string name="tr_add_session">Add a session</string>
-    <string name="tr_add_match">Add a match</string>
     <string name="tr_create_others">Create the others</string>
     <string name="tr_time">Time</string>
     <string name="tr_filter_all">All</string>
     <string name="tr_move_down">Move down</string>
     <string name="tr_search">Search</string>
-    <string name="tr_change_series_title">Change the series</string>
-    <string name="tr_keep">Leave as it is</string>
     <string name="tr_status">Status</string>
     <string name="tr_remove_guest">Remove</string>
     <string name="tr_cycles_intro">The training plan splits the season into blocks, from the largest to the smallest. The program covers the season (or half of it): preparation, championship, rest. A mesocycle usually lasts three to six weeks and has one goal: a few harder weeks, then a lighter one. A microcycle is a week: its sessions and the match, the hardest session as far from the match as possible. Start from the top (the program, then the mesocycles and microcycles inside it) or from the bottom (mark the sessions and create a microcycle).</string>
@@ -655,7 +650,6 @@
     <string name="tr_calendar">calendar</string>
     <string name="tr_month_view">Month</string>
     <string name="tr_week_view">Week</string>
-    <string name="tr_free_day">Free day</string>
     <string name="tr_detach_save">Detach and save</string>
     <string name="venue">Gym</string>
     <string name="venues">Gyms</string>

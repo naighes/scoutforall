@@ -535,7 +535,6 @@
     <string name="tr_new_session">新しいセッション</string>
     <string name="tr_edit_session">セッションを編集</string>
     <string name="tr_session_title">タイトル</string>
-    <string name="tr_session_location">場所</string>
     <string name="tr_session_duration">予定時間（分）</string>
     <string name="tr_session_actual">実際の時間（分）</string>
     <string name="tr_objectives">目標</string>
@@ -600,15 +599,11 @@
     <string name="tr_in_series_title">繰り返しのセッション</string>
     <string name="tr_scope_edit_text">このセッションはシリーズの一部です。新しい時刻・時間・体育館をどのセッションに適用しますか？</string>
     <string name="tr_scope_delete_text">このセッションはシリーズの一部です。どのセッションを削除しますか？ほかのセッションは予定のものだけが削除されます。</string>
-    <string name="tr_add_session">セッションを追加</string>
-    <string name="tr_add_match">試合を追加</string>
     <string name="tr_create_others">残りを作成</string>
     <string name="tr_time">時刻</string>
     <string name="tr_filter_all">すべて</string>
     <string name="tr_move_down">下へ</string>
     <string name="tr_search">検索</string>
-    <string name="tr_change_series_title">シリーズを変更</string>
-    <string name="tr_keep">変更しない</string>
     <string name="tr_status">状態</string>
     <string name="tr_remove_guest">外す</string>
     <string name="tr_cycles_intro">計画はシーズンを大きい順にブロックへ分けます。プログラムはシーズン全体（または半分）で、準備期・リーグ戦・休養を含みます。メゾサイクルは通常3〜6週間で、目標は一つです。数週間しっかり負荷をかけ、その後の1週間は軽くします。マイクロサイクルは1週間で、セッションと試合から成り、最も重いセッションは試合からできるだけ離します。上から（プログラム、その中にメゾサイクルとマイクロサイクル）でも、下から（セッションにチェックを付けてマイクロサイクルを作成）でも始められます。</string>
@@ -651,7 +646,6 @@
     <string name="tr_calendar">カレンダー</string>
     <string name="tr_month_view">月</string>
     <string name="tr_week_view">週</string>
-    <string name="tr_free_day">空き日</string>
     <string name="tr_detach_save">切り離して保存</string>
     <string name="venue">体育館</string>
     <string name="venues">体育館</string>
