@@ -230,6 +230,35 @@ jobs:
       - uses: android-actions/setup-android@v4
       # its cache saved by master only, as by default
       - uses: gradle/actions/setup-gradle@v6
+      # the SDKs of Robolectric (330 MB, from Maven Central): a failed
+      # download made every test fail. Cached, and on a miss fetched with
+      # retries, so a hiccup of Maven costs a retry, not the build. The
+      # key follows the Robolectric version and the SDKs of the tests
+      - name: restore the SDKs of Robolectric
+        id: robolectric
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-4.17-sdk-28-37
+      - name: fetch the SDKs of Robolectric
+        if: steps.robolectric.outputs.cache-hit != 'true'
+        run: |
+          base=https://repo1.maven.org/maven2/org/robolectric/android-all-instrumented
+          for v in 9-robolectric-4913185-2-i7 17-robolectric-15733970-i7; do
+            dir=$HOME/.m2/repository/org/robolectric/android-all-instrumented/$v
+            mkdir -p "$dir"
+            for ext in jar jar.sha512 pom pom.sha512; do
+              curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+                -o "$dir/android-all-instrumented-$v.$ext" \
+                "$base/$v/android-all-instrumented-$v.$ext"
+            done
+          done
+      - name: save the SDKs of Robolectric
+        if: steps.robolectric.outputs.cache-hit != 'true' && github.ref == 'refs/heads/master'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.m2/repository/org/robolectric
+          key: robolectric-4.17-sdk-28-37
       # the screens on the JVM, with the core built for the runner: no NDK
       - name: run the tests of the app
         working-directory: android
