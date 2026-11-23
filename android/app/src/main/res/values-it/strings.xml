@@ -152,7 +152,7 @@
     <string name="zone_attacks">%d att</string>
     <string name="serve_zone">Destinazione della battuta</string>
     <string name="zone_chosen">scelta</string>
-    <string name="serves_by_zone">Battute per zona</string>
+    <string name="serves_by_zone">Battute per zona di destinazione</string>
     <string name="zones_told">zona indicata in %1$d battute su %2$d</string>
     <string name="serve_start">Zona di partenza della battuta</string>
     <string name="serves_by_start">Battute per zona di partenza</string>
@@ -168,7 +168,7 @@
     <string name="receptions_by_zone">Ricezioni per zona</string>
     <string name="reception_zones_told">zona indicata in %1$d ricezioni su %2$d</string>
     <string name="attack_zone">Destinazione dell\'attacco</string>
-    <string name="attacks_by_zone">Attacchi per zona</string>
+    <string name="attacks_by_zone">Attacchi per zona di destinazione</string>
     <string name="attack_zones_told">zona indicata in %1$d attacchi su %2$d</string>
     <string name="dig_zone">Zona di difesa</string>
     <string name="digs_by_zone">Difese per zona</string>

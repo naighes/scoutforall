@@ -9123,6 +9123,53 @@ mod tests {
         );
     }
 
+    /// Our attack by the zone it went to is shown as our serve: their
+    /// court as our server sees it, 1 6 5 / 9 8 7 / 2 3 4.
+    #[test]
+    fn the_attacks_by_zone_as_the_serves() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        // our serve in the net, their serve received, then our attack to 9
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::P).unwrap();
+        let player = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(player).unwrap();
+        scouting.touch_target(6, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event(EventTypeEnum::A).unwrap();
+        let attacker = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(attacker).unwrap();
+        scouting.touch_target(9, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let attack = scouting
+            .detail(StatsScope::Match, EventTypeEnum::A, DetailFilter::default())
+            .unwrap()
+            .fundamental
+            .unwrap();
+        let rows: Vec<Vec<&str>> = attack
+            .targets
+            .iter()
+            .map(|row| row.iter().map(|t| t.label.as_str()).collect())
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                vec!["1", "6", "5"],
+                vec!["9", "8", "7"],
+                vec!["2", "3", "4"]
+            ]
+        );
+        let z9 = attack
+            .targets
+            .iter()
+            .flatten()
+            .find(|t| t.label == "9")
+            .unwrap();
+        assert_eq!((z9.count, z9.share), (1.0, 100.0));
+    }
+
     /// Where our serve starts from: the five zones from the left as our
     /// server sees them, along with the evaluation of our serve only;
     /// remembered for the server; the serves by zone they started from,

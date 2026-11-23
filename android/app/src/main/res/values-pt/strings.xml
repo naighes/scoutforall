@@ -152,7 +152,7 @@
     <string name="zone_attacks">%d atq</string>
     <string name="serve_zone">Destino do saque</string>
     <string name="zone_chosen">escolhida</string>
-    <string name="serves_by_zone">Saques por zona</string>
+    <string name="serves_by_zone">Saques por zona de destino</string>
     <string name="zones_told">zona indicada em %1$d de %2$d saques</string>
     <string name="serve_start">Zona de partida do saque</string>
     <string name="serves_by_start">Saques por zona de partida</string>
@@ -168,7 +168,7 @@
     <string name="receptions_by_zone">Recepções por zona</string>
     <string name="reception_zones_told">zona indicada em %1$d de %2$d recepções</string>
     <string name="attack_zone">Destino do ataque</string>
-    <string name="attacks_by_zone">Ataques por zona</string>
+    <string name="attacks_by_zone">Ataques por zona de destino</string>
     <string name="attack_zones_told">zona indicada em %1$d de %2$d ataques</string>
     <string name="dig_zone">Zona da defesa</string>
     <string name="digs_by_zone">Defesas por zona</string>

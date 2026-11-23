@@ -153,7 +153,7 @@
     <string name="zone_attacks">%d att</string>
     <string name="serve_zone">Serve destination</string>
     <string name="zone_chosen">chosen</string>
-    <string name="serves_by_zone">Serves by zone</string>
+    <string name="serves_by_zone">Serves by destination zone</string>
     <string name="zones_told">zone told for %1$d of %2$d serves</string>
     <string name="serve_start">Serve start zone</string>
     <string name="serves_by_start">Serves by start zone</string>
@@ -169,7 +169,7 @@
     <string name="receptions_by_zone">Receptions by zone</string>
     <string name="reception_zones_told">zone told for %1$d of %2$d receptions</string>
     <string name="attack_zone">Attack destination</string>
-    <string name="attacks_by_zone">Attacks by zone</string>
+    <string name="attacks_by_zone">Attacks by destination zone</string>
     <string name="attack_zones_told">zone told for %1$d of %2$d attacks</string>
     <string name="dig_zone">Defense zone</string>
     <string name="digs_by_zone">Digs by zone</string>
