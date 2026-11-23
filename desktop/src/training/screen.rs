@@ -12,7 +12,13 @@ use {
         scope::{self, ScopeQuestion},
         session::{self, SessionPage},
     },
-    crate::{form, strings::Strings, theme::Colors, ui},
+    crate::{
+        editors::{self, Editor},
+        form,
+        strings::Strings,
+        theme::Colors,
+        ui,
+    },
     chrono::{Datelike, Months, NaiveDate},
     iced::{
         Element, Length,
@@ -126,6 +132,8 @@ enum Mode {
     List,
     Page(Box<SessionPage>),
     New(Box<SessionEditor>),
+    /// a new match on a day of the calendar
+    Match(Box<Editor>),
     /// id of the session to delete, with the question of its series when
     /// it's in one
     Delete(String, Option<ScopeQuestion>),
@@ -138,6 +146,8 @@ pub enum Message {
     /// the answer of the question of the series, on deleting
     Scope(SeriesScope),
     Form(form::Message),
+    /// the form of the new match
+    MatchForm(form::Message),
     Page(session::Message),
     Tab(Tab),
     Cycles(cycles::Message),
@@ -154,6 +164,11 @@ pub enum Outcome {
     Stay,
     /// a match, to open
     Match(String),
+    /// the match made from the calendar, of its team A (maybe another one)
+    NewMatch {
+        team: String,
+        id: String,
+    },
     /// back to the team
     Back,
     /// a file to share: the archive, a sheet
@@ -216,6 +231,7 @@ impl TrainingScreen {
         match &self.mode {
             Mode::Page(page) => page.focus_id(),
             Mode::New(editor) => editor.focus_id(),
+            Mode::Match(editor) => Some(editor.focus_id()),
             Mode::List if self.tab == Tab::Cycles => self.cycles.focus_id(),
             Mode::List | Mode::Delete(..) => None,
         }
@@ -309,6 +325,12 @@ impl TrainingScreen {
                 self.mode = Mode::Delete(id, question);
             }
             calendar::Leave::Match(id) => return Outcome::Match(id),
+            calendar::Leave::NewMatch(day) => {
+                match Editor::a_match_on(s, &self.core, self.team_id.clone(), day) {
+                    Ok(editor) => self.mode = Mode::Match(Box::new(editor)),
+                    Err(e) => self.error = Some(e.to_string()),
+                }
+            }
             calendar::Leave::NewSession(day, time) => {
                 match SessionEditor::at(
                     &self.core,
@@ -364,6 +386,24 @@ impl TrainingScreen {
         self.from_cycle = false;
     }
 
+    /// After the form of the match: Esc back to the calendar, saved the
+    /// match opens.
+    fn match_edited(&mut self, edited: editors::Edited) -> Outcome {
+        let team = match &self.mode {
+            Mode::Match(e) => e.match_team().map(str::to_string),
+            _ => None,
+        };
+        match (edited, team) {
+            (editors::Edited::Stay, _) => Outcome::Stay,
+            (editors::Edited::Saved(id), Some(team)) => Outcome::NewMatch { team, id },
+            (editors::Edited::Cancel | editors::Edited::Saved(_), _) => {
+                self.mode = Mode::List;
+                self.reload();
+                Outcome::Stay
+            }
+        }
+    }
+
     fn paged(&mut self, outcome: session::Outcome) -> Outcome {
         match outcome {
             session::Outcome::Stay => {}
@@ -392,6 +432,10 @@ impl TrainingScreen {
             (Mode::New(editor), Message::Form(m)) => {
                 let edited = editor.update(&self.core, m);
                 self.edited(edited);
+            }
+            (Mode::Match(editor), Message::MatchForm(m)) => {
+                let edited = editor.update(&self.core, s, m);
+                return self.match_edited(edited);
             }
             (Mode::Delete(..), Message::Confirm) => self.delete(SeriesScope::This),
             (Mode::Delete(..), Message::Scope(scope)) => self.delete(scope),
@@ -435,6 +479,10 @@ impl TrainingScreen {
             Mode::New(editor) => {
                 let edited = editor.key(&self.core, ck);
                 self.edited(edited);
+            }
+            Mode::Match(editor) => {
+                let edited = editor.key(&self.core, s, ck);
+                return self.match_edited(edited);
             }
             Mode::Delete(_, Some(question)) => match question.key(ck) {
                 scope::Answer::Stay => {}
@@ -480,6 +528,7 @@ impl TrainingScreen {
         match &self.mode {
             Mode::Page(page) => page.hints(s),
             Mode::New(editor) => editor.hints(s),
+            Mode::Match(editor) => editor.hints(s),
             Mode::Delete(_, Some(_)) => ScopeQuestion::hints(s, s.delete),
             Mode::Delete(_, None) => vec![
                 ("Enter".to_string(), s.delete.to_string()),
@@ -500,6 +549,7 @@ impl TrainingScreen {
         let body: Element<'a, Message> = match &self.mode {
             Mode::Page(page) => page.view(s, c).map(Message::Page),
             Mode::New(editor) => editor.view(s, c, Message::Form),
+            Mode::Match(editor) => editor.view(s, c, Message::MatchForm),
             Mode::Delete(_, Some(question)) => question.view(
                 s,
                 c,
@@ -1590,6 +1640,53 @@ mod tests {
             super::super::calendar::View::Week
         );
         assert!(matches!(press(&mut screen, BACK_KEY), Outcome::Back));
+    }
+
+    /// `g` (or the pill) on a day of the calendar opens the form of a new
+    /// match on that day; Esc comes back to the calendar on the day; saved,
+    /// the match opens.
+    #[test]
+    fn a_new_match_is_made_on_a_day_of_the_calendar() {
+        use crate::form::Message::{Input, Save};
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 3, 10).unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        screen.calendar = super::super::calendar::CalendarTab::at(core.clone(), team.clone(), day);
+        assert!(
+            screen
+                .hints(s)
+                .iter()
+                .any(|(k, h)| k == "g" && h == s.new_match)
+        );
+        press(&mut screen, key!(g));
+        let Mode::Match(editor) = &screen.mode else {
+            panic!("the form of the match")
+        };
+        assert_eq!(editor.form.text(3), "2026-03-10");
+        press(&mut screen, BACK_KEY);
+        assert!(matches!(screen.mode, Mode::List));
+        assert_eq!(screen.calendar.cursor_day(), day);
+        screen.update(s, Message::Calendar(calendar::Message::NewMatch));
+        assert!(matches!(screen.mode, Mode::Match(_)));
+        screen.update(s, Message::MatchForm(Input(1, "Arezzo".into())));
+        // the details, the competition, then the score sheet
+        assert!(matches!(
+            screen.update(s, Message::MatchForm(Save)),
+            Outcome::Stay
+        ));
+        assert!(matches!(
+            screen.update(s, Message::MatchForm(Save)),
+            Outcome::Stay
+        ));
+        let Outcome::NewMatch { team: of, id } = screen.update(s, Message::MatchForm(Save)) else {
+            panic!("the match is saved and opened")
+        };
+        assert_eq!(of, team);
+        let form = core.match_form(team, id).unwrap();
+        assert_eq!(form.date.map(|d| d.date_naive()), Some(day));
     }
 
     /// x shares the archive of the training from the list; p on a session

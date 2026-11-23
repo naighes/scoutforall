@@ -12,7 +12,7 @@ use {
         ui,
         venue_choice::{venue_at, venue_options, venue_value},
     },
-    chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone},
+    chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone},
     iced::{
         Alignment, Element, Length, Padding,
         widget::{
@@ -752,9 +752,36 @@ impl Editor {
         team_id: String,
         id: Option<String>,
     ) -> Result<Editor, MobileError> {
+        Self::match_on(s, core, team_id, id, None)
+    }
+
+    /// A new match of team A `team_id` on `day` (a day of the calendar),
+    /// at the time of now.
+    pub fn a_match_on(
+        s: &Strings,
+        core: &Scout4All,
+        team_id: String,
+        day: NaiveDate,
+    ) -> Result<Editor, MobileError> {
+        Self::match_on(s, core, team_id, None, Some(day))
+    }
+
+    fn match_on(
+        s: &Strings,
+        core: &Scout4All,
+        team_id: String,
+        id: Option<String>,
+        day: Option<NaiveDate>,
+    ) -> Result<Editor, MobileError> {
+        let now = Local::now();
+        // a time the clock skips on that day (summer time): now
+        let new = day
+            .and_then(|d| d.and_time(now.time()).and_local_timezone(Local).earliest())
+            .unwrap_or(now)
+            .fixed_offset();
         let data = match &id {
             Some(id) => core.match_form(team_id.clone(), id.clone())?,
-            None => MatchForm::new(Local::now().fixed_offset()),
+            None => MatchForm::new(new),
         };
         // a saved match keeps its team A
         let teams: Vec<(String, String)> = core

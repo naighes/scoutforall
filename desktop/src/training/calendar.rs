@@ -101,6 +101,8 @@ pub enum Message {
     Today,
     View(View),
     New,
+    /// a new match on the day of the cursor
+    NewMatch,
     /// a click on an empty place: a new session on the day, at the minute
     /// of the day when it's of the week
     NewAt(NaiveDate, Option<u32>),
@@ -125,6 +127,8 @@ pub enum Leave {
     Match(String),
     /// a new session on the day, at the time if one was clicked
     NewSession(NaiveDate, Option<NaiveTime>),
+    /// a new match on the day
+    NewMatch(NaiveDate),
     /// the marked sessions, for a new microcycle
     Create(Vec<String>),
     /// the session to delete, once asked
@@ -849,6 +853,7 @@ impl CalendarTab {
                 Leave::Stay
             }
             Message::New => Leave::NewSession(self.anchor, None),
+            Message::NewMatch => Leave::NewMatch(self.anchor),
             Message::NewAt(day, minute) => {
                 self.go_to(day);
                 Leave::NewSession(
@@ -925,6 +930,7 @@ impl CalendarTab {
             }
             k if k == key!(enter) => return self.open(),
             k if k == key!(n) => return Leave::NewSession(self.anchor, None),
+            k if k == key!(g) => return Leave::NewMatch(self.anchor),
             k if k == key!(t) => self.set_all_teams(),
             k if k == key!(v) => self.next_venue(),
             _ => {}
@@ -1047,6 +1053,7 @@ impl CalendarTab {
         hints.extend([
             ("Enter".to_string(), s.open.to_string()),
             ("n".to_string(), s.new_session.to_string()),
+            ("g".to_string(), s.new_match.to_string()),
             ("t".to_string(), s.all_teams.to_string()),
         ]);
         if !self.venues.is_empty() {
@@ -1126,27 +1133,11 @@ impl CalendarTab {
             }
         }
         controls.push(space::horizontal().width(Length::Fill).into());
-        controls.push(ui::pill(
-            match self.all_teams {
-                true => s.all_teams,
-                false => s.this_team,
-            },
-            self.all_teams,
-            Some(Message::AllTeams),
-            c,
-        ));
-        // without gyms there is nothing to filter by
-        if !self.venues.is_empty() {
-            controls.push(ui::pill(
-                self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
-                self.venue.is_some(),
-                Some(Message::NextVenue),
-                c,
-            ));
-        }
         controls.push(ui::pill(s.new_session, false, Some(Message::New), c));
-        // the filter in every view; the period of the list; the microcycle
-        // only once sessions are marked
+        controls.push(ui::pill(s.new_match, false, Some(Message::NewMatch), c));
+        // the filter in every view, then whose and where (a row that goes
+        // on below when it's narrow); the count of the list; the
+        // microcycle only once sessions are marked
         let mut choices: Vec<Element<'a, Message>> = FILTERS
             .iter()
             .map(|f| {
@@ -1158,6 +1149,25 @@ impl CalendarTab {
                 )
             })
             .collect();
+        choices.push(space::horizontal().width(Length::Fixed(12.0)).into());
+        choices.push(ui::pill(
+            match self.all_teams {
+                true => s.all_teams,
+                false => s.this_team,
+            },
+            self.all_teams,
+            Some(Message::AllTeams),
+            c,
+        ));
+        // without gyms there is nothing to filter by
+        if !self.venues.is_empty() {
+            choices.push(ui::pill(
+                self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
+                self.venue.is_some(),
+                Some(Message::NextVenue),
+                c,
+            ));
+        }
         if self.view == View::List {
             let sessions = self
                 .days
