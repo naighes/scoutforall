@@ -755,19 +755,25 @@ mod tests {
             .unwrap();
         });
         let date = chrono::DateTime::parse_from_rfc3339("2030-03-04T18:30:00+01:00").unwrap();
-        app.save_match(
-            u19.clone(),
-            None,
-            scout4all_core::match_form::MatchForm {
-                opponent: "Arezzo".into(),
-                date: Some(date),
-                home: true,
-                max_substitutions: "8".into(),
-                venue: Some(Uuid::parse_str(&gym).unwrap()),
-                ..Default::default()
-            },
-        )
-        .unwrap();
+        let played = app
+            .save_match(
+                u19.clone(),
+                None,
+                scout4all_core::match_form::MatchForm {
+                    opponent: "Arezzo".into(),
+                    date: Some(date),
+                    home: true,
+                    max_substitutions: "8".into(),
+                    venue: Some(Uuid::parse_str(&gym).unwrap()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        // the details of the match tell its gym
+        assert_eq!(
+            app.match_details(u19.clone(), played).unwrap().venue_id,
+            Some(gym.clone())
+        );
         let found = app
             .match_venue_clashes(u17.clone(), None, gym.clone(), date)
             .unwrap();

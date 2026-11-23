@@ -385,24 +385,7 @@ private fun SessionData(s: SessionRecord, attendance: AttendanceSheetRecord?) {
             s.status != SessionStatus.PLANNED -> s.status.label()
             else -> null
         }
-        s.venueId?.let { id ->
-            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
-            val scope = rememberCoroutineScope()
-            TextButton(onClick = {
-                scope.launch {
-                    val (geo, web) = try {
-                        app.core { it.venueGeoUri(id) to it.venueWebUrl(id) }
-                    } catch (_: MobileException) {
-                        null to null
-                    }
-                    openVenueMap(app, geo, web)
-                }
-            }) {
-                Icon(Icons.Filled.Place, contentDescription = null)
-                Spacer(Modifier.width(8.dp))
-                Text(stringResource(R.string.venue_open_map))
-            }
-        }
+        s.venueId?.let { VenueMapButton(it) }
         state?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) }
         if (s.status == SessionStatus.COMPLETED && attendance?.recorded == false) {
             Text(stringResource(R.string.tr_attendance_not_recorded), color = MaterialTheme.colorScheme.onSurfaceVariant)

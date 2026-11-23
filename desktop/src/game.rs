@@ -16,7 +16,9 @@ use {
         widget::{Column, Id, column, container, row, space, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
-    scout4all_mobile::{MatchDetails, MobileError, NextSetKind, Scout4All, ScoutedBy},
+    scout4all_mobile::{
+        MatchDetails, MobileError, NextSetKind, Scout4All, ScoutedBy, venues::VenueRecord,
+    },
     std::sync::Arc,
 };
 
@@ -34,6 +36,8 @@ pub enum Message {
     Form(form::Message),
     /// the match seen by B: open it as A, who scouted it
     OpenAsA,
+    /// the gym of the match, in the map
+    Map,
 }
 
 pub enum Outcome {
@@ -65,6 +69,8 @@ pub struct MatchScreen {
     pub match_id: String,
     team: String,
     details: MatchDetails,
+    /// the gym it's played in, if one is set
+    venue: Option<VenueRecord>,
     editor: Option<Box<Editor>>,
     error: Option<String>,
 }
@@ -77,15 +83,32 @@ impl MatchScreen {
     ) -> Result<MatchScreen, MobileError> {
         let team = core.team(team_id.clone())?.name;
         let details = core.match_details(team_id.clone(), match_id.clone())?;
+        let venue = venue_of(&core, &details);
         Ok(MatchScreen {
             core,
             team_id,
             match_id,
             team,
             details,
+            venue,
             editor: None,
             error: None,
         })
+    }
+
+    /// The gym in the map: its link in the browser, the page of the map of
+    /// its coordinates without one; told when nothing opens it.
+    fn open_map(&mut self, s: &Strings) {
+        let Some(venue) = &self.venue else {
+            return;
+        };
+        self.error = match self.core.venue_web_url(venue.id.clone()) {
+            Ok(Some(url)) => open::that_detached(url)
+                .err()
+                .map(|_| s.no_app_to_open.to_string()),
+            Ok(None) => None,
+            Err(e) => Some(e.to_string()),
+        };
     }
 
     pub fn title(&self) -> String {
@@ -147,7 +170,10 @@ impl MatchScreen {
                     .core
                     .match_details(self.team_id.clone(), self.match_id.clone())
                 {
-                    Ok(details) => self.details = details,
+                    Ok(details) => {
+                        self.venue = venue_of(&self.core, &details);
+                        self.details = details;
+                    }
                     Err(e) => self.error = Some(e.to_string()),
                 }
             }
@@ -164,6 +190,10 @@ impl MatchScreen {
             }
             (_, Some(_)) | (Message::Form(_), None) => Outcome::Stay,
             (Message::OpenAsA, None) => self.open_as_a(),
+            (Message::Map, None) => {
+                self.open_map(s);
+                Outcome::Stay
+            }
             (Message::Stats, None) => self.stats(),
             // seen by B: only the result (and the statistics, of both sides)
             (_, None) if seen_by_b => Outcome::Stay,
@@ -301,11 +331,21 @@ impl MatchScreen {
             .spacing(8)
             .align_y(Alignment::Center)
         };
-        let facts = row![
+        let mut facts = row![
             fact(theme::icons::CALENDAR, s.day(&d.date)),
             fact(place_icon, place.to_string()),
         ]
-        .spacing(24);
+        .spacing(24)
+        .align_y(Alignment::Center);
+        if let Some(v) = &self.venue {
+            facts = facts.push(fact(
+                theme::icons::GYM,
+                crate::venue_choice::venue_label(s, &v.name, v.deleted),
+            ));
+            if !v.deleted {
+                facts = facts.push(ui::pill(s.open_in_map, false, Some(Message::Map), c));
+            }
+        }
         let notes: Element<'a, Message> = match d.notes.trim().is_empty() {
             true => space::vertical().height(0).into(),
             false => column![
@@ -428,4 +468,12 @@ impl MatchScreen {
         .spacing(10)
         .into()
     }
+}
+
+/// The gym of a match, when it has one and it can be read.
+fn venue_of(core: &Scout4All, details: &MatchDetails) -> Option<VenueRecord> {
+    details
+        .venue_id
+        .as_ref()
+        .and_then(|id| core.venue(id.clone()).ok())
 }

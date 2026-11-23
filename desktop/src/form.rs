@@ -1859,7 +1859,10 @@ mod tests {
         assert_eq!(f.key(BACK_KEY), Outcome::Stay);
         assert_eq!(f.picker, None);
         f.update(Message::Calendar(0));
-        assert_eq!(f.update(Message::Day(day(2026, 12, 5))), Outcome::Changed(0));
+        assert_eq!(
+            f.update(Message::Day(day(2026, 12, 5))),
+            Outcome::Changed(0)
+        );
         assert_eq!(f.text(0), "2026-12-05");
         assert_eq!(f.picker, None);
         assert_eq!(f.key(BACK_KEY), Outcome::Cancel);

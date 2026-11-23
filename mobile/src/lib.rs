@@ -1160,6 +1160,8 @@ pub struct MatchDetails {
     /// scouted on both sides: the statistics of each team can be read
     /// (`MatchSide`)
     pub both_sides: bool,
+    /// the gym it's played in, if one is set
+    pub venue_id: Option<String>,
 }
 
 /// The team of a match whose statistics are read: A, the team that
@@ -4093,6 +4095,7 @@ impl Scout4All {
             notes: m.notes.clone(),
             scouted_by: None,
             both_sides: row.scouting == ScoutingMode::Both,
+            venue_id: row.venue_id.map(|v| v.to_string()),
         };
         Ok(match seen_by_b {
             Some((a, home)) => MatchDetails {

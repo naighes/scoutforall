@@ -42,6 +42,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -97,6 +98,28 @@ internal fun openVenueMap(app: android.content.Context, geo: String?, web: Strin
             return
         } catch (_: ActivityNotFoundException) {
         }
+    }
+}
+
+/** "Open in the map" for the gym of a session or a match: the `geo:` address
+ * (the map app of the phone), else the page of its link. */
+@Composable
+internal fun VenueMapButton(venueId: String) {
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    val scope = rememberCoroutineScope()
+    androidx.compose.material3.TextButton(onClick = {
+        scope.launch {
+            val (geo, web) = try {
+                app.core { it.venueGeoUri(venueId) to it.venueWebUrl(venueId) }
+            } catch (_: MobileException) {
+                null to null
+            }
+            openVenueMap(app, geo, web)
+        }
+    }) {
+        Icon(Icons.Filled.Place, contentDescription = null)
+        androidx.compose.foundation.layout.Spacer(Modifier.width(8.dp))
+        Text(stringResource(R.string.venue_open_map))
     }
 }
 

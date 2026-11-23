@@ -240,6 +240,14 @@ private fun MatchHeader(m: MatchDetails) {
         fontWeight = FontWeight.SemiBold,
         color = resultColor(m.finished, m.won.toInt(), m.lost.toInt()),
     )
+    m.venueId?.let { id ->
+        Text(
+            venueLabel(id).orEmpty(),
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp),
+            style = MaterialTheme.typography.bodyLarge,
+        )
+        VenueMapButton(id)
+    }
 }
 
 @Composable
