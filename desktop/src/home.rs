@@ -255,21 +255,19 @@ impl HomeScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.editor {
             Some(editor) => editor.hints(s),
-            None if self.panel == WEEK => {
-                [
-                    vec![("← → ⇧⇥ ⇥".to_string(), s.panel.to_string())],
-                    self.week.hints(s),
-                    vec![
-                        ("Enter".to_string(), s.open.to_string()),
-                        ("n".to_string(), s.new_team.to_string()),
-                        ("i".to_string(), s.import_archive.to_string()),
-                        ("c".to_string(), s.competitions.to_string()),
-                        ("g".to_string(), s.venues.to_string()),
-                        ("F2".to_string(), s.settings.to_string()),
-                    ],
-                ]
-                .concat()
-            }
+            None if self.panel == WEEK => [
+                vec![("← → ⇧⇥ ⇥".to_string(), s.panel.to_string())],
+                self.week.hints(s),
+                vec![
+                    ("Enter".to_string(), s.open.to_string()),
+                    ("n".to_string(), s.new_team.to_string()),
+                    ("i".to_string(), s.import_archive.to_string()),
+                    ("c".to_string(), s.competitions.to_string()),
+                    ("g".to_string(), s.venues.to_string()),
+                    ("F2".to_string(), s.settings.to_string()),
+                ],
+            ]
+            .concat(),
             None => vec![
                 ("← → ⇧⇥ ⇥".to_string(), s.panel.to_string()),
                 ("↑ ↓".to_string(), String::new()),

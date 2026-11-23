@@ -568,7 +568,7 @@ impl Editor {
                 s.date_placeholder,
             ),
             Field::text(s.height, start.height_cm.clone()).placeholder(s.height_placeholder),
-            Field::text(s.notes, start.notes.clone()),
+            Field::lines(s.notes, start.notes.clone()),
         ];
         let title = match id {
             Some(_) => s.edit_player,
@@ -731,7 +731,7 @@ impl Editor {
                 PLAYER_HEIGHT,
                 Field::text("", start.height_cm.clone()).value,
             ),
-            (PLAYER_NOTES, Field::text("", start.notes.clone()).value),
+            (PLAYER_NOTES, Field::lines("", start.notes.clone()).value),
         ];
         for (field, value) in values {
             if let Some(f) = self.form.fields.get_mut(field) {
@@ -838,7 +838,7 @@ impl Editor {
             ),
             Field::text(s.round, data.round.clone()).placeholder(s.round_placeholder),
             Field::text(s.max_substitutions, data.max_substitutions.clone()),
-            Field::text(s.notes, data.notes.clone()),
+            Field::lines(s.notes, data.notes.clone()),
         ];
         let title = match id {
             Some(_) => s.edit_match,
@@ -1869,13 +1869,15 @@ impl Editor {
             ])
             .collect(),
             // the details of a match: Enter goes on to the score sheet
-            (false, false) => Form::hints(s)
-                .into_iter()
-                .map(|(k, what)| match (k.as_str(), &self.kind) {
-                    ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
-                    _ => (k, what),
-                })
-                .collect(),
+            (false, false) => self.form.on_field(
+                Form::hints(s)
+                    .into_iter()
+                    .map(|(k, what)| match (k.as_str(), &self.kind) {
+                        ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
+                        _ => (k, what),
+                    })
+                    .collect(),
+            ),
         }
     }
 

@@ -714,7 +714,7 @@ impl TrainingScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
             Mode::Page(page) => page.hints(s),
-            Mode::New(_) => Form::hints(s),
+            Mode::New(editor) => editor.form.on_field(Form::hints(s)),
             Mode::Series(editor) if !editor.conflicts.is_empty() => vec![
                 ("Enter".to_string(), s.create_others.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),

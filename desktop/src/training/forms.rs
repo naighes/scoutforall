@@ -163,9 +163,9 @@ impl SessionEditor {
                 ..Field::choice(s.session_location, vec![], 0)
             },
             Field::text(s.session_title, draft.title.clone()),
-            Field::text(s.objectives, draft.objectives.clone()),
-            Field::text(s.notes, draft.notes.clone()),
-            Field::text(s.final_remarks, draft.final_remarks.clone()),
+            Field::lines(s.objectives, draft.objectives.clone()),
+            Field::lines(s.notes, draft.notes.clone()),
+            Field::lines(s.final_remarks, draft.final_remarks.clone()),
             Field::text(s.session_actual, draft.actual_duration.clone()),
             Field::choice(s.microcycle, vec![EMPTY.to_string()], 0),
         ];
@@ -347,10 +347,10 @@ impl ActivityEditor {
         let names = [s.status_planned, s.status_completed, s.status_skipped];
         let fields = vec![
             Field::text(s.name, draft.name),
-            Field::text(s.activity_description, draft.description),
+            Field::lines(s.activity_description, draft.description),
             Field::text(s.activity_planned, draft.planned),
             Field::text(s.activity_actual, draft.actual),
-            Field::text(s.notes, draft.notes),
+            Field::lines(s.notes, draft.notes),
             Field::choice(
                 s.status_planned,
                 names.iter().map(|n| n.to_string()).collect(),

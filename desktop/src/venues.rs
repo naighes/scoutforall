@@ -53,7 +53,7 @@ impl VenueEditor {
             Field::text(s.venue_map_link, draft.map_url),
             Field::text(s.venue_latitude, draft.latitude),
             Field::text(s.venue_longitude, draft.longitude),
-            Field::text(s.notes, draft.notes),
+            Field::lines(s.notes, draft.notes),
             Field::check(s.venue_pinned, draft.pinned, false),
         ];
         Ok(VenueEditor {
@@ -394,7 +394,7 @@ impl VenuesScreen {
             false => s.pin_venue,
         };
         match &self.mode {
-            Mode::Edit(_) => Form::hints(s),
+            Mode::Edit(editor) => editor.form.on_field(Form::hints(s)),
             Mode::Delete(_) => vec![
                 ("Enter".to_string(), s.delete_venue.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),

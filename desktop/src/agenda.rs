@@ -302,7 +302,10 @@ pub fn today_box<'a, M: 'a>(content: impl Into<Element<'a, M>>, c: Colors) -> El
         .width(Length::Fill)
         .padding(Padding::from([4, 6]))
         .style(move |_| container::Style {
-            background: Some(Background::Color(Color { a: 0.07, ..c.accent })),
+            background: Some(Background::Color(Color {
+                a: 0.07,
+                ..c.accent
+            })),
             border: iced::border::rounded(6),
             ..container::Style::default()
         })

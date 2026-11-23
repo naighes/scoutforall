@@ -13,7 +13,7 @@ use {
         Alignment, Element, Length, Padding,
         widget::{
             Column, Id, Row, button, column, container, overlay::menu, pick_list, row, text,
-            text_input,
+            text_editor, text_input,
         },
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
@@ -22,6 +22,13 @@ use {
 #[derive(Debug, Clone)]
 pub enum Value {
     Text(String),
+    /// a text of more lines (goals, notes): Enter starts a new line, ↑ on
+    /// the first line and ↓ on the last go to the field before and after,
+    /// ⌘Enter saves; `text` is what `content`, the editor's, holds
+    Lines {
+        text: String,
+        content: text_editor::Content,
+    },
     /// a date or an hour, written with the help of `mask`: only what can
     /// be one is taken, the separators come by themselves
     Masked {
@@ -214,6 +221,18 @@ impl Field {
         Field::of(label, Value::Text(value.into()))
     }
 
+    /// A text of more lines.
+    pub fn lines(label: &str, value: impl Into<String>) -> Field {
+        let text = value.into();
+        Field::of(
+            label,
+            Value::Lines {
+                content: text_editor::Content::with_text(&text),
+                text,
+            },
+        )
+    }
+
     /// A date or an hour, guided; `placeholder` says how to write it.
     pub fn masked(label: &str, value: &str, mask: Mask, placeholder: &str) -> Field {
         Field {
@@ -283,6 +302,8 @@ impl Field {
 #[derive(Debug, Clone)]
 pub enum Message {
     Input(usize, String),
+    /// what the editor of a text of more lines did: written, clicked, moved
+    Edit(usize, text_editor::Action),
     Choose(usize, usize),
     /// a suggestion of a search taken
     Take(usize, usize),
@@ -352,6 +373,12 @@ fn in_sight(top: usize, row: usize) -> usize {
     }
 }
 
+/// The key that saves from a text of more lines, where Enter starts a line.
+const SAVE_FROM_LINES: &str = match cfg!(target_os = "macos") {
+    true => "⌘Enter",
+    false => "⌃Enter",
+};
+
 /// The focus on nothing: on a choice, no text field takes the keys.
 const NO_FIELD: &str = "form-no-field";
 
@@ -375,7 +402,10 @@ pub fn is_redo(ck: KeyCombination) -> bool {
 /// The text of a field that's written.
 fn written(value: &Value) -> Option<&String> {
     match value {
-        Value::Text(text) | Value::Masked { text, .. } | Value::Search { text, .. } => Some(text),
+        Value::Text(text)
+        | Value::Masked { text, .. }
+        | Value::Search { text, .. }
+        | Value::Lines { text, .. } => Some(text),
         _ => None,
     }
 }
@@ -429,6 +459,29 @@ fn completion(value: &Value) -> Option<(usize, String)> {
             }
         }
         _ => None,
+    }
+}
+
+/// The least height of a text of more lines: three of them.
+const LINES_HEIGHT: f32 = 84.0;
+
+/// The keys of a text of more lines: the editor's, except ↑ on its first
+/// line and ↓ on its last (to the field before, after), ⌘Enter (saves) and
+/// Tab (to the next field), left to the form.
+fn lines_binding<M>(
+    content: &text_editor::Content,
+    press: text_editor::KeyPress,
+) -> Option<text_editor::Binding<M>> {
+    use iced::keyboard::{Key, key::Named};
+    let line = content.cursor().position.line;
+    let last = content.line_count().saturating_sub(1);
+    let plain = !(press.modifiers.shift() || press.modifiers.command() || press.modifiers.alt());
+    match (press.key.as_ref(), plain, press.modifiers.command()) {
+        (Key::Named(Named::ArrowUp), true, _) if line == 0 => None,
+        (Key::Named(Named::ArrowDown), true, _) if line >= last => None,
+        (Key::Named(Named::Enter), _, true) => None,
+        (Key::Named(Named::Tab), ..) => None,
+        _ => text_editor::Binding::from_key_press(press),
     }
 }
 
@@ -526,6 +579,10 @@ impl Form {
                 dropdown,
                 browsing: false,
                 top: 0,
+            },
+            Value::Lines { .. } => Value::Lines {
+                content: text_editor::Content::with_text(&text),
+                text,
             },
             _ => Value::Text(text),
         };
@@ -634,6 +691,35 @@ impl Form {
         Outcome::Changed(field)
     }
 
+    /// What the editor of the text of more lines `field` did; a change is
+    /// undone a word at a time, as in the other fields.
+    fn edit(&mut self, field: usize, action: text_editor::Action) -> Outcome {
+        let last = self.undo.last().map(|(f, _)| *f);
+        let Some(f) = self.fields.get_mut(field) else {
+            return Outcome::Stay;
+        };
+        let editing = action.is_edit();
+        let before = f.value.clone();
+        let Value::Lines { text, content } = &mut f.value else {
+            return Outcome::Stay;
+        };
+        self.focused = field;
+        content.perform(action);
+        let written = content.text();
+        let word = last != Some(field) || text.ends_with(char::is_whitespace) || text.is_empty();
+        match (editing, written == *text) {
+            (true, false) => {
+                *text = written;
+                if word {
+                    self.undo.push((field, before));
+                }
+                self.redo.clear();
+                Outcome::Changed(field)
+            }
+            _ => Outcome::Stay,
+        }
+    }
+
     /// The suggestion lit moved by `step`, and written in the field: past
     /// the first or the last one, none, and what was written comes back.
     fn highlight(&mut self, step: isize) {
@@ -728,6 +814,7 @@ impl Form {
     pub fn update(&mut self, message: Message) -> Outcome {
         match message {
             Message::Input(field, value) => self.write(field, value),
+            Message::Edit(field, action) => self.edit(field, action),
             Message::Take(field, chosen) => self.take(field, chosen),
             Message::Open(field) => self.open(field),
             Message::Scroll(field, step) => {
@@ -832,7 +919,7 @@ impl Form {
     fn move_key(&mut self, ck: KeyCombination) -> Outcome {
         match ck {
             k if k == BACK_KEY => Outcome::Cancel,
-            k if k == key!(enter) => Outcome::Save,
+            k if k == key!(enter) || k == key!(ctrl - enter) => Outcome::Save,
             k if is_previous(k) => {
                 self.focused = self.step(true);
                 Outcome::Stay
@@ -860,6 +947,23 @@ impl Form {
             ("Enter".to_string(), s.save.to_string()),
             ("Esc".to_string(), s.cancel.to_string()),
         ]
+    }
+
+    /// The hints as they are on the field the keys are on: in a text of
+    /// more lines Enter starts a line, ⌘Enter does what Enter does
+    /// elsewhere.
+    pub fn on_field(&self, hints: Vec<(String, String)>) -> Vec<(String, String)> {
+        let lines = matches!(
+            self.fields.get(self.focused).map(|f| &f.value),
+            Some(Value::Lines { .. })
+        );
+        hints
+            .into_iter()
+            .map(|(k, what)| match (lines, k.as_str()) {
+                (true, "Enter") => (SAVE_FROM_LINES.to_string(), what),
+                _ => (k, what),
+            })
+            .collect()
     }
 
     pub fn view<'a, M: Clone + 'a>(
@@ -988,6 +1092,32 @@ impl Form {
         };
         let input: Element<'a, M> = match &f.value {
             Value::Text(value) => input(value, field::Follow::Never),
+            Value::Lines { content, .. } => field::guard(
+                text_editor(content)
+                    .id(format!("form-field-{i}"))
+                    .placeholder(f.placeholder.as_str())
+                    .on_action(move |a| on(Message::Edit(i, a)))
+                    .key_binding(move |press| lines_binding(content, press))
+                    .size(SIZE_BODY)
+                    .min_height(LINES_HEIGHT)
+                    .padding(Padding::from([8, 12]))
+                    .style(move |_, status| {
+                        let active =
+                            focused || matches!(status, text_editor::Status::Focused { .. });
+                        text_editor::Style {
+                            background: c.background.into(),
+                            border: edge(active),
+                            placeholder: c.muted,
+                            value: c.text,
+                            selection: iced::Color {
+                                a: 0.35,
+                                ..c.accent
+                            },
+                        }
+                    }),
+                field::Follow::Never,
+            )
+            .into(),
             Value::Masked { text, .. } => input(text, field::Follow::Typing),
             Value::Search {
                 text: written,
@@ -1312,6 +1442,84 @@ mod tests {
                 Field::text("number", "9"),
             ],
         )
+    }
+
+    /// A text of more lines: what the editor writes is the text, Enter in
+    /// it a new line (not a save), ⌘Enter saves, the change is undone.
+    #[test]
+    fn a_text_of_more_lines_takes_new_lines_and_saves_with_command_enter() {
+        use text_editor::{Action, Edit};
+        let mut form = Form::new(
+            "t",
+            vec![Field::text("title", ""), Field::lines("notes", "")],
+        );
+        for c in "uno".chars() {
+            form.update(Message::Edit(1, Action::Edit(Edit::Insert(c))));
+        }
+        assert_eq!(
+            form.update(Message::Edit(1, Action::Edit(Edit::Enter))),
+            Outcome::Changed(1)
+        );
+        for c in "due".chars() {
+            form.update(Message::Edit(1, Action::Edit(Edit::Insert(c))));
+        }
+        assert_eq!(form.text(1), "uno\ndue");
+        assert_eq!(form.focused, 1);
+        assert_eq!(form.focus_id(), Id::from("form-field-1"));
+        // moving the cursor changes nothing
+        assert_eq!(
+            form.update(Message::Edit(1, Action::Move(text_editor::Motion::Home))),
+            Outcome::Stay
+        );
+        assert_eq!(form.key(key!(ctrl - enter)), Outcome::Save);
+        // the footer says it there, Enter elsewhere
+        let saves = |form: &Form| -> String {
+            let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+            form.on_field(Form::hints(s))
+                .into_iter()
+                .find(|(_, what)| what == s.save)
+                .map(|(k, _)| k)
+                .unwrap_or_default()
+        };
+        assert_eq!(saves(&form), SAVE_FROM_LINES);
+        form.update(Message::Focus(0));
+        assert_eq!(saves(&form), "Enter");
+        form.key(key!(ctrl - z));
+        assert_eq!(form.text(1), "uno\n");
+    }
+
+    fn press(named: iced::keyboard::key::Named) -> text_editor::KeyPress {
+        use iced::keyboard::{
+            Key, Modifiers,
+            key::{NativeCode, Physical},
+        };
+        text_editor::KeyPress {
+            key: Key::Named(named),
+            modified_key: Key::Named(named),
+            physical_key: Physical::Unidentified(NativeCode::Unidentified),
+            modifiers: Modifiers::empty(),
+            text: None,
+            status: text_editor::Status::Focused { is_hovered: false },
+        }
+    }
+
+    /// ↑ on the first line and ↓ on the last are left to the form (to the
+    /// field before, after), inside they move the cursor; Enter is the
+    /// editor's, Tab the form's.
+    #[test]
+    fn the_arrows_leave_a_text_of_more_lines_only_at_its_ends() {
+        use iced::keyboard::key::Named;
+        let mut content = text_editor::Content::with_text("uno\ndue");
+        let binding =
+            |content: &text_editor::Content, key| lines_binding::<()>(content, press(key));
+        // the cursor on the first line
+        assert!(binding(&content, Named::ArrowUp).is_none());
+        assert!(binding(&content, Named::ArrowDown).is_some());
+        assert!(binding(&content, Named::Enter).is_some());
+        assert!(binding(&content, Named::Tab).is_none());
+        content.perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
+        assert!(binding(&content, Named::ArrowUp).is_some());
+        assert!(binding(&content, Named::ArrowDown).is_none());
     }
 
     fn countries() -> Vec<Suggestion> {

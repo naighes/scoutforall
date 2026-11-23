@@ -5,7 +5,6 @@
 
 use {
     super::forms::{Edited, clash_warning, cycle_label, day_of},
-    chrono::NaiveDate,
     crate::{
         calendar::text_of,
         form::{self, Field, Form, Mask, Outcome, Value},
@@ -13,6 +12,7 @@ use {
         theme::{self, Colors, SIZE_SMALL},
         ui,
     },
+    chrono::NaiveDate,
     iced::{
         Alignment, Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
@@ -168,8 +168,8 @@ impl CycleEditor {
             Field::text(s.session_title, draft.title.clone()),
             Field::masked(s.cycle_start, &start, Mask::Date, s.date_placeholder),
             span,
-            Field::text(s.objectives, draft.objectives.clone()),
-            Field::text(s.notes, draft.notes.clone()),
+            Field::lines(s.objectives, draft.objectives.clone()),
+            Field::lines(s.notes, draft.notes.clone()),
         ];
         if parent_level.is_some() {
             fields.push(Field::choice(
@@ -1041,7 +1041,8 @@ impl CyclesTab {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
-            Mode::Editor(_) | Mode::Overlay(_) => Form::hints(s),
+            Mode::Editor(e) => e.form.on_field(Form::hints(s)),
+            Mode::Overlay(_) => Form::hints(s),
             Mode::Delete(deletion) => {
                 let mut hints = vec![("Enter".to_string(), s.delete.to_string())];
                 if deletion.children {
