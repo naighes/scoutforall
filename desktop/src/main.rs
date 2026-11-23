@@ -7,6 +7,7 @@
 // still answers whoever reads its output (the self update, the workflow)
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod agenda;
 mod calendar;
 mod charts;
 mod compare;
@@ -34,9 +35,12 @@ mod stats;
 mod strings;
 mod team;
 mod theme;
+mod training;
 mod transfer;
 mod ui;
 mod update;
+mod venue_choice;
+mod venues;
 mod video;
 
 use {
@@ -120,6 +124,7 @@ fn config(dir: &std::path::Path) -> (LanguageEnum, ScoutingKeys, Option<bool>) {
 enum Screen {
     Home(Box<HomeScreen>),
     Competitions(Box<competitions::CompetitionsScreen>),
+    Venues(Box<venues::VenuesScreen>),
     Team(Box<TeamScreen>),
     Match(Box<MatchScreen>),
     Start(Box<start::StartScreen>),
@@ -129,6 +134,7 @@ enum Screen {
     Events(Box<events::EventsScreen>),
     Video(Box<video::VideoScreen>),
     Live(Box<live::screen::LiveScreen>),
+    Training(Box<training::screen::TrainingScreen>),
 }
 
 /// Where a key or a click leads.
@@ -141,7 +147,11 @@ enum Go {
     Home,
     /// the competitions, from the home
     Competitions,
+    /// the gyms, from the home or from the training of a team (back there)
+    Venues(Option<String>),
     Team(String),
+    /// the training of the team: what it opens on
+    Training(String, training::screen::Open),
     Match(String, String),
     /// the statistics of the match of team A, from the page of team B
     Stats(String, String, Option<String>),
@@ -253,7 +263,9 @@ enum Message {
     OpenSettings,
     Home(home::Message),
     Competitions(competitions::Message),
+    Venues(venues::Message),
     Team(team::Message),
+    Training(training::screen::Message),
     Match(game::Message),
     Scouting(scouting::Message),
     Start(start::Message),
@@ -326,6 +338,7 @@ impl shots::Open {
             shots::Open::Stats(team, m) => Go::Stats(team, m, None),
             shots::Open::Analysis(team) => Go::Analysis(team),
             shots::Open::Video(team, m) => Go::Video(team, m),
+            shots::Open::Training(team) => Go::Training(team, training::screen::Open::Sessions),
         }
     }
 }
@@ -357,6 +370,14 @@ impl App {
                 Err(_) => std::process::exit(1),
             },
         };
+        let home = HomeScreen::new(
+            &core,
+            Home {
+                in_progress: vec![],
+                recent: vec![],
+                teams: vec![],
+            },
+        );
         let mut app = App {
             core,
             dir,
@@ -367,11 +388,7 @@ impl App {
             // the screenshots always dark, whatever was chosen
             theme: if quiet { None } else { theme },
             system_dark: true,
-            screen: Screen::Home(Box::new(HomeScreen::new(Home {
-                in_progress: vec![],
-                recent: vec![],
-                teams: vec![],
-            }))),
+            screen: Screen::Home(Box::new(home)),
             error,
             notice: None,
             importing: None,
@@ -412,7 +429,9 @@ impl App {
             (Some(_), _) => self.strings.settings.to_string(),
             (None, Screen::Home(_)) => String::new(),
             (None, Screen::Competitions(_)) => self.strings.competitions.to_string(),
+            (None, Screen::Venues(_)) => self.strings.venues.to_string(),
             (None, Screen::Team(screen)) => screen.title(),
+            (None, Screen::Training(screen)) => screen.title(self.strings),
             (None, Screen::Match(screen)) => screen.title(),
             (None, Screen::Start(screen)) => screen.title(),
             (None, Screen::Scouting(screen)) => screen.title(),
@@ -459,10 +478,16 @@ impl App {
             }
             Go::Home => core
                 .home()
-                .map(|home| Screen::Home(Box::new(HomeScreen::new(home)))),
+                .map(|home| Screen::Home(Box::new(HomeScreen::new(&core, home)))),
             Go::Competitions => competitions::CompetitionsScreen::new(core)
                 .map(|screen| Screen::Competitions(Box::new(screen))),
+            Go::Venues(team) => venues::VenuesScreen::new(core).map(|mut screen| {
+                screen.back_to = team;
+                Screen::Venues(Box::new(screen))
+            }),
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
+            Go::Training(team, open) => training::screen::TrainingScreen::new(core, team, open)
+                .map(|t| Screen::Training(Box::new(t))),
             Go::Match(team, m) => {
                 MatchScreen::new(core, team, m).map(|m| Screen::Match(Box::new(m)))
             }
@@ -619,6 +644,9 @@ impl App {
             transfer::Export::Team(_) => s.export_team,
             transfer::Export::Match(..) => s.export_match,
             transfer::Export::Report(..) => s.match_report,
+            transfer::Export::Training(_) => s.export_training,
+            transfer::Export::SessionSheet(..) => s.session_sheet_pdf,
+            transfer::Export::Microcycle(_) => s.plan_pdf,
         };
         match transfer::archive(&self.core, &export) {
             Ok((name, bytes)) => self.offer(transfer::Sharing {
@@ -775,7 +803,11 @@ impl App {
         match &self.screen {
             Screen::Home(_) => Go::Home,
             Screen::Competitions(_) => Go::Competitions,
+            Screen::Venues(v) => Go::Venues(v.back_to.clone()),
             Screen::Team(t) => Go::Team(t.team_id.clone()),
+            Screen::Training(t) => {
+                Go::Training(t.team_id.clone(), training::screen::Open::Sessions)
+            }
             Screen::Match(m) => Go::Match(m.team_id.clone(), m.match_id.clone()),
             Screen::Stats(st) => match st.match_id() {
                 Some(m) => Go::Stats(st.team_id.clone(), m, st.of_b.clone()),
@@ -866,7 +898,9 @@ impl App {
             (Some(settings), _) => settings.focus_id(),
             (None, Screen::Home(screen)) => screen.focus_id(),
             (None, Screen::Competitions(screen)) => screen.focus_id(),
+            (None, Screen::Venues(screen)) => screen.focus_id(),
             (None, Screen::Team(screen)) => screen.focus_id(),
+            (None, Screen::Training(screen)) => screen.focus_id(),
             (None, Screen::Match(screen)) => screen.focus_id(),
             (None, Screen::Dvw(screen)) => screen.focus_id(),
             (None, Screen::Video(screen)) => screen.focus_id(),
@@ -917,6 +951,7 @@ impl App {
             // video don't take the list back while scrolled
             Screen::Video(screen) => screen.take_scroll(),
             Screen::Stats(screen) => screen.take_scroll(),
+            Screen::Training(screen) => screen.scroll(),
             _ => None,
         };
         let task = match scroll {
@@ -931,6 +966,22 @@ impl App {
                 ),
             ]),
             _ => handled,
+        };
+        let task = match &mut self.screen {
+            Screen::Training(screen) => match screen.take_week_scroll() {
+                Some((id, y)) => Task::batch([
+                    task,
+                    iced::widget::operation::scroll_to(
+                        id,
+                        iced::widget::operation::AbsoluteOffset {
+                            x: None,
+                            y: Some(y),
+                        },
+                    ),
+                ]),
+                None => task,
+            },
+            _ => task,
         };
         let focus = self.focus_id();
         match focus == self.focused {
@@ -1294,11 +1345,23 @@ impl App {
                 competitions_go(screen.update(s, m))
             }
             (Message::Key(ck), Screen::Competitions(screen)) => competitions_go(screen.key(s, ck)),
+            (Message::Venues(m), Screen::Venues(screen)) => {
+                venues_go(screen.back_to.clone(), screen.update(s, m))
+            }
+            (Message::Key(ck), Screen::Venues(screen)) => {
+                venues_go(screen.back_to.clone(), screen.key(s, ck))
+            }
             (Message::Team(m), Screen::Team(screen)) => {
                 team_go(&screen.team_id.clone(), screen.update(s, m))
             }
             (Message::Key(ck), Screen::Team(screen)) => {
                 team_go(&screen.team_id.clone(), screen.key(s, ck))
+            }
+            (Message::Training(m), Screen::Training(screen)) => {
+                training_go(&screen.team_id.clone(), screen.update(s, m))
+            }
+            (Message::Key(ck), Screen::Training(screen)) => {
+                training_go(&screen.team_id.clone(), screen.key(s, ck))
             }
             (Message::Match(m), Screen::Match(screen)) => {
                 let outcome = screen.update(s, m);
@@ -1402,6 +1465,11 @@ impl App {
                 (None, None, Screen::Home(screen)) => {
                     (screen.view(s, c).map(Message::Home), screen.hints(s), false)
                 }
+                (None, None, Screen::Venues(screen)) => (
+                    screen.view(s, c).map(Message::Venues),
+                    screen.hints(s),
+                    true,
+                ),
                 (None, None, Screen::Competitions(screen)) => (
                     screen.view(s, c).map(Message::Competitions),
                     screen.hints(s),
@@ -1410,6 +1478,11 @@ impl App {
                 (None, None, Screen::Team(screen)) => {
                     (screen.view(s, c).map(Message::Team), screen.hints(s), true)
                 }
+                (None, None, Screen::Training(screen)) => (
+                    screen.view(s, c).map(Message::Training),
+                    screen.hints(s),
+                    true,
+                ),
                 (None, None, Screen::Match(screen)) => {
                     (screen.view(s, c).map(Message::Match), screen.hints(s), true)
                 }
@@ -1634,7 +1707,18 @@ fn home_go(outcome: home::Outcome) -> Go {
         home::Outcome::Scout(open) => Go::Scout(open),
         home::Outcome::Match(team, m) => Go::Match(team, m),
         home::Outcome::Team(team) => Go::Team(team),
+        home::Outcome::Training(team, open) => Go::Training(team, open),
         home::Outcome::Competitions => Go::Competitions,
+        home::Outcome::Venues => Go::Venues(None),
+    }
+}
+
+/// Back from the gyms: to the training they were opened from, or home.
+fn venues_go(back_to: Option<String>, outcome: venues::Outcome) -> Go {
+    match (outcome, back_to) {
+        (venues::Outcome::Stay, _) => Go::Stay,
+        (venues::Outcome::Back, Some(team)) => Go::Training(team, training::screen::Open::Sessions),
+        (venues::Outcome::Back, None) => Go::Home,
     }
 }
 
@@ -1655,6 +1739,18 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
         team::Outcome::OpenTeam(team) => Go::Team(team),
+        team::Outcome::Training(open) => Go::Training(team_id.to_string(), open),
+    }
+}
+
+fn training_go(team_id: &str, outcome: training::screen::Outcome) -> Go {
+    match outcome {
+        training::screen::Outcome::Stay => Go::Stay,
+        training::screen::Outcome::Back => Go::Team(team_id.to_string()),
+        training::screen::Outcome::Match(id) => Go::Match(team_id.to_string(), id),
+        training::screen::Outcome::NewMatch { team, id } => Go::Match(team, id),
+        training::screen::Outcome::Export(export) => Go::Export(export),
+        training::screen::Outcome::Venues => Go::Venues(Some(team_id.to_string())),
     }
 }
 
@@ -2083,4 +2179,24 @@ fn save(sharing: transfer::Sharing) -> Task<Message> {
     Task::perform(transfer::save_to(sharing.name), move |path| {
         Message::Exported(path, content.clone())
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The gyms opened from the training of a team go back to it; from
+    /// the home, home.
+    #[test]
+    fn the_gyms_go_back_where_they_were_opened() {
+        assert!(matches!(
+            venues_go(Some("team".into()), venues::Outcome::Back),
+            Go::Training(t, training::screen::Open::Sessions) if t == "team"
+        ));
+        assert!(matches!(venues_go(None, venues::Outcome::Back), Go::Home));
+        assert!(matches!(
+            training_go("team", training::screen::Outcome::Venues),
+            Go::Venues(Some(t)) if t == "team"
+        ));
+    }
 }

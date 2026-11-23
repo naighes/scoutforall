@@ -20,7 +20,7 @@ pub(crate) mod tests {
                 Database,
                 archive::{
                     FORMAT, Imported, Kind, MANIFEST, Manifest, MatchPreview, Merged, Preview,
-                    Subject, export, import, manifest, preview, zip_files,
+                    Subject, TrainingMerged, export, import, manifest, preview, zip_files,
                 },
                 matches::{SqliteMatchReader, SqliteMatchWriter},
                 sets::SqliteSetWriter,
@@ -263,7 +263,8 @@ pub(crate) mod tests {
             (m.format, m.schema, m.kind, m.id, m.app_version.as_str()),
             (
                 FORMAT,
-                crate::db::schema_version(),
+                // no gyms nor training: the schema of v1.1.0, which reads it
+                4,
                 Kind::Team,
                 id,
                 env!("CARGO_PKG_VERSION")
@@ -490,6 +491,7 @@ pub(crate) mod tests {
                 competitions: same(0),
                 matches: 0,
                 matches_here: 1,
+                training: Default::default(),
             }
         );
         assert_eq!(rows(&s.db), before);
@@ -747,6 +749,7 @@ pub(crate) mod tests {
         changed.insert(
             "manifest.json".into(),
             serde_json::to_value(Manifest {
+                contents: None,
                 kind: Kind::Team,
                 id: s.team.id,
                 ..manifest(&archive).unwrap()
@@ -866,6 +869,7 @@ pub(crate) mod tests {
         changed.insert(
             "manifest.json".into(),
             serde_json::to_value(Manifest {
+                contents: None,
                 id: Uuid::new_v4(),
                 ..serde_json::from_value(changed["manifest.json"].clone()).unwrap()
             })
@@ -949,6 +953,7 @@ pub(crate) mod tests {
             competitions: Merged::default(),
             matches: 1,
             matches_here: 0,
+            training: TrainingMerged::default(),
         };
         assert_eq!(imported(Kind::Match).summary(EN), None);
         assert_eq!(

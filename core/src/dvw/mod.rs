@@ -15,7 +15,9 @@ pub(crate) mod scout;
 pub(crate) mod text;
 
 use crate::dvw::{
-    meta::{Line, attack_combinations, match_info, players, program, sets, teams, winning_symbols},
+    meta::{
+        Line, attack_combinations, hall, match_info, players, program, sets, teams, winning_symbols,
+    },
     model::DvwFile,
     scout::scout_lines,
 };
@@ -85,6 +87,7 @@ pub fn parse(bytes: &[u8]) -> Result<DvwFile, DvwError> {
         generator: program(header, "GENERATOR"),
         last_change: program(header, "LASTCHANGE"),
         match_info: match_info(section("[3MATCH]")?)?,
+        venue: hall(section("[3MORE]").unwrap_or_default()),
         home,
         visiting,
         sets: sets(section("[3SET]")?)?,

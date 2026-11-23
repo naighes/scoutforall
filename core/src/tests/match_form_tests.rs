@@ -48,6 +48,7 @@ mod tests {
             round: None,
             max_substitutions: m.max_substitutions,
             notes: m.notes.clone(),
+            venue_id: None,
             source: m.source,
             video_clock: m.video_clock,
             legacy: None,

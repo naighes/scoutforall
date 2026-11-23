@@ -127,35 +127,98 @@ pub fn pill<'a, M: Clone + 'a>(
     message: Option<M>,
     c: Colors,
 ) -> Element<'a, M> {
-    button(
+    pill_of(
         text(label.to_string())
             .size(SIZE_SMALL)
-            .align_x(Alignment::Center),
+            .align_x(Alignment::Center)
+            .into(),
+        chosen,
+        message,
+        c,
     )
-    .padding(Padding::from([4, 14]))
-    .on_press_maybe(message)
-    .style(move |_, status| {
-        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-        button::Style {
-            background: match chosen {
-                true => Some(Background::Color(c.accent)),
-                false => None,
-            },
-            text_color: match chosen {
-                true => c.on_accent,
-                false => c.text,
-            },
-            border: border(
-                match (chosen, hovered) {
-                    (true, _) => c.accent,
-                    (false, true) => Color { a: 0.7, ..c.accent },
-                    (false, false) => c.border,
+}
+
+/// A `pill` with an icon before its words, for a place to go (the gyms).
+pub fn icon_pill<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    message: M,
+    c: Colors,
+) -> Element<'a, M> {
+    pill_of(
+        row![
+            icon(icon_bytes, SIZE_SMALL + 2.0, c.text),
+            text(label.to_string()).size(SIZE_SMALL)
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into(),
+        false,
+        Some(message),
+        c,
+    )
+}
+
+fn pill_of<'a, M: Clone + 'a>(
+    content: Element<'a, M>,
+    chosen: bool,
+    message: Option<M>,
+    c: Colors,
+) -> Element<'a, M> {
+    button(content)
+        .padding(Padding::from([4, 14]))
+        .on_press_maybe(message)
+        .style(move |_, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: match chosen {
+                    true => Some(Background::Color(c.accent)),
+                    false => None,
                 },
-                BORDER,
-                RADIUS_PILL,
-            ),
-            ..button::Style::default()
-        }
+                // a pill that does nothing looks like it: a click on it was
+                // taken for a broken button
+                text_color: match (chosen, status) {
+                    (true, _) => c.on_accent,
+                    (false, button::Status::Disabled) => c.muted,
+                    (false, _) => c.text,
+                },
+                border: border(
+                    match (chosen, hovered) {
+                        (true, _) => c.accent,
+                        (false, true) => Color { a: 0.7, ..c.accent },
+                        (false, false) => c.border,
+                    },
+                    BORDER,
+                    RADIUS_PILL,
+                ),
+                ..button::Style::default()
+            }
+        })
+        .into()
+}
+
+/// The room of `mark_box`, kept by the rows that can't be marked.
+pub const MARK_WIDTH: f32 = 28.0;
+
+/// The box that marks a row, beside it: a click toggles it.
+pub fn mark_box<'a, M: Clone + 'a>(marked: bool, message: M, c: Colors) -> Element<'a, M> {
+    button(
+        text(match marked {
+            true => "☑",
+            false => "☐",
+        })
+        .size(SIZE_BODY)
+        .align_x(Alignment::Center),
+    )
+    .width(Length::Fixed(MARK_WIDTH))
+    .padding(Padding::from([2, 4]))
+    .on_press(message)
+    .style(move |_, status| button::Style {
+        text_color: match (marked, status) {
+            (true, _) | (false, button::Status::Hovered | button::Status::Pressed) => c.accent,
+            (false, _) => c.muted,
+        },
+        ..button::Style::default()
     })
     .into()
 }
@@ -570,32 +633,54 @@ pub fn top_bar<'a, M: Clone + 'a>(
 }
 
 /// The bar at the bottom: the version on the left, the keys of the screen
-/// on the right.
+/// on the right; the keys that don't fit in the width go on a second line,
+/// never cut nor broken in the middle.
 pub fn bottom_bar<'a, M: 'a>(hints: Vec<(String, String)>, c: Colors) -> Element<'a, M> {
     let hints = row(hints.into_iter().map(|(key, what)| {
-        row![keycap(&key, c), text(what).size(SIZE_SMALL).color(c.muted)]
-            .spacing(6)
-            .align_y(Alignment::Center)
-            .into()
+        row![
+            keycap(&key, c),
+            text(what)
+                .size(SIZE_SMALL)
+                .color(c.muted)
+                .wrapping(text::Wrapping::None)
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into()
     }))
-    .spacing(18);
+    .spacing(18)
+    .width(Length::Fill)
+    .wrap()
+    .vertical_spacing(4)
+    .align_x(Alignment::End);
     column![
         line(c.border, 1.0),
-        bar(
+        container(
             row![
                 text(format!("v{}", scout4all_mobile::version()))
                     .size(SIZE_SMALL)
-                    .color(c.muted),
-                space::horizontal(),
+                    .color(c.muted)
+                    .wrapping(text::Wrapping::None),
                 hints,
+                // one line high at least, as the bar on top
+                space::vertical().height(BOTTOM_LINE).width(0),
             ]
+            .spacing(18)
             .align_y(Alignment::Center),
-            36.0,
-            c,
-        ),
+        )
+        .width(Length::Fill)
+        .padding(Padding::from([BOTTOM_PADDING, 18.0]))
+        .style(move |_| container::Style {
+            background: Some(c.bar.into()),
+            ..container::Style::default()
+        }),
     ]
     .into()
 }
+
+/// The bar at the bottom is 36 high with one line of keys.
+const BOTTOM_PADDING: f32 = 4.0;
+const BOTTOM_LINE: f32 = 36.0 - 2.0 * BOTTOM_PADDING;
 
 /// Plain text of the body.
 pub fn body<'a>(s: impl ToString) -> iced::widget::Text<'a> {
@@ -681,7 +766,7 @@ pub fn confirm_deletion<'a, M: Clone + 'a>(
     on_no: M,
     c: Colors,
 ) -> Element<'a, M> {
-    confirm_deletion_with(s, what, vec![], s.delete_forever, on_yes, on_no, c)
+    confirm_deletion_with(s, what, vec![], s.delete, on_yes, on_no, c)
 }
 
 /// As `confirm_deletion`, with other answers before the main one, `yes`

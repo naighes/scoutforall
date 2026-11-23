@@ -1,0 +1,39 @@
+use crate::{
+    errors::AppError,
+    training::{Activity, ActivityHit, AttendanceRow, AttendanceSheet, TrainingSession},
+};
+use async_trait::async_trait;
+use uuid::Uuid;
+
+#[async_trait]
+pub trait TrainingReader {
+    /// The sessions of a team not removed, by start.
+    async fn sessions(&self, team_id: &Uuid) -> Result<Vec<TrainingSession>, AppError>;
+
+    /// The session, or an error when it's removed or there's none.
+    async fn session(&self, session_id: &Uuid) -> Result<TrainingSession, AppError>;
+
+    /// The activities of the session not removed, in order. Empty when the
+    /// session is removed.
+    async fn activities(&self, session_id: &Uuid) -> Result<Vec<Activity>, AppError>;
+
+    /// The activities written before whose name holds `query` (case
+    /// aside; all when empty), the first `limit`: the ones of `team_id` in
+    /// front, then by the latest session. The same name and description
+    /// appear once. With `only_team` those of the team only.
+    async fn search_activities(
+        &self,
+        team_id: &Uuid,
+        query: &str,
+        only_team: bool,
+        limit: usize,
+    ) -> Result<Vec<ActivityHit>, AppError>;
+
+    /// The attendance of the session: the saved lines, the guests last; when
+    /// none was ever saved, the active roster of the team, all present.
+    async fn attendance(&self, session_id: &Uuid) -> Result<AttendanceSheet, AppError>;
+
+    /// The active players of the team that the saved attendance doesn't
+    /// list: who joined after it, to add by hand. Empty when none was saved.
+    async fn missing_players(&self, session_id: &Uuid) -> Result<Vec<AttendanceRow>, AppError>;
+}

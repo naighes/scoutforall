@@ -31,6 +31,11 @@ import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import java.time.LocalDate
+import io.github.naighes.scout4all.core.AgendaSpan
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -105,6 +110,8 @@ fun TeamsScreen(
     onResume: (teamId: String, matchId: String, next: NextSetKind) -> Unit = { _, _, _ -> },
     onDvw: (() -> Unit)? = null,
     onCompetitions: () -> Unit = {},
+    onVenues: () -> Unit = {},
+    onSession: (teamId: String, sessionId: String) -> Unit = { _, _ -> },
 ) {
     val state by teams.state.collectAsState()
     // back from a team, which may have changed
@@ -119,6 +126,9 @@ fun TeamsScreen(
                     ImportButton(stringResource(R.string.import_team), teamId = null, onTeam = onTeam, onMatch = onMatch, onDvw = onDvw)
                     IconButton(onClick = onCompetitions) {
                         Icon(painterResource(R.drawable.ic_trophy), contentDescription = stringResource(R.string.competitions))
+                    }
+                    IconButton(onClick = onVenues) {
+                        Icon(painterResource(R.drawable.ic_gym), contentDescription = stringResource(R.string.venues))
                     }
                     IconButton(onClick = onSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))
@@ -151,7 +161,18 @@ fun TeamsScreen(
                             list.animateScrollToItem(count - 1)
                         }
                     }
+                    var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
+                    val today = LocalDate.now()
+                    val week by rememberAgenda(null, AgendaSpan.WEEK, day, s.home)
                     LazyColumn(modifier, list, contentPadding = PaddingValues(bottom = 88.dp)) {
+                    agendaWeek(
+                        week, today, withTeam = true,
+                        onPrevious = { day = day.minusWeeks(1) },
+                        onNext = { day = day.plusWeeks(1) },
+                        onToday = { day = LocalDate.now() },
+                        onMatch = onMatch,
+                        onSession = onSession,
+                    )
                     // a section only with something in it
                     section(R.string.home_in_progress, s.home.inProgress) {
                         InProgressRow(it, { onMatch(it.teamId, it.id) }) { onResume(it.teamId, it.id, it.next) }

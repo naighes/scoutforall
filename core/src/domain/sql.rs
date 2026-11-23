@@ -11,6 +11,8 @@
 //!   back (the same id never spelled two ways).
 //! - Times: RFC 3339 text, with the offset of the match (`matches.start`),
 //!   in UTC with `Z` for the events; every digit of the fractions kept.
+//!   The time of a training session is local, `YYYY-MM-DDTHH:MM`, without
+//!   offset.
 //!   Dates of birth `YYYY-MM-DD`.
 //! - The flags of an event: their integer, the bits of a later version
 //!   too. Booleans 0/1, numbers as integers (rusqlite's own).
@@ -30,8 +32,9 @@ use crate::{
         r#match::MatchSource,
         technique::TechniqueEnum,
     },
+    training::{ActivityStatus, AttendanceStatus, SessionStatus},
 };
-use chrono::{DateTime, FixedOffset, NaiveDate, SecondsFormat, Utc};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, SecondsFormat, Utc};
 use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, ValueRef};
 use uuid::Uuid;
 
@@ -149,6 +152,25 @@ db_text!(Stage, "stage", Stage::ALL, {
     Stage::FinalRound => "final_round",
     Stage::Placement => "placement",
     Stage::Other => "other",
+});
+
+db_text!(SessionStatus, "session status", SessionStatus::ALL, {
+    SessionStatus::Planned => "planned",
+    SessionStatus::Completed => "completed",
+    SessionStatus::Cancelled => "cancelled",
+});
+
+db_text!(ActivityStatus, "activity status", ActivityStatus::ALL, {
+    ActivityStatus::Planned => "planned",
+    ActivityStatus::Completed => "completed",
+    ActivityStatus::Skipped => "skipped",
+});
+
+db_text!(AttendanceStatus, "attendance status", AttendanceStatus::ALL, {
+    AttendanceStatus::Present => "present",
+    AttendanceStatus::Absent => "absent",
+    AttendanceStatus::Late => "late",
+    AttendanceStatus::Unavailable => "unavailable",
 });
 
 db_text!(CompetitionFormat, "format", CompetitionFormat::ALL, {
@@ -312,6 +334,23 @@ impl FromSql for Sql<DateTime<FixedOffset>> {
         DateTime::parse_from_rfc3339(text)
             .map(Sql)
             .map_err(|_| not_valid("time", text))
+    }
+}
+
+const LOCAL_TIME: &str = "%Y-%m-%dT%H:%M";
+
+impl ToSql for Sql<NaiveDateTime> {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.0.format(LOCAL_TIME).to_string()))
+    }
+}
+
+impl FromSql for Sql<NaiveDateTime> {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let text = value.as_str()?;
+        NaiveDateTime::parse_from_str(text, LOCAL_TIME)
+            .map(Sql)
+            .map_err(|_| not_valid("local time", text))
     }
 }
 

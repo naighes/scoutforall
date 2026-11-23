@@ -206,6 +206,16 @@ pub enum TeamRef {
     Name(String),
 }
 
+impl TeamRef {
+    /// The team, none for a name.
+    pub fn team_id(&self) -> Option<Uuid> {
+        match self {
+            TeamRef::Team(id) => Some(*id),
+            TeamRef::Name(_) => None,
+        }
+    }
+}
+
 /// Where a match is played (D3): a fact of the match, not of a point of
 /// view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -281,6 +291,8 @@ pub struct Match {
     pub source: MatchSource,
     pub video_clock: bool,
     pub legacy: Option<LegacyId>,
+    /// the gym, if any; it may be a removed one
+    pub venue_id: Option<Uuid>,
     pub deleted: bool,
 }
 

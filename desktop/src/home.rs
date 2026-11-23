@@ -5,6 +5,7 @@
 
 use {
     crate::{
+        agenda::{self, Agenda, Pick},
         editors::{Edited, Editor},
         form,
         strings::Strings,
@@ -18,6 +19,11 @@ use {
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{Home, HomeMatch, NextSetKind, Scout4All, TeamListing},
 };
+
+/// Today, by the clock of the computer.
+fn today() -> chrono::NaiveDate {
+    chrono::Local::now().date_naive()
+}
 
 #[derive(Debug, Clone)]
 pub struct Open {
@@ -54,7 +60,10 @@ pub enum Message {
     NewTeam,
     Import,
     Competitions,
+    Venues,
     Form(form::Message),
+    /// the agenda of the week
+    Week(agenda::Message),
 }
 
 pub enum Outcome {
@@ -62,19 +71,25 @@ pub enum Outcome {
     Scout(Open),
     Match(String, String),
     Team(String),
+    /// the training of a team: a session or a new one
+    Training(String, crate::training::screen::Open),
     /// an archive or a DataVolley file to choose
     Import,
     Competitions,
+    Venues,
 }
 
-const IN_PROGRESS: usize = 0;
-const RECENT: usize = 1;
-const TEAMS: usize = 2;
+const WEEK: usize = 0;
+const IN_PROGRESS: usize = 1;
+const RECENT: usize = 2;
+const TEAMS: usize = 3;
+const PANELS: usize = 4;
 
 pub struct HomeScreen {
     pub home: Home,
+    week: Agenda,
     panel: usize,
-    selected: [usize; 3],
+    selected: [usize; PANELS],
     /// a new team, being written
     editor: Option<Box<Editor>>,
 }
@@ -87,11 +102,12 @@ fn team_id(t: &TeamListing) -> Option<String> {
 }
 
 impl HomeScreen {
-    pub fn new(home: Home) -> HomeScreen {
+    pub fn new(core: &Scout4All, home: Home) -> HomeScreen {
         HomeScreen {
             home,
+            week: Agenda::week(core, None, today()),
             panel: IN_PROGRESS,
-            selected: [0; 3],
+            selected: [0; PANELS],
             editor: None,
         }
     }
@@ -104,7 +120,28 @@ impl HomeScreen {
         match panel {
             IN_PROGRESS => self.home.in_progress.len(),
             RECENT => self.home.recent.len(),
-            _ => self.home.teams.len(),
+            TEAMS => self.home.teams.len(),
+            _ => 0,
+        }
+    }
+
+    /// The panel after (or before) the one chosen.
+    fn step(&self, forward: bool) -> usize {
+        let one = match forward {
+            true => 1,
+            false => PANELS - 1,
+        };
+        (self.panel + one) % PANELS
+    }
+
+    /// What the row picked in an agenda opens: a match or a session.
+    fn picked(pick: Option<Pick>) -> Outcome {
+        match pick {
+            Some(Pick::Match { team_id, id }) => Outcome::Match(team_id, id),
+            Some(Pick::Session { team_id, id }) => {
+                Outcome::Training(team_id, crate::training::screen::Open::Session(id))
+            }
+            None => Outcome::Stay,
         }
     }
 
@@ -131,6 +168,7 @@ impl HomeScreen {
     /// What the row of `panel` at `index` opens.
     fn open(&self, panel: usize, index: usize) -> Outcome {
         match panel {
+            WEEK => Outcome::Stay,
             IN_PROGRESS => self
                 .home
                 .in_progress
@@ -156,11 +194,13 @@ impl HomeScreen {
                 self.edited(edited)
             }
             (_, Some(_)) | (Message::Form(_), None) => Outcome::Stay,
+            (Message::Week(m), None) => HomeScreen::picked(self.week.update(core, m)),
             (Message::Scout(open), None) => Outcome::Scout(open),
             (Message::Match(team, m), None) => Outcome::Match(team, m),
             (Message::Team(team), None) => Outcome::Team(team),
             (Message::Import, None) => Outcome::Import,
             (Message::Competitions, None) => Outcome::Competitions,
+            (Message::Venues, None) => Outcome::Venues,
             (Message::NewTeam, None) => {
                 self.new_team(core, s);
                 Outcome::Stay
@@ -180,13 +220,18 @@ impl HomeScreen {
             || ck == key!(shift - backtab)
             || ck == key!(backtab);
         let selected = self.selected.get(self.panel).copied().unwrap_or(0);
+        if self.panel == WEEK
+            && !(next || previous || ck == key!(n) || ck == key!(i) || ck == key!(c))
+        {
+            return HomeScreen::picked(self.week.key(core, ck));
+        }
         let moved = match ck {
             _ if next => {
-                self.panel = (self.panel + 1) % 3;
+                self.panel = self.step(true);
                 None
             }
             _ if previous => {
-                self.panel = (self.panel + 2) % 3;
+                self.panel = self.step(false);
                 None
             }
             k if k == key!(down) && count > 0 => Some((selected + 1) % count),
@@ -198,6 +243,7 @@ impl HomeScreen {
             }
             k if k == key!(i) => return Outcome::Import,
             k if k == key!(c) => return Outcome::Competitions,
+            k if k == key!(g) => return Outcome::Venues,
             _ => None,
         };
         if let (Some(index), Some(slot)) = (moved, self.selected.get_mut(self.panel)) {
@@ -209,6 +255,19 @@ impl HomeScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.editor {
             Some(editor) => editor.hints(s),
+            None if self.panel == WEEK => [
+                vec![("← → ⇧⇥ ⇥".to_string(), s.panel.to_string())],
+                self.week.hints(s),
+                vec![
+                    ("Enter".to_string(), s.open.to_string()),
+                    ("n".to_string(), s.new_team.to_string()),
+                    ("i".to_string(), s.import_archive.to_string()),
+                    ("c".to_string(), s.competitions.to_string()),
+                    ("g".to_string(), s.venues.to_string()),
+                    ("F2".to_string(), s.settings.to_string()),
+                ],
+            ]
+            .concat(),
             None => vec![
                 ("← → ⇧⇥ ⇥".to_string(), s.panel.to_string()),
                 ("↑ ↓".to_string(), String::new()),
@@ -216,8 +275,24 @@ impl HomeScreen {
                 ("n".to_string(), s.new_team.to_string()),
                 ("i".to_string(), s.import_archive.to_string()),
                 ("c".to_string(), s.competitions.to_string()),
+                ("g".to_string(), s.venues.to_string()),
                 ("F2".to_string(), s.settings.to_string()),
             ],
+        }
+    }
+
+    #[cfg(test)]
+    pub fn week_shown(&self) -> Vec<(String, bool)> {
+        self.week.shown_days()
+    }
+
+    #[cfg(test)]
+    pub fn panel_name(&self) -> &'static str {
+        match self.panel {
+            WEEK => "week",
+            IN_PROGRESS => "in progress",
+            RECENT => "recent",
+            _ => "teams",
         }
     }
 
@@ -229,7 +304,7 @@ impl HomeScreen {
         if let Some(editor) = &self.editor {
             return editor.view(s, c, Message::Form);
         }
-        let in_progress = self
+        let in_progress: Vec<Element<'a, Message>> = self
             .home
             .in_progress
             .iter()
@@ -310,18 +385,39 @@ impl HomeScreen {
             ),
             ui::add_button(s.new_team, Message::NewTeam, c),
         ];
+        // the first column: the week (today lit in it), the matches in
+        // progress; these, none, are a line
+        let week = container(
+            self.week
+                .view(s, c, self.panel == WEEK, true)
+                .map(Message::Week),
+        )
+        .height(Length::FillPortion(2));
+        let in_progress: Element<'a, Message> = match in_progress.is_empty() {
+            true => ui::panel_with(
+                s.in_progress,
+                vec![],
+                text(s.no_matches).size(SIZE_BODY).color(c.muted),
+                c,
+            ),
+            false => container(list(s.in_progress, vec![], in_progress, s.no_matches, c))
+                .height(Length::FillPortion(1))
+                .into(),
+        };
+        let first = column![week, in_progress]
+            .spacing(14)
+            .width(Length::FillPortion(1))
+            .height(Length::Fill);
         row![
-            list(s.in_progress, vec![], in_progress, s.no_matches, c),
+            first,
             // the competitions their matches are played in: the teams
             // have no room left for a third action in a small window
             list(
                 s.recent,
-                vec![ui::pill(
-                    s.competitions,
-                    false,
-                    Some(Message::Competitions),
-                    c
-                )],
+                vec![
+                    ui::pill(s.competitions, false, Some(Message::Competitions), c),
+                    ui::icon_pill(theme::icons::GYM, s.venues, Message::Venues, c),
+                ],
                 recent,
                 s.no_matches,
                 c

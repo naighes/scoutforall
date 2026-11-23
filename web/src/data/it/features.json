@@ -53,6 +53,19 @@
     "image_alt": "L'analisi di una squadra sulle ultime partite: riepilogo, rotazioni, distribuzione ed errori"
   },
   {
+    "id": "training",
+    "eyebrow": "Programmazione",
+    "title": "Pianificare la stagione, registrare ogni seduta",
+    "content": "Dividi la stagione in programma, mesocicli e microcicli settimanali, poi riempili di sedute: attività, obiettivi, palestra e durata. Dopo la seduta segna cosa è stato fatto e chi c'era; il calendario mostra allenamenti e partite insieme.",
+    "points": [
+      "Sedute ricorrenti create in un colpo solo, con le sovrapposizioni con altre sedute e partite segnalate",
+      "Presenze per giocatore e per periodo, con ritardi, assenze e ospiti",
+      "Scheda della seduta in PDF, palestre con la loro mappa, programmazione condivisa con altri allenatori"
+    ],
+    "image": "training-calendar",
+    "image_alt": "Il calendario degli allenamenti: un mese di sedute e una partita, con i mesocicli sopra ogni settimana"
+  },
+  {
     "id": "teams",
     "eyebrow": "Squadre e partite",
     "title": "I tuoi dati, sul tuo dispositivo",

@@ -54,6 +54,8 @@ pub struct MatchForm {
     /// scouting both teams, not only A: chosen when the match is created,
     /// never changed
     pub both: bool,
+    /// the gym, if any
+    pub venue: Option<Uuid>,
 }
 
 /// The number and the role of a player on the score sheet of a match:
@@ -113,6 +115,7 @@ pub struct MatchInput {
     pub round: Option<String>,
     /// `Both` only against a team: B has a roster to scout
     pub scouting: ScoutingMode,
+    pub venue_id: Option<Uuid>,
 }
 
 impl MatchInput {
@@ -139,6 +142,7 @@ impl MatchInput {
             stage: None,
             round: None,
             scouting: ScoutingMode::A,
+            venue_id: None,
         }
     }
 }
@@ -238,6 +242,7 @@ impl MatchForm {
             round: row.round.clone().unwrap_or_default(),
             numbers: vec![],
             both: row.scouting == ScoutingMode::Both,
+            venue: row.venue_id,
         }
     }
 
@@ -509,6 +514,7 @@ impl MatchForm {
                         true => ScoutingMode::Both,
                         false => ScoutingMode::A,
                     },
+                    venue_id: self.venue,
                 })
             }
         }

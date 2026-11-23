@@ -26,6 +26,12 @@ pub enum Export {
     Match(String, String),
     /// the report of the match as a PDF, as the TUI prints it
     Report(String, String),
+    /// the training of a team
+    Training(String),
+    /// the sheet of a session as a PDF: with the participants, with the notes
+    SessionSheet(String, bool, bool),
+    /// the plan of a microcycle as a PDF
+    Microcycle(String),
 }
 
 /// A file made to share (an archive, a report, a video): shared with the
@@ -140,6 +146,14 @@ pub fn archive(core: &Scout4All, export: &Export) -> Result<(String, Vec<u8>), M
         Export::Report(team, m) => {
             return Ok((format!("{m}.pdf"), core.match_pdf(team.clone(), m.clone())?));
         }
+        Export::Training(team) => core.export_training(team.clone())?,
+        Export::SessionSheet(id, participants, notes) => {
+            let pdf = core.session_pdf(id.clone(), *participants, *notes)?;
+            return Ok((format!("{id}.pdf"), pdf));
+        }
+        Export::Microcycle(id) => {
+            return Ok((format!("{id}.pdf"), core.microcycle_pdf(id.clone())?));
+        }
     };
     Ok((archive.file_name, archive.bytes))
 }
@@ -221,7 +235,7 @@ impl Importing {
     fn teams(&self) -> &[scout4all_mobile::TeamChoice] {
         match &self.preview {
             ArchivePreview::Match { teams, .. } => teams,
-            ArchivePreview::Team { .. } => &[],
+            ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => &[],
         }
     }
 
@@ -229,7 +243,9 @@ impl Importing {
     pub fn import(&self, core: &Scout4All) -> Result<Imported, MobileError> {
         let bytes = self.picked.bytes.to_vec();
         match &self.preview {
-            ArchivePreview::Team { .. } => core
+            // the training of a team goes in as the team does: the archive
+            // says what it holds
+            ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => core
                 .import_team(bytes, Some(self.picked.name.clone()))
                 .map(|team| Imported::Team(team.id, team.summary)),
             ArchivePreview::Match { .. } => {
@@ -309,6 +325,20 @@ impl Importing {
                 s.import_team_title,
                 name.clone(),
                 format!("{year} · {players} {}", s.players),
+            ),
+            ArchivePreview::Training {
+                name,
+                year,
+                sessions,
+                cycles,
+            } => (
+                s.import_team_title,
+                name.clone(),
+                format!(
+                    "{year} · {sessions} {} · {cycles} {}",
+                    s.sessions.to_lowercase(),
+                    s.cycles.to_lowercase()
+                ),
             ),
             ArchivePreview::Match {
                 opponent,

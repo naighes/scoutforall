@@ -4,8 +4,8 @@
 use crate::dvw::{
     DvwError, Field,
     model::{
-        AttackCombination, DvwRole, MatchDate, MatchInfo, Player, SetResult, SetStart, Skill, Team,
-        WinningSymbols,
+        AttackCombination, DvwRole, Hall, MatchDate, MatchInfo, Player, SetResult, SetStart, Skill,
+        Team, WinningSymbols,
     },
     text::prefer_utf8,
 };
@@ -47,6 +47,21 @@ pub(crate) fn program(header: &[Line], prefix: &str) -> Option<String> {
     };
     let parts: Vec<String> = [value("PRG"), value("REL")].into_iter().flatten().collect();
     Some(parts.join(" ")).filter(|p| !p.is_empty())
+}
+
+/// The hall of the match, from the first line of `[3MORE]`: referees,
+/// spectators, receipts, city, hall, scout. None without a hall or a city.
+pub(crate) fn hall(lines: &[Line]) -> Option<Hall> {
+    lines.first().and_then(|(_, line)| {
+        let fields = fields(line);
+        // the UTF-8 copies of the fields come after the others
+        let city = prefer_utf8(at(&fields, 3), fields.get(7).copied());
+        let name = prefer_utf8(at(&fields, 4), fields.get(8).copied());
+        match (city.is_empty(), name.is_empty()) {
+            (true, true) => None,
+            _ => Some(Hall { city, name }),
+        }
+    })
 }
 
 pub(crate) fn match_info(lines: &[Line]) -> Result<MatchInfo, DvwError> {

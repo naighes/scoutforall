@@ -37,7 +37,7 @@ fun DeletionDialog(
     text: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
-    confirm: String = stringResource(R.string.delete_forever),
+    confirm: String = stringResource(R.string.delete),
     /** another way to delete, with its button over the first */
     also: Pair<String, () -> Unit>? = null,
 ) = AlertDialog(

@@ -41,6 +41,17 @@ pub trait MatchWriter {
     /// of B go.
     async fn save_scouting(&self, m: &MatchEntry, scouting: ScoutingMode) -> Result<(), AppError>;
 
+    /// The match, saved, played in the gym named `name` (a name as the
+    /// DataVolley files write it: the gym with that name, whatever its
+    /// case, accents and spaces, or a new one, not pinned). Its city, when
+    /// given, is the address of a gym made now.
+    async fn save_venue_named(
+        &self,
+        m: &MatchEntry,
+        name: &str,
+        city: &str,
+    ) -> Result<(), AppError>;
+
     /// Removes the match with its sets, for good: by its folder, so that
     /// a match that can't be read goes too.
     async fn remove(&self, team_id: &Uuid, match_id: &str) -> Result<(), AppError>;

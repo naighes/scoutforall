@@ -10,8 +10,9 @@ use {
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL, SIZE_TITLE},
         ui,
+        venue_choice::{venue_at, venue_options, venue_value},
     },
-    chrono::{DateTime, FixedOffset, Local, NaiveDateTime, TimeZone},
+    chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone},
     iced::{
         Alignment, Element, Length, Padding,
         widget::{
@@ -125,6 +126,12 @@ pub struct MatchEditor {
     competitions: Vec<CompetitionChoice>,
     formats: Vec<FormatChoice>,
     stages: Vec<StageChoice>,
+    /// the gyms of the choice after the empty one: id and name
+    venues: Vec<(String, String)>,
+    /// another team holds the gym then and the user was told: Enter again
+    /// saves
+    warned: bool,
+    anyway_hint: String,
     step: MatchStep,
     /// a match scouted on both sides, saved: the id of the match, and the
     /// team B whose players the score sheet shows
@@ -244,15 +251,16 @@ const MATCH_CREATE_OPPONENT: usize = 2;
 const MATCH_DATE: usize = 3;
 const MATCH_TIME: usize = 4;
 const MATCH_COURT: usize = 5;
-const MATCH_SCOUTING: usize = 6;
-const MATCH_COMPETITION: usize = 7;
-const MATCH_FORMAT: usize = 8;
-const MATCH_FRIENDLY: usize = 9;
-const MATCH_STAGE: usize = 10;
-const MATCH_ROUND: usize = 11;
-const MATCH_SUBSTITUTIONS: usize = 12;
-const MATCH_NOTES: usize = 13;
-const MATCH_ROSTER: usize = 14;
+const MATCH_VENUE: usize = 6;
+const MATCH_SCOUTING: usize = 7;
+const MATCH_COMPETITION: usize = 8;
+const MATCH_FORMAT: usize = 9;
+const MATCH_FRIENDLY: usize = 10;
+const MATCH_STAGE: usize = 11;
+const MATCH_ROUND: usize = 12;
+const MATCH_SUBSTITUTIONS: usize = 13;
+const MATCH_NOTES: usize = 14;
+const MATCH_ROSTER: usize = 15;
 
 // the options of the scouting
 const SCOUTING_A: usize = 0;
@@ -560,7 +568,7 @@ impl Editor {
                 s.date_placeholder,
             ),
             Field::text(s.height, start.height_cm.clone()).placeholder(s.height_placeholder),
-            Field::text(s.notes, start.notes.clone()),
+            Field::lines(s.notes, start.notes.clone()),
         ];
         let title = match id {
             Some(_) => s.edit_player,
@@ -723,7 +731,7 @@ impl Editor {
                 PLAYER_HEIGHT,
                 Field::text("", start.height_cm.clone()).value,
             ),
-            (PLAYER_NOTES, Field::text("", start.notes.clone()).value),
+            (PLAYER_NOTES, Field::lines("", start.notes.clone()).value),
         ];
         for (field, value) in values {
             if let Some(f) = self.form.fields.get_mut(field) {
@@ -744,9 +752,36 @@ impl Editor {
         team_id: String,
         id: Option<String>,
     ) -> Result<Editor, MobileError> {
+        Self::match_on(s, core, team_id, id, None)
+    }
+
+    /// A new match of team A `team_id` on `day` (a day of the calendar),
+    /// at the time of now.
+    pub fn a_match_on(
+        s: &Strings,
+        core: &Scout4All,
+        team_id: String,
+        day: NaiveDate,
+    ) -> Result<Editor, MobileError> {
+        Self::match_on(s, core, team_id, None, Some(day))
+    }
+
+    fn match_on(
+        s: &Strings,
+        core: &Scout4All,
+        team_id: String,
+        id: Option<String>,
+        day: Option<NaiveDate>,
+    ) -> Result<Editor, MobileError> {
+        let now = Local::now();
+        // a time the clock skips on that day (summer time): now
+        let new = day
+            .and_then(|d| d.and_time(now.time()).and_local_timezone(Local).earliest())
+            .unwrap_or(now)
+            .fixed_offset();
         let data = match &id {
             Some(id) => core.match_form(team_id.clone(), id.clone())?,
-            None => MatchForm::new(Local::now().fixed_offset()),
+            None => MatchForm::new(new),
         };
         // a saved match keeps its team A
         let teams: Vec<(String, String)> = core
@@ -762,6 +797,12 @@ impl Editor {
         let competitions = core.competitions()?;
         let formats = core.competition_formats();
         let stages = core.stages();
+        let venues = venue_options(
+            s,
+            core,
+            &team_id,
+            data.venue.map(|v| v.to_string()).as_deref(),
+        );
         let fields = vec![
             Field::choice(
                 s.team_a,
@@ -796,6 +837,10 @@ impl Editor {
                 theme::icons::AWAY,
                 theme::icons::VOLLEYBALL,
             ]),
+            Field {
+                value: venue_value(&venues, data.venue.map(|v| v.to_string()).as_deref()),
+                ..Field::choice(s.session_location, vec![], 0)
+            },
             Field::choice(
                 s.scouting,
                 vec![s.scouting_one.to_string(), s.scouting_both.to_string()],
@@ -820,7 +865,7 @@ impl Editor {
             ),
             Field::text(s.round, data.round.clone()).placeholder(s.round_placeholder),
             Field::text(s.max_substitutions, data.max_substitutions.clone()),
-            Field::text(s.notes, data.notes.clone()),
+            Field::lines(s.notes, data.notes.clone()),
         ];
         let title = match id {
             Some(_) => s.edit_match,
@@ -850,6 +895,9 @@ impl Editor {
                 competitions,
                 formats,
                 stages,
+                venues,
+                warned: false,
+                anyway_hint: s.save_anyway_hint.to_string(),
                 step: MatchStep::Match,
                 created: None,
                 correcting: None,
@@ -933,6 +981,8 @@ impl Editor {
             home: court == COURT_HOME,
             max_substitutions: f.text(MATCH_SUBSTITUTIONS),
             notes: f.text(MATCH_NOTES),
+            venue: venue_at(&m.venues, f.index(MATCH_VENUE))
+                .and_then(|id| uuid::Uuid::parse_str(&id).ok()),
             roster: m.data.roster.clone(),
             opponent_team: m.data.opponent_team,
             create_opponent: checked(MATCH_CREATE_OPPONENT),
@@ -1560,6 +1610,9 @@ impl Editor {
                 _ => Edited::Cancel,
             },
             Outcome::Changed(field) => {
+                if let Kind::Match(m) = &mut self.kind {
+                    m.warned = false;
+                }
                 self.changed(core, s, field);
                 Edited::Stay
             }
@@ -1572,10 +1625,41 @@ impl Editor {
         }
     }
 
+    /// The warning of the gym held by another team then, once: the next save
+    /// goes through. Only for a match not saved yet on its first step.
+    fn venue_warning(&mut self, core: &Scout4All) -> Option<String> {
+        let Kind::Match(m) = &self.kind else {
+            return None;
+        };
+        let data = self.match_data(m);
+        let Kind::Match(m) = &mut self.kind else {
+            return None;
+        };
+        if m.warned || m.created.is_some() {
+            return None;
+        }
+        let venue = data.venue?.to_string();
+        let warning = crate::training::clash_warning(
+            &m.anyway_hint,
+            core.match_venue_clashes(
+                m.team_id.clone(),
+                data.opponent_team.map(|t| t.to_string()),
+                venue,
+                data.date?,
+            ),
+        );
+        m.warned = warning.is_some();
+        warning
+    }
+
     /// The form saved, or the error shown next to its field; the namesake
     /// of a player asked about first.
     fn saved(&mut self, core: &Scout4All, s: &Strings, namesake_confirmed: bool) -> Edited {
         self.namesake = None;
+        if let Some(warning) = self.venue_warning(core) {
+            self.form.error = Some(warning);
+            return Edited::Stay;
+        }
         match self.save(core, s, namesake_confirmed) {
             // a new match on both sides: now the players of B
             Ok(id) if self.both_to_scout() => match self.start_b(core, &id) {
@@ -1812,13 +1896,15 @@ impl Editor {
             ])
             .collect(),
             // the details of a match: Enter goes on to the score sheet
-            (false, false) => Form::hints(s)
-                .into_iter()
-                .map(|(k, what)| match (k.as_str(), &self.kind) {
-                    ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
-                    _ => (k, what),
-                })
-                .collect(),
+            (false, false) => self.form.on_field(
+                Form::hints(s)
+                    .into_iter()
+                    .map(|(k, what)| match (k.as_str(), &self.kind) {
+                        ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
+                        _ => (k, what),
+                    })
+                    .collect(),
+            ),
         }
     }
 
@@ -2209,6 +2295,7 @@ mod tests {
                 MATCH_DATE,
                 MATCH_TIME,
                 MATCH_COURT,
+                MATCH_VENUE,
                 MATCH_SCOUTING
             ]
         );
@@ -2519,6 +2606,54 @@ mod tests {
             press(&mut e, &core, key!(enter));
         }
         assert_eq!(core.teams().unwrap().len(), 3);
+    }
+
+    /// The gym chosen is held by another team then: the last Enter tells it
+    /// and saves nothing, the next saves; a gym free of it saves at once.
+    #[test]
+    fn a_match_in_a_gym_held_by_another_team_is_told_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let vigili = team(&core, "Vigili", 0);
+        let gym = core
+            .save_venue(
+                None,
+                scout4all_mobile::venues::VenueDraft {
+                    name: "Terontola".into(),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .id;
+        core.save_session(
+            vigili,
+            None,
+            scout4all_mobile::training::SessionDraft {
+                start: Some("2026-03-10T18:30".into()),
+                duration: "90".into(),
+                venue: Some(gym),
+                ..core.new_session_draft()
+            },
+        )
+        .unwrap();
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        send(&mut e, &core, Input(MATCH_DATE, "2026-03-10".into()));
+        send(&mut e, &core, Input(MATCH_TIME, "18:00".into()));
+        send(&mut e, &core, Choose(MATCH_VENUE, 1));
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
+        let told = e.form.error.clone().unwrap_or_default();
+        assert!(told.contains("Terontola"), "{told}");
+        assert!(core.matches(cortona.clone()).unwrap().is_empty());
+        assert!(matches!(
+            press(&mut e, &core, key!(enter)),
+            Edited::Saved(_)
+        ));
+        let saved = core.matches(cortona).unwrap();
+        assert_eq!(saved.len(), 1);
     }
 
     /// A new competition asks for its format; an existing one doesn't, and

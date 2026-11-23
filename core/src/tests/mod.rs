@@ -77,6 +77,22 @@ mod substitution_tests;
 mod summary_tests;
 mod team_form_tests;
 mod technique_tests;
+mod training_activity_tests;
+mod training_agenda_tests;
+mod training_archive_tests;
+mod training_attendance_tests;
+mod training_cycle_duplicate_tests;
+mod training_cycle_tests;
+mod training_duplicate_tests;
+mod training_form_tests;
+mod training_overlap_tests;
+mod training_schema_tests;
+mod training_series_tests;
+mod training_session_tests;
+mod training_sheet_tests;
+mod training_status_tests;
+mod training_totals_tests;
+mod training_venue_tests;
 mod upload_queue_tests;
 mod upload_tests;
 mod video_seconds_tests;
@@ -88,6 +104,20 @@ pub(crate) const EN: &Labels = labels(LanguageEnum::En);
 /// A database in memory, set up and migrated.
 pub(crate) fn database() -> Database {
     Database::new(crate::db::open_in_memory().expect("a database in memory"))
+}
+
+/// The gym called "Gym" of the database: the one there, else a new one.
+pub(crate) fn gym(db: &Database) -> uuid::Uuid {
+    use crate::{providers::sqlite::venues::SqliteVenues, training::venue::VenueInput};
+    let venues = SqliteVenues::new(db.clone());
+    match venues
+        .venues()
+        .ok()
+        .and_then(|all| all.into_iter().find(|v| v.name == "Gym"))
+    {
+        Some(venue) => venue.id,
+        None => venues.create(VenueInput::named("Gym").unwrap()).unwrap().id,
+    }
 }
 
 /// The providers over a database, in English.

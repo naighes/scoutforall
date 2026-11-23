@@ -84,6 +84,34 @@ impl SqlitePersons {
     /// only its id and the flag, no personal details (minors, 017). The
     /// matches played keep the person as an anonymous player, with the
     /// number of their roster: what the teams did doesn't change.
+    /// A person of the registry with only the name, in no team: a guest of
+    /// a session who isn't a player of any team of the user. The name is
+    /// trimmed; an empty one is refused.
+    pub fn create(&self, name: &str) -> Result<Person, AppError> {
+        let name = name.trim().to_string();
+        match name.is_empty() {
+            true => Err(AppError::IO(crate::errors::IOError::Msg(
+                "a person needs a name".into(),
+            ))),
+            false => self.0.write(|tx| {
+                let person = Person {
+                    id: Uuid::new_v4(),
+                    name,
+                    birth_date: None,
+                    height_cm: None,
+                    notes: String::new(),
+                    deleted: false,
+                };
+                tx.execute(
+                    "INSERT INTO persons (id, name) VALUES (?1, ?2)",
+                    rusqlite::params![Sql(person.id), person.name],
+                )
+                .map_err(sqlite)
+                .map(|_| person)
+            }),
+        }
+    }
+
     pub fn remove(&self, person_id: &Uuid) -> Result<(), AppError> {
         let id = Sql(*person_id);
         self.0.write(|tx| {

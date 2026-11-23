@@ -212,6 +212,7 @@ impl MatchRows {
                 source: entry.source,
                 video_clock: entry.video_clock,
                 legacy,
+                venue_id: None,
                 deleted: false,
             },
             roster,

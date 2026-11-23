@@ -236,6 +236,8 @@ pub mod icons {
     pub const LOST: &[u8] = include_bytes!("../assets/icons/cancel.svg");
     pub const COIN: &[u8] = include_bytes!("../assets/icons/toll.svg");
     pub const CALENDAR: &[u8] = include_bytes!("../assets/icons/event.svg");
+    /// a hall with an arched roof: the gyms
+    pub const GYM: &[u8] = include_bytes!("../assets/icons/gym.svg");
     pub const VOLLEYBALL: &[u8] = include_bytes!("../assets/icons/sports_volleyball.svg");
     pub const CLOSE: &[u8] = include_bytes!("../assets/icons/close.svg");
     pub const CHECK: &[u8] = include_bytes!("../assets/icons/check.svg");
@@ -243,4 +245,5 @@ pub mod icons {
     pub const SHARE: &[u8] = include_bytes!("../assets/icons/share.svg");
     pub const SAVE: &[u8] = include_bytes!("../assets/icons/save.svg");
     pub const DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
+    pub const WARNING: &[u8] = include_bytes!("../assets/icons/warning.svg");
 }

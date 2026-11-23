@@ -196,10 +196,26 @@ private fun Navigation(
                 },
                 onDvw = { nav.navigate("dvw") },
                 onCompetitions = { nav.navigate("competitions") },
+                onVenues = { nav.navigate("venues") },
+                onSession = { team, session -> nav.navigate("team/$team/training/$session") },
             )
         }
         composable("competitions") { entry ->
             CompetitionsScreen(onBack = { nav.back(entry) }, onCompetition = { nav.navigate("competitions/$it") })
+        }
+        composable("venues") { entry ->
+            VenuesScreen(onBack = { nav.back(entry) }, onVenue = { nav.navigate("venues/$it") }, onNew = { nav.navigate("venues/new") })
+        }
+        composable("venues/new") { entry ->
+            VenueFormScreen(null, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
+        }
+        composable("venues/{id}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            VenueScreen(id, onBack = { nav.back(entry) }, onEdit = { nav.navigate("venues/$id/edit") })
+        }
+        composable("venues/{id}/edit") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            VenueFormScreen(id, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
         }
         composable("competitions/{id}") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
@@ -249,8 +265,11 @@ private fun Navigation(
                 onAnalysis = { nav.navigate("team/$id/analysis") },
                 onDeleted = { nav.back(entry) },
                 onNewSeason = { nav.navigate("team/$id/new-season") },
+                onTraining = { nav.navigate("team/$id/training") },
+                onSession = { nav.navigate("team/$id/training/$it") },
             )
         }
+        trainingRoutes(nav)
         composable("team/{id}/new-season") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             // saved, the new team in place of the form; back from it, the

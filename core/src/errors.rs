@@ -1,7 +1,13 @@
 use thiserror::Error;
 use zip::result::ZipError;
 
-use crate::localization::Labels;
+use crate::{
+    localization::Labels,
+    training::{
+        cycles::{Child, Window},
+        overlap::{Slot, SlotKind},
+    },
+};
 
 #[derive(Debug, Error)]
 pub enum AppError {
@@ -13,6 +19,62 @@ pub enum AppError {
 
     #[error("IO error: {0}")]
     IO(#[from] IOError),
+
+    #[error("training error: {0}")]
+    Training(#[from] TrainingError),
+}
+
+#[derive(Debug, Error)]
+pub enum TrainingError {
+    /// the slots of the team it overlaps, by start
+    #[error("overlaps {} other slots of the team", .0.len())]
+    Overlap(Vec<Slot>),
+    /// the cycles of the same level and team it overlaps
+    #[error("overlaps {} other cycles of the team", .0.len())]
+    CycleOverlap(Vec<Window>),
+    /// the window (or the day) is not inside its container
+    #[error("outside the window of its container")]
+    OutsideParent,
+    /// what a new window would leave out
+    #[error("leaves out {} children", .0.len())]
+    ChildrenOutside(Vec<Child>),
+    /// the span is not the one of the level
+    #[error("invalid window")]
+    InvalidWindow,
+}
+
+impl TrainingError {
+    /// What overlaps what, in the language of `labels`: one line a slot.
+    pub fn message(&self, labels: &Labels) -> String {
+        match self {
+            TrainingError::Overlap(slots) => slots
+                .iter()
+                .map(|slot| {
+                    let template = match slot.kind {
+                        SlotKind::Session => labels.overlaps_session,
+                        SlotKind::Match => labels.overlaps_match,
+                    };
+                    template.replace("{}", &slot.start.format("%Y-%m-%d %H:%M").to_string())
+                })
+                .collect::<Vec<_>>()
+                .join("\n"),
+            TrainingError::CycleOverlap(windows) => windows
+                .iter()
+                .map(|w| labels.overlaps_cycle.replace("{}", &w.text()))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            TrainingError::OutsideParent => labels.outside_parent.to_string(),
+            TrainingError::ChildrenOutside(children) => labels.children_outside.replace(
+                "{}",
+                &children
+                    .iter()
+                    .map(|c| c.window.text())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            ),
+            TrainingError::InvalidWindow => labels.invalid_date.to_string(),
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -68,6 +130,7 @@ impl AppError {
     pub fn message(&self, labels: &Labels) -> String {
         match self {
             AppError::IO(e) => e.message(labels),
+            AppError::Training(e) => e.message(labels),
             other => other.to_string(),
         }
     }

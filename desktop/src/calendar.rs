@@ -16,6 +16,31 @@ use {
 
 const CELL: f32 = 38.0;
 
+/// The day a text of the core starts with (`YYYY-MM-DD`, alone or with the
+/// time after it).
+pub fn day_of(text: &str) -> Option<NaiveDate> {
+    text.get(..10)
+        .and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok())
+}
+
+/// `day` as the core writes it (`YYYY-MM-DD`).
+pub fn text_of(day: NaiveDate) -> String {
+    day.format("%Y-%m-%d").to_string()
+}
+
+/// "18:30–20:00": the clock time of `start` (`YYYY-MM-DDTHH:MM`) and of
+/// `minutes` later; the start alone when it is not understood.
+pub fn time_span(start: &str, minutes: u16) -> String {
+    let from = start.get(11..16).unwrap_or_default();
+    chrono::NaiveDateTime::parse_from_str(start.get(..16).unwrap_or_default(), "%Y-%m-%dT%H:%M")
+        .ok()
+        .and_then(|at| at.checked_add_signed(chrono::Duration::minutes(i64::from(minutes))))
+        .map_or_else(
+            || from.to_string(),
+            |end| format!("{from}–{}", end.format("%H:%M")),
+        )
+}
+
 /// The first day of the month of `day`.
 pub fn month_of(day: NaiveDate) -> NaiveDate {
     day.with_day(1).unwrap_or(day)
@@ -231,5 +256,17 @@ mod tests {
         assert_eq!(shift(day(2026, 1, 1), -1), day(2025, 12, 1));
         assert_eq!(shift(day(2026, 12, 1), 1), day(2027, 1, 1));
         assert_eq!(month_of(day(2026, 3, 31)), day(2026, 3, 1));
+    }
+
+    #[test]
+    fn the_days_and_the_times_of_the_core() {
+        assert_eq!(day_of("2026-11-22"), Some(day(2026, 11, 22)));
+        assert_eq!(day_of("2026-11-22T18:30"), Some(day(2026, 11, 22)));
+        assert_eq!(day_of("2026-11"), None);
+        assert_eq!(text_of(day(2026, 2, 3)), "2026-02-03");
+        assert_eq!(time_span("2026-11-22T18:30", 90), "18:30–20:00");
+        assert_eq!(time_span("2026-11-22T23:30", 60), "23:30–00:30");
+        assert_eq!(time_span("2026-11-22T18:30:00", 30), "18:30–19:00");
+        assert_eq!(time_span("domani", 30), "");
     }
 }

@@ -1,5 +1,7 @@
 package io.github.naighes.scout4all
 
+import java.time.LocalDate
+import io.github.naighes.scout4all.core.AgendaSpan
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -93,6 +95,8 @@ fun TeamScreen(
     onAnalysis: () -> Unit = {},
     onDeleted: () -> Unit = {},
     onNewSeason: () -> Unit = {},
+    onTraining: () -> Unit = {},
+    onSession: (String) -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val state by produceState<TeamState>(TeamState.Loading, id) {
@@ -200,7 +204,7 @@ fun TeamScreen(
                 val content = Modifier.fillMaxSize()
                 when (tab) {
                     PLAYERS_TAB -> Players(s.team, onPlayer, onNewSeason, content)
-                    else -> Matches(matches, onMatch, onAnalysis, content, onUnreadable = { unreadable = it })
+                    else -> Matches(id, matches, onMatch, onAnalysis, onTraining, onSession, content, onUnreadable = { unreadable = it })
                 }
             }
         }
@@ -232,26 +236,44 @@ private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, onNewSeason: 
 
 @Composable
 private fun Matches(
+    teamId: String,
     state: MatchesState,
     onMatch: (String) -> Unit,
     onAnalysis: () -> Unit,
+    onTraining: () -> Unit,
+    onSession: (String) -> Unit,
     modifier: Modifier,
     onUnreadable: (String) -> Unit,
 ) = when (state) {
     MatchesState.Loading -> Centered(modifier) { CircularProgressIndicator() }
     is MatchesState.Failed -> Centered(modifier) { Text(state.message) }
-    is MatchesState.Loaded -> when {
-        state.matches.isEmpty() -> Centered(modifier) { Text(stringResource(R.string.no_matches)) }
-        // room at the bottom: the button doesn't cover the last match
-        else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
-            // the statistics of the matches together, first
-            item {
-                FilledTonalButton(
-                    onClick = onAnalysis,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                ) { Text(stringResource(R.string.analysis)) }
+    // room at the bottom: the button doesn't cover the last match
+    is MatchesState.Loaded -> {
+        var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
+        val week by rememberAgenda(teamId, AgendaSpan.WEEK, day, state)
+        LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
+            // the week above the matches
+            agendaWeek(
+                week, LocalDate.now(), withTeam = false,
+                onPrevious = { day = day.minusWeeks(1) },
+                onNext = { day = day.plusWeeks(1) },
+                onToday = { day = LocalDate.now() },
+                onMatch = { _, m -> onMatch(m) },
+                onSession = { _, s -> onSession(s) },
+            )
+            // the training plan of the team, under its week
+            item(key = "training") {
+                ScreenButton(R.drawable.ic_calendar, stringResource(R.string.tr_programming), onTraining)
             }
-            items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
+            if (state.matches.isEmpty()) {
+                item { Text(stringResource(R.string.no_matches), Modifier.padding(16.dp)) }
+            } else {
+                // the statistics of the matches together, first
+                item {
+                    ScreenButton(R.drawable.ic_stats, stringResource(R.string.analysis), onAnalysis)
+                }
+                items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
+            }
         }
     }
 }

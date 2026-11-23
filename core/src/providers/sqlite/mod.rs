@@ -30,7 +30,13 @@ pub(crate) mod rows;
 pub mod sets;
 pub(crate) mod summary;
 pub mod teams;
+pub mod training;
+pub mod training_agenda;
+pub mod training_archive;
+pub mod training_cycles;
+pub mod training_totals;
 pub mod upload;
+pub mod venues;
 pub mod video;
 
 use crate::errors::{AppError, IOError};

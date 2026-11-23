@@ -2,7 +2,13 @@ package io.github.naighes.scout4all
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
@@ -72,9 +78,241 @@ class ScreensLayoutTest(private val screen: Size) {
         }
         rule.waitForText("Ekaterina Antropova")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        // today, always in the week, may push the match below a short screen
+        rule.waitForText(string(R.string.tr_programming))
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Cortona"))
         rule.waitForText("Cortona")
         rule.shot("screen-team-matches-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+    }
+
+    /** A training today: in the home and in the team, in the week (above
+     * the matches in the team), in the block of today. */
+    private fun planTraining(team: String): String {
+        val start = java.time.LocalDate.now().toString() + "T18:00"
+        core { it.saveSession(team, null, it.newSessionDraft().copy(start = start, duration = "90", title = "Ricezione")) }
+        return "Ricezione"
+    }
+
+    @Test
+    fun theAgendaOfTheHome() {
+        val team = saveNationalTeam()
+        val title = planTraining(team)
+        assertFits("home-agenda", title) {
+            TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
+        }
+        // no card of today on its own: today is lit in the week, the
+        // training in it; "today" is only the button of the week
+        rule.onAllNodes(hasText(string(R.string.agenda_today))).assertCountEquals(1)
+        rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText(title))).assertExists()
+    }
+
+    @Test
+    fun theWeekOfTheHomeShowsTodayWithNothingPlanned() {
+        saveNationalTeam()
+        rule.setContent {
+            Scout4AllTheme {
+                TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
+            }
+        }
+        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText(string(R.string.agenda_nothing)))).assertExists()
+    }
+
+    @Test
+    fun theWeekOfTheTeam() {
+        val team = saveNationalTeam()
+        val title = planTraining(team)
+        rule.setContent {
+            Scout4AllTheme {
+                TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
+            }
+        }
+        rule.waitForText("Ekaterina Antropova")
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(title)
+        rule.shot("screen-team-week-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+    }
+
+    /** The training screens fit every screen: the sessions, a session with
+     * its activities, the forms, the attendance. */
+    private fun trainingWithActivities(team: String): String {
+        val gym = core { it.createVenueNamed("Palestra comunale") }.id
+        val session = core {
+            it.saveSession(
+                team, null,
+                it.newSessionDraft().copy(
+                    start = java.time.LocalDate.now().plusDays(1).toString() + "T18:00",
+                    duration = "90", title = "Ricezione e attacco", venue = gym,
+                    objectives = "Ricezione a tre, cambio palla", notes = "Portare i palloni leggeri",
+                ),
+            )
+        }
+        listOf("Palleggio a coppie", "Bagher contro il muro", "Partitella a tema con servizio float").forEach { name ->
+            core { it.saveActivity(session.id, null, it.newActivityDraft().copy(name = name, planned = "20")) }
+        }
+        return session.id
+    }
+
+    @Test
+    fun theSessionsOfTheTeam() {
+        val team = saveNationalTeam()
+        trainingWithActivities(team)
+        assertFits("sessions", "Ricezione e attacco", null) {
+            Hub(team, Part.CALENDAR, CalendarView.LIST)
+        }
+    }
+
+    @Composable
+    private fun Hub(team: String, part: Part, view: CalendarView = CalendarView.MONTH) = TrainingScreen(
+        team, onBack = {}, onSession = {}, onCycle = { _, _ -> }, onNewCycle = {}, onNewOn = {},
+        onMatch = {}, first = part, firstView = view,
+    )
+
+    private fun week(team: String): String = core {
+        val monday = java.time.LocalDate.now().let { d -> d.minusDays((d.dayOfWeek.value - 1).toLong()) }
+        it.saveCycle(
+            team, io.github.naighes.scout4all.core.Level.MICROCYCLE, null,
+            it.newCycleDraft().copy(title = "Settimana di ricezione", start = monday.toString(), weeks = "1"),
+            emptyList(), false,
+        )
+    }.id
+
+    @Test
+    fun theCalendarOfTheTeam() {
+        val team = saveNationalTeam()
+        planTraining(team)
+        assertFits("calendar", string(R.string.agenda_today), null) { Hub(team, Part.CALENDAR) }
+    }
+
+    /** The week by the hour: seven columns even at 320dp, the hours
+     * scrolling under the heads. */
+    @Test
+    fun theWeekByTheHourOfTheTeam() {
+        val team = saveNationalTeam()
+        planTraining(team)
+        assertFits("calendar-week", string(R.string.agenda_today), null) { Hub(team, Part.CALENDAR, CalendarView.WEEK) }
+        rule.onNode(hasTestTag(WEEK_EVENT) and hasText("Ricezione", substring = true)).assertExists()
+    }
+
+    @Test
+    fun theCyclesOfTheTeam() {
+        val team = saveNationalTeam()
+        week(team)
+        assertFits("cycles", "Settimana di ricezione", null) { Hub(team, Part.CYCLES) }
+    }
+
+    @Test
+    fun theAttendanceOfTheTeam() {
+        val team = saveNationalTeam()
+        assertFits("attendance-report", string(R.string.tr_no_attendance_to_count).replaceFirstChar { it.uppercase() }, null) {
+            Hub(team, Part.ATTENDANCE)
+        }
+    }
+
+    @Test
+    fun theHistoryOfTheTeam() {
+        val team = saveNationalTeam()
+        val old = saveTeam("Italia", 2025)
+        core {
+            it.saveCycle(
+                old, io.github.naighes.scout4all.core.Level.PROGRAM, null,
+                it.newCycleDraft().copy(title = "Preparazione e campionato", start = "2025-09-01", end = "2026-05-31"),
+                emptyList(), false,
+            )
+        }
+        assertFits("history", "Preparazione e campionato", null) { Hub(team, Part.HISTORY) }
+    }
+
+    @Test
+    fun aCycle() {
+        val team = saveNationalTeam()
+        val cycle = week(team)
+        assertFits("cycle", string(R.string.tr_sessions), string(R.string.tr_new_session)) {
+            CycleScreen(
+                team, io.github.naighes.scout4all.core.Level.MICROCYCLE, cycle,
+                onBack = {}, onEdit = {}, onAdd = {}, onDuplicate = {}, onChild = {}, onNewChild = {}, onMatch = {},
+            )
+        }
+    }
+
+    @Test
+    fun theFormOfACycle() {
+        val team = saveNationalTeam()
+        assertFits("cycle-form", string(R.string.tr_cycle_weeks), string(R.string.save)) {
+            CycleFormScreen(team, io.github.naighes.scout4all.core.Level.MICROCYCLE, null, onBack = {}, onSaved = {})
+        }
+    }
+
+    @Test
+    fun theCopyOfACycle() {
+        val team = saveNationalTeam()
+        val cycle = week(team)
+        assertFits("cycle-duplicate", string(R.string.tr_copies), string(R.string.tr_duplicate_microcycle)) {
+            DuplicateCycleScreen(cycle, onBack = {}, onDone = {})
+        }
+    }
+
+    @Test
+    fun aSession() {
+        val team = saveNationalTeam()
+        val session = trainingWithActivities(team)
+        // its title: in landscape the activities are below the fold (the
+        // gym and its map push them), out of the lazy list until scrolled
+        assertFits("session", "Ricezione e attacco", string(R.string.tr_complete_session)) {
+            SessionScreen(team, session, onBack = {}, onEdit = {}, onActivity = {}, onAttendance = {}, onDuplicate = {})
+        }
+    }
+
+    @Test
+    fun theFormOfASession() {
+        val team = saveNationalTeam()
+        assertFits("session-form", string(R.string.tr_session_duration), string(R.string.save)) {
+            SessionFormScreen(team, null, onBack = {}, onSaved = {})
+        }
+    }
+
+    @Test
+    fun theFormOfAnActivity() {
+        val team = saveNationalTeam()
+        val session = trainingWithActivities(team)
+        assertFits("activity-form", string(R.string.tr_copy_activity), string(R.string.save)) {
+            ActivityFormScreen(team, session, null, onBack = {}, onDone = {})
+        }
+    }
+
+    @Test
+    fun theAttendanceOfASession() {
+        val team = saveNationalTeam()
+        val session = trainingWithActivities(team)
+        assertFits("attendance", "Alessia Orro", string(R.string.save)) {
+            AttendanceScreen(team, session, onBack = {})
+        }
+    }
+
+    @Test
+    fun theCopyOfASession() {
+        val team = saveNationalTeam()
+        val session = trainingWithActivities(team)
+        assertFits("duplicate", string(R.string.tr_copy_objectives), string(R.string.tr_duplicate_session)) {
+            DuplicateScreen(team, session, onBack = {}, onDuplicated = {})
+        }
+    }
+
+    /** The form of a new session as a weekly series: Continue and Finish
+     * both whole at the bottom. */
+    @Test
+    fun theFormOfASeries() {
+        val team = saveNationalTeam()
+        rule.setContent { Scout4AllTheme { SessionFormScreen(team, null, onBack = {}, onSaved = {}) } }
+        rule.waitForText(string(R.string.tr_weekly_series))
+        rule.onNode(hasText(string(R.string.tr_weekly_series)) and hasClickAction()).performClick()
+        rule.waitForText(string(R.string.tr_until))
+        rule.shot("screen-series-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.assertWhole(hasText(string(R.string.tr_continue_entry)) and hasClickAction())
+        rule.assertWhole(hasText(string(R.string.tr_finish)) and hasClickAction())
     }
 
     @Test

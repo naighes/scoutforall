@@ -18,6 +18,8 @@ pub fn combination(key: &Key, modifiers: Modifiers) -> Option<KeyCombination> {
     // shortcuts of ⌘ are the system's
     match (modifiers.macos_command(), key) {
         (true, Key::Character(c)) if ["z", "Z", "y"].contains(&c.as_str()) => {}
+        // ⌘Enter saves a form from a text of more lines
+        (true, Key::Named(Named::Enter)) => {}
         (true, _) => return None,
         (false, _) => {}
     }

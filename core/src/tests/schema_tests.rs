@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn a_new_database_has_the_tables_of_this_version() {
         let db = db::open_in_memory().unwrap();
-        assert_eq!(db::schema_version(), 4);
+        assert_eq!(db::schema_version(), 6);
         let expected: &[(&str, &[&str])] = &[
             (
                 "competitions",
@@ -221,6 +221,35 @@ mod tests {
                     "legacy_id",
                     "legacy_team",
                     "deleted",
+                    "venue_id",
+                ],
+            ),
+            (
+                "mesocycles",
+                &[
+                    "id",
+                    "team_id",
+                    "program_id",
+                    "title",
+                    "start_date",
+                    "weeks",
+                    "objectives",
+                    "notes",
+                    "deleted",
+                ],
+            ),
+            (
+                "microcycles",
+                &[
+                    "id",
+                    "team_id",
+                    "mesocycle_id",
+                    "title",
+                    "start_date",
+                    "weeks",
+                    "objectives",
+                    "notes",
+                    "deleted",
                 ],
             ),
             (
@@ -279,8 +308,81 @@ mod tests {
                 ],
             ),
             (
+                "training_activities",
+                &[
+                    "id",
+                    "session_id",
+                    "position",
+                    "name",
+                    "description",
+                    "planned_min",
+                    "actual_min",
+                    "notes",
+                    "status",
+                    "deleted",
+                ],
+            ),
+            (
+                "training_attendance",
+                &[
+                    "session_id",
+                    "person_id",
+                    "status",
+                    "note",
+                    "number",
+                    "guest",
+                    "makeup",
+                    "deleted",
+                ],
+            ),
+            (
+                "training_programs",
+                &[
+                    "id",
+                    "team_id",
+                    "title",
+                    "start_date",
+                    "end_date",
+                    "notes",
+                    "deleted",
+                ],
+            ),
+            (
+                "training_sessions",
+                &[
+                    "id",
+                    "team_id",
+                    "microcycle_id",
+                    "series_id",
+                    "start_local",
+                    "duration_min",
+                    "actual_duration_min",
+                    "venue_id",
+                    "title",
+                    "objectives",
+                    "notes",
+                    "final_remarks",
+                    "status",
+                    "deleted",
+                ],
+            ),
+            (
                 "upload_queue",
                 &["match_id", "position", "queued_at", "retry_count"],
+            ),
+            (
+                "venues",
+                &[
+                    "id",
+                    "name",
+                    "address",
+                    "map_url",
+                    "latitude",
+                    "longitude",
+                    "notes",
+                    "pinned",
+                    "deleted",
+                ],
             ),
         ];
         assert_eq!(
@@ -313,8 +415,14 @@ mod tests {
                 "match_video_anchor_insert",
                 "match_video_anchor_update",
                 "match_video_event_insert",
+                "mesocycles_team_insert",
+                "mesocycles_team_update",
+                "microcycles_team_insert",
+                "microcycles_team_update",
                 "set_lineups_side_b_insert",
                 "set_lineups_side_b_update",
+                "training_sessions_team_insert",
+                "training_sessions_team_update",
             ]
         );
     }

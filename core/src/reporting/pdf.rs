@@ -1,9 +1,10 @@
 use crate::errors::{AppError, IOError};
 use crate::localization::Labels;
 use crate::reporting::model::{Report, build_report, build_report_of_both};
+use crate::reporting::training::Sheet;
 use crate::reporting::typst_world::ReportWorld;
 use crate::shapes::r#match::MatchEntry;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use typst::WorldExt;
 use typst::foundations::{Dict, Value};
 use typst_layout::PagedDocument;
@@ -27,8 +28,20 @@ pub fn render_both_pdf(
     render_report_pdf(&build_report_of_both(a, b, labels)?)
 }
 
+/// The layout of the sheets of the training.
+const TRAINING_TEMPLATE: &str = include_str!("training.typ");
+
+/// The sheet of a session or the plan of a microcycle, as a PDF.
+pub fn render_training_pdf(sheet: &Sheet) -> Result<Vec<u8>, AppError> {
+    render(TRAINING_TEMPLATE, "sheet", sheet)
+}
+
 pub fn render_report_pdf(report: &Report) -> Result<Vec<u8>, AppError> {
-    let world = ReportWorld::new(TEMPLATE, report_inputs(report)?);
+    render(TEMPLATE, "report", report)
+}
+
+fn render(template: &str, key: &str, data: &impl Serialize) -> Result<Vec<u8>, AppError> {
+    let world = ReportWorld::new(template, report_inputs(key, data)?);
     let document = typst::compile::<PagedDocument>(&world)
         .output
         .map_err(|e| typst_error(&world, "error compiling typst", &e))?;
@@ -36,14 +49,14 @@ pub fn render_report_pdf(report: &Report) -> Result<Vec<u8>, AppError> {
         .map_err(|e| typst_error(&world, "error exporting PDF", &e))
 }
 
-/// The report as the typst value of `sys.inputs.report`.
-fn report_inputs(report: &Report) -> Result<Dict, AppError> {
+/// The data as the typst value of `sys.inputs.<key>`.
+fn report_inputs(key: &str, data: &impl Serialize) -> Result<Dict, AppError> {
     let msg = |e: serde_json::Error| {
         AppError::IO(IOError::Msg(format!("error encoding the report: {e}")))
     };
-    let json = serde_json::to_value(report).map_err(msg)?;
+    let json = serde_json::to_value(data).map_err(msg)?;
     let value = Value::deserialize(json).map_err(msg)?;
-    Ok(Dict::from_iter([("report".into(), value)]))
+    Ok(Dict::from_iter([(key.into(), value)]))
 }
 
 /// The diagnostics, with the line of the template they refer to.

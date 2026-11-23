@@ -29,6 +29,7 @@ mod tests {
         },
         storage::fs::FsStore,
         tests::{EN, LEGACY_VERSIONS, copy_dir, legacy_fixtures},
+        training::SessionStatus,
     };
     use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
     use rusqlite::{
@@ -82,6 +83,7 @@ mod tests {
         check_texts::<MatchSource>();
         check_texts::<Side>();
         check_texts::<ScoutingMode>();
+        check_texts::<SessionStatus>();
         check_texts::<Stage>();
         check_texts::<CompetitionFormat>();
         check_texts::<EventTypeEnum>();
@@ -202,6 +204,7 @@ mod tests {
             ("sets", "lineup_rules", texts::<LineupRulesEnum>()),
             ("set_lineups", "side", texts::<Side>()),
             ("events", "side", texts::<Side>()),
+            ("training_sessions", "status", texts::<SessionStatus>()),
         ];
         for (table, column, values) in columns {
             assert_eq!(schema_list(&db, table, column), values, "{table}.{column}");

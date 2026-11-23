@@ -53,6 +53,19 @@
     "image_alt": "Analiza drużyny z ostatnich meczów: podsumowanie, ustawienia, rozegranie i błędy"
   },
   {
+    "id": "training",
+    "eyebrow": "Plan treningów",
+    "title": "Planowanie sezonu, zapis każdej sesji",
+    "content": "Podziel sezon na program, mezocykle i tygodniowe mikrocykle, a potem wypełnij je sesjami: ćwiczenia, cele, hala i czas trwania. Po sesji zaznacz, co zostało zrobione i kto był obecny; kalendarz pokazuje treningi i mecze razem.",
+    "points": [
+      "Sesje cykliczne tworzone za jednym razem, z sygnalizacją nakładania się na inne sesje i mecze",
+      "Obecność według zawodniczki i okresu, ze spóźnieniami, nieobecnościami i gośćmi",
+      "Karta zajęć w PDF, hale z mapą, plan treningów udostępniany innym trenerom"
+    ],
+    "image": "training-calendar",
+    "image_alt": "Kalendarz treningów: miesiąc sesji i mecz, z mezocyklami nad każdym tygodniem"
+  },
+  {
     "id": "teams",
     "eyebrow": "Drużyny i mecze",
     "title": "Twoje dane na twoim urządzeniu",

@@ -355,7 +355,7 @@ mod tests {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let (core, _, _) = competitions_played(&dir);
-        let mut home = HomeScreen::new(core.home().unwrap());
+        let mut home = HomeScreen::new(&core, core.home().unwrap());
         assert!(matches!(
             home.key(&core, s, key!(c)),
             home::Outcome::Competitions

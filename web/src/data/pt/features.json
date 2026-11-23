@@ -53,6 +53,19 @@
     "image_alt": "A análise de uma equipe nas últimas partidas: resumo, rodízios, distribuição e erros"
   },
   {
+    "id": "training",
+    "eyebrow": "Programação",
+    "title": "Planejar a temporada, registrar cada sessão",
+    "content": "Divida a temporada em programa, mesociclos e microciclos semanais e preencha-os com sessões: atividades, objetivos, ginásio e duração. Depois da sessão marque o que foi feito e quem estava presente; o calendário mostra treinos e partidas juntos.",
+    "points": [
+      "Sessões recorrentes criadas de uma vez, com as sobreposições com outras sessões e partidas sinalizadas",
+      "Presenças por jogadora e por período, com atrasos, faltas e convidadas",
+      "Ficha da sessão em PDF, ginásios com o mapa, programação compartilhada com outros treinadores"
+    ],
+    "image": "training-calendar",
+    "image_alt": "O calendário dos treinos: um mês de sessões e uma partida, com os mesociclos acima de cada semana"
+  },
+  {
     "id": "teams",
     "eyebrow": "Equipes e partidas",
     "title": "Seus dados, no seu dispositivo",

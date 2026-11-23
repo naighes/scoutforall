@@ -104,6 +104,8 @@ sealed interface MatchFormState {
         /** an error of the save */
         val error: String? = null,
         val busy: Boolean = false,
+        /** the gym is held by another team: asked before saving */
+        val clashes: List<io.github.naighes.scout4all.core.VenueClashRecord>? = null,
         /** the form as it was read: changed, going back asks first */
         val loaded: MatchForm = form,
         /** the second step, after the fields: who is on the score sheet */
@@ -196,6 +198,8 @@ class MatchFormViewModel(
     teamId: String,
     private val matchId: String?,
     example: Boolean = false,
+    /** a new match on this day of the calendar, at the time of now */
+    day: LocalDate? = null,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow<MatchFormState>(MatchFormState.Loading)
     val state: StateFlow<MatchFormState> = mutableState
@@ -210,7 +214,7 @@ class MatchFormViewModel(
                     val form = when (matchId) {
                         null -> when (example) {
                             true -> core.tutorialMatchForm(teamId, rfc3339(OffsetDateTime.now()))
-                            false -> core.newMatchForm(rfc3339(OffsetDateTime.now()))
+                            false -> core.newMatchForm(rfc3339(day?.let { onDay(it, null) } ?: OffsetDateTime.now()))
                         }
                         else -> core.matchForm(teamId, matchId)
                     }
@@ -388,12 +392,28 @@ class MatchFormViewModel(
     fun toFields() = update { it.copy(onRoster = false, invalid = null, error = null) }
 
     /** Saves, once at a time. */
-    fun save() {
+    fun save() = save(false)
+
+    fun dismissClashes() = update { it.copy(clashes = null) }
+
+    /** The gym held by another team at that time asks first, unless
+     * `confirmed`. */
+    fun save(confirmed: Boolean) {
         val editing = mutableState.value as? MatchFormState.Editing ?: return
         if (editing.busy) return
-        mutableState.value = editing.copy(busy = true)
+        mutableState.value = editing.copy(busy = true, clashes = null)
         viewModelScope.launch {
             mutableState.value = try {
+                val venue = editing.form.venue
+                val date = editing.form.date
+                val busyWith = when {
+                    confirmed || venue == null || date == null -> emptyList()
+                    else -> app.core { it.matchVenueClashes(editing.teamId, editing.form.opponentTeam, venue, date) }
+                }
+                if (busyWith.isNotEmpty()) {
+                    mutableState.value = editing.copy(clashes = busyWith)
+                    return@launch
+                }
                 val id = app.core { it.saveMatch(editing.teamId, matchId, editing.form) }
                 when (editing.form.both) {
                     true -> startB(editing, id)
@@ -512,9 +532,10 @@ fun MatchFormScreen(
     onBack: () -> Unit,
     onSaved: (teamId: String, matchId: String) -> Unit,
     example: Boolean = false,
+    day: LocalDate? = null,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
-    val model = viewModel { MatchFormViewModel(app, teamId, matchId, example) }
+    val model = viewModel { MatchFormViewModel(app, teamId, matchId, example, day) }
     val state by model.state.collectAsState()
     val back = rememberFormBack((state as? MatchFormState.Editing)?.changed == true, onBack)
     val onRoster = (state as? MatchFormState.Editing)?.onRoster == true
@@ -551,6 +572,7 @@ fun MatchFormScreen(
                     s.b != null || s.onRoster -> RosterContent(s, model, modifier)
                     else -> MatchFormContent(s, model, modifier)
                 }
+                s.clashes?.let { c -> ClashDialog(c, onConfirm = { model.save(true) }, onDismiss = model::dismissClashes) }
                 s.correcting?.let { CorrectionDialog(it, s.b?.roles ?: s.roles, model) }
                 s.adding?.let { AddingDialog(it, s.b?.roles.orEmpty(), model) }
             }
@@ -620,6 +642,7 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 error = error(MatchField.DATE),
             )
             CourtChoice(form) { home, neutral -> model.change(null) { it.copy(home = home, neutral = neutral) } }
+            VenueChoice(state.teamId, form.venue, onVenue = { v -> model.change(null) { it.copy(venue = v) } })
             Section(R.string.competition_section)
             val competitions = remember(state.competitions) { state.competitions.map { it.label() } }
             SuggestField(
