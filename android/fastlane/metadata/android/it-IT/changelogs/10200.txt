@@ -1,0 +1,6 @@
+- Allenamenti: pianifica le sedute di squadra, con data, ora, luogo e attività (copiate da quelle fatte), ripetute ogni settimana.
+- Presenze di ogni seduta, con ospiti, e sedute completate o annullate.
+- Programmi, mesocicli e microcicli per pianificare la stagione, con copia della settimana.
+- Agenda per giorno, settimana e mese, con allenamenti e partite.
+- Totali di sedute e minuti, e presenze per giocatore.
+- Analisi della squadra: il filtro giocatori elenca chi ha toccato la palla.

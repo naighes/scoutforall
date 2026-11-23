@@ -1,0 +1,6 @@
+- Treningi: planuj sesje drużyny z datą, godziną, miejscem i ćwiczeniami (kopiowanymi z wcześniejszych) i powtarzaj je co tydzień.
+- Obecność na każdej sesji, z gośćmi, oraz sesje zakończone lub odwołane.
+- Programy, mezocykle i mikrocykle do planowania sezonu, z kopiowaniem tygodnia.
+- Terminarz dzienny, tygodniowy i miesięczny, z treningami i meczami razem.
+- Sumy sesji i minut oraz obecność każdego zawodnika.
+- Analiza drużyny: filtr zawodników pokazuje każdego, kto miał kontakt z piłką.

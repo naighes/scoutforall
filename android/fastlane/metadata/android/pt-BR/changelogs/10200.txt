@@ -1,0 +1,6 @@
+- Treinos: planeje as sessões de uma equipe, com data, hora, local e atividades (copiadas de anteriores), repetidas toda semana.
+- Presença em cada sessão, com convidados, e sessões concluídas ou canceladas.
+- Programas, mesociclos e microciclos para planejar a temporada, com cópia da semana.
+- Agenda por dia, semana e mês, com treinos e jogos juntos.
+- Totais de sessões e minutos, e presença por jogador.
+- Análise da equipe: o filtro de jogadores lista quem tocou na bola.

@@ -1,0 +1,6 @@
+- Training: plan the sessions of a team, with date, time, place and activities (copied from earlier ones), and repeat them weekly.
+- Attendance of each session, with guests, and the sessions completed or cancelled.
+- Programs, mesocycles and microcycles to plan the season, with the copy of a week.
+- Agenda by day, week and month, with training and matches together.
+- Totals of sessions and minutes, and attendance per player.
+- Team analysis: the player filter lists every player with a touch.
