@@ -157,7 +157,7 @@ internal fun TrainingScreen(
 private fun Part.label(): String = when (this) {
     Part.CALENDAR -> stringResource(R.string.tr_calendar).replaceFirstChar { it.uppercase() }
     Part.SESSIONS -> stringResource(R.string.tr_sessions)
-    Part.CYCLES -> stringResource(R.string.tr_cycles)
+    Part.CYCLES -> stringResource(R.string.tr_programming)
     Part.ATTENDANCE -> stringResource(R.string.tr_attendance)
 }
 

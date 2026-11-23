@@ -64,7 +64,7 @@ fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> 
     let pills = row([
         (Tab::Calendar, s.calendar),
         (Tab::Sessions, s.sessions),
-        (Tab::Cycles, s.cycles),
+        (Tab::Cycles, s.programming),
         (Tab::Presence, s.attendance),
         (Tab::History, s.history),
     ]
@@ -732,7 +732,7 @@ impl TrainingScreen {
                 ("↑ ↓".to_string(), String::new()),
                 ("space".to_string(), s.select_row.to_string()),
                 ("m".to_string(), s.create_microcycle.to_string()),
-                ("⇥".to_string(), s.cycles.to_string()),
+                ("⇥".to_string(), s.programming.to_string()),
                 ("Enter".to_string(), s.open.to_string()),
                 ("← → f".to_string(), s.filter.to_string()),
                 ("p".to_string(), s.period.to_string()),
@@ -844,7 +844,7 @@ impl TrainingScreen {
         // only what can be done now: the microcycle once sessions are
         // marked; a session is deleted from its sheet (or ⌫ on its row)
         let mut add: Vec<Element<'a, Message>> = vec![
-            text(ui::fill(s.sessions_of, &[shown.len().to_string()]))
+            text(s.count(s.sessions_of, shown.len()))
                 .size(SIZE_SMALL)
                 .color(c.muted)
                 .into(),

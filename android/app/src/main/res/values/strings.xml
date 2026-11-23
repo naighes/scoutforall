@@ -605,7 +605,7 @@
     <string name="tr_keep">Leave as it is</string>
     <string name="tr_status">Status</string>
     <string name="tr_remove_guest">Remove</string>
-    <string name="tr_cycles">Cycles</string>
+    <string name="tr_cycles_intro">The training plan splits the season into blocks, from the largest to the smallest. The program covers the season (or half of it): preparation, championship, rest. A mesocycle usually lasts three to six weeks and has one goal: a few harder weeks, then a lighter one. A microcycle is a week: its sessions and the match, the hardest session as far from the match as possible. Start from the program, then make the mesocycles and the microcycles inside it.</string>
     <string name="tr_programs">Programs</string>
     <string name="tr_mesocycles">Mesocycles</string>
     <string name="tr_microcycles">Microcycles</string>

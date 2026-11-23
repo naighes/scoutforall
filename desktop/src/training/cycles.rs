@@ -1160,10 +1160,17 @@ impl CyclesTab {
                 .into(),
         };
         let mut actions: Vec<Element<'a, Message>> = vec![
-            text(ui::fill(s.cycles_of, &[self.cycles.len().to_string()]))
-                .size(SIZE_SMALL)
-                .color(c.muted)
-                .into(),
+            text(s.count(
+                match self.level {
+                    Level::Program => s.programs_of,
+                    Level::Mesocycle => s.mesocycles_of,
+                    Level::Microcycle => s.microcycles_of,
+                },
+                self.cycles.len(),
+            ))
+            .size(SIZE_SMALL)
+            .color(c.muted)
+            .into(),
             // a new cycle of the level shown, named: "new cycle" next to
             // "create mesocycle" didn't say which made what
             ui::pill(create_name(s, self.level), false, Some(Message::New), c),
@@ -1178,7 +1185,14 @@ impl CyclesTab {
                 c,
             ));
         }
-        ui::panel_with(s.cycles, actions, column![levels, list].spacing(12), c)
+        // what the levels are, for who has never planned a season
+        let intro = text(s.cycles_intro).size(SIZE_SMALL).color(c.muted);
+        ui::panel_with(
+            s.programming,
+            actions,
+            column![intro, levels, list].spacing(12),
+            c,
+        )
     }
 
     fn cycle_row<'a>(

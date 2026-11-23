@@ -484,7 +484,16 @@ pub struct Strings {
     pub copies_free: &'static str,
     pub remove_with_children: &'static str,
     pub detach_hint: &'static str,
-    pub cycles_of: &'static str,
+    /// "{1} programs", "{1} mesocycles", "{1} microcycles": one, a few
+    /// (Polish), many; `plural` picks
+    pub programs_of: [&'static str; 3],
+    pub mesocycles_of: [&'static str; 3],
+    pub microcycles_of: [&'static str; 3],
+    /// the form of a count: 0 one, 1 a few (Polish), 2 many
+    pub plural: fn(usize) -> usize,
+    /// what the programs, the mesocycles and the microcycles are, for who
+    /// has never planned a season
+    pub cycles_intro: &'static str,
     pub status_planned: &'static str,
     pub status_completed: &'static str,
     pub complete_session: &'static str,
@@ -542,7 +551,7 @@ pub struct Strings {
     pub no_sessions: &'static str,
     pub move_up: &'static str,
     pub min_short: &'static str,
-    pub sessions_of: &'static str,
+    pub sessions_of: [&'static str; 3],
     pub duplicate_session: &'static str,
     pub repeat_sessions: &'static str,
     pub copy_objectives: &'static str,
@@ -1174,7 +1183,11 @@ What did you expect instead?
     copies_free: "{1} copies left out of the mesocycle: they are free",
     remove_with_children: "Delete what it contains too",
     detach_hint: "Press Enter again to detach them and save",
-    cycles_of: "{1} cycles",
+    programs_of: ["{1} program", "{1} programs", "{1} programs"],
+    mesocycles_of: ["{1} mesocycle", "{1} mesocycles", "{1} mesocycles"],
+    microcycles_of: ["{1} microcycle", "{1} microcycles", "{1} microcycles"],
+    plural: one_or_many,
+    cycles_intro: "The training plan splits the season into blocks, from the largest to the smallest. The program covers the season (or half of it): preparation, championship, rest. A mesocycle usually lasts three to six weeks and has one goal: a few harder weeks, then a lighter one. A microcycle is a week: its sessions and the match, the hardest session as far from the match as possible. Start from the top (the program, then the mesocycles and microcycles inside it) or from the bottom (mark the sessions and create a microcycle).",
     status_planned: "planned",
     status_completed: "completed",
     complete_session: "Complete",
@@ -1230,7 +1243,7 @@ What did you expect instead?
     no_sessions: "No sessions",
     move_up: "Move up",
     min_short: "min",
-    sessions_of: "{1} sessions",
+    sessions_of: ["{1} session", "{1} sessions", "{1} sessions"],
     duplicate_session: "Duplicate",
     repeat_sessions: "Repeat",
     copy_objectives: "Copy the objectives",
@@ -1859,7 +1872,11 @@ Cosa ti aspettavi invece?
     copies_free: "{1} copie restano fuori dal mesociclo: sono libere",
     remove_with_children: "Elimina anche ciò che contiene",
     detach_hint: "Premi di nuovo Invio per staccarli e salvare",
-    cycles_of: "{1} cicli",
+    programs_of: ["{1} programma", "{1} programmi", "{1} programmi"],
+    mesocycles_of: ["{1} mesociclo", "{1} mesocicli", "{1} mesocicli"],
+    microcycles_of: ["{1} microciclo", "{1} microcicli", "{1} microcicli"],
+    plural: one_or_many,
+    cycles_intro: "La programmazione divide la stagione in blocchi, dal più grande al più piccolo. Il programma copre la stagione (o metà): preparazione, campionato, riposo. Il mesociclo dura di solito da tre a sei settimane e ha un solo obiettivo: qualche settimana più pesante, poi una più leggera. Il microciclo è una settimana: le sue sedute e la partita, la seduta più pesante il più lontano possibile dalla partita. Si parte dall'alto (il programma, poi i mesocicli e i microcicli al suo interno) o dal basso (si spuntano le sedute e si crea il microciclo).",
     status_planned: "pianificata",
     status_completed: "completata",
     complete_session: "Completa",
@@ -1915,7 +1932,7 @@ Cosa ti aspettavi invece?
     no_sessions: "Nessuna seduta",
     move_up: "Sposta su",
     min_short: "min",
-    sessions_of: "{1} sedute",
+    sessions_of: ["{1} seduta", "{1} sedute", "{1} sedute"],
     duplicate_session: "Duplica",
     repeat_sessions: "Ripeti",
     copy_objectives: "Copia gli obiettivi",
@@ -2545,7 +2562,11 @@ O que você esperava?
     copies_free: "{1} cópias ficam fora do mesociclo: estão livres",
     remove_with_children: "Excluir também o que contém",
     detach_hint: "Prima Enter de novo para desligá-los e salvar",
-    cycles_of: "{1} ciclos",
+    programs_of: ["{1} programa", "{1} programas", "{1} programas"],
+    mesocycles_of: ["{1} mesociclo", "{1} mesociclos", "{1} mesociclos"],
+    microcycles_of: ["{1} microciclo", "{1} microciclos", "{1} microciclos"],
+    plural: one_or_many,
+    cycles_intro: "A programação divide a temporada em blocos, do maior ao menor. O programa cobre a temporada (ou metade): preparação, campeonato, descanso. O mesociclo dura em geral de três a seis semanas e tem um só objetivo: algumas semanas mais pesadas, depois uma mais leve. O microciclo é uma semana: as suas sessões e o jogo, a sessão mais pesada o mais longe possível do jogo. Comece de cima (o programa, depois os mesociclos e microciclos dentro dele) ou de baixo (marque as sessões e crie um microciclo).",
     status_planned: "planeada",
     status_completed: "concluída",
     complete_session: "Concluir",
@@ -2601,7 +2622,7 @@ O que você esperava?
     no_sessions: "Nenhuma sessão",
     move_up: "Mover para cima",
     min_short: "min",
-    sessions_of: "{1} sessões",
+    sessions_of: ["{1} sessão", "{1} sessões", "{1} sessões"],
     duplicate_session: "Duplicar",
     repeat_sessions: "Repetir",
     copy_objectives: "Copiar os objetivos",
@@ -3230,7 +3251,11 @@ Czego się spodziewałeś(-aś)?
     copies_free: "{1} kopii poza mezocyklem: są wolne",
     remove_with_children: "Usuń też to, co zawiera",
     detach_hint: "Naciśnij Enter ponownie, by je odłączyć i zapisać",
-    cycles_of: "Cykle: {1}",
+    programs_of: ["{1} program", "{1} programy", "{1} programów"],
+    mesocycles_of: ["{1} mezocykl", "{1} mezocykle", "{1} mezocykli"],
+    microcycles_of: ["{1} mikrocykl", "{1} mikrocykle", "{1} mikrocykli"],
+    plural: polish_plural,
+    cycles_intro: "Plan treningów dzieli sezon na bloki, od największego do najmniejszego. Program obejmuje sezon (lub jego połowę): przygotowanie, rozgrywki, odpoczynek. Mezocykl trwa zwykle od trzech do sześciu tygodni i ma jeden cel: kilka cięższych tygodni, potem lżejszy. Mikrocykl to tydzień: jego sesje i mecz, najcięższa sesja jak najdalej od meczu. Zacznij od góry (program, potem mezocykle i mikrocykle w nim) albo od dołu (zaznacz sesje i utwórz mikrocykl).",
     status_planned: "zaplanowana",
     status_completed: "zakończona",
     complete_session: "Zakończ",
@@ -3286,7 +3311,7 @@ Czego się spodziewałeś(-aś)?
     no_sessions: "Brak sesji",
     move_up: "Przesuń w górę",
     min_short: "min",
-    sessions_of: "Sesje: {1}",
+    sessions_of: ["{1} sesja", "{1} sesje", "{1} sesji"],
     duplicate_session: "Duplikuj",
     repeat_sessions: "Powtarzaj",
     copy_objectives: "Kopiuj cele",
@@ -3904,7 +3929,19 @@ const JA: Strings = Strings {
     copies_free: "{1}件のコピーはメゾサイクルの外：未所属です",
     remove_with_children: "含まれるものも削除",
     detach_hint: "もう一度Enterで外して保存",
-    cycles_of: "{1}件",
+    programs_of: ["プログラム {1}件", "プログラム {1}件", "プログラム {1}件"],
+    mesocycles_of: [
+        "メゾサイクル {1}件",
+        "メゾサイクル {1}件",
+        "メゾサイクル {1}件",
+    ],
+    microcycles_of: [
+        "マイクロサイクル {1}件",
+        "マイクロサイクル {1}件",
+        "マイクロサイクル {1}件",
+    ],
+    plural: one_or_many,
+    cycles_intro: "計画はシーズンを大きい順にブロックへ分けます。プログラムはシーズン全体（または半分）で、準備期・リーグ戦・休養を含みます。メゾサイクルは通常3〜6週間で、目標は一つです。数週間しっかり負荷をかけ、その後の1週間は軽くします。マイクロサイクルは1週間で、セッションと試合から成り、最も重いセッションは試合からできるだけ離します。上から（プログラム、その中にメゾサイクルとマイクロサイクル）でも、下から（セッションにチェックを付けてマイクロサイクルを作成）でも始められます。",
     status_planned: "予定",
     status_completed: "完了",
     complete_session: "完了にする",
@@ -3960,7 +3997,7 @@ const JA: Strings = Strings {
     no_sessions: "セッションなし",
     move_up: "上へ",
     min_short: "分",
-    sessions_of: "セッション {1}件",
+    sessions_of: ["セッション {1}件", "セッション {1}件", "セッション {1}件"],
     duplicate_session: "複製",
     repeat_sessions: "繰り返し",
     copy_objectives: "目標をコピー",
@@ -4137,7 +4174,32 @@ pub const fn strings(language: LanguageEnum) -> &'static Strings {
     }
 }
 
+/// English, Italian, Portuguese: one, or many (Japanese has no plural:
+/// its forms are the same).
+fn one_or_many(n: usize) -> usize {
+    match n {
+        1 => 0,
+        _ => 2,
+    }
+}
+
+/// Polish: one; 2–4, 22–24… (not 12–14); the rest.
+fn polish_plural(n: usize) -> usize {
+    match (n, n % 10, n % 100) {
+        (1, _, _) => 0,
+        (_, 2..=4, 12..=14) => 2,
+        (_, 2..=4, _) => 1,
+        _ => 2,
+    }
+}
+
 impl Strings {
+    /// `n` with the form of `forms` it takes: "1 programma", "2 programmi".
+    pub fn count(&self, forms: [&'static str; 3], n: usize) -> String {
+        let form = forms.get((self.plural)(n)).copied().unwrap_or_default();
+        form.replace("{1}", &n.to_string())
+    }
+
     /// `day` as the language writes it.
     pub fn date(&self, day: chrono::NaiveDate) -> String {
         self.dated(self.date_pattern, day)
@@ -4209,6 +4271,27 @@ impl Strings {
 
 #[cfg(test)]
 mod tests {
+    /// A count says its noun as the language does: one, many, and the
+    /// Polish few (2–4, not 12–14).
+    #[test]
+    fn counts_take_the_singular_and_the_plural() {
+        use {super::strings, scout4all_core::shapes::enums::LanguageEnum};
+        let it = strings(LanguageEnum::It);
+        assert_eq!(it.count(it.programs_of, 1), "1 programma");
+        assert_eq!(it.count(it.mesocycles_of, 2), "2 mesocicli");
+        assert_eq!(it.count(it.microcycles_of, 0), "0 microcicli");
+        assert_eq!(it.count(it.sessions_of, 1), "1 seduta");
+        let en = strings(LanguageEnum::En);
+        assert_eq!(en.count(en.programs_of, 1), "1 program");
+        assert_eq!(en.count(en.programs_of, 3), "3 programs");
+        let pl = strings(LanguageEnum::Pl);
+        assert_eq!(pl.count(pl.sessions_of, 1), "1 sesja");
+        assert_eq!(pl.count(pl.sessions_of, 3), "3 sesje");
+        assert_eq!(pl.count(pl.sessions_of, 5), "5 sesji");
+        assert_eq!(pl.count(pl.sessions_of, 12), "12 sesji");
+        assert_eq!(pl.count(pl.sessions_of, 22), "22 sesje");
+    }
+
     /// `ui::fill` puts the values in `{1}`, `{2}`…: a zero would be shown
     /// as it is.
     #[test]

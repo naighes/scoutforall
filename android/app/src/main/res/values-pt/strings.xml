@@ -603,7 +603,7 @@
     <string name="tr_keep">Deixar como está</string>
     <string name="tr_status">Estado</string>
     <string name="tr_remove_guest">Remover</string>
-    <string name="tr_cycles">Ciclos</string>
+    <string name="tr_cycles_intro">A programação divide a temporada em blocos, do maior ao menor. O programa cobre a temporada (ou metade): preparação, campeonato, descanso. O mesociclo dura em geral de três a seis semanas e tem um só objetivo: algumas semanas mais pesadas, depois uma mais leve. O microciclo é uma semana: as suas sessões e o jogo, a sessão mais pesada o mais longe possível do jogo. Comece pelo programa, depois crie os mesociclos e os microciclos dentro dele.</string>
     <string name="tr_programs">Programas</string>
     <string name="tr_mesocycles">Mesociclos</string>
     <string name="tr_microcycles">Microciclos</string>

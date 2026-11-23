@@ -116,10 +116,22 @@ fun CyclesTab(teamId: String, level: Level, onLevel: (Level) -> Unit, modifier: 
             }
         }
         val all = cycles
-        when {
-            all == null -> Centered(Modifier.fillMaxSize()) { CircularProgressIndicator() }
-            all.isEmpty() -> Text(stringResource(R.string.tr_no_cycles), Modifier.padding(16.dp))
+        when (all) {
+            null -> Centered(Modifier.fillMaxSize()) { CircularProgressIndicator() }
             else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
+                // what the levels are, for who has never planned a season:
+                // it scrolls away with the list
+                item(key = "intro") {
+                    Text(
+                        stringResource(R.string.tr_cycles_intro),
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (all.isEmpty()) {
+                    item(key = "none") { Text(stringResource(R.string.tr_no_cycles), Modifier.padding(16.dp)) }
+                }
                 items(all.sortedByDescending { it.firstDay }, key = { it.id }) { c ->
                     ListItem(
                         modifier = Modifier.clickable { onCycle(level, c.id) },
