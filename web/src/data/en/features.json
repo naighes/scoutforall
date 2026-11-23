@@ -53,6 +53,19 @@
     "image_alt": "The analysis of a team over its last matches: summary, rotations, distribution and errors"
   },
   {
+    "id": "training",
+    "eyebrow": "Training plan",
+    "title": "Plan the season, record every session",
+    "content": "Split the season into a program, mesocycles and weekly microcycles, then fill them with sessions: activities, objectives, gym and duration. After the session mark what was done and who was there; the calendar shows training and matches together.",
+    "points": [
+      "Recurring sessions created in one go, with overlaps with other sessions and matches reported",
+      "Attendance by player and by period, with late arrivals, absences and guests",
+      "Session sheet in PDF, gyms with their map, the training plan shared with other coaches"
+    ],
+    "image": "training-calendar",
+    "image_alt": "The training calendar: a month of sessions and a match, with the mesocycles above each week"
+  },
+  {
     "id": "teams",
     "eyebrow": "Teams and matches",
     "title": "Your data, on your device",

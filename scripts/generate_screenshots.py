@@ -5,6 +5,8 @@ The desktop app takes them itself (`scout4all-desktop --shots plan.json`):
 each language on a copy of the example matches (never `~/.scout4all`), the
 screens opened and the keys pressed by the plan, the window saved as PNG,
 then converted to the WebP the site uses (`web/src/assets/screens/<lang>/`).
+The training screens show an example plan of the team, written into the
+copy around the day they're taken (`core/examples/training_plan.rs`).
 
 The video screen is taken on the match given with `--video-match`: its id
 in the data (`--video-data`, default `~/.scout4all`), or its id of before
@@ -72,6 +74,20 @@ def build():
     return app
 
 
+def build_training_plan():
+    """The example that writes a training plan into a data folder."""
+    run(["cargo", "build", "--release", "-p", "scout4all-core", "--example", "training_plan"], cwd=ROOT)
+    tool = ROOT / "target" / "release" / "examples" / "training_plan"
+    if not tool.exists():
+        fail(f"{tool} not built")
+    return tool
+
+
+def training_plan(tool, data, lang):
+    """The example plan of the team of `data` (migrated), around today."""
+    run([str(tool), str(data), the_team(data), lang])
+
+
 # the files of the database in a data folder (`layout::is_database_file`)
 DATABASE = "scout4all.db"
 DATABASE_FILES = {DATABASE, f"{DATABASE}-wal", f"{DATABASE}-shm", f"{DATABASE}-journal"}
@@ -125,7 +141,7 @@ def set_language(data, lang):
 
 
 def examples_plan(data, out):
-    """Home, scouting, statistics and analysis on the example matches."""
+    """Home, scouting, statistics, analysis and training on the example matches."""
     t = the_team(data)
     live = match_on(data, t, IN_PROGRESS)
     over = match_on(data, t, FINISHED)
@@ -157,6 +173,37 @@ def examples_plan(data, out):
             {"key": "right"},
             {"wait": 1200},
             {"shot": "team-analysis"},
+            # the training plan (written by `training_plan`): the month with
+            # its mesocycles, a session of last week done, the mesocycle of
+            # last week with its microcycles, the attendance
+            {"go": {"training": t}},
+            {"wait": 800},
+            {"key": "m"},
+            {"wait": 600},
+            {"shot": "training-calendar"},
+            {"key": "w"},
+            {"wait": 400},
+            {"key": "pageup"},
+            {"wait": 500},
+            {"key": "enter"},
+            {"wait": 700},
+            {"shot": "training-session"},
+            {"key": "esc"},
+            {"wait": 400},
+            {"key": "tab"},
+            {"wait": 600},
+            {"key": "left"},
+            {"wait": 300},
+            {"key": "down"},
+            {"wait": 300},
+            {"key": "enter"},
+            {"wait": 700},
+            {"shot": "training-plan"},
+            {"key": "esc"},
+            {"wait": 400},
+            {"key": "tab"},
+            {"wait": 600},
+            {"shot": "training-attendance"},
         ],
     }
 
@@ -348,6 +395,7 @@ def main():
     if making_hero and not shutil.which("ffmpeg"):
         fail("ffmpeg missing (the video of the site), or --no-hero")
     app = build()
+    plan_tool = build_training_plan()
     work = Path(tempfile.mkdtemp(prefix="scout4all-shots-"))
     try:
         for lang in langs:
@@ -358,6 +406,7 @@ def main():
             copy_data(source, data)
             set_language(data, lang)
             migrated(app, data, work)
+            training_plan(plan_tool, data, lang)
             out = work / lang / "png"
             plan = examples_plan(data, out)
             if args.video_match:
