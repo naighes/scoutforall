@@ -9,7 +9,7 @@ use crate::training::{SessionStatus, TrainingSession, overlap::Slot};
 use chrono::{Datelike, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use uuid::Uuid;
 
-/// The most sessions a repetition makes.
+/// The most sessions a repetition makes (all its series together).
 pub const MAX_SESSIONS: usize = 400;
 
 /// The most days a repetition spans (bounds the walk over the dates).
@@ -157,6 +157,27 @@ pub fn select(
 }
 
 impl SeriesEdit {
+    /// What changed from `old` to the new start, minutes and gym, as a group
+    /// change: the time of day, the minutes, the gym; the date never goes
+    /// to the others.
+    pub fn between(
+        old: &TrainingSession,
+        start: NaiveDateTime,
+        duration_min: u16,
+        venue_id: Option<Uuid>,
+    ) -> SeriesEdit {
+        SeriesEdit {
+            venue: (venue_id != old.venue_id).then_some(venue_id),
+            time: (start.time() != old.start.time()).then_some(start.time()),
+            duration_min: (duration_min != old.duration_min).then_some(duration_min),
+        }
+    }
+
+    /// Nothing changes for the others.
+    pub fn is_empty(&self) -> bool {
+        *self == SeriesEdit::default()
+    }
+
     /// The session as changed: same day, the new time and duration if any.
     pub fn apply(&self, session: &TrainingSession) -> (NaiveDateTime, u16, Option<Uuid>) {
         (
@@ -173,16 +194,32 @@ impl SeriesEdit {
 /// one of themselves: what a group change or a repetition mustn't do.
 pub fn conflicts_of(
     windows: &[(NaiveDateTime, u16)],
-    mut busy: Vec<Slot>,
+    busy: Vec<Slot>,
 ) -> (Vec<(NaiveDateTime, u16)>, Vec<SeriesConflict>) {
-    windows
+    let tagged: Vec<(NaiveDateTime, u16, ())> = windows
         .iter()
-        .fold((vec![], vec![]), |(mut ok, mut bad), (start, minutes)| {
+        .map(|(start, min)| (*start, *min, ()))
+        .collect();
+    let (ok, bad) = conflicts_of_tagged(&tagged, busy);
+    (
+        ok.into_iter().map(|(start, min, _)| (start, min)).collect(),
+        bad,
+    )
+}
+
+/// The same, each window keeping what it is of (the entry of a repetition).
+pub fn conflicts_of_tagged<T: Copy>(
+    windows: &[(NaiveDateTime, u16, T)],
+    mut busy: Vec<Slot>,
+) -> (Vec<(NaiveDateTime, u16, T)>, Vec<SeriesConflict>) {
+    windows.iter().fold(
+        (vec![], vec![]),
+        |(mut ok, mut bad), (start, minutes, tag)| {
             let slot = Slot::session(*start, *minutes);
             match crate::training::overlap::clashes(&slot, &busy) {
                 with if with.is_empty() => {
                     busy.push(slot);
-                    ok.push((*start, *minutes));
+                    ok.push((*start, *minutes, *tag));
                 }
                 with => bad.push(SeriesConflict {
                     start: *start,
@@ -191,5 +228,6 @@ pub fn conflicts_of(
                 }),
             }
             (ok, bad)
-        })
+        },
+    )
 }

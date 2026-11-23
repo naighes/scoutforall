@@ -9,6 +9,7 @@ pub(crate) use forms::clash_warning;
 mod history;
 mod presence;
 mod roll;
+mod scope;
 pub mod screen;
 mod series;
 mod session;

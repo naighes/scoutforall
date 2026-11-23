@@ -644,7 +644,10 @@ mod tests {
                 band(Weekday::Fri, None),
             ],
         };
-        let found = w.venues.series_clashes(&a.id, &input).unwrap();
+        let found = w
+            .venues
+            .series_clashes(&a.id, std::slice::from_ref(&input))
+            .unwrap();
         assert_eq!(
             found
                 .iter()
@@ -653,7 +656,11 @@ mod tests {
             [(at(25, 18, 30), "B")]
         );
         // and the series is created all the same, each session in the gym of its band
-        let outcome = w.training.create_series(&a.id, input, false).await.unwrap();
+        let outcome = w
+            .training
+            .create_series(&a.id, vec![input], false)
+            .await
+            .unwrap();
         assert_eq!(outcome.created.len(), 4);
         let venues: Vec<Option<Uuid>> = outcome.created.iter().map(|s| s.venue_id).collect();
         assert_eq!(

@@ -23,7 +23,7 @@ use {
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL, SIZE_TITLE},
         ui,
     },
-    chrono::{Datelike, Days, Duration, Months, NaiveDate},
+    chrono::{Datelike, Days, Duration, Months, NaiveDate, NaiveTime},
     iced::{
         Alignment, Background, Element, Length, Padding,
         widget::{Column, Id, Row, column, container, row, scrollable, space, text},
@@ -94,7 +94,9 @@ pub enum Message {
     Today,
     View(View),
     New,
-    Repeat,
+    /// a click on an empty place: a new session on the day, at the minute
+    /// of the day when it's of the week
+    NewAt(NaiveDate, Option<u32>),
     /// this team or all the teams
     AllTeams,
     /// the next gym of the filter
@@ -114,8 +116,8 @@ pub enum Leave {
     Stay,
     Session(String),
     Match(String),
-    NewSession(NaiveDate),
-    Repeat(NaiveDate),
+    /// a new session on the day, at the time if one was clicked
+    NewSession(NaiveDate, Option<NaiveTime>),
     /// the marked sessions, for a new microcycle
     Create(Vec<String>),
     /// the session to delete, once asked
@@ -807,7 +809,7 @@ impl CalendarTab {
                 item: AgendaItemRecord::Match { id, .. },
                 ..
             }) => Leave::Match(id.clone()),
-            None => Leave::NewSession(day),
+            None => Leave::NewSession(day, None),
         }
     }
 
@@ -838,8 +840,14 @@ impl CalendarTab {
                 self.set_view(view);
                 Leave::Stay
             }
-            Message::New => Leave::NewSession(self.anchor),
-            Message::Repeat => Leave::Repeat(self.anchor),
+            Message::New => Leave::NewSession(self.anchor, None),
+            Message::NewAt(day, minute) => {
+                self.go_to(day);
+                Leave::NewSession(
+                    day,
+                    minute.and_then(|m| NaiveTime::from_hms_opt(m / 60, m % 60, 0)),
+                )
+            }
             Message::AllTeams => {
                 self.set_all_teams();
                 Leave::Stay
@@ -908,8 +916,7 @@ impl CalendarTab {
                 }
             }
             k if k == key!(enter) => return self.open(),
-            k if k == key!(n) => return Leave::NewSession(self.anchor),
-            k if k == key!(r) => return Leave::Repeat(self.anchor),
+            k if k == key!(n) => return Leave::NewSession(self.anchor, None),
             k if k == key!(t) => self.set_all_teams(),
             k if k == key!(v) => self.next_venue(),
             _ => {}
@@ -1032,7 +1039,6 @@ impl CalendarTab {
         hints.extend([
             ("Enter".to_string(), s.open.to_string()),
             ("n".to_string(), s.new_session.to_string()),
-            ("r".to_string(), s.repeat_sessions.to_string()),
             ("t".to_string(), s.all_teams.to_string()),
         ]);
         if !self.venues.is_empty() {
@@ -1131,7 +1137,6 @@ impl CalendarTab {
             ));
         }
         controls.push(ui::pill(s.new_session, false, Some(Message::New), c));
-        controls.push(ui::pill(s.repeat_sessions, false, Some(Message::Repeat), c));
         // the filter in every view; the period of the list; the microcycle
         // only once sessions are marked
         let mut choices: Vec<Element<'a, Message>> = FILTERS
@@ -1436,7 +1441,8 @@ impl CalendarTab {
         .into()
     }
 
-    /// A day of the week: an hour a cell (a click chooses the day), today
+    /// A day of the week: an hour a cell (a click opens a new session at
+    /// its half hour), today
     /// on a background of its own; over them the events, where their hours
     /// are.
     fn day_column<'a>(
@@ -1452,17 +1458,25 @@ impl CalendarTab {
             true => mix(c.panel, c.accent, 0.07),
             false => c.panel,
         };
-        let grid = Column::with_children((first..last).map(|_| {
+        // half an hour a button: a click opens a new session there
+        let half = |minute: u32| -> Element<'a, Message> {
             iced::widget::button(space::vertical())
                 .width(Length::Fill)
-                .height(Length::Fixed(HOUR - 1.0))
-                .on_press_maybe(date.map(Message::Day))
-                .style(move |_, _| iced::widget::button::Style {
-                    background: Some(Background::Color(background)),
+                .height(Length::Fixed((HOUR - 1.0) / 2.0))
+                .padding(0)
+                .on_press_maybe(date.map(|d| Message::NewAt(d, Some(minute))))
+                .style(move |_, status| iced::widget::button::Style {
+                    background: Some(Background::Color(match status {
+                        iced::widget::button::Status::Hovered => mix(background, c.accent, 0.12),
+                        _ => background,
+                    })),
                     ..iced::widget::button::Style::default()
                 })
                 .into()
-        }))
+        };
+        let grid = Column::with_children(
+            (first..last).map(|hour| column![half(hour * 60), half(hour * 60 + 30)].into()),
+        )
         .spacing(1);
         let here = date == Some(self.anchor);
         let placed = lanes(&day.events);
@@ -1612,7 +1626,7 @@ impl CalendarTab {
             .width(Length::FillPortion(1))
             .height(Length::Fixed(CELL_HEIGHT))
             .padding(Padding::from([4, 6]))
-            .on_press(Message::Day(day))
+            .on_press(Message::NewAt(day, None))
             .style(move |_, _| iced::widget::button::Style {
                 background: Some(Background::Color(background)),
                 text_color: c.text,

@@ -346,6 +346,9 @@ pub struct Form {
     /// the buttons, when not to cancel and to save: Esc's, then Enter's,
     /// each with its icon
     pub actions: Option<(Answer, Answer)>,
+    /// a button between the two, giving `Message::Another` (to go on to
+    /// another entry, say)
+    pub another: Option<Answer>,
     /// no buttons: each change is saved as it's made
     pub plain: bool,
     /// the fields shown, and the keys move among: all, if none
@@ -494,6 +497,7 @@ impl Form {
             error: None,
             sections: vec![],
             actions: None,
+            another: None,
             plain: false,
             shown: None,
             hidden: vec![],
@@ -1002,8 +1006,12 @@ impl Form {
                 (theme::icons::CHECK, s.save.to_string()),
             )
         });
-        let buttons = ui::answers(
+        let buttons = ui::answers_with(
             Some((no_icon, &no, on(Message::Cancel))),
+            self.another
+                .iter()
+                .map(|(icon, label)| (*icon, label.as_str(), on(Message::Another)))
+                .collect(),
             yes_icon,
             &yes,
             Some(on(Message::Save)),

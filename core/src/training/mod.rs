@@ -15,7 +15,7 @@ use chrono::{Duration, NaiveDateTime};
 use uuid::Uuid;
 
 /// What a session is proposed to last, in minutes.
-pub const DEFAULT_SESSION_MINUTES: u16 = 90;
+pub const DEFAULT_SESSION_MINUTES: u16 = 120;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SessionStatus {

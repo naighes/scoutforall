@@ -20,7 +20,7 @@ use scout4all_core::{
     },
     training::{
         Activity, ActivityHit, ActivityStatus, AttendanceInput, AttendanceRow, AttendanceStatus,
-        Move, SessionStatus, TrainingSession,
+        Move, SessionInput, SessionStatus, TrainingSession,
         agenda::{AgendaEvent, AgendaItem, MatchState, Period, busy_days, by_day},
         cycles::{
             Child, Cycle, CycleForm, Level, Span, Window, proposed_container, proposed_microcycle,
@@ -248,17 +248,6 @@ pub struct SeriesConflictRecord {
 pub struct SeriesResult {
     pub created: Vec<SessionRecord>,
     pub conflicts: Vec<SeriesConflictRecord>,
-}
-
-/// What changes in a series: only what is `Some`.
-#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
-pub struct SeriesChange {
-    /// the id of the gym to set; with `clear_venue` the gym goes instead
-    pub venue: Option<String>,
-    pub clear_venue: bool,
-    /// `HH:MM`
-    pub time: Option<String>,
-    pub duration_min: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -719,22 +708,7 @@ impl Scout4All {
         session_id: Option<String>,
         draft: SessionDraft,
     ) -> Result<SessionRecord, MobileError> {
-        let form = SessionForm {
-            start: draft.start.as_deref().map(parse_moment).transpose()?,
-            duration: draft.duration,
-            actual_duration: draft.actual_duration,
-            venue: opt_id(&draft.venue)?,
-            title: draft.title,
-            objectives: draft.objectives,
-            notes: draft.notes,
-            final_remarks: draft.final_remarks,
-            microcycle: opt_id(&draft.microcycle)?,
-            status: draft.status,
-        };
-        let input = form.validate().map_err(|e| MobileError::InvalidTraining {
-            field: session_form_field(e),
-            reason: e.message(self.language.labels()),
-        })?;
+        let input = self.session_input(draft)?;
         let training = self.training();
         let session = match session_id {
             Some(id) => self
@@ -745,6 +719,68 @@ impl Scout4All {
                 .block_on(training.create_session(&parse_id(&team_id)?, input))?,
         };
         Ok(session_record(&session, Local::now().naive_local()))
+    }
+
+    /// Whether saving the draft (or, with none, removing the session) asks
+    /// "this, this and the following, the whole series": the session is in
+    /// a series with other planned sessions, and the draft changes the time,
+    /// the duration or the gym (what goes to the others).
+    pub fn asks_series_scope(
+        &self,
+        session_id: String,
+        draft: Option<SessionDraft>,
+    ) -> Result<bool, MobileError> {
+        let training = self.training();
+        let session = self
+            .runtime
+            .block_on(training.session(&parse_id(&session_id)?))?;
+        let others = match session.series_id {
+            None => false,
+            Some(series) => self
+                .runtime
+                .block_on(training.sessions(&session.team_id))?
+                .iter()
+                .any(|s| {
+                    s.series_id == Some(series)
+                        && s.id != session.id
+                        && s.status == SessionStatus::Planned
+                }),
+        };
+        match (others, draft) {
+            (false, _) => Ok(false),
+            (true, None) => Ok(true),
+            (true, Some(draft)) => {
+                let input = self.session_input(draft)?;
+                Ok(
+                    !SeriesEdit::between(&session, input.start, input.duration_min, input.venue_id)
+                        .is_empty(),
+                )
+            }
+        }
+    }
+
+    /// Saves the session, and its time, duration and gym to the other
+    /// planned sessions of its series the scope reaches. An overlap stops
+    /// everything (`Overlap`).
+    pub fn save_session_in_series(
+        &self,
+        session_id: String,
+        draft: SessionDraft,
+        scope: SeriesScope,
+    ) -> Result<SessionRecord, MobileError> {
+        let input = self.session_input(draft)?;
+        let written = self
+            .runtime
+            .block_on(self.training().update_session_in_series(
+                &parse_id(&session_id)?,
+                input,
+                scope,
+            ))?;
+        let now = Local::now().naive_local();
+        written
+            .first()
+            .map(|s| session_record(s, now))
+            .ok_or_else(|| failed(format!("session {session_id}")))
     }
 
     /// Cancels the session, or reopens it (planned).
@@ -981,19 +1017,23 @@ impl Scout4All {
 
     // ---- series and duplicates
 
-    /// Creates the sessions of the bands between the days. With a conflict
+    /// Creates the sessions of the bands between the days, each draft a
+    /// series of its own (an entry of the dialog). With a conflict
     /// and not `create_others` nothing is written and the conflicts are
     /// told; with it the others are created.
     pub fn create_series(
         &self,
         team_id: String,
-        draft: SeriesDraft,
+        drafts: Vec<SeriesDraft>,
         create_others: bool,
     ) -> Result<SeriesResult, MobileError> {
-        let input = series_input(&draft)?;
+        let inputs = drafts
+            .iter()
+            .map(series_input)
+            .collect::<Result<Vec<_>, _>>()?;
         let outcome = self.runtime.block_on(self.training().create_series(
             &parse_id(&team_id)?,
-            input,
+            inputs,
             create_others,
         ))?;
         let now = Local::now().naive_local();
@@ -1015,32 +1055,8 @@ impl Scout4All {
         })
     }
 
-    /// Changes the planned sessions of the series of the session.
-    pub fn update_series(
-        &self,
-        session_id: String,
-        scope: SeriesScope,
-        change: SeriesChange,
-    ) -> Result<Vec<SessionRecord>, MobileError> {
-        let edit = SeriesEdit {
-            venue: match (change.clear_venue, opt_id(&change.venue)?) {
-                (true, _) => Some(None),
-                (false, Some(id)) => Some(Some(id)),
-                (false, None) => None,
-            },
-            time: change.time.as_deref().map(parse_time).transpose()?,
-            duration_min: change.duration_min,
-        };
-        let sessions = self.runtime.block_on(self.training().update_series(
-            &parse_id(&session_id)?,
-            scope,
-            edit,
-        ))?;
-        let now = Local::now().naive_local();
-        Ok(sessions.iter().map(|s| session_record(s, now)).collect())
-    }
-
-    /// Removes the planned sessions of the series of the session: how many.
+    /// Removes the session and the other planned sessions of its series the
+    /// scope reaches: how many.
     pub fn remove_series(
         &self,
         session_id: String,
@@ -1480,6 +1496,26 @@ impl Scout4All {
 }
 
 impl Scout4All {
+    /// The draft checked, as the provider wants it.
+    fn session_input(&self, draft: SessionDraft) -> Result<SessionInput, MobileError> {
+        let form = SessionForm {
+            start: draft.start.as_deref().map(parse_moment).transpose()?,
+            duration: draft.duration,
+            actual_duration: draft.actual_duration,
+            venue: opt_id(&draft.venue)?,
+            title: draft.title,
+            objectives: draft.objectives,
+            notes: draft.notes,
+            final_remarks: draft.final_remarks,
+            microcycle: opt_id(&draft.microcycle)?,
+            status: draft.status,
+        };
+        form.validate().map_err(|e| MobileError::InvalidTraining {
+            field: session_form_field(e),
+            reason: e.message(self.language.labels()),
+        })
+    }
+
     /// The provider of the training, over the database of the app.
     fn training(&self) -> SqliteTraining {
         SqliteTraining::new(self.db.clone())
@@ -1649,7 +1685,8 @@ mod tests {
         let app = app(&dir);
         let team = team(&app, "Cortona");
         let first = session(&app, &team, "2030-03-04T18:30");
-        assert_eq!(first.duration_min, 90);
+        // two hours, the usual duration
+        assert_eq!(first.duration_min, 120);
         assert_eq!(first.status, SessionStatus::Planned);
         assert!(!first.to_close);
         let gym = gym(&app, "Palestra");
@@ -1851,33 +1888,96 @@ mod tests {
         };
         session(&app, &team, "2030-03-11T18:00");
         let blocked = app
-            .create_series(team.clone(), series.clone(), false)
+            .create_series(team.clone(), vec![series.clone()], false)
             .unwrap();
         assert!(blocked.created.is_empty());
         assert_eq!(blocked.conflicts.len(), 1);
         assert_eq!(blocked.conflicts[0].start, "2030-03-11T18:30");
-        let made = app.create_series(team.clone(), series, true).unwrap();
+        let made = app.create_series(team.clone(), vec![series], true).unwrap();
         assert_eq!(made.created.len(), 3);
         let first = made.created[0].clone();
-        let moved = app
-            .update_series(
-                first.id.clone(),
-                SeriesScope::All,
-                SeriesChange {
-                    venue: Some(campo.clone()),
-                    clear_venue: false,
-                    time: None,
-                    duration_min: Some(60),
-                },
-            )
+        // a change of gym and minutes asks where it goes; a title doesn't
+        let changed = SessionDraft {
+            venue: Some(campo.clone()),
+            duration: "60".into(),
+            ..app.session_draft(first.id.clone()).unwrap()
+        };
+        assert!(
+            app.asks_series_scope(first.id.clone(), Some(changed.clone()))
+                .unwrap()
+        );
+        let titled = SessionDraft {
+            title: "Battuta".into(),
+            ..app.session_draft(first.id.clone()).unwrap()
+        };
+        assert!(
+            !app.asks_series_scope(first.id.clone(), Some(titled))
+                .unwrap()
+        );
+        assert!(app.asks_series_scope(first.id.clone(), None).unwrap());
+        app.save_session_in_series(first.id.clone(), changed, SeriesScope::All)
             .unwrap();
         assert!(
-            moved
+            app.training_sessions(team.clone())
+                .unwrap()
                 .iter()
+                .filter(|s| s.series_id.is_some())
                 .all(|s| s.venue_id.as_ref() == Some(&campo) && s.duration_min == 60)
         );
         assert_eq!(app.remove_series(first.id, SeriesScope::All).unwrap(), 3);
-        assert_eq!(app.training_sessions(team).unwrap().len(), 1);
+        assert_eq!(app.training_sessions(team.clone()).unwrap().len(), 1);
+        // a session alone never asks
+        let alone = app.training_sessions(team).unwrap()[0].id.clone();
+        assert!(!app.asks_series_scope(alone, None).unwrap());
+    }
+
+    /// Each entry of the dialog is a series: Thursday moves with Thursdays.
+    #[test]
+    fn the_entries_of_a_series_are_series_of_their_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir);
+        let team = team(&app, "Cortona");
+        let entry = |from: &str, weekday| SeriesDraft {
+            from: from.into(),
+            to: "2030-03-17".into(),
+            bands: vec![SeriesBand {
+                weekday,
+                time: "20:30".into(),
+                duration_min: 120,
+                venue: None,
+            }],
+        };
+        let made = app
+            .create_series(
+                team.clone(),
+                vec![entry("2030-03-04", 1), entry("2030-03-07", 4)],
+                false,
+            )
+            .unwrap();
+        assert_eq!(made.created.len(), 4);
+        let thursday = made.created[1].clone();
+        assert_eq!(thursday.start, "2030-03-07T20:30");
+        let earlier = SessionDraft {
+            start: Some("2030-03-07T19:30".into()),
+            ..app.session_draft(thursday.id.clone()).unwrap()
+        };
+        app.save_session_in_series(thursday.id, earlier, SeriesScope::All)
+            .unwrap();
+        let starts: Vec<String> = app
+            .training_sessions(team)
+            .unwrap()
+            .into_iter()
+            .map(|s| s.start)
+            .collect();
+        assert_eq!(
+            starts,
+            [
+                "2030-03-04T20:30",
+                "2030-03-07T19:30",
+                "2030-03-11T20:30",
+                "2030-03-14T19:30"
+            ]
+        );
     }
 
     #[test]
@@ -2099,8 +2199,8 @@ mod tests {
                 planned: 0,
                 completed: 1,
                 cancelled: 1,
-                planned_minutes: 90,
-                actual_minutes: 90,
+                planned_minutes: 120,
+                actual_minutes: 120,
             }
         );
         let report = app

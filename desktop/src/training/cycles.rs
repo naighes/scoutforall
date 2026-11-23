@@ -15,7 +15,7 @@ use {
         theme::{self, Colors, SIZE_SMALL},
         ui,
     },
-    chrono::NaiveDate,
+    chrono::{NaiveDate, NaiveTime},
     iced::{
         Alignment, Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
@@ -400,7 +400,8 @@ pub enum Leave {
     /// the PDF of the plan of the microcycle, to share
     Export(crate::transfer::Export),
     /// a new session on the day, in the microcycle that holds it
-    NewSession(NaiveDate),
+    /// a new session on the day, at the time if one was clicked
+    NewSession(NaiveDate, Option<NaiveTime>),
 }
 
 pub struct CyclesTab {
@@ -718,6 +719,7 @@ impl CyclesTab {
                     .map(|w| w.cursor_day())
                     .filter(|d| *d >= day)
                     .unwrap_or(day),
+                None,
             ),
             (None, None) => Leave::Stay,
         }
@@ -913,7 +915,7 @@ impl CyclesTab {
 
     fn edited(&mut self, edited: Edited) {
         match edited {
-            Edited::Stay | Edited::Copy(_) => {}
+            Edited::Stay | Edited::Copy(_) | Edited::Repeated => {}
             Edited::Cancel => self.close_forms(),
             // a child made from a sheet opens that sheet, holding it
             Edited::Saved(id) => {
@@ -1018,7 +1020,7 @@ impl CyclesTab {
     fn week_leave(&mut self, leave: Option<calendar::Leave>) -> Leave {
         match leave {
             Some(calendar::Leave::Session(id)) => Leave::Session(id),
-            Some(calendar::Leave::NewSession(day)) => Leave::NewSession(day),
+            Some(calendar::Leave::NewSession(day, time)) => Leave::NewSession(day, time),
             _ => Leave::Stay,
         }
     }

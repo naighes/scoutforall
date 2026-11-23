@@ -347,21 +347,34 @@ fn clashes_of(
 }
 
 impl SqliteVenues {
-    /// The sessions a repetition would make that hold a gym another team
-    /// holds then: the dialog lists them (a warning, not a conflict).
+    /// The sessions a repetition would make (all its entries) that hold a
+    /// gym another team holds then: the dialog lists them (a warning, not a
+    /// conflict).
     pub fn series_clashes(
         &self,
         team: &Uuid,
-        input: &SeriesInput,
+        inputs: &[SeriesInput],
     ) -> Result<Vec<VenueClash>, AppError> {
-        let windows = input.generate().map_err(|e| {
-            AppError::IO(crate::errors::IOError::Msg(format!(
-                "invalid series: {e:?}"
-            )))
-        })?;
-        let items: Vec<(Uuid, NaiveDateTime, u16)> = windows
+        let items: Vec<(Uuid, NaiveDateTime, u16)> = inputs
+            .iter()
+            .map(|input| {
+                input.generate().map(|windows| {
+                    windows
+                        .into_iter()
+                        .filter_map(|(start, minutes)| {
+                            input.venue_of(start).map(|v| (v, start, minutes))
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| {
+                AppError::IO(crate::errors::IOError::Msg(format!(
+                    "invalid series: {e:?}"
+                )))
+            })?
             .into_iter()
-            .filter_map(|(start, minutes)| input.venue_of(start).map(|v| (v, start, minutes)))
+            .flatten()
             .collect();
         self.0.read(|tx| clashes_of(tx, &[*team], &items))
     }

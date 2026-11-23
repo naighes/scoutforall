@@ -7,7 +7,8 @@ use {
     super::{
         forms::{ActivityEditor, CopyEditor, Edited, SessionEditor},
         roll::{self, Done, Roll},
-        series::{DuplicateEditor, SeriesChangeEditor},
+        scope::{self, ScopeQuestion},
+        series::DuplicateEditor,
     },
     crate::{
         form::{self, Form},
@@ -20,7 +21,9 @@ use {
         Alignment, Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
     },
-    scout4all_core::training::{ActivityStatus, AttendanceStatus, Move, SessionStatus},
+    scout4all_core::training::{
+        ActivityStatus, AttendanceStatus, Move, SessionStatus, series::SeriesScope,
+    },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         MobileError, Scout4All,
@@ -49,12 +52,12 @@ enum Mode {
     Activity(Box<ActivityEditor>),
     Copy(Box<CopyEditor>),
     Duplicate(Box<DuplicateEditor>),
-    Series(Box<SeriesChangeEditor>),
     Roll(Box<Roll>),
     /// the options of the PDF of the sheet
     Pdf(Box<Form>),
     Complete(Checklist),
-    DeleteSession,
+    /// with the question of its series, when it's in one
+    DeleteSession(Option<ScopeQuestion>),
     /// id and name
     DeleteActivity(String, String),
 }
@@ -71,7 +74,6 @@ pub enum Message {
     Attendance,
     EditSession,
     Duplicate,
-    EditSeries,
     Pdf,
     Complete,
     CancelSession,
@@ -79,6 +81,8 @@ pub enum Message {
     DeleteSession,
     Confirm,
     Dismiss,
+    /// the answer of the question of the series, on deleting
+    Scope(SeriesScope),
     Check(usize),
     Form(form::Message),
     Roll(roll::Message),
@@ -150,11 +154,10 @@ impl SessionPage {
             Mode::Activity(_) => "activity",
             Mode::Copy(_) => "copy",
             Mode::Duplicate(_) => "duplicate",
-            Mode::Series(_) => "series",
             Mode::Roll(_) => "roll",
             Mode::Pdf(_) => "pdf",
             Mode::Complete(_) => "complete",
-            Mode::DeleteSession | Mode::DeleteActivity(..) => "delete",
+            Mode::DeleteSession(_) | Mode::DeleteActivity(..) => "delete",
         }
     }
 
@@ -168,11 +171,10 @@ impl SessionPage {
 
     pub fn focus_id(&self) -> Option<Id> {
         match &self.mode {
-            Mode::Session(e) => Some(e.form.focus_id()),
+            Mode::Session(e) => e.focus_id(),
             Mode::Activity(e) => Some(e.form.focus_id()),
             Mode::Copy(e) => Some(e.form.focus_id()),
             Mode::Duplicate(e) => Some(e.form.focus_id()),
-            Mode::Series(e) => Some(e.form.focus_id()),
             Mode::Roll(r) => r.focus_id(),
             Mode::Pdf(f) => Some(f.focus_id()),
             _ => None,
@@ -223,17 +225,6 @@ impl SessionPage {
     fn duplicate(&mut self, s: &'static Strings) {
         match DuplicateEditor::new(&self.core, s, self.team_id.clone(), self.id.clone()) {
             Ok(editor) => self.mode = Mode::Duplicate(Box::new(editor)),
-            Err(e) => self.error = Some(e.to_string()),
-        }
-    }
-
-    /// The change of the group, for a session of a series.
-    fn edit_series(&mut self, s: &Strings) {
-        if self.record.series_id.is_none() {
-            return;
-        }
-        match SeriesChangeEditor::new(&self.core, s, self.team_id.clone(), self.id.clone()) {
-            Ok(editor) => self.mode = Mode::Series(Box::new(editor)),
             Err(e) => self.error = Some(e.to_string()),
         }
     }
@@ -366,16 +357,26 @@ impl SessionPage {
                 let result = self.core.remove_activity(id.clone());
                 self.done(result);
             }
-            Mode::DeleteSession => match self.core.remove_session(self.id.clone()) {
-                Ok(()) => return Outcome::Back,
-                Err(e) => {
-                    self.error = Some(e.to_string());
-                    self.mode = Mode::Browse;
-                }
-            },
+            Mode::DeleteSession(_) => return self.delete(SeriesScope::This),
             _ => {}
         }
         Outcome::Stay
+    }
+
+    /// The session deleted, and the others of its series the scope reaches.
+    fn delete(&mut self, scope: SeriesScope) -> Outcome {
+        match scope::delete_session(&self.core, &self.id, scope) {
+            Ok(()) => Outcome::Back,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                self.mode = Mode::Browse;
+                Outcome::Stay
+            }
+        }
+    }
+
+    fn ask_deletion(&mut self) {
+        self.mode = Mode::DeleteSession(scope::deletion_question(&self.core, &self.id));
     }
 
     fn edited(&mut self, s: &Strings, edited: Edited) -> Outcome {
@@ -384,15 +385,7 @@ impl SessionPage {
             (_, Edited::Cancel) => self.mode = Mode::Browse,
             // the duplicate: its sheet opens
             (Mode::Duplicate(_), Edited::Saved(id)) => return Outcome::Opened(id),
-            // the series changed or removed: the session may be gone
-            (Mode::Series(_), Edited::Saved(_)) => {
-                self.mode = Mode::Browse;
-                if self.core.training_session(self.id.clone()).is_err() {
-                    return Outcome::Back;
-                }
-                self.reload();
-            }
-            (_, Edited::Saved(_)) => {
+            (_, Edited::Saved(_) | Edited::Repeated) => {
                 self.mode = Mode::Browse;
                 self.reload();
             }
@@ -430,10 +423,6 @@ impl SessionPage {
                 let edited = e.update(&self.core, m);
                 return self.edited(s, edited);
             }
-            (Mode::Series(e), Message::Form(m)) => {
-                let edited = e.update(&self.core, m);
-                return self.edited(s, edited);
-            }
             (Mode::Pdf(f), Message::Form(m)) => {
                 let outcome = f.update(m);
                 return self.pdf_outcome(outcome);
@@ -448,6 +437,7 @@ impl SessionPage {
                 }
                 list.selected = i;
             }
+            (Mode::DeleteSession(_), Message::Scope(scope)) => return self.delete(scope),
             (Mode::Browse, message) => return self.browse(s, message),
             (_, Message::Confirm) => return self.confirm(),
             (_, Message::Dismiss) => self.mode = Mode::Browse,
@@ -478,14 +468,14 @@ impl SessionPage {
             Message::Attendance => self.open_roll(),
             Message::EditSession => self.edit_session(s),
             Message::Duplicate => self.duplicate(s),
-            Message::EditSeries => self.edit_series(s),
             Message::Pdf => self.ask_pdf(s),
             Message::Complete => self.ask_completion(),
             Message::CancelSession => self.set_status(SessionStatus::Cancelled),
             Message::Reopen => self.set_status(SessionStatus::Planned),
-            Message::DeleteSession => self.mode = Mode::DeleteSession,
+            Message::DeleteSession => self.ask_deletion(),
             Message::Confirm
             | Message::Dismiss
+            | Message::Scope(_)
             | Message::Check(_)
             | Message::Form(_)
             | Message::Roll(_) => {}
@@ -508,10 +498,6 @@ impl SessionPage {
                 return self.edited(s, edited);
             }
             Mode::Duplicate(e) => {
-                let edited = e.key(&self.core, ck);
-                return self.edited(s, edited);
-            }
-            Mode::Series(e) => {
                 let edited = e.key(&self.core, ck);
                 return self.edited(s, edited);
             }
@@ -543,7 +529,12 @@ impl SessionPage {
                     _ => {}
                 }
             }
-            Mode::DeleteSession | Mode::DeleteActivity(..) => match ck {
+            Mode::DeleteSession(Some(question)) => match question.key(ck) {
+                scope::Answer::Stay => {}
+                scope::Answer::Cancel => self.mode = Mode::Browse,
+                scope::Answer::Chosen(scope) => return self.delete(scope),
+            },
+            Mode::DeleteSession(None) | Mode::DeleteActivity(..) => match ck {
                 k if k == key!(enter) => return self.confirm(),
                 k if k == BACK_KEY => self.mode = Mode::Browse,
                 _ => {}
@@ -574,13 +565,12 @@ impl SessionPage {
             }
             (_, k) if k == key!(e) => self.edit_session(s),
             (_, k) if k == key!(d) => self.duplicate(s),
-            (_, k) if k == key!(g) => self.edit_series(s),
             (_, k) if k == key!(p) => self.ask_pdf(s),
             (_, k) if k == key!(c) => self.ask_completion(),
             (_, k) if k == key!(x) => self.set_status(SessionStatus::Cancelled),
             (_, k) if k == key!(r) => self.set_status(SessionStatus::Planned),
             (_, k) if k == key!(shift - backspace) || k == key!(shift - delete) => {
-                self.mode = Mode::DeleteSession
+                self.ask_deletion()
             }
             (Panel::Activities, k) if k == key!(down) && count > 0 => {
                 self.activity = (self.activity + 1) % count
@@ -612,9 +602,9 @@ impl SessionPage {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
-            Mode::Session(e) => e.form.on_field(Form::hints(s)),
+            Mode::Session(e) => e.hints(s),
             Mode::Activity(e) => e.form.on_field(Form::hints(s)),
-            Mode::Copy(_) | Mode::Duplicate(_) | Mode::Series(_) | Mode::Pdf(_) => Form::hints(s),
+            Mode::Copy(_) | Mode::Duplicate(_) | Mode::Pdf(_) => Form::hints(s),
             Mode::Roll(r) => r.hints(s),
             Mode::Complete(_) => vec![
                 ("↑ ↓".to_string(), String::new()),
@@ -622,7 +612,8 @@ impl SessionPage {
                 ("Enter".to_string(), s.complete_session.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
-            Mode::DeleteSession | Mode::DeleteActivity(..) => vec![
+            Mode::DeleteSession(Some(_)) => ScopeQuestion::hints(s, s.delete),
+            Mode::DeleteSession(None) | Mode::DeleteActivity(..) => vec![
                 ("Enter".to_string(), s.delete.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
@@ -647,10 +638,6 @@ impl SessionPage {
                         ("d".to_string(), s.duplicate_session.to_string()),
                         ("p".to_string(), s.session_sheet_pdf.to_string()),
                     ],
-                    match self.record.series_id {
-                        Some(_) => vec![("g".to_string(), s.edit_series.to_string())],
-                        None => vec![],
-                    },
                     match planned {
                         true => vec![
                             ("c".to_string(), s.complete_session.to_string()),
@@ -670,15 +657,22 @@ impl SessionPage {
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let body: Element<'a, Message> = match &self.mode {
-            Mode::Session(e) => centered(e.form.view(s, c, Message::Form, None)),
+            Mode::Session(e) => e.view(s, c, Message::Form),
             Mode::Activity(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Copy(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Duplicate(e) => centered(e.form.view(s, c, Message::Form, None)),
-            Mode::Series(e) => centered(e.form.view(s, c, Message::Form, None)),
             Mode::Pdf(f) => centered(f.view(s, c, Message::Form, None)),
             Mode::Roll(r) => r.view(s, c).map(Message::Roll),
             Mode::Complete(list) => self.completion(list, s, c),
-            Mode::DeleteSession => ui::confirm_deletion(
+            Mode::DeleteSession(Some(question)) => question.view(
+                s,
+                c,
+                s.scope_delete_text,
+                (theme::icons::DELETE, s.delete),
+                Message::Scope,
+                Message::Dismiss,
+            ),
+            Mode::DeleteSession(None) => ui::confirm_deletion(
                 s,
                 s.delete_session_text,
                 Message::Confirm,
@@ -827,19 +821,6 @@ impl SessionPage {
             .width(Length::Fill)
             .into(),
         );
-        if r.series_id.is_some() {
-            actions.push(
-                ui::action(
-                    theme::icons::EDIT,
-                    s.edit_series,
-                    Message::EditSeries,
-                    false,
-                    c,
-                )
-                .width(Length::Fill)
-                .into(),
-            );
-        }
         match planned {
             true => {
                 actions.push(

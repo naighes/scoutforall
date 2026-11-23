@@ -321,14 +321,12 @@ pub(crate) fn insert_session(
 }
 
 /// The sessions not removed of the series of `anchor` the scope reaches
-/// (only the planned ones), and the busy slots of its team: the other
-/// sessions and the matches in programma.
-fn series_targets(
+/// (only the planned ones).
+fn series_members(
     tx: &Transaction,
-    session_id: &Uuid,
+    anchor: &TrainingSession,
     scope: SeriesScope,
-) -> Result<(Vec<TrainingSession>, Vec<Slot>), AppError> {
-    let anchor = read_session(tx, session_id)?;
+) -> Result<Vec<TrainingSession>, AppError> {
     let members: Vec<TrainingSession> = match anchor.series_id {
         Some(series) => tx
             .prepare(&format!(
@@ -342,15 +340,19 @@ fn series_targets(
             .map_err(sqlite)?,
         None => vec![],
     };
-    let targets = series::select(scope, &anchor, &members);
-    let ids: HashSet<Uuid> = targets.iter().map(|s| s.id).collect();
+    Ok(series::select(scope, anchor, &members))
+}
+
+/// The busy slots of the team but the sessions in `free`: the other
+/// sessions and the matches in programma.
+fn busy_but(tx: &Transaction, team_id: &Uuid, free: &HashSet<Uuid>) -> Result<Vec<Slot>, AppError> {
     let mut busy: Vec<Slot> = tx
         .prepare(
             "SELECT id, start_local, duration_min FROM training_sessions
              WHERE team_id = ?1 AND deleted = 0",
         )
         .map_err(sqlite)?
-        .query_map([Sql(anchor.team_id)], |row| {
+        .query_map([Sql(*team_id)], |row| {
             Ok((
                 row.get::<_, Sql<Uuid>>(0)?.0,
                 Slot::session(row.get::<_, Sql<NaiveDateTime>>(1)?.0, row.get(2)?),
@@ -360,11 +362,66 @@ fn series_targets(
         .collect::<Result<Vec<_>, _>>()
         .map_err(sqlite)?
         .into_iter()
-        .filter(|(id, _)| !ids.contains(id))
+        .filter(|(id, _)| !free.contains(id))
         .map(|(_, slot)| slot)
         .collect();
-    busy.extend(match_slots(tx, &anchor.team_id, None)?);
+    busy.extend(match_slots(tx, team_id, None)?);
+    Ok(busy)
+}
+
+/// The sessions the scope reaches from `session_id`, and the busy slots of
+/// its team without them.
+fn series_targets(
+    tx: &Transaction,
+    session_id: &Uuid,
+    scope: SeriesScope,
+) -> Result<(Vec<TrainingSession>, Vec<Slot>), AppError> {
+    let anchor = read_session(tx, session_id)?;
+    let targets = series_members(tx, &anchor, scope)?;
+    let ids: HashSet<Uuid> = targets.iter().map(|s| s.id).collect();
+    let busy = busy_but(tx, &anchor.team_id, &ids)?;
     Ok((targets, busy))
+}
+
+/// The overlaps of a group, each slot once: the error that stops it.
+fn group_overlap(conflicts: Vec<series::SeriesConflict>) -> AppError {
+    let mut hit: Vec<Slot> = conflicts.into_iter().flat_map(|c| c.with).collect();
+    hit.sort_by_key(|s| (s.start, s.minutes));
+    hit.dedup();
+    TrainingError::Overlap(hit).into()
+}
+
+/// Writes the input on the session; not found if removed.
+fn write_session(
+    tx: &Transaction,
+    session_id: &Uuid,
+    input: &SessionInput,
+) -> Result<TrainingSession, AppError> {
+    let changed = tx
+        .execute(
+            "UPDATE training_sessions SET microcycle_id = ?2, start_local = ?3,
+                 duration_min = ?4, actual_duration_min = ?5, venue_id = ?6, title = ?7,
+                 objectives = ?8, notes = ?9, final_remarks = ?10, status = ?11
+             WHERE id = ?1 AND deleted = 0",
+            params![
+                Sql(*session_id),
+                input.microcycle_id.map(Sql),
+                Sql(input.start),
+                input.duration_min,
+                input.actual_duration_min,
+                input.venue_id.map(Sql),
+                input.title,
+                input.objectives,
+                input.notes,
+                input.final_remarks,
+                input.status,
+            ],
+        )
+        .map_err(sqlite)?;
+    match changed {
+        0 => Err(not_found(&format!("session {session_id}"))),
+        _ => read_session(tx, session_id),
+    }
 }
 
 #[async_trait]
@@ -548,43 +605,36 @@ impl TrainingWriter for SqliteTraining {
                 input.start,
                 input.duration_min,
             )?;
-            let changed = tx
-                .execute(
-                    "UPDATE training_sessions SET microcycle_id = ?2, start_local = ?3,
-                         duration_min = ?4, actual_duration_min = ?5, venue_id = ?6, title = ?7,
-                         objectives = ?8, notes = ?9, final_remarks = ?10, status = ?11
-                     WHERE id = ?1 AND deleted = 0",
-                    params![
-                        Sql(*session_id),
-                        input.microcycle_id.map(Sql),
-                        Sql(input.start),
-                        input.duration_min,
-                        input.actual_duration_min,
-                        input.venue_id.map(Sql),
-                        input.title,
-                        input.objectives,
-                        input.notes,
-                        input.final_remarks,
-                        input.status,
-                    ],
-                )
-                .map_err(sqlite)?;
-            match changed {
-                0 => Err(not_found(&format!("session {session_id}"))),
-                _ => read_session(tx, session_id),
-            }
+            write_session(tx, session_id, &input)
         })
     }
 
     async fn create_series(
         &self,
         team_id: &Uuid,
-        input: SeriesInput,
+        inputs: Vec<SeriesInput>,
         create_others: bool,
     ) -> Result<SeriesOutcome, AppError> {
-        let windows = input
-            .generate()
-            .map_err(|e| AppError::IO(IOError::Msg(format!("invalid series: {e:?}"))))?;
+        let invalid = |e| AppError::IO(IOError::Msg(format!("invalid series: {e:?}")));
+        // each window with the input it is of, in the order of the inputs
+        let tagged: Vec<(NaiveDateTime, u16, usize)> = inputs
+            .iter()
+            .enumerate()
+            .map(|(i, input)| {
+                input
+                    .generate()
+                    .map(|w| w.into_iter().map(move |(start, min)| (start, min, i)))
+            })
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(invalid)?
+            .into_iter()
+            .flatten()
+            .collect();
+        match (inputs.is_empty(), tagged.len() > series::MAX_SESSIONS) {
+            (true, _) => return Err(invalid(series::SeriesError::NoBands)),
+            (_, true) => return Err(invalid(series::SeriesError::TooMany)),
+            _ => {}
+        }
         self.0.write(|tx| {
             let team: bool = tx
                 .query_row(
@@ -598,27 +648,29 @@ impl TrainingWriter for SqliteTraining {
                 true => {
                     let mut busy = session_slots(tx, team_id, None)?;
                     busy.extend(match_slots(tx, team_id, None)?);
-                    let (accepted, conflicts) = series::conflicts_of(&windows, busy);
+                    let (accepted, conflicts) = series::conflicts_of_tagged(&tagged, busy);
                     match conflicts.is_empty() || create_others {
                         false => Ok(SeriesOutcome {
                             created: vec![],
                             conflicts,
                         }),
                         true => {
-                            let series_id = Uuid::new_v4();
+                            let ids: Vec<Uuid> = inputs.iter().map(|_| Uuid::new_v4()).collect();
                             let created = accepted
                                 .into_iter()
-                                .map(|(start, duration_min)| {
+                                .map(|(start, duration_min, i)| {
                                     insert_session(
                                         tx,
                                         team_id,
-                                        Some(series_id),
+                                        ids.get(i).copied(),
                                         &SessionInput {
                                             microcycle_id: None,
                                             start,
                                             duration_min,
                                             actual_duration_min: None,
-                                            venue_id: input.venue_of(start),
+                                            venue_id: inputs
+                                                .get(i)
+                                                .and_then(|input| input.venue_of(start)),
                                             title: String::new(),
                                             objectives: String::new(),
                                             notes: String::new(),
@@ -627,10 +679,66 @@ impl TrainingWriter for SqliteTraining {
                                         },
                                     )
                                 })
-                                .collect::<Result<_, _>>()?;
+                                .collect::<Result<Vec<_>, _>>()?;
+                            let mut created = created;
+                            created.sort_by_key(|s| (s.start, s.id));
                             Ok(SeriesOutcome { created, conflicts })
                         }
                     }
+                }
+            }
+        })
+    }
+
+    async fn update_session_in_series(
+        &self,
+        session_id: &Uuid,
+        input: SessionInput,
+        scope: SeriesScope,
+    ) -> Result<Vec<TrainingSession>, AppError> {
+        self.0.write(|tx| {
+            let anchor = read_session(tx, session_id)?;
+            check_microcycle(
+                tx,
+                &anchor.team_id,
+                input.microcycle_id.as_ref(),
+                input.start,
+            )?;
+            let edit =
+                SeriesEdit::between(&anchor, input.start, input.duration_min, input.venue_id);
+            let others: Vec<TrainingSession> = match edit.is_empty() {
+                true => vec![],
+                false => series_members(tx, &anchor, scope)?
+                    .into_iter()
+                    .filter(|s| s.id != anchor.id)
+                    .collect(),
+            };
+            let free: HashSet<Uuid> = others.iter().map(|s| s.id).chain(Some(anchor.id)).collect();
+            let busy = busy_but(tx, &anchor.team_id, &free)?;
+            let moved: Vec<(NaiveDateTime, u16, Option<Uuid>)> =
+                others.iter().map(|s| edit.apply(s)).collect();
+            let windows: Vec<(NaiveDateTime, u16)> = Some((input.start, input.duration_min))
+                .into_iter()
+                .chain(moved.iter().map(|(start, min, _)| (*start, *min)))
+                .collect();
+            match series::conflicts_of(&windows, busy) {
+                (_, conflicts) if !conflicts.is_empty() => Err(group_overlap(conflicts)),
+                _ => {
+                    let first = write_session(tx, session_id, &input)?;
+                    let rest = others
+                        .iter()
+                        .zip(moved)
+                        .map(|(session, (start, minutes, venue))| {
+                            tx.execute(
+                                "UPDATE training_sessions SET start_local = ?2,
+                                     duration_min = ?3, venue_id = ?4 WHERE id = ?1",
+                                params![Sql(session.id), Sql(start), minutes, venue.map(Sql)],
+                            )
+                            .map_err(sqlite)?;
+                            read_session(tx, &session.id)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+                    Ok(Some(first).into_iter().chain(rest).collect())
                 }
             }
         })
@@ -652,13 +760,7 @@ impl TrainingWriter for SqliteTraining {
                     moved.iter().map(|(start, min, _)| (*start, *min)).collect();
                 let (_, conflicts) = series::conflicts_of(&windows, busy);
                 match conflicts.is_empty() {
-                    false => {
-                        let mut hit: Vec<Slot> =
-                            conflicts.into_iter().flat_map(|c| c.with).collect();
-                        hit.sort_by_key(|s| (s.start, s.minutes));
-                        hit.dedup();
-                        Err(TrainingError::Overlap(hit).into())
-                    }
+                    false => Err(group_overlap(conflicts)),
                     true => targets
                         .iter()
                         .zip(moved)
@@ -683,7 +785,13 @@ impl TrainingWriter for SqliteTraining {
         scope: SeriesScope,
     ) -> Result<usize, AppError> {
         self.0.write(|tx| {
-            let (targets, _) = series_targets(tx, session_id, scope)?;
+            let anchor = read_session(tx, session_id)?;
+            // the one chosen goes whatever its status; the others if planned
+            let mut targets = series_members(tx, &anchor, scope)?;
+            match targets.iter().any(|s| s.id == anchor.id) {
+                true => {}
+                false => targets.push(anchor),
+            }
             targets.iter().try_for_each(|s| {
                 tx.execute(
                     "UPDATE training_sessions SET deleted = 1 WHERE id = ?1",

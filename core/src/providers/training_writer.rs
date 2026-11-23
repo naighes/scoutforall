@@ -26,18 +26,30 @@ pub trait TrainingWriter {
         input: SessionInput,
     ) -> Result<TrainingSession, AppError>;
 
-    /// Repeats the bands between the dates: real sessions with a `series_id`
-    /// in common, planned, with no objectives, activities or attendance.
-    /// The ones that overlap a session or a match in programma (or an
-    /// earlier one of the series) are reported as conflicts: with
-    /// `create_others` false any conflict stops everything and nothing is
-    /// written; with true the others are created.
+    /// Repeats the bands of each input between its dates: real sessions,
+    /// planned, with no objectives, activities or attendance; each input is
+    /// a series of its own (a `series_id` in common). The ones that overlap
+    /// a session or a match in programma (or an earlier one of the inputs)
+    /// are reported as conflicts: with `create_others` false any conflict
+    /// stops everything and nothing is written; with true the others are
+    /// created.
     async fn create_series(
         &self,
         team_id: &Uuid,
-        input: SeriesInput,
+        inputs: Vec<SeriesInput>,
         create_others: bool,
     ) -> Result<SeriesOutcome, AppError>;
+
+    /// The session as the input says, and the time of day, the duration
+    /// and the gym it changes to the other planned sessions `scope` reaches
+    /// in its series (their date never changes). An overlap stops
+    /// everything: nothing is written. The sessions written.
+    async fn update_session_in_series(
+        &self,
+        session_id: &Uuid,
+        input: SessionInput,
+        scope: SeriesScope,
+    ) -> Result<Vec<TrainingSession>, AppError>;
 
     /// Changes gym, time or duration of the planned sessions `scope`
     /// reaches from `session_id` (the date never changes). A change that
@@ -49,8 +61,8 @@ pub trait TrainingWriter {
         edit: SeriesEdit,
     ) -> Result<Vec<TrainingSession>, AppError>;
 
-    /// Removes (D7) the planned sessions `scope` reaches from `session_id`;
-    /// how many.
+    /// Removes (D7) the session and the other planned sessions `scope`
+    /// reaches from it; how many.
     async fn remove_series(&self, session_id: &Uuid, scope: SeriesScope)
     -> Result<usize, AppError>;
 

@@ -9,21 +9,16 @@ use {
         forms::{Edited, SessionEditor},
         history::{self, HistoryTab},
         presence::{self, PresenceTab},
-        series::SeriesEditor,
+        scope::{self, ScopeQuestion},
         session::{self, SessionPage},
     },
-    crate::{
-        form::{self, Form},
-        strings::Strings,
-        theme::Colors,
-        ui,
-    },
+    crate::{form, strings::Strings, theme::Colors, ui},
     chrono::{Datelike, Months, NaiveDate},
     iced::{
         Element, Length,
-        widget::{Id, column, container, row, space},
+        widget::{Id, column, row, space},
     },
-    scout4all_core::training::cycles::Level,
+    scout4all_core::training::{cycles::Level, series::SeriesScope},
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{MobileError, Scout4All},
     std::sync::Arc,
@@ -133,15 +128,17 @@ enum Mode {
     List,
     Page(Box<SessionPage>),
     New(Box<SessionEditor>),
-    Series(Box<SeriesEditor>),
-    /// id of the session to delete
-    Delete(String),
+    /// id of the session to delete, with the question of its series when
+    /// it's in one
+    Delete(String, Option<ScopeQuestion>),
 }
 
 #[derive(Debug, Clone)]
 pub enum Message {
     Confirm,
     Dismiss,
+    /// the answer of the question of the series, on deleting
+    Scope(SeriesScope),
     Form(form::Message),
     Page(session::Message),
     Tab(Tab),
@@ -220,11 +217,9 @@ impl TrainingScreen {
     pub fn focus_id(&self) -> Option<Id> {
         match &self.mode {
             Mode::Page(page) => page.focus_id(),
-            Mode::New(editor) => Some(editor.form.focus_id()),
-            Mode::Series(editor) if editor.conflicts.is_empty() => Some(editor.form.focus_id()),
-            Mode::Series(_) => None,
+            Mode::New(editor) => editor.focus_id(),
             Mode::List if self.tab == Tab::Cycles => self.cycles.focus_id(),
-            Mode::List | Mode::Delete(_) => None,
+            Mode::List | Mode::Delete(..) => None,
         }
     }
 
@@ -274,8 +269,14 @@ impl TrainingScreen {
             Leave::Stay => Outcome::Stay,
             Leave::Back => Outcome::Back,
             Leave::Export(export) => Outcome::Export(export),
-            Leave::NewSession(day) => {
-                match SessionEditor::new(&self.core, s, self.team_id.clone(), None, Some(day)) {
+            Leave::NewSession(day, time) => {
+                match SessionEditor::at(
+                    &self.core,
+                    s,
+                    self.team_id.clone(),
+                    None,
+                    Some((day, time)),
+                ) {
                     Ok(editor) => {
                         self.mode = Mode::New(Box::new(editor));
                         self.from_cycle = true;
@@ -305,17 +306,20 @@ impl TrainingScreen {
             calendar::Leave::Stay => {}
             calendar::Leave::Session(id) => self.open_session(&id),
             calendar::Leave::Create(ids) => self.create_microcycle(s, ids),
-            calendar::Leave::Delete(id) => self.mode = Mode::Delete(id),
-            calendar::Leave::Match(id) => return Outcome::Match(id),
-            calendar::Leave::NewSession(day) => {
-                match SessionEditor::new(&self.core, s, self.team_id.clone(), None, Some(day)) {
-                    Ok(editor) => self.mode = Mode::New(Box::new(editor)),
-                    Err(e) => self.error = Some(e.to_string()),
-                }
+            calendar::Leave::Delete(id) => {
+                let question = scope::deletion_question(&self.core, &id);
+                self.mode = Mode::Delete(id, question);
             }
-            calendar::Leave::Repeat(day) => {
-                match SeriesEditor::new(&self.core, s, self.team_id.clone(), Some(day)) {
-                    Ok(editor) => self.mode = Mode::Series(Box::new(editor)),
+            calendar::Leave::Match(id) => return Outcome::Match(id),
+            calendar::Leave::NewSession(day, time) => {
+                match SessionEditor::at(
+                    &self.core,
+                    s,
+                    self.team_id.clone(),
+                    None,
+                    Some((day, time)),
+                ) {
+                    Ok(editor) => self.mode = Mode::New(Box::new(editor)),
                     Err(e) => self.error = Some(e.to_string()),
                 }
             }
@@ -323,21 +327,9 @@ impl TrainingScreen {
         Outcome::Stay
     }
 
-    /// The series made: the list shows them.
-    fn series_edited(&mut self, edited: Edited) {
-        match edited {
-            Edited::Cancel => self.mode = Mode::List,
-            Edited::Saved(_) => {
-                self.mode = Mode::List;
-                self.reload();
-            }
-            Edited::Stay | Edited::Copy(_) => {}
-        }
-    }
-
-    fn delete(&mut self) {
+    fn delete(&mut self, scope: SeriesScope) {
         let removed = match &self.mode {
-            Mode::Delete(id) => self.core.remove_session(id.clone()),
+            Mode::Delete(id, _) => scope::delete_session(&self.core, id, scope),
             _ => Ok(()),
         };
         if let Err(e) = removed {
@@ -352,6 +344,13 @@ impl TrainingScreen {
         match edited {
             Edited::Stay | Edited::Copy(_) => return,
             Edited::Cancel => self.mode = Mode::List,
+            // a series made: the calendar shows it (the sheet of the
+            // microcycle, when asked from there)
+            Edited::Repeated => {
+                self.reload();
+                self.cycles.refresh();
+                self.mode = Mode::List;
+            }
             // made from a microcycle: its sheet again, the session in it
             Edited::Saved(_) if from_cycle => {
                 self.reload();
@@ -396,20 +395,9 @@ impl TrainingScreen {
                 let edited = editor.update(&self.core, m);
                 self.edited(edited);
             }
-            (Mode::Series(editor), Message::Form(m)) => {
-                let edited = editor.update(&self.core, s, m);
-                self.series_edited(edited);
-            }
-            (Mode::Series(editor), Message::Confirm) => {
-                let edited = editor.answer(&self.core, s, true);
-                self.series_edited(edited);
-            }
-            (Mode::Series(editor), Message::Dismiss) => {
-                let edited = editor.answer(&self.core, s, false);
-                self.series_edited(edited);
-            }
-            (Mode::Delete(_), Message::Confirm) => self.delete(),
-            (Mode::Delete(_), Message::Dismiss) => self.mode = Mode::List,
+            (Mode::Delete(..), Message::Confirm) => self.delete(SeriesScope::This),
+            (Mode::Delete(..), Message::Scope(scope)) => self.delete(scope),
+            (Mode::Delete(..), Message::Dismiss) => self.mode = Mode::List,
             (Mode::List, Message::Tab(tab)) => self.set_tab(tab),
             (Mode::List, Message::Cycles(m)) if self.tab == Tab::Cycles => {
                 let leave = self.cycles.update(s, m);
@@ -450,12 +438,13 @@ impl TrainingScreen {
                 let edited = editor.key(&self.core, ck);
                 self.edited(edited);
             }
-            Mode::Series(editor) => {
-                let edited = editor.key(&self.core, s, ck);
-                self.series_edited(edited);
-            }
-            Mode::Delete(_) => match ck {
-                k if k == key!(enter) => self.delete(),
+            Mode::Delete(_, Some(question)) => match question.key(ck) {
+                scope::Answer::Stay => {}
+                scope::Answer::Cancel => self.mode = Mode::List,
+                scope::Answer::Chosen(scope) => self.delete(scope),
+            },
+            Mode::Delete(_, None) => match ck {
+                k if k == key!(enter) => self.delete(SeriesScope::This),
                 k if k == BACK_KEY => self.mode = Mode::List,
                 _ => {}
             },
@@ -492,13 +481,9 @@ impl TrainingScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
             Mode::Page(page) => page.hints(s),
-            Mode::New(editor) => editor.form.on_field(Form::hints(s)),
-            Mode::Series(editor) if !editor.conflicts.is_empty() => vec![
-                ("Enter".to_string(), s.create_others.to_string()),
-                ("Esc".to_string(), s.cancel.to_string()),
-            ],
-            Mode::Series(_) => Form::hints(s),
-            Mode::Delete(_) => vec![
+            Mode::New(editor) => editor.hints(s),
+            Mode::Delete(_, Some(_)) => ScopeQuestion::hints(s, s.delete),
+            Mode::Delete(_, None) => vec![
                 ("Enter".to_string(), s.delete.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
@@ -516,22 +501,16 @@ impl TrainingScreen {
         };
         let body: Element<'a, Message> = match &self.mode {
             Mode::Page(page) => page.view(s, c).map(Message::Page),
-            Mode::New(editor) => {
-                container(container(editor.form.view(s, c, Message::Form, None)).max_width(720))
-                    .center_x(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-            }
-            Mode::Series(editor) if !editor.conflicts.is_empty() => {
-                editor.dialog(s, c, Message::Confirm, Message::Dismiss)
-            }
-            Mode::Series(editor) => {
-                container(container(editor.form.view(s, c, Message::Form, None)).max_width(720))
-                    .center_x(Length::Fill)
-                    .height(Length::Fill)
-                    .into()
-            }
-            Mode::Delete(_) => ui::confirm_deletion(
+            Mode::New(editor) => editor.view(s, c, Message::Form),
+            Mode::Delete(_, Some(question)) => question.view(
+                s,
+                c,
+                s.scope_delete_text,
+                (crate::theme::icons::DELETE, s.delete),
+                Message::Scope,
+                Message::Dismiss,
+            ),
+            Mode::Delete(_, None) => ui::confirm_deletion(
                 s,
                 s.delete_session_text,
                 Message::Confirm,
@@ -739,21 +718,21 @@ mod tests {
         session(&core, &team, "2026-03-02T18:00", "Prima");
         let day = NaiveDate::from_ymd_opt(2026, 3, 2).unwrap();
         let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
-        screen.calendared(s, calendar::Leave::NewSession(day));
+        screen.calendared(s, calendar::Leave::NewSession(day, None));
         let Mode::New(editor) = &screen.mode else {
             panic!("the form")
         };
-        assert_eq!(editor.form.text(0), "2026-03-02");
+        assert_eq!(editor.form.text(1), "2026-03-02");
         // the same hour: it overlaps
-        type_in(&mut screen, 1, "18:30");
+        type_in(&mut screen, 2, "18:30");
         screen.key(s, key!(enter));
         let Mode::New(editor) = &screen.mode else {
             panic!("still the form")
         };
         assert!(editor.form.error.is_some());
         assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 1);
-        type_in(&mut screen, 1, "20:00");
-        type_in(&mut screen, 4, "Seconda");
+        type_in(&mut screen, 2, "20:00");
+        type_in(&mut screen, 6, "Seconda");
         screen.key(s, key!(enter));
         assert!(matches!(&screen.mode, Mode::Page(_)));
         assert_eq!(core.training_sessions(team).unwrap().len(), 2);
@@ -908,79 +887,195 @@ mod tests {
         assert_eq!(core.session_activities(copy.id.clone()).unwrap().len(), 1);
     }
 
-    /// The series: a session on the way is told in a dialog and nothing is
-    /// made; the others are made on Enter. The group is then changed from
-    /// the sheet of one of them, from it on.
+    /// The series, from the form of a new session: an entry (Mondays), then
+    /// another (Thursdays) with Continue; Finish tells a session on the way
+    /// in a dialog and makes nothing, Enter there makes the others. Each
+    /// entry is a series: the time of a Thursday changed for the whole
+    /// series moves the Thursdays only; the Thursdays deleted from one go.
     #[test]
-    fn a_series_tells_its_conflicts_and_is_changed_as_a_group() {
+    fn a_series_is_written_entry_by_entry_and_changed_by_entry() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         let team = core.tutorial_team().unwrap();
         session(&core, &team, "2026-03-09T20:00", "Occupata");
         let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
-        screen.key(s, key!(r));
-        assert!(matches!(screen.mode, Mode::Series(_)));
-        type_in(&mut screen, 0, "2026-03-02");
-        type_in(&mut screen, 1, "2026-03-16");
-        type_in(&mut screen, 3, "20:30");
-        type_in(&mut screen, 4, "120");
+        screen.calendared(
+            s,
+            calendar::Leave::NewSession(NaiveDate::from_ymd_opt(2026, 3, 2).unwrap(), None),
+        );
+        screen.update(s, Message::Form(FormMessage::Choose(0, 1)));
+        let Mode::New(editor) = &screen.mode else {
+            panic!("the form")
+        };
+        assert!(editor.is_series());
+        assert_eq!(editor.form.text(1), "2026-03-02");
+        type_in(&mut screen, 2, "20:30");
+        // the last day is wanted before going on
+        screen.key(s, key!(alt - enter));
+        let Mode::New(editor) = &screen.mode else {
+            panic!("the form")
+        };
+        assert!(editor.form.error.is_some());
+        type_in(&mut screen, 5, "2026-03-16");
+        screen.key(s, key!(alt - enter));
+        let Mode::New(editor) = &screen.mode else {
+            panic!("the next entry")
+        };
+        assert_eq!(editor.form.error, None);
+        // the next entry starts from the one before, the day after
+        assert_eq!(editor.form.text(1), "2026-03-03");
+        assert_eq!(editor.form.text(2), "20:30");
+        assert_eq!(editor.form.text(5), "2026-03-16");
+        type_in(&mut screen, 1, "2026-03-05");
+        type_in(&mut screen, 2, "19:00");
         screen.key(s, key!(enter));
-        let Mode::Series(editor) = &screen.mode else {
+        let Mode::New(editor) = &screen.mode else {
             panic!("the dialog")
         };
         assert_eq!(editor.conflicts, vec!["2026-03-09 20:30".to_string()]);
         assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 1);
-        // Esc goes back to the form, Enter again asks again
+        // Esc goes back to the form, Finish again asks again
         screen.key(s, BACK_KEY);
-        assert!(matches!(&screen.mode, Mode::Series(e) if e.conflicts.is_empty()));
+        assert!(matches!(&screen.mode, Mode::New(e) if e.conflicts.is_empty()));
         screen.key(s, key!(enter));
         screen.key(s, key!(enter));
         assert!(matches!(screen.mode, Mode::List));
         let sessions = core.training_sessions(team.clone()).unwrap();
-        assert_eq!(sessions.len(), 3);
-        let first = sessions
+        let starts: Vec<&str> = sessions.iter().map(|r| r.start.as_str()).collect();
+        assert_eq!(
+            starts,
+            [
+                "2026-03-02T20:30",
+                "2026-03-05T19:00",
+                "2026-03-09T20:00",
+                "2026-03-12T19:00",
+                "2026-03-16T20:30",
+            ]
+        );
+        let series_of = |start: &str| {
+            sessions
+                .iter()
+                .find(|r| r.start == start)
+                .and_then(|r| r.series_id.clone())
+        };
+        assert!(series_of("2026-03-02T20:30").is_some());
+        assert_eq!(series_of("2026-03-02T20:30"), series_of("2026-03-16T20:30"));
+        assert_eq!(series_of("2026-03-05T19:00"), series_of("2026-03-12T19:00"));
+        assert_ne!(series_of("2026-03-02T20:30"), series_of("2026-03-05T19:00"));
+        // a Thursday an hour earlier, for the whole series
+        let thursday = sessions
             .iter()
-            .find(|r| r.start == "2026-03-02T20:30")
-            .unwrap();
-        assert!(first.series_id.is_some());
-        // from the last on: the time moves
-        let last = sessions
-            .iter()
-            .find(|r| r.start == "2026-03-16T20:30")
+            .find(|r| r.start == "2026-03-05T19:00")
             .unwrap()
             .id
             .clone();
         let mut screen =
-            TrainingScreen::new(core.clone(), team.clone(), Open::Session(last.clone())).unwrap();
-        screen.key(s, key!(g));
-        screen.update(
-            s,
-            Message::Page(session::Message::Form(FormMessage::Choose(0, 1))),
-        );
-        type_in(&mut screen, 2, "19:00");
+            TrainingScreen::new(core.clone(), team.clone(), Open::Session(thursday.clone()))
+                .unwrap();
+        screen.key(s, key!(e));
+        type_in(&mut screen, 2, "18:00");
         screen.key(s, key!(enter));
+        let Mode::Page(page) = &screen.mode else {
+            panic!("the sheet")
+        };
+        assert_eq!(page.mode_name(), "session");
+        // the question: the whole series (the third answer)
+        screen.key(s, key!('3'));
         let starts: Vec<String> = core
             .training_sessions(team.clone())
             .unwrap()
             .into_iter()
             .map(|r| r.start)
             .collect();
-        assert!(starts.contains(&"2026-03-02T20:30".to_string()));
-        assert!(starts.contains(&"2026-03-16T19:00".to_string()));
-        // removed from the first on: the sheet closes
-        let mut screen =
-            TrainingScreen::new(core.clone(), team.clone(), Open::Session(first.id.clone()))
-                .unwrap();
-        screen.key(s, key!(g));
-        screen.update(
-            s,
-            Message::Page(session::Message::Form(FormMessage::Choose(4, 1))),
+        assert_eq!(
+            starts,
+            [
+                "2026-03-02T20:30",
+                "2026-03-05T18:00",
+                "2026-03-09T20:00",
+                "2026-03-12T18:00",
+                "2026-03-16T20:30",
+            ]
         );
+        // a title only asks nothing
+        screen.key(s, key!(e));
+        type_in(&mut screen, 6, "Ricezione");
+        screen.key(s, key!(enter));
+        let Mode::Page(page) = &screen.mode else {
+            panic!("the sheet")
+        };
+        assert_eq!(page.mode_name(), "browse");
+        // deleted with the whole series: the Thursdays go, the sheet closes
+        screen.key(s, key!(shift - backspace));
+        screen.key(s, key!(down));
+        screen.key(s, key!(down));
         screen.key(s, key!(enter));
         assert!(matches!(screen.mode, Mode::List));
-        assert_eq!(core.training_sessions(team).unwrap().len(), 1);
+        let starts: Vec<String> = core
+            .training_sessions(team)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.start)
+            .collect();
+        assert_eq!(
+            starts,
+            ["2026-03-02T20:30", "2026-03-09T20:00", "2026-03-16T20:30"]
+        );
     }
+
+    /// A session alone is deleted as before, with no question.
+    #[test]
+    fn a_session_alone_is_deleted_without_the_question() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let id = session(&core, &team, "2026-03-02T18:00", "Sola");
+        let mut screen =
+            TrainingScreen::new(core.clone(), team.clone(), Open::Session(id)).unwrap();
+        screen.key(s, key!(shift - backspace));
+        screen.key(s, key!(enter));
+        assert!(matches!(screen.mode, Mode::List));
+        assert!(core.training_sessions(team).unwrap().is_empty());
+    }
+
+    /// A click on an empty half hour of the week opens a new session there,
+    /// two hours long; on a day of the month, on that day.
+    #[test]
+    fn a_click_on_the_calendar_opens_a_new_session_there() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        let day = NaiveDate::from_ymd_opt(2026, 3, 4).unwrap();
+        screen.update(
+            s,
+            Message::Calendar(calendar::Message::NewAt(day, Some(18 * 60 + 30))),
+        );
+        let Mode::New(editor) = &screen.mode else {
+            panic!("the form")
+        };
+        assert_eq!(editor.form.text(1), "2026-03-04");
+        assert_eq!(editor.form.text(2), "18:30");
+        assert_eq!(editor.form.text(3), "120");
+        assert!(!editor.is_series());
+        screen.key(s, key!(enter));
+        let sessions = core.training_sessions(team.clone()).unwrap();
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].start, "2026-03-04T18:30");
+        assert_eq!(sessions[0].duration_min, 120);
+        // the month: the day, the time to write
+        screen.key(s, BACK_KEY);
+        screen.update(s, Message::Calendar(calendar::Message::NewAt(day, None)));
+        let Mode::New(editor) = &screen.mode else {
+            panic!("the form")
+        };
+        assert_eq!(editor.form.text(1), "2026-03-04");
+        assert_eq!(editor.form.text(2), "");
+    }
+
     /// Sessions marked with space become a microcycle (window proposed from
     /// the first Monday); the sheet gives the totals; the microcycle is
     /// duplicated and the two marked make a mesocycle.
@@ -1166,8 +1261,8 @@ mod tests {
         screen.key(s, key!(enter));
         screen.key(s, key!(n));
         assert!(matches!(screen.mode, Mode::New(_)));
-        screen.update(s, Message::Form(FormMessage::Focus(1)));
-        screen.update(s, Message::Form(FormMessage::Input(1, "18:00".into())));
+        screen.update(s, Message::Form(FormMessage::Focus(2)));
+        screen.update(s, Message::Form(FormMessage::Input(2, "18:00".into())));
         screen.key(s, key!(enter));
         assert!(matches!(screen.mode, Mode::List));
         assert!(screen.cycles.on_card());
@@ -1292,8 +1387,8 @@ mod tests {
         // a new session on the day chosen, in the microcycle
         screen.key(s, key!(right));
         screen.key(s, key!(n));
-        screen.update(s, Message::Form(FormMessage::Focus(1)));
-        screen.update(s, Message::Form(FormMessage::Input(1, "18:00".into())));
+        screen.update(s, Message::Form(FormMessage::Focus(2)));
+        screen.update(s, Message::Form(FormMessage::Input(2, "18:00".into())));
         screen.key(s, key!(enter));
         let made = core
             .training_sessions(team.clone())
@@ -1461,10 +1556,6 @@ mod tests {
         assert!(matches!(screen.mode, Mode::New(_)));
         press(&mut screen, BACK_KEY);
         assert!(matches!(screen.mode, Mode::List));
-        // a series from the day
-        press(&mut screen, key!(r));
-        assert!(matches!(screen.mode, Mode::Series(_)));
-        press(&mut screen, BACK_KEY);
         // the month: Enter comes back to the week of the day
         press(&mut screen, key!(m));
         press(&mut screen, key!(enter));

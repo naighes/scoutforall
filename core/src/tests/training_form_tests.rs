@@ -31,6 +31,8 @@ mod tests {
     fn a_new_form_is_planned_and_of_the_usual_duration() {
         let f = SessionForm::default();
         assert_eq!(f.duration, DEFAULT_SESSION_MINUTES.to_string());
+        // two hours, as a session usually lasts (decided 2026-11-23)
+        assert_eq!(f.duration, "120");
         assert_eq!(f.status, SessionStatus::Planned);
         assert_eq!(f.start, None);
     }

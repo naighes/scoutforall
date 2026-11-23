@@ -23,7 +23,7 @@ mod tests {
         },
         tests::Sqlite,
         training::{
-            SessionStatus, TrainingSession,
+            SessionInput, SessionStatus, TrainingSession,
             form::SessionForm,
             overlap::{Slot, SlotKind},
             series::{Band, SeriesEdit, SeriesError, SeriesInput, SeriesScope, select},
@@ -321,11 +321,11 @@ mod tests {
             .training
             .create_series(
                 &t.id,
-                input(
+                vec![input(
                     day(2026, 11, 23),
                     day(2026, 12, 6),
                     in_gym(mon_wed(), w.gym),
-                ),
+                )],
                 false,
             )
             .await
@@ -348,7 +348,7 @@ mod tests {
             .training
             .create_series(
                 &t.id,
-                input(day(2026, 12, 14), day(2026, 12, 14), mon_wed()),
+                vec![input(day(2026, 12, 14), day(2026, 12, 14), mon_wed())],
                 false,
             )
             .await
@@ -364,7 +364,7 @@ mod tests {
         let range = input(day(2026, 11, 23), day(2026, 12, 6), mon_wed());
         let stopped = w
             .training
-            .create_series(&t.id, range.clone(), false)
+            .create_series(&t.id, vec![range.clone()], false)
             .await
             .unwrap();
         assert!(stopped.created.is_empty());
@@ -376,7 +376,11 @@ mod tests {
         );
         assert_eq!(w.training.sessions(&t.id).await.unwrap().len(), 1);
 
-        let others = w.training.create_series(&t.id, range, true).await.unwrap();
+        let others = w
+            .training
+            .create_series(&t.id, vec![range], true)
+            .await
+            .unwrap();
         assert_eq!(others.created.len(), 3);
         assert_eq!(others.conflicts, stopped.conflicts);
         assert_eq!(w.training.sessions(&t.id).await.unwrap().len(), 4);
@@ -407,7 +411,7 @@ mod tests {
             .training
             .create_series(
                 &t.id,
-                input(day(2026, 11, 23), day(2026, 11, 25), mon_wed()),
+                vec![input(day(2026, 11, 23), day(2026, 11, 25), mon_wed())],
                 true,
             )
             .await
@@ -425,14 +429,14 @@ mod tests {
             .training
             .create_series(
                 &t.id,
-                input(
+                vec![input(
                     day(2026, 11, 23),
                     day(2026, 11, 24),
                     vec![
                         band(Weekday::Mon, 23, 0, 120),
                         band(Weekday::Tue, 0, 30, 60),
                     ],
-                ),
+                )],
                 true,
             )
             .await
@@ -448,7 +452,7 @@ mod tests {
             w.training
                 .create_series(
                     &Uuid::new_v4(),
-                    input(day(2026, 11, 23), day(2026, 11, 25), mon_wed()),
+                    vec![input(day(2026, 11, 23), day(2026, 11, 25), mon_wed())],
                     true,
                 )
                 .await
@@ -460,7 +464,7 @@ mod tests {
             w.training
                 .create_series(
                     &t.id,
-                    input(day(2026, 11, 25), day(2026, 11, 23), mon_wed()),
+                    vec![input(day(2026, 11, 25), day(2026, 11, 23), mon_wed())],
                     true
                 )
                 .await
@@ -475,11 +479,11 @@ mod tests {
             .training
             .create_series(
                 &t.id,
-                input(
+                vec![input(
                     day(2026, 11, 23),
                     day(2026, 12, 6),
                     in_gym(mon_wed(), w.gym),
-                ),
+                )],
                 false,
             )
             .await
@@ -680,5 +684,235 @@ mod tests {
             .unwrap();
         assert_eq!(removed, 1);
         assert_eq!(w.training.sessions(&t.id).await.unwrap().len(), 1);
+    }
+
+    /// Monday, Wednesday and Thursday at 20:30 for two weeks, each entry of
+    /// the dialog its own series (decided 2026-11-23).
+    async fn three_entries(w: &World) -> (TeamEntry, Vec<TrainingSession>) {
+        let t = team(&w.p).await;
+        let entry =
+            |weekday, first| input(first, day(2026, 12, 6), vec![band(weekday, 20, 30, 120)]);
+        let out = w
+            .training
+            .create_series(
+                &t.id,
+                vec![
+                    entry(Weekday::Mon, day(2026, 11, 23)),
+                    entry(Weekday::Wed, day(2026, 11, 25)),
+                    entry(Weekday::Thu, day(2026, 11, 26)),
+                ],
+                false,
+            )
+            .await
+            .unwrap();
+        (t, out.created)
+    }
+
+    #[tokio::test]
+    async fn each_entry_of_the_dialog_is_a_series_of_its_own() {
+        let w = world();
+        let (t, made) = three_entries(&w).await;
+        assert_eq!(made.len(), 6);
+        let series_of = |weekday: Weekday| {
+            made.iter()
+                .filter(|s| chrono::Datelike::weekday(&s.start) == weekday)
+                .map(|s| s.series_id.unwrap())
+                .collect::<std::collections::HashSet<_>>()
+        };
+        let (mon, wed, thu) = (
+            series_of(Weekday::Mon),
+            series_of(Weekday::Wed),
+            series_of(Weekday::Thu),
+        );
+        assert_eq!((mon.len(), wed.len(), thu.len()), (1, 1, 1));
+        assert!(mon.is_disjoint(&wed) && wed.is_disjoint(&thu) && mon.is_disjoint(&thu));
+        assert_eq!(w.training.sessions(&t.id).await.unwrap().len(), 6);
+    }
+
+    #[tokio::test]
+    async fn entries_that_overlap_each_other_are_conflicts() {
+        let w = world();
+        let t = team(&w.p).await;
+        let monday = |h| {
+            input(
+                day(2026, 11, 23),
+                day(2026, 11, 23),
+                vec![band(Weekday::Mon, h, 0, 120)],
+            )
+        };
+        let out = w
+            .training
+            .create_series(&t.id, vec![monday(18), monday(19)], false)
+            .await
+            .unwrap();
+        assert!(out.created.is_empty());
+        assert_eq!(out.conflicts.len(), 1);
+        assert_eq!(out.conflicts[0].start, at(2026, 11, 23, 19, 0));
+        // all the entries together are capped
+        let long = |weekday| {
+            input(
+                day(2026, 11, 23),
+                day(2030, 11, 23),
+                vec![band(weekday, 8, 0, 60)],
+            )
+        };
+        assert!(
+            w.training
+                .create_series(&t.id, vec![long(Weekday::Mon), long(Weekday::Tue)], true)
+                .await
+                .is_err()
+        );
+        assert!(w.training.sessions(&t.id).await.unwrap().is_empty());
+    }
+
+    fn form_of(s: &TrainingSession) -> SessionInput {
+        SessionInput {
+            microcycle_id: s.microcycle_id,
+            start: s.start,
+            duration_min: s.duration_min,
+            actual_duration_min: s.actual_duration_min,
+            venue_id: s.venue_id,
+            title: s.title.clone(),
+            objectives: s.objectives.clone(),
+            notes: s.notes.clone(),
+            final_remarks: s.final_remarks.clone(),
+            status: s.status,
+        }
+    }
+
+    #[tokio::test]
+    async fn the_thursday_is_moved_alone_with_all_its_series() {
+        let w = world();
+        let (t, made) = three_entries(&w).await;
+        let thursday = made
+            .iter()
+            .find(|s| s.start == at(2026, 11, 26, 20, 30))
+            .unwrap();
+        let input = SessionInput {
+            start: at(2026, 11, 26, 19, 30),
+            title: "Ricezione".into(),
+            ..form_of(thursday)
+        };
+        let done = w
+            .training
+            .update_session_in_series(&thursday.id, input, SeriesScope::All)
+            .await
+            .unwrap();
+        assert_eq!(done.len(), 2);
+        let now = w.training.sessions(&t.id).await.unwrap();
+        let starts: Vec<NaiveDateTime> = now.iter().map(|s| s.start).collect();
+        assert_eq!(
+            starts,
+            [
+                at(2026, 11, 23, 20, 30),
+                at(2026, 11, 25, 20, 30),
+                at(2026, 11, 26, 19, 30),
+                at(2026, 11, 30, 20, 30),
+                at(2026, 12, 2, 20, 30),
+                at(2026, 12, 3, 19, 30),
+            ]
+        );
+        // the title is of the session edited only
+        let titles: Vec<&str> = now.iter().map(|s| s.title.as_str()).collect();
+        assert_eq!(titles, ["", "", "Ricezione", "", "", ""]);
+    }
+
+    #[tokio::test]
+    async fn this_and_following_and_the_date_of_the_one_edited() {
+        let w = world();
+        let (t, list) = four(&w).await;
+        // the second (Wed 25th 18:30) moves to Thursday at 19:00, 90 minutes
+        let input = SessionInput {
+            start: at(2026, 11, 26, 19, 0),
+            duration_min: 90,
+            ..form_of(&list[1])
+        };
+        w.training
+            .update_session_in_series(&list[1].id, input, SeriesScope::ThisAndFollowing)
+            .await
+            .unwrap();
+        let now = w.training.sessions(&t.id).await.unwrap();
+        let windows: Vec<(NaiveDateTime, u16)> =
+            now.iter().map(|s| (s.start, s.duration_min)).collect();
+        // the first is as it was; the date goes to the edited one only
+        assert_eq!(
+            windows,
+            [
+                (at(2026, 11, 23, 20, 30), 120),
+                (at(2026, 11, 26, 19, 0), 90),
+                (at(2026, 11, 30, 19, 0), 90),
+                (at(2026, 12, 2, 19, 0), 90),
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_one_edited_changes_even_if_completed_the_others_only_if_planned() {
+        let w = world();
+        let (t, list) = four(&w).await;
+        w.training
+            .complete_session(&list[0].id, vec![])
+            .await
+            .unwrap();
+        w.training
+            .set_session_status(&list[2].id, SessionStatus::Cancelled)
+            .await
+            .unwrap();
+        let input = SessionInput {
+            venue_id: Some(w.arena),
+            ..form_of(&w.training.session(&list[0].id).await.unwrap())
+        };
+        let done = w
+            .training
+            .update_session_in_series(&list[0].id, input, SeriesScope::All)
+            .await
+            .unwrap();
+        assert_eq!(done.len(), 3);
+        let now = w.training.sessions(&t.id).await.unwrap();
+        assert_eq!(
+            now.iter().map(|s| s.venue_id).collect::<Vec<_>>(),
+            [Some(w.arena), Some(w.arena), Some(w.gym), Some(w.arena)]
+        );
+        assert_eq!(now[0].status, SessionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn an_overlap_of_the_others_stops_the_edit_too() {
+        let w = world();
+        let (t, list) = four(&w).await;
+        plain_session(&w, &t.id, at(2026, 12, 2, 20, 30), 60).await;
+        let input = SessionInput {
+            start: at(2026, 11, 25, 20, 0),
+            title: "x".into(),
+            ..form_of(&list[1])
+        };
+        let e = w
+            .training
+            .update_session_in_series(&list[1].id, input, SeriesScope::All)
+            .await
+            .unwrap_err();
+        assert_eq!(overlaps(&e), [Slot::session(at(2026, 12, 2, 20, 30), 60)]);
+        let now = w.training.sessions(&t.id).await.unwrap();
+        for before in &list {
+            assert!(now.contains(before));
+        }
+    }
+
+    #[tokio::test]
+    async fn removing_takes_the_one_chosen_even_if_completed() {
+        let w = world();
+        let (t, list) = four(&w).await;
+        w.training
+            .complete_session(&list[1].id, vec![])
+            .await
+            .unwrap();
+        let removed = w
+            .training
+            .remove_series(&list[1].id, SeriesScope::ThisAndFollowing)
+            .await
+            .unwrap();
+        assert_eq!(removed, 3);
+        let now = w.training.sessions(&t.id).await.unwrap();
+        assert_eq!(now, [list[0].clone()]);
     }
 }

@@ -385,15 +385,19 @@ impl Scout4All {
         Ok(self.clash_records(&clashes)?)
     }
 
-    /// For the sessions a series would make.
+    /// For the sessions a series would make (all its entries).
     pub fn series_venue_clashes(
         &self,
         team_id: String,
-        draft: SeriesDraft,
+        drafts: Vec<SeriesDraft>,
     ) -> Result<Vec<VenueClashRecord>, MobileError> {
+        let inputs = drafts
+            .iter()
+            .map(series_input)
+            .collect::<Result<Vec<_>, _>>()?;
         let clashes = self
             .venue_provider()
-            .series_clashes(&parse_id(&team_id)?, &series_input(&draft)?)?;
+            .series_clashes(&parse_id(&team_id)?, &inputs)?;
         Ok(self.clash_records(&clashes)?)
     }
 
@@ -628,7 +632,7 @@ mod tests {
         assert!(found[0].message.contains("18:30"));
         // touching is not clashing
         assert!(
-            app.session_venue_clashes(u17.clone(), gym.clone(), "2030-03-04T20:00".into(), 60)
+            app.session_venue_clashes(u17.clone(), gym.clone(), "2030-03-04T20:30".into(), 60)
                 .unwrap()
                 .is_empty()
         );
@@ -644,7 +648,9 @@ mod tests {
             }],
         };
         assert_eq!(
-            app.series_venue_clashes(u17.clone(), series).unwrap().len(),
+            app.series_venue_clashes(u17.clone(), vec![series])
+                .unwrap()
+                .len(),
             1
         );
         let mine = app
