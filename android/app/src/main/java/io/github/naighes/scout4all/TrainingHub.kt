@@ -67,7 +67,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
 import java.util.Locale
 
-internal enum class Part { CALENDAR, CYCLES, ATTENDANCE }
+internal enum class Part { CALENDAR, CYCLES, ATTENDANCE, HISTORY }
 
 /** The calendar as the month (a day to touch, what it holds below) or as
  * the list of the days with something, for a long period. */
@@ -257,6 +257,7 @@ internal fun TrainingScreen(
                 modifier, onCycle, cycles, { cycles = it },
             )
             Part.ATTENDANCE -> AttendanceTab(teamId, modifier)
+            Part.HISTORY -> HistoryTab(teamId, modifier)
         }
     }
     if (sharing) {
@@ -300,6 +301,7 @@ private fun Part.label(): String = when (this) {
     Part.CALENDAR -> stringResource(R.string.tr_calendar).replaceFirstChar { it.uppercase() }
     Part.CYCLES -> stringResource(R.string.tr_programming)
     Part.ATTENDANCE -> stringResource(R.string.tr_attendance)
+    Part.HISTORY -> stringResource(R.string.tr_history)
 }
 
 // ---- calendar
@@ -675,6 +677,61 @@ private fun AttendanceTab(teamId: String, modifier: Modifier) {
                                 p.percent?.let { "$it% ${stringResource(R.string.tr_on_sessions)} ${p.present + p.absent}" } ?: NO_CHOICE,
                                 style = MaterialTheme.typography.titleSmall,
                             )
+                        },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** The training of the seasons before: the teams of the same name with an
+ * earlier year, the latest first, each with its totals and its programs
+ * with theirs. Read only: a season is planned on its own team. */
+@Composable
+private fun HistoryTab(teamId: String, modifier: Modifier) {
+    val seasons by rememberCore(Unit, teamId) { it.trainingHistory(teamId) }
+    val all = seasons
+    when {
+        all == null -> Centered(modifier) { CircularProgressIndicator() }
+        all.isEmpty() -> Text(
+            stringResource(R.string.tr_no_earlier_seasons).replaceFirstChar { it.uppercase() },
+            modifier.padding(16.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        else -> LazyColumn(modifier) {
+            all.forEach { season ->
+                item(key = season.teamId) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Text(
+                            "${stringResource(R.string.season)} ${season.year}",
+                            Modifier.title(),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        TotalsLines(season.totals)
+                    }
+                }
+                if (season.programs.isEmpty()) {
+                    item(key = "${season.teamId}/none") {
+                        Text(
+                            stringResource(R.string.tr_no_cycles).replaceFirstChar { it.uppercase() },
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                items(season.programs, key = { "${season.teamId}/${it.program.id}" }) { p ->
+                    ListItem(
+                        overlineContent = { Text(stringResource(R.string.tr_program)) },
+                        headlineContent = { Text(p.program.title.ifBlank { p.program.window }) },
+                        supportingContent = {
+                            Column {
+                                if (p.program.title.isNotBlank()) Text(p.program.window)
+                                TotalsLines(p.totals)
+                            }
                         },
                     )
                 }

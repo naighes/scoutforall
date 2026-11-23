@@ -57,6 +57,7 @@ import io.github.naighes.scout4all.core.CycleDraft
 import io.github.naighes.scout4all.core.CycleRecord
 import io.github.naighes.scout4all.core.DuplicateCycleDraft
 import io.github.naighes.scout4all.core.Level
+import io.github.naighes.scout4all.core.TotalsRecord
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.TrainingField
 import io.github.naighes.scout4all.core.TrainingScope
@@ -219,6 +220,21 @@ internal fun MarkBox(name: String, marked: Boolean, onToggle: () -> Unit) {
 
 private fun minutesText(minutes: UInt): String = "${minutes / 60u}:${(minutes % 60u).toString().padStart(2, '0')}"
 
+/** The sessions by state, the planned and the actual time. */
+@Composable
+internal fun TotalsLines(t: TotalsRecord) {
+    // the word, then the count: "2 completata" isn't Italian
+    Text(
+        listOf(
+            "${stringResource(R.string.tr_filter_planned)} ${t.planned}",
+            "${stringResource(R.string.tr_filter_completed)} ${t.completed}",
+            "${stringResource(R.string.tr_filter_cancelled)} ${t.cancelled}",
+        ).joinToString(" · "),
+    )
+    Text("${stringResource(R.string.tr_planned_time)}: ${minutesText(t.plannedMinutes)}")
+    Text("${stringResource(R.string.tr_actual_time)}: ${minutesText(t.actualMinutes)}")
+}
+
 /** What a cycle holds: the cycles of the level below, the sessions of a
  * microcycle (null). */
 internal fun Level.child(): Level? = when (this) {
@@ -350,16 +366,7 @@ fun CycleScreen(
                 item(key = "totals") {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         TrainingSection(R.string.tr_sessions)
-                        // the word, then the count: "2 completata" isn't Italian
-                        Text(
-                            listOf(
-                                "${stringResource(R.string.tr_filter_planned)} ${t.planned}",
-                                "${stringResource(R.string.tr_filter_completed)} ${t.completed}",
-                                "${stringResource(R.string.tr_filter_cancelled)} ${t.cancelled}",
-                            ).joinToString(" · "),
-                        )
-                        Text("${stringResource(R.string.tr_planned_time)}: ${minutesText(t.plannedMinutes)}")
-                        Text("${stringResource(R.string.tr_actual_time)}: ${minutesText(t.actualMinutes)}")
+                        TotalsLines(t)
                     }
                 }
             }

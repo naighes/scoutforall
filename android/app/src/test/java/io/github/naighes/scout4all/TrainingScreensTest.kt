@@ -489,6 +489,29 @@ class TrainingScreensTest {
         rule.waitForText(rows.first().name)
     }
 
+    @Test
+    fun theHistorySaysWhenThereAreNoEarlierSeasons() {
+        hub(Part.HISTORY)
+        rule.waitForText(string(R.string.tr_no_earlier_seasons).replaceFirstChar { it.uppercase() })
+    }
+
+    @Test
+    fun theHistoryShowsTheEarlierSeasonsOfTheSameName() {
+        // the team is Italia 2026: another name or a later year isn't there
+        val old = saveTeam("Italia", 2025)
+        saveTeam("Italia", 2027)
+        saveTeam("Francia", 2024)
+        val s = core { it.saveSession(old, null, it.newSessionDraft().copy(start = "2025-03-02T18:00", duration = "90", title = "Battuta")) }.id
+        core { it.completeSession(s, emptyList()) }
+        core { it.saveCycle(old, Level.PROGRAM, null, it.newCycleDraft().copy(title = "Andata", start = "2025-03-01", end = "2025-03-31"), emptyList(), false) }
+        hub(Part.HISTORY)
+        rule.waitForText("${string(R.string.season)} 2025")
+        rule.waitForText("Andata")
+        rule.waitForText("${string(R.string.tr_actual_time)}: 1:30")
+        assertEquals(0, rule.onAllNodes(hasText("2027", substring = true)).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodes(hasText("2024", substring = true)).fetchSemanticsNodes().size)
+    }
+
     private fun mark(name: String) {
         rule.onNode(isToggleable() and hasContentDescription(string(R.string.tr_mark, name))).performScrollTo().performClick()
         rule.waitForIdle()

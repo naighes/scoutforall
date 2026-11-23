@@ -642,6 +642,8 @@
     <string name="tr_calendar_list">Lista</string>
     <string name="tr_events_all">Tudo</string>
     <string name="tr_whole_season">toda a temporada</string>
+    <string name="tr_history">Histórico</string>
+    <string name="tr_no_earlier_seasons">nenhuma temporada anterior</string>
     <string name="tr_on_sessions">em</string>
     <string name="tr_no_attendance_to_count">nenhuma sessão concluída com presenças registradas</string>
     <string name="tr_export_training">Compartilhar treinos</string>

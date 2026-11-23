@@ -644,6 +644,8 @@
     <string name="tr_calendar_list">List</string>
     <string name="tr_events_all">Everything</string>
     <string name="tr_whole_season">whole season</string>
+    <string name="tr_history">History</string>
+    <string name="tr_no_earlier_seasons">no earlier seasons</string>
     <string name="tr_on_sessions">on</string>
     <string name="tr_no_attendance_to_count">no completed session with attendance written</string>
     <string name="tr_export_training">Share training</string>

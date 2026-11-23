@@ -640,6 +640,8 @@
     <string name="tr_calendar_list">リスト</string>
     <string name="tr_events_all">すべて</string>
     <string name="tr_whole_season">シーズン全体</string>
+    <string name="tr_history">履歴</string>
+    <string name="tr_no_earlier_seasons">以前のシーズンはありません</string>
     <string name="tr_on_sessions">/</string>
     <string name="tr_no_attendance_to_count">出欠が記録された完了済みセッションはありません</string>
     <string name="tr_export_training">トレーニングを共有</string>

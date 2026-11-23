@@ -10,23 +10,15 @@ use {
         Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
     },
-    scout4all_core::training::cycles::Level,
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{
-        Scout4All, TeamListing,
-        training::{CycleRecord, TotalsRecord, TrainingScope},
+        Scout4All,
+        training::{SeasonRecord, TotalsRecord},
     },
     std::sync::Arc,
 };
 
 const LIST: &str = "training-history";
-
-/// A season: its team, the totals of all its training and its programs.
-struct Season {
-    year: u16,
-    totals: TotalsRecord,
-    programs: Vec<(CycleRecord, TotalsRecord)>,
-}
 
 #[derive(Debug, Clone)]
 pub enum Message {
@@ -36,7 +28,7 @@ pub enum Message {
 pub struct HistoryTab {
     core: Arc<Scout4All>,
     team_id: String,
-    seasons: Vec<Season>,
+    seasons: Vec<SeasonRecord>,
     selected: usize,
     error: Option<String>,
 }
@@ -60,7 +52,7 @@ impl HistoryTab {
     }
 
     pub fn reload(&mut self) {
-        match self.read() {
+        match self.core.training_history(self.team_id.clone()) {
             Ok(seasons) => {
                 self.selected = self.selected.min(seasons.len().saturating_sub(1));
                 self.seasons = seasons;
@@ -68,50 +60,6 @@ impl HistoryTab {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
-    }
-
-    fn read(&self) -> Result<Vec<Season>, scout4all_mobile::MobileError> {
-        let team = self.core.team(self.team_id.clone())?;
-        let mut earlier: Vec<(u16, String)> = self
-            .core
-            .teams()?
-            .into_iter()
-            .filter_map(|listed| match listed {
-                TeamListing::Team { id, name, year, .. }
-                    if name == team.name && year < team.year =>
-                {
-                    Some((year, id))
-                }
-                _ => None,
-            })
-            .collect();
-        earlier.sort_by(|a, b| b.cmp(a));
-        earlier
-            .into_iter()
-            .map(|(year, id)| {
-                let totals = self.core.training_totals(id.clone(), TrainingScope::All)?;
-                let programs = self
-                    .core
-                    .cycles(id.clone(), Level::Program)?
-                    .into_iter()
-                    .map(|p| {
-                        let totals = self.core.training_totals(
-                            id.clone(),
-                            TrainingScope::Cycle {
-                                level: Level::Program,
-                                id: p.id.clone(),
-                            },
-                        )?;
-                        Ok((p, totals))
-                    })
-                    .collect::<Result<Vec<_>, scout4all_mobile::MobileError>>()?;
-                Ok(Season {
-                    year,
-                    totals,
-                    programs,
-                })
-            })
-            .collect()
     }
 
     pub fn update(&mut self, message: Message) {
@@ -184,20 +132,20 @@ impl HistoryTab {
 
     fn season_view<'a>(
         &self,
-        season: &Season,
+        season: &SeasonRecord,
         s: &'static Strings,
         c: Colors,
     ) -> Element<'a, Message> {
         let programs: Vec<Element<'a, Message>> = season
             .programs
             .iter()
-            .map(|(p, totals)| {
+            .map(|p| {
                 column![
-                    ui::name(p.title.clone()),
-                    text(s.window(&p.first_day, &p.last_day))
+                    ui::name(p.program.title.clone()),
+                    text(s.window(&p.program.first_day, &p.program.last_day))
                         .size(SIZE_SMALL)
                         .color(c.muted),
-                    text(summary(s, totals)).size(SIZE_SMALL),
+                    text(summary(s, &p.totals)).size(SIZE_SMALL),
                 ]
                 .spacing(2)
                 .into()

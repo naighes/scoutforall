@@ -202,6 +202,20 @@ class ScreensLayoutTest(private val screen: Size) {
     }
 
     @Test
+    fun theHistoryOfTheTeam() {
+        val team = saveNationalTeam()
+        val old = saveTeam("Italia", 2025)
+        core {
+            it.saveCycle(
+                old, io.github.naighes.scout4all.core.Level.PROGRAM, null,
+                it.newCycleDraft().copy(title = "Preparazione e campionato", start = "2025-09-01", end = "2026-05-31"),
+                emptyList(), false,
+            )
+        }
+        assertFits("history", "Preparazione e campionato", null) { Hub(team, Part.HISTORY) }
+    }
+
+    @Test
     fun aCycle() {
         val team = saveNationalTeam()
         val cycle = week(team)

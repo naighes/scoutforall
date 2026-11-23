@@ -388,6 +388,22 @@ pub struct TotalsRecord {
     pub actual_minutes: u32,
 }
 
+/// A season before the team's: the team of the same name with an earlier
+/// year, the totals of all its training and its programs with theirs.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct SeasonRecord {
+    pub team_id: String,
+    pub year: u16,
+    pub totals: TotalsRecord,
+    pub programs: Vec<ProgramTotalsRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct ProgramTotalsRecord {
+    pub program: CycleRecord,
+    pub totals: TotalsRecord,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
 pub struct PlayerAttendanceRecord {
     pub person_id: String,
@@ -1393,6 +1409,49 @@ impl Scout4All {
         Ok(totals_record(&totals))
     }
 
+    /// The training of the seasons before: the teams of the same name with
+    /// an earlier year, the latest first, with their totals and their
+    /// programs with theirs. Read only: a season is planned on its own team.
+    pub fn training_history(&self, team_id: String) -> Result<Vec<SeasonRecord>, MobileError> {
+        let team = self.team(team_id)?;
+        let mut earlier: Vec<(u16, String)> = self
+            .teams()?
+            .into_iter()
+            .filter_map(|listed| match listed {
+                super::TeamListing::Team { id, name, year, .. }
+                    if name == team.name && year < team.year =>
+                {
+                    Some((year, id))
+                }
+                _ => None,
+            })
+            .collect();
+        earlier.sort_by(|a, b| b.cmp(a));
+        earlier
+            .into_iter()
+            .map(|(year, id)| {
+                let programs = self
+                    .cycles(id.clone(), Level::Program)?
+                    .into_iter()
+                    .map(|program| {
+                        let scope = TrainingScope::Cycle {
+                            level: Level::Program,
+                            id: program.id.clone(),
+                        };
+                        let totals = self.training_totals(id.clone(), scope)?;
+                        Ok(ProgramTotalsRecord { program, totals })
+                    })
+                    .collect::<Result<Vec<_>, MobileError>>()?;
+                Ok(SeasonRecord {
+                    totals: self.training_totals(id.clone(), TrainingScope::All)?,
+                    team_id: id,
+                    year,
+                    programs,
+                })
+            })
+            .collect()
+    }
+
     /// The attendance of each player over the completed sessions of the
     /// scope, with the percentage.
     pub fn attendance_report(
@@ -1636,6 +1695,66 @@ mod tests {
             },
         )
         .unwrap()
+    }
+
+    /// The earlier seasons of the same name, the latest first, with the
+    /// totals and the programs with theirs; another name, the same year or a
+    /// later one isn't there.
+    #[test]
+    fn the_history_holds_the_earlier_seasons_of_the_same_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir);
+        let team = |name: &str, year: &str| {
+            app.save_team(
+                None,
+                TeamForm {
+                    name: name.into(),
+                    classification: Some(TeamClassificationEnum::Regional),
+                    gender: Some(GenderEnum::Women),
+                    country: CountryCode::known("IT"),
+                    year: year.into(),
+                },
+            )
+            .unwrap()
+        };
+        let old = team("Vigili", "2025");
+        let older = team("Vigili", "2024");
+        let _other = team("Altri", "2025");
+        let now = team("Vigili", "2026");
+        let _later = team("Vigili", "2027");
+        let draft = SessionDraft {
+            duration: "90".into(),
+            ..draft(&app, "2025-03-02T18:00")
+        };
+        let id = app.save_session(old.clone(), None, draft).unwrap().id;
+        app.complete_session(id, vec![]).unwrap();
+        let program = app
+            .save_cycle(
+                old.clone(),
+                Level::Program,
+                None,
+                CycleDraft {
+                    title: "Andata".into(),
+                    start: Some("2025-03-01".into()),
+                    end: Some("2025-03-31".into()),
+                    ..app.new_cycle_draft()
+                },
+                vec![],
+                false,
+            )
+            .unwrap();
+        let seasons = app.training_history(now).unwrap();
+        let read: Vec<(u16, &str)> = seasons
+            .iter()
+            .map(|x| (x.year, x.team_id.as_str()))
+            .collect();
+        assert_eq!(read, vec![(2025, old.as_str()), (2024, older.as_str())]);
+        assert_eq!(seasons[0].totals.completed, 1);
+        assert_eq!(seasons[0].totals.actual_minutes, 90);
+        assert_eq!(seasons[0].programs.len(), 1);
+        assert_eq!(seasons[0].programs[0].program.id, program.id);
+        assert_eq!(seasons[1].totals.completed, 0);
+        assert!(seasons[1].programs.is_empty());
     }
 
     fn player(app: &Scout4All, team: &str, name: &str, number: u8) {
