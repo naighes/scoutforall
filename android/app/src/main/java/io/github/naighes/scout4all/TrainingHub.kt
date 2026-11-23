@@ -73,9 +73,16 @@ internal enum class Part { CALENDAR, CYCLES, ATTENDANCE }
  * the list of the days with something, for a long period. */
 internal enum class CalendarView { MONTH, LIST }
 
-/** What the calendar lets through: everything, the sessions only, or the
- * sessions of a state (the matches have none). */
-private enum class EventFilter { ALL, SESSIONS, PLANNED, TO_CLOSE, COMPLETED, CANCELLED }
+/** What the calendar lets through: everything, the sessions only, the
+ * sessions of a state (the matches have none), or the completed ones of
+ * the team whose attendance is not written. */
+private enum class EventFilter {
+    ALL, SESSIONS, PLANNED, TO_CLOSE, COMPLETED, CANCELLED, NO_ATTENDANCE;
+
+    /** What is left to close or to take the attendance of is in the past:
+     * the list looks at any date for it. */
+    val looksBack get() = this == TO_CLOSE || this == NO_ATTENDANCE
+}
 
 /** The days of the list; null for any date. */
 private enum class ListPeriod { ANY, WEEK, MONTH, PREVIOUS_MONTH, NEXT_MONTH }
@@ -108,10 +115,13 @@ private fun EventFilter.label(): String = stringResource(
         EventFilter.TO_CLOSE -> R.string.tr_filter_to_close
         EventFilter.COMPLETED -> R.string.tr_filter_completed
         EventFilter.CANCELLED -> R.string.tr_filter_cancelled
+        EventFilter.NO_ATTENDANCE -> R.string.tr_filter_no_attendance
     },
 )
 
-private fun EventFilter.lets(e: AgendaEventRecord): Boolean {
+/** [unrecorded]: whether [e] is a completed session of the team without
+ * its attendance (another team's is not read). */
+private fun EventFilter.lets(e: AgendaEventRecord, unrecorded: (AgendaEventRecord) -> Boolean): Boolean {
     val s = e.item as? AgendaItemRecord.Session
     return when (this) {
         EventFilter.ALL -> true
@@ -120,6 +130,26 @@ private fun EventFilter.lets(e: AgendaEventRecord): Boolean {
         EventFilter.TO_CLOSE -> s?.toClose == true
         EventFilter.COMPLETED -> s?.status == io.github.naighes.scout4all.core.SessionStatus.COMPLETED
         EventFilter.CANCELLED -> s?.status == io.github.naighes.scout4all.core.SessionStatus.CANCELLED
+        EventFilter.NO_ATTENDANCE -> unrecorded(e)
+    }
+}
+
+/** The completed sessions of [teamId] among [days] whose attendance is
+ * written: the others are the ones without it. Null until read, so
+ * that nothing shows as missing before it is known. */
+@Composable
+private fun rememberRecorded(teamId: String, days: List<List<AgendaDay>>): androidx.compose.runtime.State<Set<String>?> {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+    val ids = days.flatten().flatMap { it.events }
+        .filter { it.teamId == teamId }
+        .mapNotNull { (it.item as? AgendaItemRecord.Session)?.takeIf { s -> s.status == io.github.naighes.scout4all.core.SessionStatus.COMPLETED }?.id }
+        .toSet()
+    return produceState<Set<String>?>(null, teamId, ids) {
+        value = try {
+            app.core { c -> ids.filter { c.sessionAttendance(it).recorded }.toSet() }
+        } catch (_: io.github.naighes.scout4all.core.MobileException) {
+            emptySet()
+        }
     }
 }
 
@@ -249,8 +279,14 @@ private fun CalendarTab(
     val monthDays by rememberAgenda(team, AgendaSpan.MONTH, month.atDay(1), month)
     val bounds = period.days(today)
     val listDays by rememberAgendaBetween(team, bounds?.first, bounds?.second, view == CalendarView.LIST)
+    val recorded by rememberRecorded(teamId, listOf(monthDays, listDays))
+    val unrecorded = { e: AgendaEventRecord ->
+        val s = e.item as? AgendaItemRecord.Session
+        e.teamId == teamId && s?.status == io.github.naighes.scout4all.core.SessionStatus.COMPLETED &&
+            recorded?.let { s.id !in it } == true
+    }
     fun shown(days: List<AgendaDay>) =
-        days.map { d -> d.copy(events = d.events.filter { (venue == null || it.venue?.id == venue) && filter.lets(it) }) }
+        days.map { d -> d.copy(events = d.events.filter { (venue == null || it.venue?.id == venue) && filter.lets(it, unrecorded) }) }
     val byDate = shown(monthDays).associateBy { it.date }
     val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
     val venues by produceState(emptyList<io.github.naighes.scout4all.core.VenueRecord>()) {
@@ -269,6 +305,7 @@ private fun CalendarTab(
             allTeams,
             { t, m -> if (t == teamId) onMatch(m) },
             { t, s -> if (t == teamId) onSession(s) },
+            unrecorded = unrecorded(e),
         )
     }
     LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
@@ -365,9 +402,7 @@ private fun CalendarTab(
                         selected = filter == it,
                         onClick = {
                             filter = it
-                            // what is to close is in the past: the list
-                            // looks at any date for it
-                            if (it == EventFilter.TO_CLOSE && view == CalendarView.LIST) period = ListPeriod.ANY
+                            if (it.looksBack && view == CalendarView.LIST) period = ListPeriod.ANY
                         },
                         label = { Text(it.label()) },
                     )

@@ -444,6 +444,32 @@ class TrainingScreensTest {
         rule.waitForText("Vecchia")
     }
 
+    /** "No attendance" lets through the completed sessions whose attendance
+     * is not written, marked so in their row; the list looks at any date
+     * for them, like "to close". */
+    @Test
+    fun noAttendanceShowsTheCompletedSessionsWithoutIt() {
+        val bare = session(LocalDate.now().minusMonths(3), "Scoperta")
+        core { it.completeSession(bare, emptyList()) }
+        val taken = session(LocalDate.now().minusMonths(3).plusDays(1), "Rilevata")
+        val rows = core { it.sessionAttendance(taken) }.rows
+        core { it.saveAttendance(taken, rows.map { r -> r.copy(status = AttendanceStatus.PRESENT) }) }
+        core { it.completeSession(taken, emptyList()) }
+        session(LocalDate.now().plusDays(1), "Futura")
+        hub(Part.CALENDAR)
+        rule.waitForText(string(R.string.agenda_today))
+        press(string(R.string.tr_calendar_list))
+        rule.waitForText("Futura")
+        press(string(R.string.tr_period_any))
+        rule.onNode(hasText(string(R.string.tr_this_month)) and hasClickAction()).performClick()
+        rule.waitFor({ "still there" }) { rule.onAllNodes(hasText("Scoperta")).fetchSemanticsNodes().isEmpty() }
+        rule.onNode(hasText(string(R.string.tr_filter_no_attendance)) and hasClickAction()).performScrollTo().performClick()
+        rule.waitForText("Scoperta")
+        rule.waitForText(string(R.string.tr_attendance_not_recorded), substring = true)
+        assertEquals(0, rule.onAllNodes(hasText("Rilevata")).fetchSemanticsNodes().size)
+        assertEquals(0, rule.onAllNodes(hasText("Futura")).fetchSemanticsNodes().size)
+    }
+
     @Test
     fun theAttendanceReportCountsTheCompletedSessions() {
         val s = session(LocalDate.now().minusDays(1))

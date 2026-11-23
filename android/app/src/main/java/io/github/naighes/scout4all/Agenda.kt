@@ -178,6 +178,7 @@ internal fun EventRow(
     onMatch: (teamId: String, matchId: String) -> Unit,
     onSession: (teamId: String, sessionId: String) -> Unit,
     lit: Boolean = false,
+    unrecorded: Boolean = false,
 ) {
     // on today's background the rows are clear, to let it show
     val colors = if (lit) ListItemDefaults.colors(containerColor = Color.Transparent) else ListItemDefaults.colors()
@@ -201,7 +202,8 @@ internal fun EventRow(
                         i.toClose -> stringResource(R.string.agenda_to_close)
                         else -> null
                     }
-                    val line = listOfNotNull(e.venueText(), note).joinToString(" · ")
+                    val missing = stringResource(R.string.tr_attendance_not_recorded).takeIf { unrecorded }
+                    val line = listOfNotNull(e.venueText(), note, missing).joinToString(" · ")
                     if (line.isNotEmpty()) Text(line, color = e.clashColor())
                 },
                 trailingContent = if (e.sharedVenue) {

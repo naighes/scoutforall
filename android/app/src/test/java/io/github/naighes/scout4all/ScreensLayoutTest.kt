@@ -234,7 +234,9 @@ class ScreensLayoutTest(private val screen: Size) {
     fun aSession() {
         val team = saveNationalTeam()
         val session = trainingWithActivities(team)
-        assertFits("session", string(R.string.tr_activities), string(R.string.tr_complete_session)) {
+        // its title: in landscape the activities are below the fold (the
+        // gym and its map push them), out of the lazy list until scrolled
+        assertFits("session", "Ricezione e attacco", string(R.string.tr_complete_session)) {
             SessionScreen(team, session, onBack = {}, onEdit = {}, onActivity = {}, onAttendance = {}, onDuplicate = {})
         }
     }
