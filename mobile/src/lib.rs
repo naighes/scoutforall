@@ -6698,6 +6698,49 @@ mod tests {
         assert!(config.get("language").is_some(), "{config}");
     }
 
+    /// The opponent made from the match form starts unpinned, as the
+    /// imported teams; the teams made by hand start pinned.
+    #[test]
+    fn the_opponent_made_in_the_match_form_is_not_pinned() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        app.accept_terms().unwrap();
+        let team = app.save_team(None, form("Pisa")).unwrap();
+        for n in 1..=7 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        app.save_match(
+            team,
+            None,
+            MatchForm {
+                create_opponent: true,
+                ..match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8")
+            },
+        )
+        .unwrap();
+        let pins: Vec<(String, bool)> = app
+            .teams()
+            .unwrap()
+            .into_iter()
+            .filter_map(|t| match t {
+                TeamListing::Team { name, pinned, .. } => Some((name, pinned)),
+                TeamListing::Unreadable { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            pins,
+            [("Pisa", true), ("Arezzo", false)]
+                .map(|(n, p)| (n.to_string(), p))
+                .to_vec()
+        );
+    }
+
     #[test]
     fn an_invalid_form_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
