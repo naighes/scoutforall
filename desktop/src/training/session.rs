@@ -1040,8 +1040,6 @@ impl SessionPage {
     fn attendance_panel<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let active = self.panel == Panel::Attendance;
         let sheet = &self.attendance;
-        let count =
-            |status: AttendanceStatus| sheet.rows.iter().filter(|r| r.status == status).count();
         let body: Element<'a, Message> = match sheet.recorded {
             false => text(s.attendance_not_recorded)
                 .size(SIZE_SMALL)
@@ -1071,16 +1069,9 @@ impl SessionPage {
                     })
                     .collect();
                 column![
-                    text(format!(
-                        "{} {} · {} {} · {} {} · {} {}",
-                        count(AttendanceStatus::Present),
-                        s.present,
-                        count(AttendanceStatus::Late),
-                        s.late,
-                        count(AttendanceStatus::Absent),
-                        s.absent,
-                        count(AttendanceStatus::Unavailable),
-                        s.unavailable
+                    text(attendance_counts(
+                        s,
+                        sheet.rows.iter().map(|r| r.status).collect()
                     ))
                     .size(SIZE_SMALL)
                     .color(c.muted),
@@ -1102,6 +1093,24 @@ impl SessionPage {
     }
 }
 
+/// The totals of a sheet, the word then the count as in the attendance
+/// screen and on Android: "12 presente" isn't Italian, "12 obecny" isn't
+/// Polish, "presente 12" and "obecny 12" read as labels.
+fn attendance_counts(s: &Strings, statuses: Vec<AttendanceStatus>) -> String {
+    let count = |status: AttendanceStatus| statuses.iter().filter(|&&v| v == status).count();
+    format!(
+        "{} {} · {} {} · {} {} · {} {}",
+        s.present,
+        count(AttendanceStatus::Present),
+        s.late,
+        count(AttendanceStatus::Late),
+        s.absent,
+        count(AttendanceStatus::Absent),
+        s.unavailable,
+        count(AttendanceStatus::Unavailable),
+    )
+}
+
 fn centered<'a>(form: Element<'a, Message>) -> Element<'a, Message> {
     container(container(form).max_width(720))
         .center_x(Length::Fill)
@@ -1120,6 +1129,22 @@ mod tests {
 
     fn s() -> &'static Strings {
         strings(LanguageEnum::It)
+    }
+
+    /// The sheet's totals put the word before the count, in every
+    /// language: Polish has no plural in "obecny", so "12 obecny" was wrong.
+    #[test]
+    fn the_attendance_totals_put_the_word_first() {
+        use AttendanceStatus::*;
+        let statuses = vec![Present, Present, Late, Absent];
+        assert_eq!(
+            attendance_counts(strings(LanguageEnum::Pl), statuses.clone()),
+            "obecny 2 · spóźniony 1 · nieobecny 1 · niedostępny 0"
+        );
+        assert_eq!(
+            attendance_counts(s(), statuses),
+            "presente 2 · in ritardo 1 · assente 1 · non disponibile 0"
+        );
     }
 
     /// The app, its team and a session on 2 March at 18:00 titled "Prima".
