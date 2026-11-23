@@ -1,5 +1,8 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -381,6 +384,24 @@ private fun SessionData(s: SessionRecord, attendance: AttendanceSheetRecord?) {
             s.toClose -> stringResource(R.string.agenda_to_close)
             s.status != SessionStatus.PLANNED -> s.status.label()
             else -> null
+        }
+        s.venueId?.let { id ->
+            val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+            val scope = rememberCoroutineScope()
+            TextButton(onClick = {
+                scope.launch {
+                    val (geo, web) = try {
+                        app.core { it.venueGeoUri(id) to it.venueWebUrl(id) }
+                    } catch (_: MobileException) {
+                        null to null
+                    }
+                    openVenueMap(app, geo, web)
+                }
+            }) {
+                Icon(Icons.Filled.Place, contentDescription = null)
+                Spacer(Modifier.width(8.dp))
+                Text(stringResource(R.string.venue_open_map))
+            }
         }
         state?.let { Text(it, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold) }
         if (s.status == SessionStatus.COMPLETED && attendance?.recorded == false) {

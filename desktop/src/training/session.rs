@@ -74,6 +74,8 @@ pub enum Message {
     Attendance,
     EditSession,
     Duplicate,
+    /// the gym of the session, in the map
+    Map,
     Pdf,
     Complete,
     CancelSession,
@@ -468,6 +470,7 @@ impl SessionPage {
             Message::Attendance => self.open_roll(),
             Message::EditSession => self.edit_session(s),
             Message::Duplicate => self.duplicate(s),
+            Message::Map => self.open_map(s),
             Message::Pdf => self.ask_pdf(s),
             Message::Complete => self.ask_completion(),
             Message::CancelSession => self.set_status(SessionStatus::Cancelled),
@@ -799,6 +802,13 @@ impl SessionPage {
             .width(Length::Fill)
             .into(),
         ];
+        if self.venue.as_ref().is_some_and(|v| !v.deleted) {
+            actions.push(
+                ui::action(theme::icons::GYM, s.open_in_map, Message::Map, false, c)
+                    .width(Length::Fill)
+                    .into(),
+            );
+        }
         actions.push(
             ui::action(
                 theme::icons::ADD,
@@ -906,6 +916,21 @@ impl SessionPage {
             .height(Length::Fill),
             c,
         )
+    }
+
+    /// The gym in the map: its link in the browser, the page of the map of
+    /// its coordinates without one; told when nothing opens it.
+    fn open_map(&mut self, s: &Strings) {
+        let Some(venue) = &self.venue else {
+            return;
+        };
+        self.error = match self.core.venue_web_url(venue.id.clone()) {
+            Ok(Some(url)) => open::that_detached(url)
+                .err()
+                .map(|_| s.no_app_to_open.to_string()),
+            Ok(None) => None,
+            Err(e) => Some(e.to_string()),
+        };
     }
 
     fn activities_panel<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
