@@ -16,7 +16,9 @@ use scout4all_core::{
     db,
     errors::AppError,
     providers::{
-        sqlite::{Database, teams::SqliteTeamReader, training::SqliteTraining, venues::SqliteVenues},
+        sqlite::{
+            Database, teams::SqliteTeamReader, training::SqliteTraining, venues::SqliteVenues,
+        },
         team_reader::TeamReader,
         training_cycles::TrainingCycles,
         training_writer::TrainingWriter,
@@ -76,8 +78,16 @@ const EN: Words = Words {
     sessions: ["Technique", "Tactics", "Game"],
     activities: [
         ("Warm-up", "Mobility and jumps", 15),
-        ("Serve and reception", "Float and jump serves, reception in 3", 30),
-        ("Attack against the block", "Outside and opposite against 2 blockers", 30),
+        (
+            "Serve and reception",
+            "Float and jump serves, reception in 3",
+            30,
+        ),
+        (
+            "Attack against the block",
+            "Outside and opposite against 2 blockers",
+            30,
+        ),
         ("Defense and transition", "Dig, set, counter-attack", 25),
         ("Block", "Reading the setter, closing the line", 20),
         ("Game 6 v 6", "Sets to 15 from 10-10", 20),
@@ -96,7 +106,10 @@ const IT: Words = Words {
     mesocycles: [
         ("Preparazione generale", "Forza e volume."),
         ("Preparazione specifica", "Tecnica sotto pressione."),
-        ("Agonistico", "Situazioni di gioco, qualità del cambio palla."),
+        (
+            "Agonistico",
+            "Situazioni di gioco, qualità del cambio palla.",
+        ),
         ("Finali", "Freschezza e schemi."),
     ],
     microcycles: [
@@ -111,7 +124,11 @@ const IT: Words = Words {
     sessions: ["Tecnica", "Tattica", "Gioco"],
     activities: [
         ("Riscaldamento", "Mobilità e salti", 15),
-        ("Battuta e ricezione", "Flottante e salto, ricezione a 3", 30),
+        (
+            "Battuta e ricezione",
+            "Flottante e salto, ricezione a 3",
+            30,
+        ),
         ("Attacco contro muro", "Banda e opposto contro 2 a muro", 30),
         ("Difesa e contrattacco", "Difesa, alzata, contrattacco", 25),
         ("Muro", "Lettura dell'alzatore, chiusura del lungolinea", 20),
@@ -146,9 +163,21 @@ const PT: Words = Words {
     sessions: ["Técnica", "Tática", "Jogo"],
     activities: [
         ("Aquecimento", "Mobilidade e saltos", 15),
-        ("Saque e recepção", "Saque flutuante e viagem, recepção em 3", 30),
-        ("Ataque contra o bloqueio", "Ponteira e oposta contra 2 bloqueadoras", 30),
-        ("Defesa e contra-ataque", "Defesa, levantamento, contra-ataque", 25),
+        (
+            "Saque e recepção",
+            "Saque flutuante e viagem, recepção em 3",
+            30,
+        ),
+        (
+            "Ataque contra o bloqueio",
+            "Ponteira e oposta contra 2 bloqueadoras",
+            30,
+        ),
+        (
+            "Defesa e contra-ataque",
+            "Defesa, levantamento, contra-ataque",
+            25,
+        ),
         ("Bloqueio", "Leitura da levantadora, fechar a paralela", 20),
         ("Jogo 6 x 6", "Sets de 15 a partir de 10-10", 20),
     ],
@@ -181,8 +210,16 @@ const PL: Words = Words {
     sessions: ["Technika", "Taktyka", "Gra"],
     activities: [
         ("Rozgrzewka", "Mobilność i skoki", 15),
-        ("Zagrywka i przyjęcie", "Zagrywka szybująca i z wyskoku, przyjęcie w 3", 30),
-        ("Atak przeciw blokowi", "Przyjmująca i atakująca przeciw 2 blokującym", 30),
+        (
+            "Zagrywka i przyjęcie",
+            "Zagrywka szybująca i z wyskoku, przyjęcie w 3",
+            30,
+        ),
+        (
+            "Atak przeciw blokowi",
+            "Przyjmująca i atakująca przeciw 2 blokującym",
+            30,
+        ),
         ("Obrona i kontratak", "Obrona, wystawa, kontratak", 25),
         ("Blok", "Czytanie rozgrywającej, zamykanie linii", 20),
         ("Gra 6 na 6", "Sety do 15 od 10-10", 20),
@@ -216,8 +253,16 @@ const JA: Words = Words {
     sessions: ["技術", "戦術", "ゲーム"],
     activities: [
         ("ウォームアップ", "可動域とジャンプ", 15),
-        ("サーブとレシーブ", "フローターとジャンプサーブ、3人レシーブ", 30),
-        ("ブロックに対するアタック", "アウトサイドとオポジット対2枚ブロック", 30),
+        (
+            "サーブとレシーブ",
+            "フローターとジャンプサーブ、3人レシーブ",
+            30,
+        ),
+        (
+            "ブロックに対するアタック",
+            "アウトサイドとオポジット対2枚ブロック",
+            30,
+        ),
         ("ディフェンスと切り返し", "ディグ、トス、カウンター", 25),
         ("ブロック", "セッターを読む、ストレートを閉める", 20),
         ("6対6ゲーム", "10-10から15点セット", 20),
@@ -307,7 +352,13 @@ async fn plan(
         .create_cycle(
             &team_id,
             Level::Program,
-            cycle(None, w.program, weeks(-8), Span::Until(weeks(8) - Duration::days(1)), w.program_goals),
+            cycle(
+                None,
+                w.program,
+                weeks(-8),
+                Span::Until(weeks(8) - Duration::days(1)),
+                w.program_goals,
+            ),
             vec![],
         )
         .await
@@ -371,7 +422,11 @@ async fn plan(
                         venue_id: Some(gym.id),
                         title: (*title).into(),
                         objectives: (*goals).into(),
-                        notes: if cancelled { w.cancelled.into() } else { String::new() },
+                        notes: if cancelled {
+                            w.cancelled.into()
+                        } else {
+                            String::new()
+                        },
                         final_remarks: if status == SessionStatus::Completed && day == 0 {
                             w.remarks.into()
                         } else {
