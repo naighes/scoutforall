@@ -159,14 +159,14 @@ class ScreensLayoutTest(private val screen: Size) {
         val team = saveNationalTeam()
         trainingWithActivities(team)
         assertFits("sessions", "Ricezione e attacco", null) {
-            Hub(team, Part.SESSIONS)
+            Hub(team, Part.CALENDAR, CalendarView.LIST)
         }
     }
 
     @Composable
-    private fun Hub(team: String, part: Part) = TrainingScreen(
-        team, onBack = {}, onSession = {}, onNew = {}, onSeries = {}, onCycle = { _, _ -> }, onNewCycle = {}, onNewOn = {},
-        onMatch = {}, first = part,
+    private fun Hub(team: String, part: Part, view: CalendarView = CalendarView.MONTH) = TrainingScreen(
+        team, onBack = {}, onSession = {}, onSeries = {}, onCycle = { _, _ -> }, onNewCycle = {}, onNewOn = {},
+        onMatch = {}, first = part, firstView = view,
     )
 
     private fun week(team: String): String = core {

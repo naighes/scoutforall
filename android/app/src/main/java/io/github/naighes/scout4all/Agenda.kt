@@ -56,6 +56,21 @@ fun rememberAgenda(teamId: String?, span: AgendaSpan, day: LocalDate, refresh: A
     }
 }
 
+/** The days with something between [from] and [to] (both included, null
+ * for no end), of the team or of every team: the list of the calendar.
+ * Read only while [reading]; empty until read, and when it can't be. */
+@Composable
+fun rememberAgendaBetween(teamId: String?, from: LocalDate?, to: LocalDate?, reading: Boolean): State<List<AgendaDay>> {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+    return produceState(emptyList(), teamId, from, to, reading) {
+        value = if (!reading) emptyList() else try {
+            app.core { it.trainingAgendaBetween(teamId, from?.toString(), to?.toString()) }
+        } catch (_: MobileException) {
+            emptyList()
+        }
+    }
+}
+
 /** The week of [monday], with the buttons to move it: the days with
  * something planned, and today, always there and lit. */
 fun LazyListScope.agendaWeek(
@@ -144,12 +159,16 @@ internal fun AgendaEventRecord.id(): String = when (val i = item) {
 /** The day, today in the accent. */
 @Composable
 internal fun DayHeader(date: LocalDate, today: Boolean) = Text(
-    date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(java.util.Locale.getDefault())),
+    fullDayText(date),
     Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
     style = MaterialTheme.typography.labelLarge,
     fontWeight = if (today) FontWeight.Bold else FontWeight.Normal,
     color = if (today) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
 )
+
+/** A day as its header reads it: the whole date, in the language. */
+internal fun fullDayText(date: LocalDate): String =
+    date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(java.util.Locale.getDefault()))
 
 /** A session or a match: the time, what, where; the match opens. */
 @Composable

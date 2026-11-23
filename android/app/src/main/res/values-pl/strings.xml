@@ -635,6 +635,11 @@
     <string name="tr_this_week">ten tydzień</string>
     <string name="tr_this_month">ten miesiąc</string>
     <string name="tr_previous_month">zeszły miesiąc</string>
+    <string name="tr_next_month">następny miesiąc</string>
+    <string name="tr_period_any">dowolna data</string>
+    <string name="tr_calendar_month">Miesiąc</string>
+    <string name="tr_calendar_list">Lista</string>
+    <string name="tr_events_all">Wszystko</string>
     <string name="tr_whole_season">cały sezon</string>
     <string name="tr_on_sessions">z</string>
     <string name="tr_no_attendance_to_count">brak zakończonych zajęć z zapisaną obecnością</string>

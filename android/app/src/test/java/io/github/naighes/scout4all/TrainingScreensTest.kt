@@ -7,6 +7,7 @@ import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import io.github.naighes.scout4all.core.ActivityStatus
 import io.github.naighes.scout4all.core.AttendanceStatus
 import io.github.naighes.scout4all.core.Level
@@ -156,7 +157,7 @@ class TrainingScreensTest {
     private fun hub(part: Part, onNewOn: (LocalDate) -> Unit = {}, onNewCycle: (Level) -> Unit = {}) = rule.setContent {
         Scout4AllTheme {
             TrainingScreen(
-                team, onBack = {}, onSession = {}, onNew = {}, onSeries = {}, onCycle = { _, _ -> },
+                team, onBack = {}, onSession = {}, onSeries = {}, onCycle = { _, _ -> },
                 onNewCycle = onNewCycle, onNewOn = onNewOn, onMatch = {}, first = part,
             )
         }
@@ -201,6 +202,55 @@ class TrainingScreensTest {
         rule.waitForText(string(R.string.agenda_today))
         rule.onNode(hasContentDescription(string(R.string.tr_new_session)) and hasClickAction()).performClick()
         assertEquals(listOf(LocalDate.now()), days)
+    }
+
+    /** The sessions are in the calendar, no tab of their own: its list has
+     * only the days with something, the filter hides what it leaves out. */
+    @Test
+    fun theListOfTheCalendarHasTheBusyDaysAndTheFilterHides() {
+        val first = session(LocalDate.now().plusDays(1), "Ricezione")
+        val second = session(LocalDate.now().plusDays(3), "Battuta")
+        core { it.setSessionStatus(second, SessionStatus.CANCELLED) }
+        hub(Part.CALENDAR)
+        rule.waitForText(string(R.string.agenda_today))
+        val tab = androidx.compose.ui.test.SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.Role,
+            androidx.compose.ui.semantics.Role.Tab,
+        )
+        assertEquals(0, rule.onAllNodes(hasText(string(R.string.tr_sessions)) and tab).fetchSemanticsNodes().size)
+        press(string(R.string.tr_calendar_list))
+        rule.waitForText("Ricezione")
+        rule.waitForText("Battuta")
+        // the day in between, empty, is not there
+        val empty = LocalDate.now().plusDays(2)
+        assertEquals(0, rule.onAllNodes(hasText(fullDayText(empty))).fetchSemanticsNodes().size)
+        rule.onNode(hasText(fullDayText(LocalDate.now().plusDays(1)))).assertExists()
+        // the chip, not the row of the cancelled session
+        val chip = androidx.compose.ui.test.SemanticsMatcher.expectValue(
+            androidx.compose.ui.semantics.SemanticsProperties.Role,
+            androidx.compose.ui.semantics.Role.Checkbox,
+        )
+        rule.onNode(hasText(string(R.string.tr_filter_cancelled)) and chip).performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.waitFor({ "still planned" }) { rule.onAllNodes(hasText("Ricezione")).fetchSemanticsNodes().isEmpty() }
+        rule.onNode(hasText("Battuta")).assertExists()
+        assertEquals(first, core { it.trainingSessions(team) }.first { s -> s.title == "Ricezione" }.id)
+    }
+
+    /** What is to close is in the past: the list looks at any date for it,
+     * whatever period it was on. */
+    @Test
+    fun toCloseLooksAtAnyDateInTheList() {
+        session(LocalDate.now().minusMonths(3), "Vecchia")
+        hub(Part.CALENDAR)
+        rule.waitForText(string(R.string.agenda_today))
+        press(string(R.string.tr_calendar_list))
+        rule.waitForText("Vecchia")
+        press(string(R.string.tr_period_any))
+        rule.onNode(hasText(string(R.string.tr_this_month)) and hasClickAction()).performClick()
+        rule.waitFor({ "still there" }) { rule.onAllNodes(hasText("Vecchia")).fetchSemanticsNodes().isEmpty() }
+        rule.onNode(hasText(string(R.string.tr_filter_to_close)) and hasClickAction()).performScrollTo().performClick()
+        rule.waitForText("Vecchia")
     }
 
     @Test

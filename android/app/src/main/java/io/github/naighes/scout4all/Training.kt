@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Edit
@@ -24,7 +23,6 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -89,7 +87,6 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
             id,
             onBack = { nav.back(entry) },
             onSession = { nav.navigate("team/$id/training/$it") },
-            onNew = { nav.navigate("team/$id/training-new") },
             onSeries = { nav.navigate("team/$id/training-series") },
             onCycle = { level, cycle -> nav.navigate("team/$id/cycles/${level.name}/$cycle") },
             onNewCycle = { level -> nav.navigate("team/$id/cycle-new/${level.name}") },
@@ -192,80 +189,6 @@ internal fun <T> rememberCore(refresh: Any?, key: Any?, read: (io.github.naighes
             null
         }
     }
-}
-
-private enum class Filter { ALL, PLANNED, TO_CLOSE, COMPLETED, CANCELLED }
-
-/** The sessions of the team, the latest first, to filter by state. */
-@Composable
-fun SessionsTab(teamId: String, modifier: Modifier, onSession: (String) -> Unit) {
-    var filter by rememberSaveable { mutableStateOf(Filter.ALL) }
-    val sessions by rememberCore(Unit, teamId) { it.trainingSessions(teamId) }
-    val all = sessions
-    when {
-        all == null -> Centered(modifier) { CircularProgressIndicator() }
-        else -> Column(modifier) {
-            Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Filter.entries.forEach {
-                    FilterChip(
-                        selected = filter == it,
-                        onClick = { filter = it },
-                        label = {
-                            Text(
-                                stringResource(
-                                    when (it) {
-                                        Filter.ALL -> R.string.tr_filter_all
-                                        Filter.PLANNED -> R.string.tr_filter_planned
-                                        Filter.TO_CLOSE -> R.string.tr_filter_to_close
-                                        Filter.COMPLETED -> R.string.tr_filter_completed
-                                        Filter.CANCELLED -> R.string.tr_filter_cancelled
-                                    },
-                                ),
-                            )
-                        },
-                    )
-                }
-            }
-            val shown = all.filter {
-                when (filter) {
-                    Filter.ALL -> true
-                    Filter.PLANNED -> it.status == SessionStatus.PLANNED
-                    Filter.TO_CLOSE -> it.toClose
-                    Filter.COMPLETED -> it.status == SessionStatus.COMPLETED
-                    Filter.CANCELLED -> it.status == SessionStatus.CANCELLED
-                }
-            }.sortedByDescending { it.start }
-            if (shown.isEmpty()) {
-                Text(stringResource(R.string.tr_no_sessions), Modifier.padding(16.dp))
-            } else {
-                // room at the bottom: the button doesn't cover the last
-                LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
-                    items(shown, key = { it.id }) { SessionRow(it) { onSession(it.id) } }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-internal fun SessionRow(s: SessionRecord, onClick: () -> Unit) {
-    val cancelled = s.status == SessionStatus.CANCELLED
-    ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
-        overlineContent = { Text(momentText(s.start)) },
-        headlineContent = {
-            Text(s.name(), textDecoration = if (cancelled) TextDecoration.LineThrough else null)
-        },
-        supportingContent = {
-            val state = when {
-                s.toClose -> stringResource(R.string.agenda_to_close)
-                s.status != SessionStatus.PLANNED -> s.status.label()
-                else -> null
-            }
-            val line = listOfNotNull(venueLabel(s.venueId), state).joinToString(" · ")
-            if (line.isNotEmpty()) Text(line)
-        },
-    )
 }
 
 /** A session: its data, its state, its activities in order, the attendance,
