@@ -129,3 +129,18 @@ pub fn by_day(period: &Period, events: &[AgendaEvent]) -> Vec<(NaiveDate, Vec<Ag
         })
         .collect()
 }
+
+/// The events by day, only the days with some, in time order: the list of
+/// a long period, where the empty days are not drawn.
+pub fn busy_days(events: &[AgendaEvent]) -> Vec<(NaiveDate, Vec<AgendaEvent>)> {
+    let mut sorted = events.to_vec();
+    sorted.sort_by_key(|e| (e.start, e.minutes));
+    sorted.into_iter().fold(vec![], |mut days, event| {
+        let day = event.start.date();
+        match days.last_mut() {
+            Some((last, found)) if *last == day => found.push(event),
+            _ => days.push((day, vec![event])),
+        }
+        days
+    })
+}

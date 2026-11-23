@@ -394,6 +394,10 @@ pub struct Strings {
     pub per_match: &'static str,
     pub touches: &'static str,
     pub calendar_month: &'static str,
+    /// the calendar as a list: only the days with something
+    pub calendar_list: &'static str,
+    /// the filter of the calendar that lets everything through
+    pub events_all: &'static str,
     pub from_to: &'static str,
     pub period_hint: &'static str,
     pub months: [&'static str; 12],
@@ -534,8 +538,6 @@ pub struct Strings {
     pub previous_month: &'static str,
     pub history: &'static str,
     pub calendar: &'static str,
-    /// the filter of the sessions that shows them all (feminine in Italian)
-    pub sessions_all: &'static str,
     /// a gym removed, where a session or a match still tells of it
     pub deleted_venue: &'static str,
     pub no_earlier_seasons: &'static str,
@@ -1085,6 +1087,8 @@ What did you expect instead?
     per_match: "Match by match",
     touches: "{1} touches",
     calendar_month: "Month",
+    calendar_list: "List",
+    events_all: "Everything",
     from_to: "From / to",
     period_hint: "digits: the day, Space: from / to",
     months: [
@@ -1228,7 +1232,6 @@ What did you expect instead?
     previous_month: "last month",
     history: "history",
     calendar: "calendar",
-    sessions_all: "All",
     deleted_venue: "deleted gym",
     no_earlier_seasons: "no earlier seasons",
     whole_season: "whole season",
@@ -1774,6 +1777,8 @@ Cosa ti aspettavi invece?
     per_match: "Partita per partita",
     touches: "{1} tocchi",
     calendar_month: "Mese",
+    calendar_list: "Elenco",
+    events_all: "Tutto",
     from_to: "Dal / al",
     period_hint: "cifre: il giorno, Spazio: dal / al",
     months: [
@@ -1917,7 +1922,6 @@ Cosa ti aspettavi invece?
     previous_month: "mese scorso",
     history: "storico",
     calendar: "calendario",
-    sessions_all: "Tutte",
     deleted_venue: "palestra eliminata",
     no_earlier_seasons: "nessuna stagione precedente",
     whole_season: "tutta la stagione",
@@ -2463,6 +2467,8 @@ O que você esperava?
     per_match: "Partida a partida",
     touches: "{1} toques",
     calendar_month: "Mês",
+    calendar_list: "Lista",
+    events_all: "Tudo",
     from_to: "De / até",
     period_hint: "dígitos: o dia, Espaço: de / até",
     months: [
@@ -2607,7 +2613,6 @@ O que você esperava?
     previous_month: "mês passado",
     history: "histórico",
     calendar: "calendário",
-    sessions_all: "Todas",
     deleted_venue: "ginásio eliminado",
     no_earlier_seasons: "nenhuma temporada anterior",
     whole_season: "toda a temporada",
@@ -3153,6 +3158,8 @@ Czego się spodziewałeś(-aś)?
     per_match: "Mecz po meczu",
     touches: "Dotknięcia: {1}",
     calendar_month: "Miesiąc",
+    calendar_list: "Lista",
+    events_all: "Wszystko",
     from_to: "Od / do",
     period_hint: "cyfry: dzień, Spacja: od / do",
     months: [
@@ -3296,7 +3303,6 @@ Czego się spodziewałeś(-aś)?
     previous_month: "zeszły miesiąc",
     history: "historia",
     calendar: "kalendarz",
-    sessions_all: "Wszystkie",
     deleted_venue: "usunięta hala",
     no_earlier_seasons: "brak wcześniejszych sezonów",
     whole_season: "cały sezon",
@@ -3842,6 +3848,8 @@ const JA: Strings = Strings {
     per_match: "試合ごと",
     touches: "{1}回",
     calendar_month: "月",
+    calendar_list: "リスト",
+    events_all: "すべて",
     from_to: "開始 / 終了",
     period_hint: "数字: 日付、スペース: 開始 / 終了",
     months: [
@@ -3982,7 +3990,6 @@ const JA: Strings = Strings {
     previous_month: "先月",
     history: "履歴",
     calendar: "カレンダー",
-    sessions_all: "すべて",
     deleted_venue: "削除された体育館",
     no_earlier_seasons: "以前のシーズンはありません",
     whole_season: "シーズン全体",

@@ -21,7 +21,7 @@ use scout4all_core::{
     training::{
         Activity, ActivityHit, ActivityStatus, AttendanceInput, AttendanceRow, AttendanceStatus,
         Move, SessionStatus, TrainingSession,
-        agenda::{AgendaEvent, AgendaItem, MatchState, Period, by_day},
+        agenda::{AgendaEvent, AgendaItem, MatchState, Period, busy_days, by_day},
         cycles::{
             Child, Cycle, CycleForm, Level, Span, Window, proposed_container, proposed_microcycle,
         },
@@ -1326,6 +1326,45 @@ impl Scout4All {
             .collect())
     }
 
+    /// The days between `from` and `to` (both included, either open) that
+    /// have sessions or matches of the team (all the teams without), by
+    /// start: the list of the calendar, the empty days left out.
+    pub fn training_agenda_between(
+        &self,
+        team_id: Option<String>,
+        from: Option<String>,
+        to: Option<String>,
+    ) -> Result<Vec<AgendaDay>, MobileError> {
+        // an open end: dates no session or match can be before or after
+        let first = NaiveDate::from_ymd_opt(1900, 1, 1).unwrap_or(NaiveDate::MIN);
+        let last = NaiveDate::from_ymd_opt(9999, 12, 30).unwrap_or(NaiveDate::MAX);
+        let from = from
+            .map(|d| parse_day(&d, TrainingField::Start))
+            .transpose()?
+            .unwrap_or(first);
+        let to = to
+            .map(|d| parse_day(&d, TrainingField::Start))
+            .transpose()?
+            .unwrap_or(last);
+        let period = Period {
+            from,
+            to: to.succ_opt().unwrap_or(to),
+        };
+        let team = opt_id(&team_id)?;
+        let events = self.runtime.block_on(self.training().agenda(
+            team.as_ref(),
+            period,
+            Local::now().naive_local(),
+        ))?;
+        Ok(busy_days(&events)
+            .iter()
+            .map(|(date, events)| AgendaDay {
+                date: day(*date),
+                events: events.iter().map(event_record).collect(),
+            })
+            .collect())
+    }
+
     pub fn training_totals(
         &self,
         team_id: String,
@@ -1986,6 +2025,56 @@ mod tests {
                 .len(),
             31
         );
+    }
+
+    /// The list of the calendar: only the days with something, in time
+    /// order, between the days given (both included) or over any date.
+    #[test]
+    fn the_agenda_between_two_days_has_only_the_busy_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir);
+        let team = team(&app, "Cortona");
+        let first = session(&app, &team, "2030-03-06T18:30");
+        let second = session(&app, &team, "2030-03-06T20:30");
+        let later = session(&app, &team, "2031-01-10T18:30");
+        let ids = |days: &[AgendaDay]| -> Vec<(String, Vec<String>)> {
+            days.iter()
+                .map(|d| {
+                    let ids = d
+                        .events
+                        .iter()
+                        .filter_map(|e| match &e.item {
+                            AgendaItemRecord::Session { id, .. } => Some(id.clone()),
+                            AgendaItemRecord::Match { .. } => None,
+                        })
+                        .collect();
+                    (d.date.clone(), ids)
+                })
+                .collect()
+        };
+        let any = app
+            .training_agenda_between(Some(team.clone()), None, None)
+            .unwrap();
+        assert_eq!(
+            ids(&any),
+            vec![
+                ("2030-03-06".to_string(), vec![first.id.clone(), second.id]),
+                ("2031-01-10".to_string(), vec![later.id]),
+            ]
+        );
+        let march = app
+            .training_agenda_between(
+                Some(team),
+                Some("2030-03-01".into()),
+                Some("2030-03-06".into()),
+            )
+            .unwrap();
+        assert_eq!(march.len(), 1);
+        assert_eq!(march[0].events.len(), 2);
+        assert!(matches!(
+            &march[0].events[0].item,
+            AgendaItemRecord::Session { id, .. } if *id == first.id
+        ));
     }
 
     #[test]

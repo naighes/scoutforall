@@ -1,7 +1,6 @@
-//! The plan of the training of a team: tabs (the sessions for now), the
-//! list of the sessions with its filter, and the sheet of the one opened.
-//! ↑ ↓ between the sessions, Enter opens one, n makes a new one, f changes
-//! the filter, ⌫ deletes the one chosen, Esc goes back.
+//! The plan of the training of a team: tabs (the calendar, which lists
+//! the sessions too, the training plan, the attendance, the history) and
+//! the sheet of the session opened. Esc goes back.
 
 use {
     super::{
@@ -16,21 +15,19 @@ use {
     crate::{
         form::{self, Form},
         strings::Strings,
-        theme::{Colors, SIZE_SMALL},
+        theme::Colors,
         ui,
     },
-    chrono::{Datelike, Local, Months, NaiveDate},
+    chrono::{Datelike, Months, NaiveDate},
     iced::{
-        Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, space, text},
+        Element, Length,
+        widget::{Id, column, container, row, space},
     },
-    scout4all_core::training::{SessionStatus, cycles::Level},
+    scout4all_core::training::cycles::Level,
     scout4all_keys::{BACK_KEY, KeyCombination, key},
-    scout4all_mobile::{MobileError, Scout4All, training::SessionRecord},
-    std::{collections::HashSet, sync::Arc},
+    scout4all_mobile::{MobileError, Scout4All},
+    std::sync::Arc,
 };
-
-const LIST: &str = "training-sessions";
 
 /// What the screen opens on.
 #[derive(Debug, Clone, PartialEq)]
@@ -40,30 +37,10 @@ pub enum Open {
     Session(String),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum Filter {
-    All,
-    Planned,
-    ToClose,
-    Completed,
-    Cancelled,
-    NoAttendance,
-}
-
-const FILTERS: [Filter; 6] = [
-    Filter::All,
-    Filter::Planned,
-    Filter::ToClose,
-    Filter::Completed,
-    Filter::Cancelled,
-    Filter::NoAttendance,
-];
-
 /// The tabs, the one shown chosen.
 fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> {
     let pills = row([
         (Tab::Calendar, s.calendar),
-        (Tab::Sessions, s.sessions),
         (Tab::Cycles, s.programming),
         (Tab::Presence, s.attendance),
         (Tab::History, s.history),
@@ -88,17 +65,6 @@ fn tabs<'a>(s: &'static Strings, shown: Tab, c: Colors) -> Element<'a, Message> 
         .into()
 }
 
-fn filter_name(s: &Strings, filter: Filter) -> &'static str {
-    match filter {
-        Filter::All => s.sessions_all,
-        Filter::Planned => s.filter_planned,
-        Filter::ToClose => s.filter_to_close,
-        Filter::Completed => s.filter_completed,
-        Filter::Cancelled => s.filter_cancelled,
-        Filter::NoAttendance => s.filter_no_attendance,
-    }
-}
-
 /// The days the list is kept to.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Period {
@@ -109,7 +75,7 @@ pub enum Period {
     NextMonth,
 }
 
-const PERIODS: [Period; 5] = [
+pub(super) const PERIODS: [Period; 5] = [
     Period::Any,
     Period::Week,
     Period::Month,
@@ -158,7 +124,6 @@ impl Period {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Tab {
     Calendar,
-    Sessions,
     Cycles,
     Presence,
     History,
@@ -175,13 +140,6 @@ enum Mode {
 
 #[derive(Debug, Clone)]
 pub enum Message {
-    Filter(Filter),
-    Period(Period),
-    Row(usize),
-    New,
-    Repeat,
-    /// the box of a row clicked: the session marked or no more
-    Mark(usize),
     Confirm,
     Dismiss,
     Form(form::Message),
@@ -191,8 +149,6 @@ pub enum Message {
     History(history::Message),
     Presence(presence::Message),
     Calendar(calendar::Message),
-    /// the sessions marked, in a new microcycle
-    Create,
     /// the archive of the training of the team
     Export,
     /// the gyms, to add or change one
@@ -215,15 +171,6 @@ pub struct TrainingScreen {
     core: Arc<Scout4All>,
     pub team_id: String,
     team_name: String,
-    /// the sessions of the team, the latest first
-    sessions: Vec<SessionRecord>,
-    /// the completed ones with their attendance written
-    recorded: HashSet<String>,
-    filter: Filter,
-    period: Period,
-    selected: usize,
-    /// the sessions marked to make a microcycle
-    marked: HashSet<String>,
     tab: Tab,
     calendar: CalendarTab,
     cycles: CyclesTab,
@@ -251,18 +198,11 @@ impl TrainingScreen {
             core,
             team_id,
             team_name,
-            sessions: vec![],
-            recorded: HashSet::new(),
-            filter: Filter::All,
-            period: Period::Any,
-            selected: 0,
-            marked: HashSet::new(),
-            tab: Tab::Sessions,
+            tab: Tab::Calendar,
             mode: Mode::List,
             from_cycle: false,
             error: None,
         };
-        screen.reload();
         match open {
             Open::Sessions => {}
             Open::Session(id) => screen.open_session(&id),
@@ -294,69 +234,20 @@ impl TrainingScreen {
             Mode::List if self.tab == Tab::Cycles => self.cycles.scroll(),
             Mode::List if self.tab == Tab::History => self.history.scroll(),
             Mode::List if self.tab == Tab::Presence => self.presence.scroll(),
-            Mode::List => {
-                let last = self.shown().len().saturating_sub(1).max(1);
-                Some((Id::new(LIST), self.selected as f32 / last as f32))
-            }
+            Mode::List => self.calendar.scroll(),
             _ => None,
         }
     }
 
-    /// The sessions read again, the latest first; the one chosen stays.
+    /// The calendar read again, after a change.
     fn reload(&mut self) {
         self.calendar.reload();
-        match self.core.training_sessions(self.team_id.clone()) {
-            Ok(mut sessions) => {
-                sessions.reverse();
-                self.recorded = sessions
-                    .iter()
-                    .filter(|r| r.status == SessionStatus::Completed)
-                    .filter(|r| {
-                        self.core
-                            .session_attendance(r.id.clone())
-                            .is_ok_and(|a| a.recorded)
-                    })
-                    .map(|r| r.id.clone())
-                    .collect();
-                self.sessions = sessions;
-                self.selected = self.selected.min(self.shown().len().saturating_sub(1));
-                self.error = None;
-            }
-            Err(e) => self.error = Some(e.to_string()),
-        }
-    }
-
-    fn matches(&self, r: &SessionRecord) -> bool {
-        let days = self.period.days(Local::now().date_naive());
-        let inside = days.is_none_or(|(from, to)| {
-            r.start
-                .get(..10)
-                .and_then(|d| d.parse::<NaiveDate>().ok())
-                .is_some_and(|d| from <= d && d <= to)
-        });
-        inside
-            && match self.filter {
-                Filter::All => true,
-                Filter::Planned => r.status == SessionStatus::Planned,
-                Filter::ToClose => r.to_close,
-                Filter::Completed => r.status == SessionStatus::Completed,
-                Filter::Cancelled => r.status == SessionStatus::Cancelled,
-                Filter::NoAttendance => {
-                    r.status == SessionStatus::Completed && !self.recorded.contains(&r.id)
-                }
-            }
-    }
-
-    /// The sessions the filter lets through.
-    fn shown(&self) -> Vec<&SessionRecord> {
-        self.sessions.iter().filter(|r| self.matches(r)).collect()
     }
 
     fn set_tab(&mut self, tab: Tab) {
         self.tab = tab;
         match tab {
             Tab::Calendar => self.calendar.reload(),
-            Tab::Sessions => self.reload(),
             Tab::Cycles => self.cycles.reload(),
             Tab::Presence => self.presence.reload(),
             Tab::History => self.history.reload(),
@@ -365,43 +256,16 @@ impl TrainingScreen {
 
     /// The tab after (or before) the one shown, around.
     fn step_tab(&mut self, forward: bool) {
-        const TABS: [Tab; 5] = [
-            Tab::Calendar,
-            Tab::Sessions,
-            Tab::Cycles,
-            Tab::Presence,
-            Tab::History,
-        ];
+        const TABS: [Tab; 4] = [Tab::Calendar, Tab::Cycles, Tab::Presence, Tab::History];
         if let Some(next) = ui::cycle(&TABS, &self.tab, forward) {
             self.set_tab(next);
         }
     }
 
     /// The marked sessions in a new microcycle, made on the cycles tab.
-    fn create_microcycle(&mut self, s: &Strings) {
-        let ids: Vec<String> = self
-            .sessions
-            .iter()
-            .filter(|r| self.marked.contains(&r.id))
-            .map(|r| r.id.clone())
-            .collect();
-        if ids.is_empty() {
-            return;
-        }
-        self.marked.clear();
+    fn create_microcycle(&mut self, s: &Strings, ids: Vec<String>) {
         self.tab = Tab::Cycles;
         self.cycles.create_from(s, Level::Microcycle, ids);
-    }
-
-    fn toggle_mark(&mut self, index: usize) {
-        let free = self
-            .shown()
-            .get(index)
-            .filter(|r| r.microcycle_id.is_none())
-            .map(|r| r.id.clone());
-        if let Some(id) = free.filter(|id| !self.marked.remove(id)) {
-            self.marked.insert(id);
-        }
     }
 
     /// What the cycles tab did.
@@ -421,7 +285,7 @@ impl TrainingScreen {
                 Outcome::Stay
             }
             Leave::Session(id) => {
-                self.tab = Tab::Sessions;
+                self.tab = Tab::Calendar;
                 self.reload();
                 self.open_session(&id);
                 Outcome::Stay
@@ -436,22 +300,13 @@ impl TrainingScreen {
         }
     }
 
-    fn open_selected(&mut self) {
-        let id = self.shown().get(self.selected).map(|r| r.id.clone());
-        if let Some(id) = id {
-            self.open_session(&id);
-        }
-    }
-
     /// What the calendar asked for.
     fn calendared(&mut self, s: &'static Strings, leave: calendar::Leave) -> Outcome {
         match leave {
             calendar::Leave::Stay => {}
-            calendar::Leave::Session(id) => {
-                self.tab = Tab::Sessions;
-                self.reload();
-                self.open_session(&id);
-            }
+            calendar::Leave::Session(id) => self.open_session(&id),
+            calendar::Leave::Create(ids) => self.create_microcycle(s, ids),
+            calendar::Leave::Delete(id) => self.mode = Mode::Delete(id),
             calendar::Leave::Match(id) => return Outcome::Match(id),
             calendar::Leave::NewSession(day) => {
                 match SessionEditor::new(&self.core, s, self.team_id.clone(), None, Some(day)) {
@@ -469,37 +324,15 @@ impl TrainingScreen {
         Outcome::Stay
     }
 
-    fn new_session(&mut self, s: &'static Strings) {
-        match SessionEditor::new(&self.core, s, self.team_id.clone(), None, None) {
-            Ok(editor) => self.mode = Mode::New(Box::new(editor)),
-            Err(e) => self.error = Some(e.to_string()),
-        }
-    }
-
-    fn repeat(&mut self, s: &Strings) {
-        match SeriesEditor::new(&self.core, s, self.team_id.clone(), None) {
-            Ok(editor) => self.mode = Mode::Series(Box::new(editor)),
-            Err(e) => self.error = Some(e.to_string()),
-        }
-    }
-
     /// The series made: the list shows them.
     fn series_edited(&mut self, edited: Edited) {
         match edited {
             Edited::Cancel => self.mode = Mode::List,
             Edited::Saved(_) => {
                 self.mode = Mode::List;
-                self.filter = Filter::All;
                 self.reload();
             }
             Edited::Stay | Edited::Copy(_) => {}
-        }
-    }
-
-    fn ask_deletion(&mut self) {
-        let id = self.shown().get(self.selected).map(|r| r.id.clone());
-        if let Some(id) = id {
-            self.mode = Mode::Delete(id);
         }
     }
 
@@ -588,27 +421,8 @@ impl TrainingScreen {
                 let leave = self.calendar.update(m);
                 return self.calendared(s, leave);
             }
-            (Mode::List, Message::Period(period)) => {
-                self.period = period;
-                self.selected = 0;
-            }
-            (Mode::List, Message::Create) => self.create_microcycle(s),
             (Mode::List, Message::Export) => return self.export_outcome(),
             (Mode::List, Message::Venues) => return Outcome::Venues,
-            (Mode::List, Message::Filter(filter)) => {
-                self.filter = filter;
-                self.selected = 0;
-            }
-            (Mode::List, Message::Row(i)) => {
-                self.selected = i;
-                self.open_selected();
-            }
-            (Mode::List, Message::New) => self.new_session(s),
-            (Mode::List, Message::Repeat) => self.repeat(s),
-            (Mode::List, Message::Mark(i)) => {
-                self.selected = i;
-                self.toggle_mark(i);
-            }
             _ => {}
         }
         Outcome::Stay
@@ -651,14 +465,6 @@ impl TrainingScreen {
                 let leave = self.cycles.key(s, ck);
                 return self.cycled(s, leave);
             }
-            Mode::List if self.tab == Tab::Calendar => match ck {
-                k if k == BACK_KEY => return Outcome::Back,
-                k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
-                k => {
-                    let leave = self.calendar.key(k);
-                    return self.calendared(s, leave);
-                }
-            },
             Mode::List if self.tab == Tab::Presence => match ck {
                 k if k == BACK_KEY => return Outcome::Back,
                 k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
@@ -669,46 +475,16 @@ impl TrainingScreen {
                 k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
                 k => self.history.key(k),
             },
-            Mode::List => return self.list_key(s, ck),
+            Mode::List => match ck {
+                k if k == BACK_KEY => return Outcome::Back,
+                k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
+                k => {
+                    let leave = self.calendar.key(k);
+                    return self.calendared(s, leave);
+                }
+            },
         }
         Outcome::Stay
-    }
-
-    fn list_key(&mut self, s: &'static Strings, ck: KeyCombination) -> Outcome {
-        let count = self.shown().len();
-        match ck {
-            k if k == BACK_KEY => return Outcome::Back,
-            k if k == key!(down) && count > 0 => self.selected = (self.selected + 1) % count,
-            k if k == key!(up) && count > 0 => {
-                self.selected = self.selected.checked_sub(1).unwrap_or(count - 1)
-            }
-            k if k == key!(f) || k == key!(right) => self.step_filter(true),
-            k if k == key!(left) => self.step_filter(false),
-            k if k == key!(enter) => self.open_selected(),
-            k if k == key!(tab) || k == key!(shift - tab) => self.step_tab(k == key!(tab)),
-            k if k == key!(p) => self.step_period(),
-            k if k == key!(space) => self.toggle_mark(self.selected),
-            k if k == key!(m) => self.create_microcycle(s),
-            k if k == key!(n) => self.new_session(s),
-            k if k == key!(r) => self.repeat(s),
-            k if (k == key!(backspace) || k == key!(delete)) && count > 0 => self.ask_deletion(),
-            _ => {}
-        }
-        Outcome::Stay
-    }
-
-    fn step_filter(&mut self, forward: bool) {
-        if let Some(next) = ui::cycle(&FILTERS, &self.filter, forward) {
-            self.filter = next;
-            self.selected = 0;
-        }
-    }
-
-    fn step_period(&mut self) {
-        if let Some(next) = ui::cycle(&PERIODS, &self.period, true) {
-            self.period = next;
-            self.selected = 0;
-        }
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
@@ -725,23 +501,9 @@ impl TrainingScreen {
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
             Mode::List if self.tab == Tab::Cycles => self.cycles.hints(s),
-            Mode::List if self.tab == Tab::Calendar => self.calendar.hints(s),
             Mode::List if self.tab == Tab::Presence => self.presence.hints(s),
             Mode::List if self.tab == Tab::History => self.history.hints(s),
-            Mode::List => vec![
-                ("↑ ↓".to_string(), String::new()),
-                ("space".to_string(), s.select_row.to_string()),
-                ("m".to_string(), s.create_microcycle.to_string()),
-                ("⇥".to_string(), s.programming.to_string()),
-                ("Enter".to_string(), s.open.to_string()),
-                ("← → f".to_string(), s.filter.to_string()),
-                ("p".to_string(), s.period.to_string()),
-                ("n".to_string(), s.new_session.to_string()),
-                ("r".to_string(), s.repeat_sessions.to_string()),
-                ("x".to_string(), s.export_training.to_string()),
-                ("⌫".to_string(), s.delete.to_string()),
-                ("Esc".to_string(), s.back.to_string()),
-            ],
+            Mode::List => self.calendar.hints(s),
         }
     }
 
@@ -781,13 +543,6 @@ impl TrainingScreen {
             .spacing(10)
             .height(Length::Fill)
             .into(),
-            Mode::List if self.tab == Tab::Calendar => column![
-                tabs(s, Tab::Calendar, c),
-                self.calendar.view(s, c).map(Message::Calendar)
-            ]
-            .spacing(10)
-            .height(Length::Fill)
-            .into(),
             Mode::List if self.tab == Tab::Presence => column![
                 tabs(s, Tab::Presence, c),
                 self.presence.view(s, c).map(Message::Presence)
@@ -802,133 +557,15 @@ impl TrainingScreen {
             .spacing(10)
             .height(Length::Fill)
             .into(),
-            Mode::List => self.list(s, c),
+            Mode::List => column![
+                tabs(s, Tab::Calendar, c),
+                self.calendar.view(s, c).map(Message::Calendar)
+            ]
+            .spacing(10)
+            .height(Length::Fill)
+            .into(),
         };
         column![error, body].spacing(10).into()
-    }
-
-    fn list<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let periods = row(PERIODS.iter().map(|p| {
-            ui::pill(
-                period_name(s, *p),
-                *p == self.period,
-                Some(Message::Period(*p)),
-                c,
-            )
-        }))
-        .spacing(6)
-        .wrap();
-        let filters = row(FILTERS.iter().map(|f| {
-            ui::pill(
-                filter_name(s, *f),
-                *f == self.filter,
-                Some(Message::Filter(*f)),
-                c,
-            )
-        }))
-        .spacing(6)
-        .wrap();
-        let shown = self.shown();
-        let rows: Vec<Element<'a, Message>> = shown
-            .iter()
-            .enumerate()
-            .map(|(i, r)| self.session_row(r, i, s, c))
-            .collect();
-        let list: Element<'a, Message> = match rows.is_empty() {
-            true => text(s.no_sessions).size(SIZE_SMALL).color(c.muted).into(),
-            false => scrollable(Column::with_children(rows).spacing(3))
-                .id(Id::new(LIST))
-                .height(Length::Fill)
-                .into(),
-        };
-        // only what can be done now: the microcycle once sessions are
-        // marked; a session is deleted from its sheet (or ⌫ on its row)
-        let mut add: Vec<Element<'a, Message>> = vec![
-            text(s.count(s.sessions_of, shown.len()))
-                .size(SIZE_SMALL)
-                .color(c.muted)
-                .into(),
-            ui::pill(s.new_session, false, Some(Message::New), c),
-            ui::pill(s.repeat_sessions, false, Some(Message::Repeat), c),
-        ];
-        if !self.marked.is_empty() {
-            add.push(ui::pill(
-                &format!("{} ({})", s.create_microcycle, self.marked.len()),
-                true,
-                Some(Message::Create),
-                c,
-            ));
-        }
-        column![
-            tabs(s, Tab::Sessions, c),
-            ui::panel_with(
-                s.sessions,
-                add,
-                column![filters, periods, list].spacing(12),
-                c
-            )
-        ]
-        .spacing(10)
-        .height(Length::Fill)
-        .into()
-    }
-
-    fn session_row<'a>(
-        &self,
-        r: &SessionRecord,
-        index: usize,
-        s: &'static Strings,
-        c: Colors,
-    ) -> Element<'a, Message> {
-        let when = format!(
-            "{} {}",
-            s.day(&r.start),
-            r.start.get(11..16).unwrap_or_default()
-        );
-        let title = match r.title.is_empty() {
-            true => s.training.to_string(),
-            false => r.title.clone(),
-        };
-        let mut flags: Vec<String> = vec![];
-        match r.status {
-            SessionStatus::Planned => {}
-            SessionStatus::Completed => {
-                flags.push(s.status_completed.to_string());
-                if !self.recorded.contains(&r.id) {
-                    flags.push(s.attendance_not_recorded.to_string());
-                }
-            }
-            SessionStatus::Cancelled => flags.push(s.cancelled.to_string()),
-        }
-        if r.to_close {
-            flags.push(s.to_close.to_string());
-        }
-        let line = row![
-            text(when)
-                .size(SIZE_SMALL)
-                .color(c.muted)
-                .width(Length::Fixed(190.0)),
-            ui::name(title),
-            text(format!("{} {}", r.duration_min, s.min_short))
-                .size(SIZE_SMALL)
-                .color(c.muted),
-            text(flags.join(" · ")).size(SIZE_SMALL).color(c.accent),
-        ]
-        .spacing(14)
-        .align_y(Alignment::Center);
-        // the box of a free session marks it with a click too, not only
-        // with space: the row itself opens the session
-        let mark = match (r.microcycle_id.is_none(), self.marked.contains(&r.id)) {
-            (true, marked) => ui::mark_box(marked, Message::Mark(index), c),
-            (false, _) => space::horizontal().width(ui::MARK_WIDTH).into(),
-        };
-        row![
-            mark,
-            ui::list_row(line, index == self.selected, Some(Message::Row(index)), c)
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center)
-        .into()
     }
 }
 
@@ -937,7 +574,7 @@ mod tests {
     use {
         super::*,
         crate::{form::Message as FormMessage, strings::strings},
-        scout4all_core::shapes::enums::LanguageEnum,
+        scout4all_core::{shapes::enums::LanguageEnum, training::SessionStatus},
         scout4all_mobile::training::{ActivityDraft, SessionDraft},
     };
 
@@ -974,9 +611,15 @@ mod tests {
         core.save_session(team.to_string(), None, draft).unwrap().id
     }
 
-    /// The sessions come latest first; the filter keeps those it names (the
-    /// completed without attendance too); Enter opens the one chosen, Esc
-    /// comes back to the list and then to the team.
+    /// The ids of the sessions the calendar shows, in its order.
+    fn shown(screen: &TrainingScreen) -> Vec<String> {
+        screen.calendar.shown_sessions()
+    }
+
+    /// The list of the calendar holds the sessions in time order; the
+    /// filter keeps those it names (the completed without attendance too);
+    /// Enter opens the one chosen, Esc comes back to the calendar and then
+    /// to the team.
     #[test]
     fn the_sessions_are_listed_filtered_and_opened() {
         let s = strings(LanguageEnum::It);
@@ -989,30 +632,40 @@ mod tests {
             .unwrap();
         core.complete_session(second.clone(), vec![]).unwrap();
         let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
-        let ids = |screen: &TrainingScreen| -> Vec<String> {
-            screen.shown().iter().map(|r| r.id.clone()).collect()
-        };
-        assert_eq!(ids(&screen), vec![second.clone(), first.clone()]);
-        screen.update(s, Message::Filter(Filter::Cancelled));
-        assert_eq!(ids(&screen), vec![first.clone()]);
-        screen.update(s, Message::Filter(Filter::NoAttendance));
-        assert_eq!(ids(&screen), vec![second.clone()]);
+        assert_eq!(screen.tab, Tab::Calendar);
+        screen.key(s, key!(l));
+        assert_eq!(shown(&screen), vec![first.clone(), second.clone()]);
+        screen.update(
+            s,
+            Message::Calendar(calendar::Message::Filter(calendar::Filter::Cancelled)),
+        );
+        assert_eq!(shown(&screen), vec![first.clone()]);
+        screen.update(
+            s,
+            Message::Calendar(calendar::Message::Filter(calendar::Filter::NoAttendance)),
+        );
+        assert_eq!(shown(&screen), vec![second.clone()]);
         // the attendance written: it leaves the filter
         let sheet = core.session_attendance(second.clone()).unwrap();
         core.save_attendance(second.clone(), sheet.rows).unwrap();
         screen.reload();
-        assert!(ids(&screen).is_empty() || !screen.recorded.is_empty());
+        assert!(shown(&screen).is_empty());
+        // f goes round to everything again
         screen.key(s, key!(f));
-        assert_eq!(screen.filter, Filter::All);
+        assert_eq!(screen.calendar.filter_shown(), calendar::Filter::All);
+        assert_eq!(shown(&screen).len(), 2);
+        // the cursor is on the last day, the one nearest today
         assert!(matches!(screen.key(s, key!(enter)), Outcome::Stay));
         assert!(matches!(&screen.mode, Mode::Page(p) if p.id == second));
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Stay));
         assert!(matches!(screen.mode, Mode::List));
+        assert_eq!(screen.tab, Tab::Calendar);
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Back));
     }
 
     /// The period keeps the sessions of its days, both ends included; a
-    /// month before and after reads the right ends; `p` steps through them.
+    /// month before and after reads the right ends; in the list `p` steps
+    /// through them.
     #[test]
     fn the_period_keeps_the_sessions_of_its_days() {
         let day = |d: &str| d.parse::<NaiveDate>().unwrap();
@@ -1038,45 +691,38 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         let team = core.tutorial_team().unwrap();
-        let now = Local::now().date_naive();
-        let far = now.checked_add_months(Months::new(24)).unwrap();
-        let near = session(&core, &team, &format!("{now}T03:00"), "Oggi");
-        let later = session(&core, &team, &format!("{far}T18:00"), "Lontana");
-        let mut screen = TrainingScreen::new(core, team, Open::Sessions).unwrap();
-        let ids = |screen: &TrainingScreen| -> Vec<String> {
-            screen.shown().iter().map(|r| r.id.clone()).collect()
-        };
-        assert_eq!(ids(&screen), vec![later.clone(), near.clone()]);
+        let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        screen.calendar = CalendarTab::at(core.clone(), team.clone(), today);
+        let near = session(&core, &team, "2026-03-11T03:00", "Oggi");
+        let later = session(&core, &team, "2028-03-11T18:00", "Lontana");
+        screen.key(s, key!(l));
+        assert_eq!(shown(&screen), vec![near.clone(), later.clone()]);
         screen.key(s, key!(p));
-        assert_eq!(screen.period, Period::Week);
-        assert_eq!(ids(&screen), vec![near.clone()]);
-        screen.update(s, Message::Period(Period::NextMonth));
-        assert!(ids(&screen).is_empty() || ids(&screen) == vec![near.clone()]);
-        screen.update(s, Message::Period(Period::Any));
-        assert_eq!(ids(&screen).len(), 2);
+        assert_eq!(screen.calendar.period_shown(), Period::Week);
+        assert_eq!(shown(&screen), vec![near.clone()]);
+        screen.calendar.set_period(Period::NextMonth);
+        assert!(shown(&screen).is_empty());
+        screen.calendar.set_period(Period::Any);
+        assert_eq!(shown(&screen).len(), 2);
     }
 
-    /// Tab goes round sessions, cycles, history, calendar and back; the
-    /// history has nothing to change.
+    /// Tab goes round calendar, training plan, attendance, history and
+    /// back; there is no tab of the sessions apart (they're in the
+    /// calendar).
     #[test]
-    fn tab_goes_round_the_five_tabs() {
+    fn tab_goes_round_the_four_tabs() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
         let team = core.tutorial_team().unwrap();
         let mut screen = TrainingScreen::new(core, team, Open::Sessions).unwrap();
-        for tab in [
-            Tab::Cycles,
-            Tab::Presence,
-            Tab::History,
-            Tab::Calendar,
-            Tab::Sessions,
-        ] {
+        for tab in [Tab::Cycles, Tab::Presence, Tab::History, Tab::Calendar] {
             screen.key(s, key!(tab));
             assert_eq!(screen.tab, tab);
         }
         screen.key(s, key!(shift - tab));
-        assert_eq!(screen.tab, Tab::Calendar);
+        assert_eq!(screen.tab, Tab::History);
+        screen.key(s, key!(tab));
         assert!(matches!(screen.key(s, BACK_KEY), Outcome::Back));
     }
 
@@ -1345,10 +991,11 @@ mod tests {
         session(&core, &team, "2026-03-02T18:00", "Lunedì");
         session(&core, &team, "2026-03-04T18:00", "Mercoledì");
         let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        screen.key(s, key!(l));
         screen.key(s, key!(space));
-        screen.key(s, key!(down));
+        screen.key(s, key!(up));
         screen.key(s, key!(space));
-        screen.key(s, key!(m));
+        screen.key(s, key!(c));
         assert_eq!(screen.tab, Tab::Cycles);
         assert!(screen.focus_id().is_some());
         screen.key(s, key!(enter));
@@ -1403,19 +1050,31 @@ mod tests {
         session(&core, &team, "2026-03-02T18:00", "Lunedì");
         session(&core, &team, "2026-03-04T18:00", "Mercoledì");
         let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        let ids: Vec<String> = core
+            .training_sessions(team.clone())
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        let mark = |screen: &mut TrainingScreen, id: &String| {
+            screen.update(s, Message::Calendar(calendar::Message::Mark(id.clone())));
+        };
+        let create = |screen: &mut TrainingScreen| {
+            screen.update(s, Message::Calendar(calendar::Message::Create));
+        };
         // nothing marked: Create does nothing
-        screen.update(s, Message::Create);
-        assert_eq!(screen.tab, Tab::Sessions);
+        create(&mut screen);
+        assert_eq!(screen.tab, Tab::Calendar);
         // a box clicked twice is no more marked; a click marks without
         // opening the session
-        screen.update(s, Message::Mark(0));
-        screen.update(s, Message::Mark(0));
-        assert!(screen.marked.is_empty());
-        screen.update(s, Message::Mark(0));
-        screen.update(s, Message::Mark(1));
+        mark(&mut screen, &ids[0]);
+        mark(&mut screen, &ids[0]);
+        assert_eq!(screen.calendar.marked_count(), 0);
+        mark(&mut screen, &ids[0]);
+        mark(&mut screen, &ids[1]);
         assert!(matches!(screen.mode, Mode::List));
-        assert_eq!(screen.marked.len(), 2);
-        screen.update(s, Message::Create);
+        assert_eq!(screen.calendar.marked_count(), 2);
+        create(&mut screen);
         assert_eq!(screen.tab, Tab::Cycles);
         screen.key(s, key!(enter));
         assert_eq!(
@@ -1531,10 +1190,11 @@ mod tests {
         session(&core, &team, "2026-03-02T18:00", "Prima");
         session(&core, &team, "2026-03-09T18:00", "Seconda");
         let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
+        screen.key(s, key!(l));
         screen.key(s, key!(space));
-        screen.key(s, key!(down));
+        screen.key(s, key!(up));
         screen.key(s, key!(space));
-        screen.key(s, key!(m));
+        screen.key(s, key!(c));
         screen.key(s, key!(enter));
         assert_eq!(
             core.cycles(team.clone(), Level::Microcycle).unwrap()[0].weeks,
@@ -1587,9 +1247,10 @@ mod tests {
         session(&core, &team, "2026-03-02T18:00", "Lunedì");
         session(&core, &team, "2026-03-04T18:00", "Mercoledì");
         let mut screen = TrainingScreen::new(core.clone(), team.clone(), Open::Sessions).unwrap();
-        screen.update(s, Message::Mark(0));
-        screen.update(s, Message::Mark(1));
-        screen.update(s, Message::Create);
+        for r in core.training_sessions(team.clone()).unwrap() {
+            screen.update(s, Message::Calendar(calendar::Message::Mark(r.id)));
+        }
+        screen.update(s, Message::Calendar(calendar::Message::Create));
         screen.key(s, key!(enter));
         let hints = |screen: &TrainingScreen| -> Vec<String> {
             screen.hints(s).into_iter().map(|(_, what)| what).collect()
@@ -1702,8 +1363,8 @@ mod tests {
         );
     }
 
-    /// Enter on an event opens the session (on the sessions tab) or the
-    /// match; on a free day a new session on that day; `r` a series from
+    /// Enter on an event opens the session (Esc comes back to the
+    /// calendar) or the match; on a free day a new session on that day; `r` a series from
     /// the day; in the month Enter goes to the week of the day.
     #[test]
     fn the_calendar_opens_events_and_creates_on_a_day() {
@@ -1717,16 +1378,13 @@ mod tests {
             team.clone(),
             NaiveDate::from_ymd_opt(2026, 3, 10).unwrap(),
         );
-        press(&mut screen, key!(shift - tab));
         assert_eq!(screen.tab, Tab::Calendar);
         press(&mut screen, key!(enter));
-        assert_eq!(screen.tab, Tab::Sessions);
         let Mode::Page(page) = &screen.mode else {
             panic!("the event opens its sheet")
         };
-        let _ = (page, &id);
+        assert_eq!(page.id, id);
         press(&mut screen, BACK_KEY);
-        press(&mut screen, key!(shift - tab));
         assert_eq!(screen.tab, Tab::Calendar);
         // a free day: a new session on it
         press(&mut screen, key!(right));
@@ -1767,7 +1425,8 @@ mod tests {
         assert!(matches!(&export, Export::Training(t) if *t == team));
         let (name, bytes) = transfer::archive(&core, &export).unwrap();
         assert!(name.ends_with(".zip") && !bytes.is_empty());
-        // the sheet
+        // the sheet, from the list
+        screen.key(s, key!(l));
         screen.key(s, key!(enter));
         assert!(matches!(press(&mut screen, key!(p)), Outcome::Stay));
         press(&mut screen, key!(space));

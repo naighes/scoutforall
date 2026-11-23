@@ -1,15 +1,22 @@
 //! The calendar of the training and the matches of a team, as the
 //! calendars of the mail draw it: a week (seven columns under the number of
 //! their day, the hours on the left, each event as tall as it lasts, the
-//! bands of its microcycles above) or a month (a box a day, the days of the
-//! months around in grey, the bands of its mesocycles above each row). Sessions and matches are
-//! told apart by icon and color. ← → move the day, ↑ ↓ the event of the
-//! day (the week) or the week (the month), PgUp PgDn change the period,
-//! Home goes back to today, `w` and `m` choose the view, Enter opens the
-//! event or, on a day without any, a new session (in the month it opens the
-//! week of the day), `n` a new session, `r` a new series. No dragging.
+//! bands of its microcycles above), a month (a box a day, the days of the
+//! months around in grey, the bands of its mesocycles above each row) or a
+//! list (the days with something one under the other, the date on the
+//! left, for a long period). Sessions and matches are told apart by icon
+//! and color. The filter hides what it leaves out in all three; free
+//! sessions are marked (their box, or space) to make a microcycle, and the
+//! marks stay across views and periods. ← → move the day, ↑ ↓ the event of
+//! the day (the week), the week (the month) or the event (the list), PgUp
+//! PgDn change the period, Home goes back to today, `w` `m` `l` choose the
+//! view, `f` the filter, `p` the period of the list, Enter opens the event
+//! or, on a day without any, a new session (in the month it opens the week
+//! of the day), `n` a new session, `r` a new series, `c` the microcycle of
+//! the marked, ⌫ deletes the session chosen. No dragging.
 
 use {
+    super::screen::{PERIODS, Period, period_name},
     crate::{
         calendar::{day_of, text_of},
         strings::Strings,
@@ -19,7 +26,7 @@ use {
     chrono::{Datelike, Days, Duration, Months, NaiveDate},
     iced::{
         Alignment, Background, Element, Length, Padding,
-        widget::{Column, Row, column, container, row, scrollable, space, text},
+        widget::{Column, Id, Row, column, container, row, scrollable, space, text},
     },
     scout4all_core::{training::SessionStatus, training::cycles::Level},
     scout4all_keys::{KeyCombination, key},
@@ -27,8 +34,10 @@ use {
         Scout4All,
         training::{AgendaDay, AgendaEventRecord, AgendaItemRecord, AgendaSpan, CycleRecord},
     },
-    std::sync::Arc,
+    std::{collections::HashSet, sync::Arc},
 };
+
+const LIST: &str = "training-calendar-list";
 
 /// The most events a month cell writes, the others are counted.
 const CELL_EVENTS: usize = 3;
@@ -37,6 +46,43 @@ const CELL_EVENTS: usize = 3;
 pub enum View {
     Week,
     Month,
+    /// the days with something, one under the other
+    List,
+}
+
+/// What the calendar lets through: everything, the sessions only, or the
+/// sessions of a state (the matches have none).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Filter {
+    All,
+    Sessions,
+    Planned,
+    ToClose,
+    Completed,
+    Cancelled,
+    NoAttendance,
+}
+
+pub const FILTERS: [Filter; 7] = [
+    Filter::All,
+    Filter::Sessions,
+    Filter::Planned,
+    Filter::ToClose,
+    Filter::Completed,
+    Filter::Cancelled,
+    Filter::NoAttendance,
+];
+
+fn filter_name(s: &Strings, filter: Filter) -> &'static str {
+    match filter {
+        Filter::All => s.events_all,
+        Filter::Sessions => s.sessions,
+        Filter::Planned => s.filter_planned,
+        Filter::ToClose => s.filter_to_close,
+        Filter::Completed => s.filter_completed,
+        Filter::Cancelled => s.filter_cancelled,
+        Filter::NoAttendance => s.filter_no_attendance,
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +99,13 @@ pub enum Message {
     AllTeams,
     /// the next gym of the filter
     NextVenue,
+    Filter(Filter),
+    /// the next period of the list, round
+    NextPeriod,
+    /// the box of a free session: marked or no more
+    Mark(String),
+    /// the marked sessions in a new microcycle
+    Create,
 }
 
 /// What the calendar asks the screen for.
@@ -63,6 +116,10 @@ pub enum Leave {
     Match(String),
     NewSession(NaiveDate),
     Repeat(NaiveDate),
+    /// the marked sessions, for a new microcycle
+    Create(Vec<String>),
+    /// the session to delete, once asked
+    Delete(String),
 }
 
 pub struct CalendarTab {
@@ -84,6 +141,15 @@ pub struct CalendarTab {
     venue: Option<(String, String)>,
     /// the gyms there are: the filter shows only with some
     venues: Vec<(String, String)>,
+    filter: Filter,
+    /// the days of the list
+    period: Period,
+    /// the sessions marked for a microcycle: they stay across views
+    marked: HashSet<String>,
+    /// the sessions of the team in no microcycle: the ones that can be marked
+    free: HashSet<String>,
+    /// the completed sessions shown whose attendance is written
+    recorded: HashSet<String>,
     error: Option<String>,
 }
 
@@ -104,7 +170,7 @@ pub fn period(view: View, anchor: NaiveDate) -> (NaiveDate, NaiveDate) {
             let first = monday(anchor);
             (first, first + Duration::days(6))
         }
-        View::Month => {
+        View::Month | View::List => {
             let first = crate::calendar::month_of(anchor);
             let last = first
                 .checked_add_months(Months::new(1))
@@ -155,6 +221,11 @@ impl CalendarTab {
             all_teams: false,
             venue: None,
             venues: vec![],
+            filter: Filter::All,
+            period: Period::Any,
+            marked: HashSet::new(),
+            free: HashSet::new(),
+            recorded: HashSet::new(),
             error: None,
         };
         tab.reload();
@@ -191,6 +262,34 @@ impl CalendarTab {
         &self.bands
     }
 
+    /// The ids of the sessions shown, in their order.
+    #[cfg(test)]
+    pub fn shown_sessions(&self) -> Vec<String> {
+        self.days
+            .iter()
+            .flat_map(|d| &d.events)
+            .filter_map(|e| match &e.item {
+                AgendaItemRecord::Session { id, .. } => Some(id.clone()),
+                AgendaItemRecord::Match { .. } => None,
+            })
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub fn filter_shown(&self) -> Filter {
+        self.filter
+    }
+
+    #[cfg(test)]
+    pub fn period_shown(&self) -> Period {
+        self.period
+    }
+
+    #[cfg(test)]
+    pub fn marked_count(&self) -> usize {
+        self.marked.len()
+    }
+
     /// Read again, after a change or a move.
     pub fn reload(&mut self) {
         self.venues = self
@@ -208,30 +307,39 @@ impl CalendarTab {
         {
             self.venue = None;
         }
-        let span = match self.view {
-            View::Week => AgendaSpan::Week,
-            View::Month => AgendaSpan::Month,
+        let team = (!self.all_teams).then(|| self.team_id.clone());
+        let read = match self.view {
+            View::List => {
+                let days = self.period.days(self.today);
+                self.core.training_agenda_between(
+                    team,
+                    days.map(|(from, _)| text_of(from)),
+                    days.map(|(_, to)| text_of(to)),
+                )
+            }
+            View::Week => self
+                .core
+                .training_agenda(team, AgendaSpan::Week, text_of(self.anchor)),
+            View::Month => self
+                .core
+                .training_agenda(team, AgendaSpan::Month, text_of(self.anchor)),
         };
         let level = match self.view {
-            View::Week => Level::Microcycle,
-            View::Month => Level::Mesocycle,
+            View::Week => Some(Level::Microcycle),
+            View::Month => Some(Level::Mesocycle),
+            View::List => None,
         };
         let (first, last) = period(self.view, self.anchor);
-        let read = self
-            .core
-            .training_agenda(
-                (!self.all_teams).then(|| self.team_id.clone()),
-                span,
-                text_of(self.anchor),
-            )
-            .and_then(|mut days| {
-                if let Some((venue, _)) = &self.venue {
-                    for day in &mut days {
-                        day.events
-                            .retain(|e| e.venue.as_ref().is_some_and(|v| v.id == *venue));
-                    }
+        let read = read.and_then(|mut days| {
+            if let Some((venue, _)) = &self.venue {
+                for day in &mut days {
+                    day.events
+                        .retain(|e| e.venue.as_ref().is_some_and(|v| v.id == *venue));
                 }
-                let bands = self
+            }
+            let bands = match level {
+                None => vec![],
+                Some(level) => self
                     .core
                     .cycles(self.team_id.clone(), level)?
                     .into_iter()
@@ -239,12 +347,24 @@ impl CalendarTab {
                         day_of(&c.first_day).is_some_and(|f| f <= last)
                             && day_of(&c.last_day).is_some_and(|l| first <= l)
                     })
-                    .collect();
-                Ok((days, bands))
-            });
+                    .collect(),
+            };
+            let free = self
+                .core
+                .training_sessions(self.team_id.clone())?
+                .into_iter()
+                .filter(|r| r.microcycle_id.is_none())
+                .map(|r| r.id)
+                .collect();
+            Ok((days, bands, free))
+        });
         match read {
-            Ok((days, bands)) => {
+            Ok((days, bands, free)) => {
+                self.free = free;
+                self.marked.retain(|id| self.free.contains(id));
+                self.recorded = self.recorded_of(&days);
                 self.days = days;
+                self.filter_days();
                 self.bands = bands;
                 self.error = None;
             }
@@ -254,7 +374,197 @@ impl CalendarTab {
                 self.error = Some(e.to_string());
             }
         }
+        self.settle();
+    }
+
+    /// The completed sessions of the team among `days` whose attendance is
+    /// written: the others are the ones without it.
+    fn recorded_of(&self, days: &[AgendaDay]) -> HashSet<String> {
+        days.iter()
+            .flat_map(|d| &d.events)
+            .filter(|e| e.team_id == self.team_id)
+            .filter_map(|e| match &e.item {
+                AgendaItemRecord::Session {
+                    id,
+                    status: SessionStatus::Completed,
+                    ..
+                } => Some(id.clone()),
+                _ => None,
+            })
+            .filter(|id| {
+                self.core
+                    .session_attendance(id.clone())
+                    .is_ok_and(|a| a.recorded)
+            })
+            .collect()
+    }
+
+    /// Whether the filter lets `event` through.
+    fn lets(&self, event: &AgendaEventRecord) -> bool {
+        let session = match &event.item {
+            AgendaItemRecord::Session {
+                id,
+                status,
+                to_close,
+                ..
+            } => Some((id, *status, *to_close)),
+            AgendaItemRecord::Match { .. } => None,
+        };
+        match (self.filter, session) {
+            (Filter::All, _) => true,
+            (_, None) => false,
+            (Filter::Sessions, Some(_)) => true,
+            (Filter::Planned, Some((_, status, _))) => status == SessionStatus::Planned,
+            (Filter::ToClose, Some((_, _, to_close))) => to_close,
+            (Filter::Completed, Some((_, status, _))) => status == SessionStatus::Completed,
+            (Filter::Cancelled, Some((_, status, _))) => status == SessionStatus::Cancelled,
+            // another team's attendance is not read: it is not shown
+            (Filter::NoAttendance, Some((id, status, _))) => {
+                status == SessionStatus::Completed
+                    && event.team_id == self.team_id
+                    && !self.recorded.contains(id)
+            }
+        }
+    }
+
+    /// The events the filter leaves out hidden; in the list the days left
+    /// empty too.
+    fn filter_days(&mut self) {
+        let mut days = std::mem::take(&mut self.days);
+        for day in &mut days {
+            day.events.retain(|e| self.lets(e));
+        }
+        if self.view == View::List {
+            days.retain(|d| !d.events.is_empty());
+        }
+        self.days = days;
+    }
+
+    /// The cursor on what is shown: in the list on a day of it (the first
+    /// from the one it was on, or the last), the event within its day.
+    fn settle(&mut self) {
+        if self.view == View::List && self.day_record(self.anchor).is_none() {
+            let dates: Vec<NaiveDate> = self.days.iter().filter_map(|d| day_of(&d.date)).collect();
+            let found = dates
+                .iter()
+                .find(|d| **d >= self.anchor)
+                .or(dates.last())
+                .copied();
+            if let Some(day) = found {
+                self.anchor = day;
+                self.slot = 0;
+            }
+        }
         self.slot = self.slot.min(self.events_of(self.anchor).saturating_sub(1));
+    }
+
+    /// The events in the order of the list: day and place in the day.
+    fn flat(&self) -> Vec<(NaiveDate, usize)> {
+        self.days
+            .iter()
+            .filter_map(|d| day_of(&d.date).map(|date| (date, d.events.len())))
+            .flat_map(|(date, n)| (0..n).map(move |i| (date, i)))
+            .collect()
+    }
+
+    /// The event after (or before) the cursor, in the list.
+    fn step_event(&mut self, forward: bool) {
+        let flat = self.flat();
+        let at = flat
+            .iter()
+            .position(|(d, i)| *d == self.anchor && *i == self.slot);
+        let next = match (at, forward) {
+            (None, _) => flat.first(),
+            (Some(i), true) => flat.get(i + 1).or(flat.get(i)),
+            (Some(i), false) => flat.get(i.saturating_sub(1)),
+        };
+        if let Some((day, slot)) = next.copied() {
+            self.anchor = day;
+            self.slot = slot;
+        }
+    }
+
+    /// The day with something after (or before) the cursor, in the list.
+    fn step_day(&mut self, forward: bool) {
+        let dates: Vec<NaiveDate> = self.days.iter().filter_map(|d| day_of(&d.date)).collect();
+        let next = match forward {
+            true => dates.iter().find(|d| **d > self.anchor),
+            false => dates.iter().rev().find(|d| **d < self.anchor),
+        };
+        if let Some(day) = next.copied() {
+            self.anchor = day;
+            self.slot = 0;
+        }
+    }
+
+    /// The session of the team at the cursor, if free (in no microcycle).
+    fn session_at_cursor(&self) -> Option<String> {
+        self.day_record(self.anchor)
+            .and_then(|d| d.events.get(self.slot))
+            .filter(|e| e.team_id == self.team_id)
+            .and_then(|e| match &e.item {
+                AgendaItemRecord::Session { id, .. } => Some(id.clone()),
+                AgendaItemRecord::Match { .. } => None,
+            })
+    }
+
+    fn toggle_mark(&mut self, id: &str) {
+        let was = self.marked.remove(id);
+        if self.free.contains(id) && !was {
+            self.marked.insert(id.to_string());
+        }
+    }
+
+    /// The marked sessions, for a new microcycle; none marked, nothing.
+    fn create(&mut self) -> Leave {
+        match self.marked.is_empty() {
+            true => Leave::Stay,
+            false => {
+                let mut ids: Vec<String> = self.marked.drain().collect();
+                ids.sort();
+                Leave::Create(ids)
+            }
+        }
+    }
+
+    fn set_filter(&mut self, filter: Filter) {
+        self.filter = filter;
+        // what is still to close (or to take the attendance of) is in the
+        // past: the list looks at any date for it
+        if matches!(filter, Filter::ToClose | Filter::NoAttendance) && self.view == View::List {
+            self.period = Period::Any;
+        }
+        self.slot = 0;
+        self.reload();
+    }
+
+    fn step_filter(&mut self) {
+        if let Some(next) = ui::cycle(&FILTERS, &self.filter, true) {
+            self.set_filter(next);
+        }
+    }
+
+    pub(super) fn set_period(&mut self, period: Period) {
+        self.period = period;
+        self.slot = 0;
+        self.reload();
+    }
+
+    fn step_period(&mut self) {
+        if let Some(next) = ui::cycle(&PERIODS, &self.period, true) {
+            self.set_period(next);
+        }
+    }
+
+    /// Where the list is, to keep the event chosen in sight; the week and
+    /// the month keep their own.
+    pub fn scroll(&self) -> Option<(Id, f32)> {
+        let flat = self.flat();
+        let at = flat
+            .iter()
+            .position(|(d, i)| *d == self.anchor && *i == self.slot)?;
+        let last = flat.len().saturating_sub(1).max(1);
+        (self.view == View::List).then(|| (Id::new(LIST), at as f32 / last as f32))
     }
 
     fn day_record(&self, day: NaiveDate) -> Option<&AgendaDay> {
@@ -270,7 +580,8 @@ impl CalendarTab {
         let (first, last) = period(self.view, self.anchor);
         self.anchor = day;
         self.slot = 0;
-        if day < first || day > last {
+        // the list holds its period whatever the day
+        if self.view != View::List && (day < first || day > last) {
             self.reload();
         }
     }
@@ -281,6 +592,7 @@ impl CalendarTab {
             (View::Week, false) => self.anchor.checked_sub_days(Days::new(7)),
             (View::Month, true) => self.anchor.checked_add_months(Months::new(1)),
             (View::Month, false) => self.anchor.checked_sub_months(Months::new(1)),
+            (View::List, _) => None,
         };
         if let Some(day) = day {
             self.anchor = day;
@@ -310,7 +622,7 @@ impl CalendarTab {
                 self.set_view(View::Week);
                 Leave::Stay
             }
-            View::Week => self.pick(self.anchor, self.slot),
+            View::Week | View::List => self.pick(self.anchor, self.slot),
         }
     }
 
@@ -391,6 +703,19 @@ impl CalendarTab {
                 self.next_venue();
                 Leave::Stay
             }
+            Message::Filter(filter) => {
+                self.set_filter(filter);
+                Leave::Stay
+            }
+            Message::NextPeriod => {
+                self.step_period();
+                Leave::Stay
+            }
+            Message::Mark(id) => {
+                self.toggle_mark(&id);
+                Leave::Stay
+            }
+            Message::Create => self.create(),
         }
     }
 
@@ -404,7 +729,12 @@ impl CalendarTab {
                 tab.go_to(day);
             }
         };
+        let list = self.view == View::List;
         match ck {
+            k if k == key!(left) && list => self.step_day(false),
+            k if k == key!(right) && list => self.step_day(true),
+            k if k == key!(up) && list => self.step_event(false),
+            k if k == key!(down) && list => self.step_event(true),
             k if k == key!(left) => by_days(self, -1),
             k if k == key!(right) => by_days(self, 1),
             k if k == key!(up) && self.view == View::Month => by_days(self, -7),
@@ -418,6 +748,20 @@ impl CalendarTab {
             k if k == key!(home) => self.go_today(),
             k if k == key!(w) => self.set_view(View::Week),
             k if k == key!(m) => self.set_view(View::Month),
+            k if k == key!(l) => self.set_view(View::List),
+            k if k == key!(f) => self.step_filter(),
+            k if k == key!(p) && list => self.step_period(),
+            k if k == key!(space) && self.view != View::Month => {
+                if let Some(id) = self.session_at_cursor() {
+                    self.toggle_mark(&id);
+                }
+            }
+            k if k == key!(c) => return self.create(),
+            k if (k == key!(backspace) || k == key!(delete)) && self.view != View::Month => {
+                if let Some(id) = self.session_at_cursor() {
+                    return Leave::Delete(id);
+                }
+            }
             k if k == key!(enter) => return self.open(),
             k if k == key!(n) => return Leave::NewSession(self.anchor),
             k if k == key!(r) => return Leave::Repeat(self.anchor),
@@ -434,25 +778,45 @@ impl CalendarTab {
             (
                 "↑ ↓".to_string(),
                 match self.view {
-                    View::Week => String::new(),
+                    View::Week | View::List => String::new(),
                     View::Month => s.week.to_string(),
                 },
             ),
-            ("PgUp PgDn".to_string(), String::new()),
-            ("Home".to_string(), s.today.to_string()),
+        ];
+        if self.view != View::List {
+            hints.push(("PgUp PgDn".to_string(), String::new()));
+            hints.push(("Home".to_string(), s.today.to_string()));
+        }
+        hints.extend([
             (
-                "w m".to_string(),
-                format!("{} / {}", s.week, s.calendar_month),
+                "w m l".to_string(),
+                format!("{} / {} / {}", s.week, s.calendar_month, s.calendar_list),
             ),
+            ("f".to_string(), s.filter.to_string()),
+        ]);
+        if self.view == View::List {
+            hints.push(("p".to_string(), s.period.to_string()));
+        }
+        if self.view != View::Month {
+            hints.push(("space".to_string(), s.select_row.to_string()));
+        }
+        if !self.marked.is_empty() {
+            hints.push(("c".to_string(), s.create_microcycle.to_string()));
+        }
+        hints.extend([
             ("Enter".to_string(), s.open.to_string()),
             ("n".to_string(), s.new_session.to_string()),
             ("r".to_string(), s.repeat_sessions.to_string()),
             ("t".to_string(), s.all_teams.to_string()),
-        ];
+        ]);
         if !self.venues.is_empty() {
             hints.push(("v".to_string(), s.venues.to_string()));
         }
-        hints.push(("⇥".to_string(), s.sessions.to_string()));
+        if self.view != View::Month {
+            hints.push(("⌫".to_string(), s.delete.to_string()));
+        }
+        hints.push(("x".to_string(), s.export_training.to_string()));
+        hints.push(("⇥".to_string(), s.programming.to_string()));
         hints.push(("Esc".to_string(), s.back.to_string()));
         hints
     }
@@ -463,6 +827,7 @@ impl CalendarTab {
         let (first, last) = period(self.view, self.anchor);
         match self.view {
             View::Week => format!("{} – {}", s.short_date(first), s.short_date(last)),
+            View::List => period_name(s, self.period).to_string(),
             View::Month => format!(
                 "{} {}",
                 s.months
@@ -475,38 +840,50 @@ impl CalendarTab {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let (previous, next) = match self.view {
-            View::Week => (s.previous_week, s.next_week),
-            View::Month => (s.previous_month, s.next_month),
+        let mut controls: Vec<Element<'a, Message>> = [
+            (View::Week, s.week),
+            (View::Month, s.calendar_month),
+            (View::List, s.calendar_list),
+        ]
+        .into_iter()
+        .map(|(view, label)| ui::pill(label, self.view == view, Some(Message::View(view)), c))
+        .collect();
+        // the list holds a period of its own, chosen below: nothing to move
+        let moves = match self.view {
+            View::Week => Some((s.previous_week, s.next_week)),
+            View::Month => Some((s.previous_month, s.next_month)),
+            View::List => None,
         };
-        let mut controls: Vec<Element<'a, Message>> = vec![
-            ui::pill(
-                s.week,
-                self.view == View::Week,
-                Some(Message::View(View::Week)),
+        // one pill that goes round the periods: the row has room for it
+        if self.view == View::List {
+            controls.push(ui::tip(
+                ui::pill(
+                    period_name(s, self.period),
+                    self.period != Period::Any,
+                    Some(Message::NextPeriod),
+                    c,
+                ),
+                s.period,
                 c,
-            ),
-            ui::pill(
-                s.calendar_month,
-                self.view == View::Month,
-                Some(Message::View(View::Month)),
-                c,
-            ),
-            ui::tip(
-                ui::pill("‹", false, Some(Message::Previous), c),
-                previous,
-                c,
-            ),
-            text(self.title(s))
-                .size(SIZE_BODY)
-                .font(theme::fonts().bold)
-                .into(),
-            ui::tip(ui::pill("›", false, Some(Message::Next), c), next, c),
-        ];
-        if period(self.view, self.anchor).0 > self.today
-            || period(self.view, self.anchor).1 < self.today
-        {
-            controls.push(ui::pill(s.today, false, Some(Message::Today), c));
+            ));
+        }
+        if let Some((previous, next)) = moves {
+            controls.extend([
+                ui::tip(
+                    ui::pill("‹", false, Some(Message::Previous), c),
+                    previous,
+                    c,
+                ),
+                text(self.title(s))
+                    .size(SIZE_BODY)
+                    .font(theme::fonts().bold)
+                    .into(),
+                ui::tip(ui::pill("›", false, Some(Message::Next), c), next, c),
+            ]);
+            let (first, last) = period(self.view, self.anchor);
+            if first > self.today || last < self.today {
+                controls.push(ui::pill(s.today, false, Some(Message::Today), c));
+            }
         }
         controls.push(space::horizontal().width(Length::Fill).into());
         controls.push(ui::pill(
@@ -529,28 +906,177 @@ impl CalendarTab {
         }
         controls.push(ui::pill(s.new_session, false, Some(Message::New), c));
         controls.push(ui::pill(s.repeat_sessions, false, Some(Message::Repeat), c));
+        // the filter in every view; the period of the list; the microcycle
+        // only once sessions are marked
+        let mut choices: Vec<Element<'a, Message>> = FILTERS
+            .iter()
+            .map(|f| {
+                ui::pill(
+                    filter_name(s, *f),
+                    *f == self.filter,
+                    Some(Message::Filter(*f)),
+                    c,
+                )
+            })
+            .collect();
+        if self.view == View::List {
+            let sessions = self
+                .days
+                .iter()
+                .flat_map(|d| &d.events)
+                .filter(|e| matches!(e.item, AgendaItemRecord::Session { .. }))
+                .count();
+            choices.push(space::horizontal().width(Length::Fixed(12.0)).into());
+            choices.push(
+                text(s.count(s.sessions_of, sessions))
+                    .size(SIZE_SMALL)
+                    .color(c.muted)
+                    .into(),
+            );
+        }
+        if !self.marked.is_empty() {
+            choices.push(ui::pill(
+                &format!("{} ({})", s.create_microcycle, self.marked.len()),
+                true,
+                Some(Message::Create),
+                c,
+            ));
+        }
         let body: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => match self.view {
                 View::Week => self.week(s, c),
-                View::Month => self.month(s, c),
+                View::Month => scrollable(self.month(s, c)).height(Length::Fill).into(),
+                View::List => self.list(s, c),
             },
-        };
-        // the week scrolls its hours under the heads of the days; the
-        // month as a whole
-        let body: Element<'a, Message> = match self.view {
-            View::Week => body,
-            View::Month => scrollable(body).height(Length::Fill).into(),
         };
         column![
             Row::with_children(controls)
                 .spacing(6)
                 .align_y(Alignment::Center),
+            Row::with_children(choices)
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .wrap(),
             body
         ]
         .spacing(10)
         .height(Length::Fill)
         .into()
+    }
+
+    /// The list as the agenda of the calendars of the mail: the days with
+    /// something one under the other, the date on the left where the week
+    /// has the hours, the events as in the week, the free sessions with
+    /// their box.
+    fn list<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        if self.days.is_empty() {
+            return text(match self.filter {
+                Filter::All => s.nothing_planned,
+                _ => s.no_sessions,
+            })
+            .size(SIZE_SMALL)
+            .color(c.muted)
+            .into();
+        }
+        let days = self.days.iter().filter_map(|day| {
+            let date = day_of(&day.date)?;
+            let lit = date == self.today;
+            let color = match lit {
+                true => c.accent,
+                false => c.text,
+            };
+            let head = button_day(
+                column![
+                    text(date.day().to_string())
+                        .size(SIZE_TITLE + 6.0)
+                        .font(theme::fonts().bold)
+                        .color(color),
+                    text(format!(
+                        "{} {}{}",
+                        s.weekday(date),
+                        s.months
+                            .get(date.month0() as usize)
+                            .and_then(|m| m.get(..3).or(Some(m)))
+                            .unwrap_or_default(),
+                        match date.year() == self.today.year() {
+                            true => String::new(),
+                            false => format!(" {}", date.year()),
+                        }
+                    ))
+                    .size(SIZE_SMALL)
+                    .color(match lit {
+                        true => c.accent,
+                        false => c.muted,
+                    }),
+                ]
+                .spacing(0),
+                date == self.anchor,
+                Message::Day(date),
+                c,
+            );
+            let events = Column::with_children(day.events.iter().enumerate().map(|(i, e)| {
+                event_card(
+                    e,
+                    s,
+                    c,
+                    Look {
+                        compact: false,
+                        with_team: self.all_teams,
+                        chosen: date == self.anchor && i == self.slot,
+                        span: true,
+                        unrecorded: self.unrecorded(e),
+                    },
+                    Some(Message::Event(date, i)),
+                    self.mark_of(e),
+                    LIST_EVENT,
+                )
+            }))
+            .spacing(3)
+            .width(Length::Fill);
+            let background = match lit {
+                true => mix(c.panel, c.accent, 0.07),
+                false => c.panel,
+            };
+            Some(
+                container(row![head, events].spacing(10).align_y(Alignment::Center))
+                    .padding(Padding::from([6, 8]))
+                    .width(Length::Fill)
+                    .style(move |_| container::Style {
+                        background: Some(Background::Color(background)),
+                        ..container::Style::default()
+                    })
+                    .into(),
+            )
+        });
+        scrollable(Column::with_children(days).spacing(1))
+            .id(Id::new(LIST))
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// A completed session of the team whose attendance is not written.
+    fn unrecorded(&self, event: &AgendaEventRecord) -> bool {
+        match &event.item {
+            AgendaItemRecord::Session {
+                id,
+                status: SessionStatus::Completed,
+                ..
+            } => event.team_id == self.team_id && !self.recorded.contains(id),
+            _ => false,
+        }
+    }
+
+    /// The box of a free session of the team: marked or not, and its click.
+    fn mark_of(&self, event: &AgendaEventRecord) -> Option<(bool, Message)> {
+        match &event.item {
+            AgendaItemRecord::Session { id, .. }
+                if event.team_id == self.team_id && self.free.contains(id) =>
+            {
+                Some((self.marked.contains(id), Message::Mark(id.clone())))
+            }
+            _ => None,
+        }
     }
 
     /// The band of a row of days.
@@ -562,7 +1088,7 @@ impl CalendarTab {
     ) -> Element<'a, Message> {
         let label = match self.view {
             View::Week => s.microcycle,
-            View::Month => s.mesocycle,
+            View::Month | View::List => s.mesocycle,
         };
         Row::with_children(segments(days, &self.bands).into_iter().map(
             |(_, count, cycle)| -> Element<'a, Message> {
@@ -719,10 +1245,15 @@ impl CalendarTab {
                     event,
                     s,
                     c,
-                    tall < TWO_LINES,
-                    self.all_teams,
-                    here && i == self.slot,
+                    Look {
+                        compact: tall < TWO_LINES,
+                        with_team: self.all_teams,
+                        chosen: here && i == self.slot,
+                        span: false,
+                        unrecorded: false,
+                    },
                     date.map(|d| Message::Event(d, i)),
+                    self.mark_of(event),
                     tall,
                 );
                 let portion = |n: usize| Length::FillPortion(u16::try_from(n).unwrap_or(1));
@@ -822,10 +1353,15 @@ impl CalendarTab {
                 e,
                 s,
                 c,
-                true,
-                self.all_teams,
-                false,
+                Look {
+                    compact: true,
+                    with_team: self.all_teams,
+                    chosen: false,
+                    span: false,
+                    unrecorded: false,
+                },
                 Some(Message::Event(day, i)),
+                self.mark_of(e),
                 MONTH_EVENT,
             )
         }));
@@ -881,6 +1417,65 @@ const MONTH_EVENT: f32 = 20.0;
 
 /// The height of a day of the month.
 const CELL_HEIGHT: f32 = 112.0;
+
+/// The height of an event in the list: room for its details.
+const LIST_EVENT: f32 = 44.0;
+
+/// The width of the date on the left of the list.
+const LIST_DATE: f32 = 96.0;
+
+/// How an event is drawn.
+struct Look {
+    /// one line: the details left out
+    compact: bool,
+    /// the name of its team (the calendar of all the teams)
+    with_team: bool,
+    /// the one of the cursor
+    chosen: bool,
+    /// the time it ends too (the list, where its height doesn't tell)
+    span: bool,
+    /// a completed session whose attendance isn't written
+    unrecorded: bool,
+}
+
+/// The date of a day of the list: a click chooses it, the one of the
+/// cursor lit.
+fn button_day<'a>(
+    content: impl Into<Element<'a, Message>>,
+    chosen: bool,
+    message: Message,
+    c: Colors,
+) -> Element<'a, Message> {
+    container(ui::list_row(content, chosen, Some(message), c))
+        .width(Length::Fixed(LIST_DATE))
+        .into()
+}
+
+/// The box of a free session in its event: a click marks it (the event
+/// itself opens the session).
+fn mark_button<'a>(marked: bool, message: Message, c: Colors) -> Element<'a, Message> {
+    iced::widget::button(
+        text(match marked {
+            true => "☑",
+            false => "☐",
+        })
+        .size(SIZE_SMALL),
+    )
+    .padding(Padding::from([0, 2]))
+    .on_press(message)
+    .style(move |_, status| iced::widget::button::Style {
+        text_color: match (marked, status) {
+            (true, _)
+            | (
+                false,
+                iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed,
+            ) => c.accent,
+            (false, _) => c.muted,
+        },
+        ..iced::widget::button::Style::default()
+    })
+    .into()
+}
 
 /// `a` with a part `amount` of `b`: a background lit, opaque.
 fn mix(a: iced::Color, b: iced::Color, amount: f32) -> iced::Color {
@@ -980,12 +1575,12 @@ fn event_card<'a>(
     event: &AgendaEventRecord,
     s: &'static Strings,
     c: Colors,
-    compact: bool,
-    with_team: bool,
-    chosen: bool,
+    look: Look,
     message: Option<Message>,
+    mark: Option<(bool, Message)>,
     height: f32,
 ) -> Element<'a, Message> {
+    let chosen = look.chosen;
     let color = match event.item {
         AgendaItemRecord::Session { .. } => c.accent,
         AgendaItemRecord::Match { .. } => c.break_point,
@@ -997,11 +1592,24 @@ fn event_card<'a>(
             background: Some(Background::Color(color)),
             ..container::Style::default()
         });
-    let body = container(event_text(event, s, c, compact, with_team))
+    let body = container(event_text(event, s, c, &look))
         .padding(Padding::from([2, 6]))
         .width(Length::Fill)
         .clip(true);
-    iced::widget::button(row![stripe, body].height(Length::Fill))
+    let inside: Element<'a, Message> = match mark {
+        Some((marked, toggle)) => row![
+            stripe,
+            container(mark_button(marked, toggle, c))
+                .padding(Padding::ZERO.left(2))
+                .height(Length::Fill)
+                .align_y(Alignment::Center),
+            body
+        ]
+        .height(Length::Fill)
+        .into(),
+        None => row![stripe, body].height(Length::Fill).into(),
+    };
+    iced::widget::button(inside)
         .width(Length::Fill)
         .height(Length::Fixed(height))
         .padding(0)
@@ -1037,10 +1645,13 @@ fn event_text<'a>(
     event: &AgendaEventRecord,
     s: &'static Strings,
     c: Colors,
-    compact: bool,
-    with_team: bool,
+    look: &Look,
 ) -> Element<'a, Message> {
-    let time = event.start.get(11..16).unwrap_or_default().to_string();
+    let (compact, with_team) = (look.compact, look.with_team);
+    let time = match look.span {
+        true => crate::calendar::time_span(&event.start, event.minutes),
+        false => event.start.get(11..16).unwrap_or_default().to_string(),
+    };
     let (icon, color, title, detail) = match &event.item {
         AgendaItemRecord::Session {
             title,
@@ -1054,6 +1665,9 @@ fn event_text<'a>(
             }
             if *to_close {
                 flags.push(s.to_close.to_string());
+            }
+            if look.unrecorded {
+                flags.push(s.attendance_not_recorded.to_string());
             }
             (
                 theme::icons::CALENDAR,
@@ -1104,7 +1718,9 @@ fn event_text<'a>(
     let title = crate::agenda::heading(event, title, with_team);
     // another team holds the gym then: the error color and an icon
     let shared = event.shared_venue && !cancelled;
+    // one line clipped, not wrapped under where it can't be seen
     let first = text(format!("{time} {title}{marks}"))
+        .wrapping(iced::widget::text::Wrapping::None)
         .size(SIZE_SMALL)
         .font(theme::fonts().bold)
         .color(match (cancelled, shared) {
@@ -1199,6 +1815,114 @@ mod tests {
         let first = month_weeks(day(11, 1)).into_iter().next().unwrap();
         assert_eq!(whole_week(&first)[0], day(10, 26));
         assert_eq!(whole_week(&first)[6], day(11, 1));
+    }
+
+    fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
+        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    fn session(core: &Scout4All, team: &str, start: &str) -> String {
+        let draft = scout4all_mobile::training::SessionDraft {
+            start: Some(start.to_string()),
+            duration: "90".into(),
+            ..core.new_session_draft()
+        };
+        core.save_session(team.to_string(), None, draft).unwrap().id
+    }
+
+    fn day(text: &str) -> NaiveDate {
+        text.parse().unwrap()
+    }
+
+    /// The filter hides what it leaves out in the week, the month and the
+    /// list alike; the list has only the days with something, also once
+    /// the filter empties some.
+    #[test]
+    fn the_filter_hides_in_every_view_and_the_list_skips_empty_days() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let planned = session(&core, &team, "2026-03-10T18:00");
+        let cancelled = session(&core, &team, "2026-03-12T18:00");
+        core.set_session_status(cancelled.clone(), SessionStatus::Cancelled)
+            .unwrap();
+        let mut tab = CalendarTab::at(core.clone(), team, day("2026-03-11"));
+        assert_eq!(
+            tab.shown_sessions(),
+            vec![planned.clone(), cancelled.clone()]
+        );
+        tab.update(Message::Filter(Filter::Cancelled));
+        assert_eq!(tab.shown_sessions(), vec![cancelled.clone()]);
+        // the week keeps its seven days, the events hidden
+        assert_eq!(tab.days().len(), 7);
+        tab.key(key!(m));
+        assert_eq!(tab.shown_sessions(), vec![cancelled.clone()]);
+        assert_eq!(tab.days().len(), 31);
+        tab.key(key!(l));
+        assert_eq!(tab.shown_sessions(), vec![cancelled.clone()]);
+        let dates: Vec<String> = tab.days().iter().map(|d| d.date.clone()).collect();
+        assert_eq!(dates, vec!["2026-03-12".to_string()]);
+        tab.update(Message::Filter(Filter::All));
+        let dates: Vec<String> = tab.days().iter().map(|d| d.date.clone()).collect();
+        assert_eq!(
+            dates,
+            vec!["2026-03-10".to_string(), "2026-03-12".to_string()]
+        );
+        assert!(tab.days().iter().all(|d| !d.events.is_empty()));
+        // in the list ↑ ↓ go from event to event across the days
+        assert_eq!(tab.anchor(), day("2026-03-12"));
+        tab.key(key!(up));
+        assert_eq!(tab.anchor(), day("2026-03-10"));
+        assert_eq!(tab.key(key!(enter)), Leave::Session(planned));
+    }
+
+    /// The marks stay changing view and period; only free sessions are
+    /// marked; `c` hands them over and clears them; ⌫ asks to delete the
+    /// session chosen.
+    #[test]
+    fn the_marks_stay_across_views_and_periods() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let first = session(&core, &team, "2026-03-10T18:00");
+        let second = session(&core, &team, "2026-04-14T18:00");
+        let mut tab = CalendarTab::at(core.clone(), team, day("2026-03-10"));
+        tab.key(key!(space));
+        assert_eq!(tab.marked_count(), 1);
+        tab.key(key!(m));
+        tab.key(key!(pagedown));
+        tab.update(Message::Mark(second.clone()));
+        tab.key(key!(l));
+        tab.key(key!(p));
+        assert_eq!(tab.marked_count(), 2);
+        // something not free is not marked
+        tab.update(Message::Mark("nessuna".into()));
+        assert_eq!(tab.marked_count(), 2);
+        tab.key(key!(w));
+        let mut both = vec![first.clone(), second];
+        both.sort();
+        assert_eq!(tab.key(key!(c)), Leave::Create(both));
+        assert_eq!(tab.marked_count(), 0);
+        assert_eq!(tab.key(key!(c)), Leave::Stay);
+        tab.key(key!(home));
+        assert_eq!(tab.key(key!(backspace)), Leave::Delete(first));
+    }
+
+    /// What is to close is in the past: in the list the filter looks at
+    /// any date, whatever the period was.
+    #[test]
+    fn to_close_widens_the_period_of_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let old = session(&core, &team, "2026-01-05T18:00");
+        let mut tab = CalendarTab::at(core.clone(), team, day("2026-03-11"));
+        tab.key(key!(l));
+        tab.set_period(Period::Month);
+        assert!(tab.shown_sessions().is_empty());
+        tab.update(Message::Filter(Filter::ToClose));
+        assert_eq!(tab.period_shown(), Period::Any);
+        assert_eq!(tab.shown_sessions(), vec![old]);
     }
 
     fn offers_venues(tab: &CalendarTab) -> bool {
