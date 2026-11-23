@@ -13,6 +13,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import io.github.naighes.scout4all.core.ActivityStatus
 import io.github.naighes.scout4all.core.AttendanceStatus
 import io.github.naighes.scout4all.core.Level
@@ -187,11 +188,17 @@ class TrainingScreensTest {
         assertTrue(zoe.guest && zoe.makeup)
     }
 
-    private fun hub(part: Part, onNewOn: (LocalDate) -> Unit = {}, onNewCycle: (Level) -> Unit = {}) = rule.setContent {
+    private fun hub(
+        part: Part,
+        onNewOn: (LocalDate) -> Unit = {},
+        onNewCycle: (Level) -> Unit = {},
+        onCreateFrom: (Level, List<String>) -> Unit = { _, _ -> },
+    ) = rule.setContent {
         Scout4AllTheme {
             TrainingScreen(
                 team, onBack = {}, onSession = {}, onCycle = { _, _ -> },
                 onNewCycle = onNewCycle, onNewOn = onNewOn, onMatch = {}, first = part,
+                onCreateFrom = onCreateFrom,
             )
         }
     }
@@ -480,5 +487,121 @@ class TrainingScreensTest {
         // the first is absent once, present never: 0% on one session
         rule.waitForText("0% ${string(R.string.tr_on_sessions)} 1")
         rule.waitForText(rows.first().name)
+    }
+
+    private fun mark(name: String) {
+        rule.onNode(isToggleable() and hasContentDescription(string(R.string.tr_mark, name))).performScrollTo().performClick()
+        rule.waitForIdle()
+    }
+
+    /** The buttons over the list say their text only in the unmerged tree. */
+    private fun fabs(text: String): Int =
+        rule.onAllNodes(hasText(text), useUnmergedTree = true).fetchSemanticsNodes().size
+
+    private fun waitForFab(text: String) = rule.waitFor({ "no button \"$text\"" }) { fabs(text) > 0 }
+
+    private fun pressFab(text: String) {
+        rule.onNode(hasText(text), useUnmergedTree = true).performClick()
+        rule.waitForIdle()
+    }
+
+    private fun marks(name: String): Int =
+        rule.onAllNodes(isToggleable() and hasContentDescription(string(R.string.tr_mark, name))).fetchSemanticsNodes().size
+
+    private fun microcycle(title: String, monday: LocalDate, sessions: List<String> = emptyList()) = core {
+        it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(title = title, start = monday.toString(), weeks = "1"), sessions, false)
+    }.id
+
+    /** The free sessions of the team have a box in the list and in the
+     * month; what is marked stays across views, and "Create microcycle (N)"
+     * shows only then and hands them over. A session in a microcycle has
+     * no box. */
+    @Test
+    fun markedSessionsMakeAMicrocycle() {
+        val monday = LocalDate.now().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }.plusWeeks(1)
+        val first = session(monday, "Ricezione")
+        val second = session(monday.plusDays(2), "Battuta")
+        val held = session(monday.plusDays(3), "Attacco")
+        microcycle("Carico", monday, listOf(held))
+        val made = mutableListOf<Pair<Level, List<String>>>()
+        hub(Part.CALENDAR, onCreateFrom = { level, ids -> made += level to ids })
+        rule.waitForText(string(R.string.agenda_today))
+        press(string(R.string.tr_calendar_list))
+        rule.waitForText("Attacco")
+        assertEquals(0, marks("Attacco"))
+        val create = { n: Int -> "${string(R.string.tr_create_microcycle)} ($n)" }
+        assertEquals(0, fabs(create(1)))
+        mark("Ricezione")
+        waitForFab(create(1))
+        // the month keeps the mark: the second marked on its day
+        press(string(R.string.tr_calendar_month))
+        val day = monday.plusDays(2)
+        if (java.time.YearMonth.from(day) != java.time.YearMonth.now()) {
+            val next = hasContentDescription(string(R.string.agenda_next_week))
+            rule.onNode(androidx.compose.ui.test.hasScrollToNodeAction()).performScrollToNode(next)
+            rule.onNode(next).performClick()
+            rule.waitForIdle()
+        }
+        waitForFab(create(1))
+        val spoken = day.format(java.time.format.DateTimeFormatter.ofLocalizedDate(java.time.format.FormatStyle.FULL))
+        val cell = androidx.compose.ui.test.hasTestTag(DAY_OF_MONTH) and hasText(spoken, substring = true)
+        rule.onNode(androidx.compose.ui.test.hasScrollToNodeAction()).performScrollToNode(cell)
+        rule.onNode(cell).performClick()
+        rule.waitForText("Battuta")
+        mark("Battuta")
+        pressFab(create(2))
+        rule.waitFor({ "not handed over" }) { made.isNotEmpty() }
+        assertEquals(Level.MICROCYCLE, made.single().first)
+        assertEquals(setOf(first, second), made.single().second.toSet())
+        // handed over, the marks go
+        rule.waitFor({ "still marked" }) { fabs(create(2)) == 0 }
+    }
+
+    /** The free microcycles have a box; "Create mesocycle (N)" makes one of
+     * the marked; the programs, with no level above, have none. */
+    @Test
+    fun markedCyclesMakeTheLevelAbove() {
+        val monday = LocalDate.now().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val a = microcycle("Carico", monday)
+        val b = microcycle("Scarico", monday.plusWeeks(1))
+        val c = microcycle("Tenuto", monday.plusWeeks(2))
+        core {
+            it.saveCycle(team, Level.MESOCYCLE, null, it.newCycleDraft().copy(title = "Blocco", start = monday.plusWeeks(2).toString(), weeks = "1"), listOf(c), false)
+        }
+        val made = mutableListOf<Pair<Level, List<String>>>()
+        hub(Part.CYCLES, onCreateFrom = { level, ids -> made += level to ids })
+        rule.waitForText("Carico")
+        assertEquals(0, marks("Tenuto"))
+        mark("Carico")
+        mark("Scarico")
+        pressFab("${string(R.string.tr_create_mesocycle)} (2)")
+        rule.waitFor({ "not handed over" }) { made.isNotEmpty() }
+        assertEquals(Level.MESOCYCLE, made.single().first)
+        assertEquals(setOf(a, b), made.single().second.toSet())
+        rule.onNode(hasText(string(Level.PROGRAM.plural())) and hasClickAction()).performClick()
+        rule.waitForIdle()
+        assertEquals(0, rule.onAllNodes(isToggleable() and hasContentDescription(string(R.string.tr_mark, "Blocco"), substring = true)).fetchSemanticsNodes().size)
+    }
+
+    /** A new microcycle of sessions starts on the Monday of the first and
+     * lasts to the week of the last; saved, it holds them. */
+    @Test
+    fun aMicrocycleOfSessionsIsProposedAndHoldsThem() {
+        val monday = LocalDate.now().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }.plusWeeks(1)
+        val first = session(monday.plusDays(1), "Ricezione")
+        val second = session(monday.plusWeeks(1).plusDays(3), "Battuta")
+        val saved = mutableListOf<String>()
+        rule.setContent {
+            Scout4AllTheme {
+                CycleFormScreen(team, Level.MICROCYCLE, null, onBack = {}, onSaved = { saved += it }, children = listOf(second, first))
+            }
+        }
+        rule.waitForText(string(R.string.tr_cycle_weeks))
+        rule.onNode(hasSetTextAction() and hasText("2")).assertExists()
+        rule.save()
+        rule.waitFor({ "not saved" }) { saved.isNotEmpty() }
+        val cycle = core { it.cycle(Level.MICROCYCLE, saved.single()) }
+        assertEquals(monday.toString(), cycle.firstDay)
+        assertEquals(setOf(first, second), core { it.cycleChildren(Level.MICROCYCLE, cycle.id) }.map { c -> c.id }.toSet())
     }
 }

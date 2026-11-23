@@ -616,7 +616,7 @@
     <string name="tr_keep">Bez zmian</string>
     <string name="tr_status">Status</string>
     <string name="tr_remove_guest">Usuń</string>
-    <string name="tr_cycles_intro">Plan treningów dzieli sezon na bloki, od największego do najmniejszego. Program obejmuje sezon (lub jego połowę): przygotowanie, rozgrywki, odpoczynek. Mezocykl trwa zwykle od trzech do sześciu tygodni i ma jeden cel: kilka cięższych tygodni, potem lżejszy. Mikrocykl to tydzień: jego sesje i mecz, najcięższa sesja jak najdalej od meczu. Zacznij od programu, potem utwórz w nim mezocykle i mikrocykle.</string>
+    <string name="tr_cycles_intro">Plan treningów dzieli sezon na bloki, od największego do najmniejszego. Program obejmuje sezon (lub jego połowę): przygotowanie, rozgrywki, odpoczynek. Mezocykl trwa zwykle od trzech do sześciu tygodni i ma jeden cel: kilka cięższych tygodni, potem lżejszy. Mikrocykl to tydzień: jego sesje i mecz, najcięższa sesja jak najdalej od meczu. Zacznij od góry (program, potem mezocykle i mikrocykle w nim) albo od dołu (zaznacz sesje i utwórz mikrocykl).</string>
     <string name="tr_programs">Programy</string>
     <string name="tr_mesocycles">Mezocykle</string>
     <string name="tr_microcycles">Mikrocykle</string>
@@ -681,6 +681,7 @@
     <string name="venue_create">Utwórz</string>
     <string name="tr_create_program">Utwórz program</string>
     <string name="tr_create_mesocycle">Utwórz mezocykl</string>
+    <string name="tr_mark">Zaznacz %1$s</string>
     <string name="tr_create_microcycle">Utwórz mikrocykl</string>
     <string name="tr_edit_program">Edytuj program</string>
     <string name="tr_edit_mesocycle">Edytuj mezocykl</string>

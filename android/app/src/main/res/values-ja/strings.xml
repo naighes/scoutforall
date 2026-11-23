@@ -610,7 +610,7 @@
     <string name="tr_keep">変更しない</string>
     <string name="tr_status">状態</string>
     <string name="tr_remove_guest">外す</string>
-    <string name="tr_cycles_intro">計画はシーズンを大きい順にブロックへ分けます。プログラムはシーズン全体（または半分）で、準備期・リーグ戦・休養を含みます。メゾサイクルは通常3〜6週間で、目標は一つです。数週間しっかり負荷をかけ、その後の1週間は軽くします。マイクロサイクルは1週間で、セッションと試合から成り、最も重いセッションは試合からできるだけ離します。まずプログラムを作り、その中にメゾサイクルとマイクロサイクルを作成します。</string>
+    <string name="tr_cycles_intro">計画はシーズンを大きい順にブロックへ分けます。プログラムはシーズン全体（または半分）で、準備期・リーグ戦・休養を含みます。メゾサイクルは通常3〜6週間で、目標は一つです。数週間しっかり負荷をかけ、その後の1週間は軽くします。マイクロサイクルは1週間で、セッションと試合から成り、最も重いセッションは試合からできるだけ離します。上から（プログラム、その中にメゾサイクルとマイクロサイクル）でも、下から（セッションにチェックを付けてマイクロサイクルを作成）でも始められます。</string>
     <string name="tr_programs">プログラム</string>
     <string name="tr_mesocycles">メゾサイクル</string>
     <string name="tr_microcycles">マイクロサイクル</string>
@@ -675,6 +675,7 @@
     <string name="venue_create">作成</string>
     <string name="tr_create_program">プログラムを作成</string>
     <string name="tr_create_mesocycle">メゾサイクルを作成</string>
+    <string name="tr_mark">%1$sを選択</string>
     <string name="tr_create_microcycle">マイクロサイクルを作成</string>
     <string name="tr_edit_program">プログラムを編集</string>
     <string name="tr_edit_mesocycle">メゾサイクルを編集</string>

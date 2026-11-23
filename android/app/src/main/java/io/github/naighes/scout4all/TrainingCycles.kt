@@ -60,11 +60,18 @@ import io.github.naighes.scout4all.core.Level
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.TrainingField
 import io.github.naighes.scout4all.core.TrainingScope
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 
 /** The form of a new cycle; from the sheet of a cycle, in it from a day. */
-private const val NEW_CYCLE = "team/{id}/cycle-new/{level}?start={start}&parent={parent}"
+private const val NEW_CYCLE = "team/{id}/cycle-new/{level}?start={start}&parent={parent}&children={children}"
+
+/** The form of a new cycle of `level` made from the free `children` (comma
+ * separated: sessions for a microcycle, cycles of the level below). */
+internal fun newCycleOf(teamId: String, level: Level, children: List<String>) =
+    "team/$teamId/cycle-new/${level.name}?children=${children.joinToString(",")}"
 
 /** The screens of a cycle: its data and totals, the form, what to add to
  * it, the copy of a microcycle. */
@@ -107,13 +114,15 @@ fun NavGraphBuilder.cycleRoutes(nav: NavController) {
         arguments = listOf(
             navArgument("start") { type = NavType.StringType; nullable = true; defaultValue = null },
             navArgument("parent") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("children") { type = NavType.StringType; nullable = true; defaultValue = null },
         ),
     ) { entry ->
         val id = entry.arg("id")
         val level = entry.level()
         val parent = entry.arguments?.getString("parent")
         val start = entry.arguments?.getString("start")
-        CycleFormScreen(id, level, null, onBack = { nav.back(entry) }, start = start, parent = parent, onSaved = { cycle ->
+        val children = entry.arguments?.getString("children").orEmpty().split(',').filter { it.isNotBlank() }
+        CycleFormScreen(id, level, null, onBack = { nav.back(entry) }, start = start, parent = parent, children = children, onSaved = { cycle ->
             when (parent) {
                 null -> nav.navigate("team/$id/cycles/${level.name}/$cycle") { popUpTo(NEW_CYCLE) { inclusive = true } }
                 else -> nav.back(entry)
@@ -136,8 +145,21 @@ fun NavGraphBuilder.cycleRoutes(nav: NavController) {
 
 /** The cycles of a level of the team, to open one. */
 @Composable
-fun CyclesTab(teamId: String, level: Level, onLevel: (Level) -> Unit, modifier: Modifier, onCycle: (Level, String) -> Unit) {
+fun CyclesTab(
+    teamId: String,
+    level: Level,
+    onLevel: (Level) -> Unit,
+    modifier: Modifier,
+    onCycle: (Level, String) -> Unit,
+    marked: List<String> = emptyList(),
+    onMarked: (List<String>) -> Unit = {},
+) {
     val cycles by rememberCore(Unit, level) { it.cycles(teamId, level) }
+    // only the free ones are marked, to be put in a cycle of the level above
+    val free = cycles?.filter { it.parentId == null }?.map { it.id }?.toSet()
+    androidx.compose.runtime.LaunchedEffect(free) {
+        if (free != null && marked.any { it !in free }) onMarked(marked.filter { it in free })
+    }
     Column(modifier) {
         Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf(Level.PROGRAM, Level.MESOCYCLE, Level.MICROCYCLE).forEach {
@@ -147,17 +169,7 @@ fun CyclesTab(teamId: String, level: Level, onLevel: (Level) -> Unit, modifier: 
         val all = cycles
         when (all) {
             null -> Centered(Modifier.fillMaxSize()) { CircularProgressIndicator() }
-            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 88.dp)) {
-                // what the levels are, for who has never planned a season:
-                // it scrolls away with the list
-                item(key = "intro") {
-                    Text(
-                        stringResource(R.string.tr_cycles_intro),
-                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            else -> LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = fabRoom(marked.isNotEmpty()))) {
                 // counted by name, none in words
                 item(key = "count") {
                     Text(
@@ -168,15 +180,41 @@ fun CyclesTab(teamId: String, level: Level, onLevel: (Level) -> Unit, modifier: 
                     )
                 }
                 items(all.sortedByDescending { it.firstDay }, key = { it.id }) { c ->
+                    val name = c.title.ifBlank { stringResource(level.label()) }
                     ListItem(
                         modifier = Modifier.clickable { onCycle(level, c.id) },
+                        trailingContent = if (level.parent() != null && c.parentId == null) {
+                            { MarkBox(name, c.id in marked) { onMarked(if (c.id in marked) marked - c.id else marked + c.id) } }
+                        } else null,
                         overlineContent = { Text(windowText(c.firstDay, c.lastDay)) },
-                        headlineContent = { Text(c.title.ifBlank { stringResource(level.label()) }) },
+                        headlineContent = { Text(name) },
+                    )
+                }
+                // what the levels are, for who has never planned a season:
+                // under the list, so that the cycles come first (at a large
+                // font it would push them below the fold)
+                item(key = "intro") {
+                    Text(
+                        stringResource(R.string.tr_cycles_intro),
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
             }
         }
     }
+}
+
+/** The box that marks a free session or cycle, to make a cycle of them. */
+@Composable
+internal fun MarkBox(name: String, marked: Boolean, onToggle: () -> Unit) {
+    val spoken = stringResource(R.string.tr_mark, name)
+    androidx.compose.material3.Checkbox(
+        checked = marked,
+        onCheckedChange = { onToggle() },
+        modifier = Modifier.semantics { contentDescription = spoken },
+    )
 }
 
 private fun minutesText(minutes: UInt): String = "${minutes / 60u}:${(minutes % 60u).toString().padStart(2, '0')}"
@@ -426,7 +464,7 @@ private fun rememberContaining(teamId: String, level: Level?, day: LocalDate?, c
     return found
 }
 
-private fun Level.parent(): Level? = when (this) {
+internal fun Level.parent(): Level? = when (this) {
     Level.PROGRAM -> null
     Level.MESOCYCLE -> Level.PROGRAM
     Level.MICROCYCLE -> Level.MESOCYCLE
@@ -443,15 +481,21 @@ fun CycleFormScreen(
     onSaved: (String) -> Unit,
     start: String? = null,
     parent: String? = null,
+    children: List<String> = emptyList(),
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val draft by produceState<CycleDraft?>(null, cycleId) {
         value = try {
             app.core {
-                when (cycleId) {
+                when {
+                    cycleId != null -> it.cycleDraft(level, cycleId)
+                    // made from what was marked: the window that holds it
+                    children.isNotEmpty() -> when (level) {
+                        Level.MICROCYCLE -> it.proposedMicrocycle(children)
+                        else -> it.proposedContainer(level, children)
+                    } ?: it.newCycleDraft()
                     // made from the sheet of a cycle: in it, from the day given
-                    null -> it.newCycleDraft().let { d -> d.copy(start = start ?: d.start, parent = parent ?: d.parent) }
-                    else -> it.cycleDraft(level, cycleId)
+                    else -> it.newCycleDraft().let { d -> d.copy(start = start ?: d.start, parent = parent ?: d.parent) }
                 }
             }
         } catch (_: MobileException) {
@@ -471,7 +515,7 @@ fun CycleFormScreen(
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         val d = draft
         if (d == null) Centered(modifier) { CircularProgressIndicator() }
-        else CycleFields(teamId, level, cycleId, d, modifier, onChanged = { changed = true }, onSaved = onSaved)
+        else CycleFields(teamId, level, cycleId, d, children.takeIf { cycleId == null }.orEmpty(), modifier, onChanged = { changed = true }, onSaved = onSaved)
     }
 }
 
@@ -481,6 +525,7 @@ private fun CycleFields(
     level: Level,
     cycleId: String?,
     draft: CycleDraft,
+    children: List<String>,
     modifier: Modifier,
     onChanged: () -> Unit,
     onSaved: (String) -> Unit,
@@ -530,7 +575,7 @@ private fun CycleFields(
                             notes = notes,
                             parent = parent,
                         ),
-                        emptyList(),
+                        children,
                         detach,
                     )
                 }

@@ -179,6 +179,7 @@ internal fun EventRow(
     onSession: (teamId: String, sessionId: String) -> Unit,
     lit: Boolean = false,
     unrecorded: Boolean = false,
+    mark: Pair<Boolean, () -> Unit>? = null,
 ) {
     // on today's background the rows are clear, to let it show
     val colors = if (lit) ListItemDefaults.colors(containerColor = Color.Transparent) else ListItemDefaults.colors()
@@ -206,8 +207,15 @@ internal fun EventRow(
                     val line = listOfNotNull(e.venueText(), note, missing).joinToString(" · ")
                     if (line.isNotEmpty()) Text(line, color = e.clashColor())
                 },
-                trailingContent = if (e.sharedVenue) {
-                    { ClashMark() }
+                // the box on the right: the rows without it (matches,
+                // sessions already in a microcycle) stay aligned
+                trailingContent = if (e.sharedVenue || mark != null) {
+                    {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (e.sharedVenue) ClashMark()
+                            mark?.let { (marked, toggle) -> MarkBox(i.title.ifBlank { e.teamName }, marked, toggle) }
+                        }
+                    }
                 } else null,
             )
         }

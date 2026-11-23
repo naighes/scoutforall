@@ -168,12 +168,19 @@ internal fun TrainingScreen(
     onVenues: () -> Unit = {},
     first: Part = Part.CALENDAR,
     firstView: CalendarView = CalendarView.MONTH,
+    onCreateFrom: (Level, List<String>) -> Unit = { _, _ -> },
 ) {
     var part by rememberSaveable { mutableStateOf(first) }
     var view by rememberSaveable { mutableStateOf(firstView) }
     var level by rememberSaveable { mutableStateOf(Level.MICROCYCLE) }
     var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
     var sharing by rememberSaveable { mutableStateOf(false) }
+    // what is marked to make a cycle of it: the sessions stay across the
+    // views and periods of the calendar, the cycles while on their level
+    var sessions by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    var cycles by rememberSaveable { mutableStateOf(emptyList<String>()) }
+    val free by rememberCore(part, teamId) { c -> c.trainingSessions(teamId).filter { it.microcycleId == null }.map { it.id }.toSet() }
+    val markedSessions = free?.let { f -> sessions.filter { it in f } }.orEmpty()
     Scaffold(
         topBar = {
             Column {
@@ -209,26 +216,46 @@ internal fun TrainingScreen(
             }
         },
         floatingActionButton = {
+            // said in words: the same + makes a session here, a cycle there;
+            // above it, only once something is marked, the cycle of it
+            val up = level.parent()
             when (part) {
-                // said in words: the same + makes a session here, a cycle there
-                Part.CALENDAR -> ExtendedFloatingActionButton(
-                    onClick = { onNewOn(day) },
-                    icon = { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tr_new_session)) },
-                    text = { Text(stringResource(R.string.tr_new_session)) },
-                )
-                Part.CYCLES -> ExtendedFloatingActionButton(
-                    onClick = { onNewCycle(level) },
-                    icon = { Icon(Icons.Filled.Add, contentDescription = stringResource(level.createName())) },
-                    text = { Text(stringResource(level.createName())) },
-                )
+                Part.CALENDAR -> Fabs(
+                    markedSessions.takeIf { it.isNotEmpty() }?.let { m ->
+                        "${stringResource(R.string.tr_create_microcycle)} (${m.size})" to {
+                            onCreateFrom(Level.MICROCYCLE, m)
+                            sessions = emptyList()
+                        }
+                    },
+                    stringResource(R.string.tr_new_session),
+                ) { onNewOn(day) }
+                Part.CYCLES -> Fabs(
+                    up?.takeIf { cycles.isNotEmpty() }?.let { u ->
+                        "${stringResource(u.createName())} (${cycles.size})" to {
+                            onCreateFrom(u, cycles)
+                            cycles = emptyList()
+                        }
+                    },
+                    stringResource(level.createName()),
+                ) { onNewCycle(level) }
                 else -> {}
             }
         },
     ) { padding ->
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (part) {
-            Part.CALENDAR -> CalendarTab(teamId, day, { day = it }, view, { view = it }, modifier, onSession, onMatch, onNewOn)
-            Part.CYCLES -> CyclesTab(teamId, level, { level = it }, modifier, onCycle)
+            Part.CALENDAR -> CalendarTab(
+                teamId, day, { day = it }, view, { view = it }, modifier, onSession, onMatch, onNewOn,
+                free.orEmpty(), markedSessions, { sessions = it },
+            )
+            Part.CYCLES -> CyclesTab(
+                teamId, level,
+                {
+                    level = it
+                    cycles = emptyList()
+                },
+                modifier, onCycle, cycles, { cycles = it },
+            )
             Part.ATTENDANCE -> AttendanceTab(teamId, modifier)
         }
     }
@@ -243,6 +270,30 @@ internal fun TrainingScreen(
         )
     }
 }
+
+/** The + of the part, and above it the cycle of what is marked, when
+ * something is: both said in words. */
+@Composable
+private fun Fabs(create: Pair<String, () -> Unit>?, add: String, onAdd: () -> Unit) =
+    Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        create?.let { (label, onCreate) ->
+            ExtendedFloatingActionButton(
+                onClick = onCreate,
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                icon = { Icon(Icons.Filled.Add, contentDescription = null) },
+                text = { Text(label) },
+            )
+        }
+        ExtendedFloatingActionButton(
+            onClick = onAdd,
+            icon = { Icon(Icons.Filled.Add, contentDescription = add) },
+            text = { Text(add) },
+        )
+    }
+
+/** Room under a list for the buttons over it: one, or two with something
+ * marked. */
+internal fun fabRoom(marked: Boolean) = if (marked) 160.dp else 88.dp
 
 @Composable
 private fun Part.label(): String = when (this) {
@@ -267,6 +318,9 @@ private fun CalendarTab(
     onSession: (String) -> Unit,
     onMatch: (String) -> Unit,
     onNewOn: (LocalDate) -> Unit,
+    free: Set<String> = emptySet(),
+    marked: List<String> = emptyList(),
+    onMarked: (List<String>) -> Unit = {},
 ) {
     var month by rememberSaveable { mutableStateOf(YearMonth.from(selected)) }
     // the gyms are shared: every team, or one gym only
@@ -306,9 +360,13 @@ private fun CalendarTab(
             { t, m -> if (t == teamId) onMatch(m) },
             { t, s -> if (t == teamId) onSession(s) },
             unrecorded = unrecorded(e),
+            // the free sessions of the team, to make a microcycle of them
+            mark = (e.item as? AgendaItemRecord.Session)?.id?.takeIf { e.teamId == teamId && it in free }?.let { id ->
+                (id in marked) to { onMarked(if (id in marked) marked - id else marked + id) }
+            },
         )
     }
-    LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
+    LazyColumn(modifier, contentPadding = PaddingValues(bottom = fabRoom(marked.isNotEmpty()))) {
         if (view == CalendarView.MONTH) {
             item(key = "month") {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {

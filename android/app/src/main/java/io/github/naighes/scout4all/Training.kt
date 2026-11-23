@@ -94,6 +94,7 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
             onNewOn = { day -> nav.navigate("team/$id/training-new-on/$day") },
             onMatch = { match -> nav.navigate("team/$id/match/${android.net.Uri.encode(match)}") },
             onVenues = { nav.navigate("venues") },
+            onCreateFrom = { level, children -> nav.navigate(newCycleOf(id, level, children)) },
         )
     }
     composable("team/{id}/training-new-on/{day}") { entry ->
