@@ -12,7 +12,6 @@ import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Place
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -129,7 +128,7 @@ fun TeamsScreen(
                         Icon(painterResource(R.drawable.ic_trophy), contentDescription = stringResource(R.string.competitions))
                     }
                     IconButton(onClick = onVenues) {
-                        Icon(Icons.Filled.Place, contentDescription = stringResource(R.string.venues))
+                        Icon(painterResource(R.drawable.ic_gym), contentDescription = stringResource(R.string.venues))
                     }
                     IconButton(onClick = onSettings) {
                         Icon(Icons.Filled.Settings, contentDescription = stringResource(R.string.settings))

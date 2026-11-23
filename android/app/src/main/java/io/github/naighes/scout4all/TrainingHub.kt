@@ -136,6 +136,7 @@ internal fun TrainingScreen(
     onNewCycle: (Level) -> Unit,
     onNewOn: (LocalDate) -> Unit,
     onMatch: (String) -> Unit,
+    onVenues: () -> Unit = {},
     first: Part = Part.CALENDAR,
     firstView: CalendarView = CalendarView.MONTH,
 ) {
@@ -153,6 +154,14 @@ internal fun TrainingScreen(
                     actions = {
                         if (part == Part.CALENDAR) {
                             TextButton(onClick = onSeries) { Text(stringResource(R.string.tr_repeat_sessions)) }
+                        }
+                        // the gyms are where sessions are held: they're
+                        // added from here too, not only from the home
+                        IconButton(onClick = onVenues) {
+                            Icon(
+                                androidx.compose.ui.res.painterResource(R.drawable.ic_gym),
+                                contentDescription = stringResource(R.string.venues),
+                            )
                         }
                         IconButton(onClick = { sharing = true }) {
                             Icon(
@@ -179,7 +188,7 @@ internal fun TrainingScreen(
                     Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tr_new_session))
                 }
                 Part.CYCLES -> FloatingActionButton(onClick = { onNewCycle(level) }) {
-                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tr_new_cycle))
+                    Icon(Icons.Filled.Add, contentDescription = stringResource(level.createName()))
                 }
                 else -> {}
             }
@@ -384,6 +393,14 @@ private fun CalendarTab(
             CalendarView.LIST -> {
                 // only the days with something, the filter too
                 val days = shown(listDays).filter { it.events.isNotEmpty() }
+                item(key = "count") {
+                    Text(
+                        countText(null, days.sumOf { d -> d.events.count { it.item is AgendaItemRecord.Session } }),
+                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 if (days.isEmpty()) {
                     item(key = "nothing") {
                         Text(
@@ -520,6 +537,15 @@ private fun AttendanceTab(teamId: String, modifier: Modifier) {
             modifier = Modifier.padding(16.dp),
         )
         val r = report
+        // the sessions counted, none in words
+        r?.let {
+            Text(
+                countText(null, it.sessions.toInt()),
+                Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
         when {
             r == null -> Centered(Modifier.fillMaxSize()) { CircularProgressIndicator() }
             r.players.isEmpty() -> Text(

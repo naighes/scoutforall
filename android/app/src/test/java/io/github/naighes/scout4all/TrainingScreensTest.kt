@@ -5,6 +5,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -193,6 +194,60 @@ class TrainingScreensTest {
         press(string(R.string.tr_add_children))
         rule.waitFor({ "not added" }) { done.isNotEmpty() }
         assertEquals(listOf(s.id), core { it.cycleChildren(Level.MICROCYCLE, cycle.id) }.map { c -> c.id })
+    }
+
+    /** The sheet of a microcycle lists its sessions under their day, as
+     * the list of the calendar, not the free ones; it makes a session on
+     * its first day and offers the free ones only when there are some. */
+    @Test
+    fun theSheetOfAMicrocycleListsItsSessionsAndMakesOne() {
+        val monday = LocalDate.now().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val cycle = core {
+            it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(title = "Carico", start = monday.toString(), weeks = "1"), emptyList(), false)
+        }
+        val held = session(monday.plusDays(1), "Ricezione")
+        core { it.addChildren(Level.MICROCYCLE, cycle.id, listOf(held)) }
+        val days = mutableListOf<LocalDate>()
+        val opened = mutableListOf<String>()
+        rule.setContent {
+            Scout4AllTheme {
+                CycleScreen(
+                    team, Level.MICROCYCLE, cycle.id,
+                    onBack = {}, onEdit = {}, onAdd = {}, onDuplicate = {},
+                    onChild = { opened += it }, onNewChild = { days += it }, onMatch = {},
+                )
+            }
+        }
+        rule.waitForText("Ricezione")
+        rule.onNodeWithText(fullDayText(monday.plusDays(1))).assertExists()
+        // nothing free: nothing to add
+        rule.onNodeWithText(string(R.string.tr_add_sessions)).assertDoesNotExist()
+        rule.onNodeWithText("Ricezione").performClick()
+        assertEquals(listOf(held), opened)
+        press(string(R.string.tr_new_session))
+        assertEquals(listOf(monday), days)
+    }
+
+    /** A free session in the window: the sheet offers to add it, and does
+     * not list it. */
+    @Test
+    fun theSheetOfAMicrocycleOffersTheFreeOnesOnly() {
+        val monday = LocalDate.now().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val cycle = core {
+            it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(start = monday.toString(), weeks = "1"), emptyList(), false)
+        }
+        session(monday.plusDays(2), "Libera")
+        rule.setContent {
+            Scout4AllTheme {
+                CycleScreen(
+                    team, Level.MICROCYCLE, cycle.id,
+                    onBack = {}, onEdit = {}, onAdd = {}, onDuplicate = {}, onChild = {}, onNewChild = {}, onMatch = {},
+                )
+            }
+        }
+        rule.waitForText(string(R.string.tr_add_sessions))
+        rule.onNodeWithText(string(R.string.tr_no_sessions)).assertExists()
+        rule.onNodeWithText("Libera").assertDoesNotExist()
     }
 
     @Test

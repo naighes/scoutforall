@@ -610,14 +610,10 @@
     <string name="tr_program">Programma</string>
     <string name="tr_mesocycle">Mesociclo</string>
     <string name="tr_no_cycles">Nessun ciclo</string>
-    <string name="tr_new_cycle">Nuovo ciclo</string>
-    <string name="tr_edit_cycle">Modifica il ciclo</string>
     <string name="tr_cycle_start">Primo giorno</string>
     <string name="tr_cycle_weeks">Settimane</string>
     <string name="tr_cycle_end">Ultimo giorno</string>
     <string name="tr_cycle_parent">Dentro</string>
-    <string name="tr_cycle_contains">Contiene</string>
-    <string name="tr_cycle_totals">Totali</string>
     <string name="tr_planned_time">Tempo previsto</string>
     <string name="tr_actual_time">Tempo effettivo</string>
     <string name="tr_add_children">Aggiungi</string>
@@ -644,7 +640,6 @@
     <string name="tr_calendar">calendario</string>
     <string name="tr_month_view">Mese</string>
     <string name="tr_week_view">Settimana</string>
-    <string name="tr_sessions_n">Sedute</string>
     <string name="tr_free_day">Giorno libero</string>
     <string name="tr_detach_save">Stacca e salva</string>
     <string name="venue">Palestra</string>
@@ -671,4 +666,37 @@
     <string name="venue_deleted">palestra eliminata</string>
     <string name="makeups_count">%1$d recuperi</string>
     <string name="venue_create">Crea</string>
+    <string name="tr_create_program">Crea programma</string>
+    <string name="tr_create_mesocycle">Crea mesociclo</string>
+    <string name="tr_create_microcycle">Crea microciclo</string>
+    <string name="tr_edit_program">Modifica il programma</string>
+    <string name="tr_edit_mesocycle">Modifica il mesociclo</string>
+    <string name="tr_edit_microcycle">Modifica il microciclo</string>
+    <string name="tr_add_mesocycles">Aggiungi mesocicli esistenti</string>
+    <string name="tr_add_microcycles">Aggiungi microcicli esistenti</string>
+    <string name="tr_add_sessions">Aggiungi sedute esistenti</string>
+    <string name="tr_no_mesocycles">Nessun mesociclo</string>
+    <string name="tr_no_microcycles">Nessun microciclo</string>
+    <string name="tr_delete">Elimina</string>
+    <string name="tr_delete_cycle_keeps">Ciò che contiene non viene eliminato: resta, libero, a meno che tu non scelga «Elimina anche ciò che contiene».</string>
+    <string name="tr_zero_programs">nessun programma</string>
+    <string name="tr_zero_mesocycles">nessun mesociclo</string>
+    <string name="tr_zero_microcycles">nessun microciclo</string>
+    <string name="tr_zero_sessions">nessuna seduta</string>
+    <plurals name="tr_programs_count">
+        <item quantity="one">%d programma</item>
+        <item quantity="other">%d programmi</item>
+    </plurals>
+    <plurals name="tr_mesocycles_count">
+        <item quantity="one">%d mesociclo</item>
+        <item quantity="other">%d mesocicli</item>
+    </plurals>
+    <plurals name="tr_microcycles_count">
+        <item quantity="one">%d microciclo</item>
+        <item quantity="other">%d microcicli</item>
+    </plurals>
+    <plurals name="tr_sessions_count">
+        <item quantity="one">%d seduta</item>
+        <item quantity="other">%d sedute</item>
+    </plurals>
 </resources>

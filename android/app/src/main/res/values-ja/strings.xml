@@ -608,14 +608,10 @@
     <string name="tr_program">プログラム</string>
     <string name="tr_mesocycle">メゾサイクル</string>
     <string name="tr_no_cycles">サイクルなし</string>
-    <string name="tr_new_cycle">新しいサイクル</string>
-    <string name="tr_edit_cycle">サイクルを編集</string>
     <string name="tr_cycle_start">初日</string>
     <string name="tr_cycle_weeks">週数</string>
     <string name="tr_cycle_end">最終日</string>
     <string name="tr_cycle_parent">所属</string>
-    <string name="tr_cycle_contains">内容</string>
-    <string name="tr_cycle_totals">合計</string>
     <string name="tr_planned_time">予定時間</string>
     <string name="tr_actual_time">実際の時間</string>
     <string name="tr_add_children">追加</string>
@@ -642,7 +638,6 @@
     <string name="tr_calendar">カレンダー</string>
     <string name="tr_month_view">月</string>
     <string name="tr_week_view">週</string>
-    <string name="tr_sessions_n">セッション</string>
     <string name="tr_free_day">空き日</string>
     <string name="tr_detach_save">切り離して保存</string>
     <string name="venue">体育館</string>
@@ -669,4 +664,33 @@
     <string name="venue_deleted">削除された体育館</string>
     <string name="makeups_count">補講 %1$d</string>
     <string name="venue_create">作成</string>
+    <string name="tr_create_program">プログラムを作成</string>
+    <string name="tr_create_mesocycle">メゾサイクルを作成</string>
+    <string name="tr_create_microcycle">マイクロサイクルを作成</string>
+    <string name="tr_edit_program">プログラムを編集</string>
+    <string name="tr_edit_mesocycle">メゾサイクルを編集</string>
+    <string name="tr_edit_microcycle">マイクロサイクルを編集</string>
+    <string name="tr_add_mesocycles">既存のメゾサイクルを追加</string>
+    <string name="tr_add_microcycles">既存のマイクロサイクルを追加</string>
+    <string name="tr_add_sessions">既存のセッションを追加</string>
+    <string name="tr_no_mesocycles">メゾサイクルなし</string>
+    <string name="tr_no_microcycles">マイクロサイクルなし</string>
+    <string name="tr_delete">削除</string>
+    <string name="tr_delete_cycle_keeps">含まれるものは削除されず、そのまま残ります（「含まれるものも削除」を選んだ場合を除く）。</string>
+    <string name="tr_zero_programs">プログラムなし</string>
+    <string name="tr_zero_mesocycles">メゾサイクルなし</string>
+    <string name="tr_zero_microcycles">マイクロサイクルなし</string>
+    <string name="tr_zero_sessions">セッションなし</string>
+    <plurals name="tr_programs_count">
+        <item quantity="other">プログラム %d件</item>
+    </plurals>
+    <plurals name="tr_mesocycles_count">
+        <item quantity="other">メゾサイクル %d件</item>
+    </plurals>
+    <plurals name="tr_microcycles_count">
+        <item quantity="other">マイクロサイクル %d件</item>
+    </plurals>
+    <plurals name="tr_sessions_count">
+        <item quantity="other">セッション %d件</item>
+    </plurals>
 </resources>

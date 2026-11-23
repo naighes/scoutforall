@@ -204,10 +204,10 @@ class ScreensLayoutTest(private val screen: Size) {
     fun aCycle() {
         val team = saveNationalTeam()
         val cycle = week(team)
-        assertFits("cycle", string(R.string.tr_cycle_totals), string(R.string.tr_add_children)) {
+        assertFits("cycle", string(R.string.tr_sessions), string(R.string.tr_new_session)) {
             CycleScreen(
                 team, io.github.naighes.scout4all.core.Level.MICROCYCLE, cycle,
-                onBack = {}, onEdit = {}, onAdd = {}, onDuplicate = {}, onChild = {},
+                onBack = {}, onEdit = {}, onAdd = {}, onDuplicate = {}, onChild = {}, onNewChild = {}, onMatch = {},
             )
         }
     }

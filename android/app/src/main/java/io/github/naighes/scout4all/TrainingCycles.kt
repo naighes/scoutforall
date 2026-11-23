@@ -49,6 +49,9 @@ import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.compose.composable
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
+import androidx.compose.ui.res.pluralStringResource
 import io.github.naighes.scout4all.core.ChildRecord
 import io.github.naighes.scout4all.core.CycleDraft
 import io.github.naighes.scout4all.core.CycleRecord
@@ -59,6 +62,9 @@ import io.github.naighes.scout4all.core.TrainingField
 import io.github.naighes.scout4all.core.TrainingScope
 import kotlinx.coroutines.launch
 import java.time.LocalDate
+
+/** The form of a new cycle; from the sheet of a cycle, in it from a day. */
+private const val NEW_CYCLE = "team/{id}/cycle-new/{level}?start={start}&parent={parent}"
 
 /** The screens of a cycle: its data and totals, the form, what to add to
  * it, the copy of a microcycle. */
@@ -85,14 +91,37 @@ fun NavGraphBuilder.cycleRoutes(nav: NavController) {
                     Level.MICROCYCLE -> nav.navigate("team/$id/training/$child")
                 }
             },
+            // a cycle of the level below in it, or a session on the day;
+            // saved, the sheet comes back
+            onNewChild = { day ->
+                when (val down = level.child()) {
+                    null -> nav.navigate("team/$id/cycle-session-new/$day")
+                    else -> nav.navigate("team/$id/cycle-new/${down.name}?start=$day&parent=$cycle")
+                }
+            },
+            onMatch = { match -> nav.navigate("team/$id/match/${android.net.Uri.encode(match)}") },
         )
     }
-    composable("team/{id}/cycle-new/{level}") { entry ->
+    composable(
+        NEW_CYCLE,
+        arguments = listOf(
+            navArgument("start") { type = NavType.StringType; nullable = true; defaultValue = null },
+            navArgument("parent") { type = NavType.StringType; nullable = true; defaultValue = null },
+        ),
+    ) { entry ->
         val id = entry.arg("id")
         val level = entry.level()
-        CycleFormScreen(id, level, null, onBack = { nav.back(entry) }, onSaved = { cycle ->
-            nav.navigate("team/$id/cycles/${level.name}/$cycle") { popUpTo("team/{id}/cycle-new/{level}") { inclusive = true } }
+        val parent = entry.arguments?.getString("parent")
+        val start = entry.arguments?.getString("start")
+        CycleFormScreen(id, level, null, onBack = { nav.back(entry) }, start = start, parent = parent, onSaved = { cycle ->
+            when (parent) {
+                null -> nav.navigate("team/$id/cycles/${level.name}/$cycle") { popUpTo(NEW_CYCLE) { inclusive = true } }
+                else -> nav.back(entry)
+            }
         })
+    }
+    composable("team/{id}/cycle-session-new/{day}") { entry ->
+        SessionFormScreen(entry.arg("id"), null, onBack = { nav.back(entry) }, day = runCatching { LocalDate.parse(entry.arg("day")) }.getOrNull(), onSaved = { nav.back(entry) })
     }
     composable("team/{id}/cycles/{level}/{cycle}/edit") { entry ->
         CycleFormScreen(entry.arg("id"), entry.level(), entry.arg("cycle"), onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
@@ -129,8 +158,14 @@ fun CyclesTab(teamId: String, level: Level, onLevel: (Level) -> Unit, modifier: 
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                if (all.isEmpty()) {
-                    item(key = "none") { Text(stringResource(R.string.tr_no_cycles), Modifier.padding(16.dp)) }
+                // counted by name, none in words
+                item(key = "count") {
+                    Text(
+                        countText(level, all.size),
+                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
                 items(all.sortedByDescending { it.firstDay }, key = { it.id }) { c ->
                     ListItem(
@@ -146,8 +181,60 @@ fun CyclesTab(teamId: String, level: Level, onLevel: (Level) -> Unit, modifier: 
 
 private fun minutesText(minutes: UInt): String = "${minutes / 60u}:${(minutes % 60u).toString().padStart(2, '0')}"
 
-/** A cycle: its window and text, its totals, what it holds. */
-@OptIn(ExperimentalMaterial3Api::class)
+/** What a cycle holds: the cycles of the level below, the sessions of a
+ * microcycle (null). */
+internal fun Level.child(): Level? = when (this) {
+    Level.PROGRAM -> Level.MESOCYCLE
+    Level.MESOCYCLE -> Level.MICROCYCLE
+    Level.MICROCYCLE -> null
+}
+
+internal fun Level.createName(): Int = when (this) {
+    Level.PROGRAM -> R.string.tr_create_program
+    Level.MESOCYCLE -> R.string.tr_create_mesocycle
+    Level.MICROCYCLE -> R.string.tr_create_microcycle
+}
+
+internal fun Level.editName(): Int = when (this) {
+    Level.PROGRAM -> R.string.tr_edit_program
+    Level.MESOCYCLE -> R.string.tr_edit_mesocycle
+    Level.MICROCYCLE -> R.string.tr_edit_microcycle
+}
+
+/** What a cycle makes inside itself: a cycle of the level below, a session. */
+private fun Level.newChildName(): Int = child()?.createName() ?: R.string.tr_new_session
+
+/** What a cycle takes in among the free ones. */
+private fun Level.addName(): Int = when (this) {
+    Level.PROGRAM -> R.string.tr_add_mesocycles
+    Level.MESOCYCLE -> R.string.tr_add_microcycles
+    Level.MICROCYCLE -> R.string.tr_add_sessions
+}
+
+/** What a cycle says when it holds nothing yet. */
+private fun Level.emptyName(): Int = when (this) {
+    Level.PROGRAM -> R.string.tr_no_mesocycles
+    Level.MESOCYCLE -> R.string.tr_no_microcycles
+    Level.MICROCYCLE -> R.string.tr_no_sessions
+}
+
+/** [n] cycles of [of] (sessions when null) as the language counts them,
+ * none in words: "nessuna seduta", not "0 sedute". */
+@Composable
+internal fun countText(of: Level?, n: Int): String {
+    val (plural, zero) = when (of) {
+        Level.PROGRAM -> R.plurals.tr_programs_count to R.string.tr_zero_programs
+        Level.MESOCYCLE -> R.plurals.tr_mesocycles_count to R.string.tr_zero_mesocycles
+        Level.MICROCYCLE -> R.plurals.tr_microcycles_count to R.string.tr_zero_microcycles
+        null -> R.plurals.tr_sessions_count to R.string.tr_zero_sessions
+    }
+    return if (n == 0) stringResource(zero) else pluralStringResource(plural, n, n)
+}
+
+/** A cycle: its window and text, its sessions counted, what it holds named
+ * by its level (a microcycle's sessions under their day, as the list of
+ * the calendar), what it can make and take in. */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun CycleScreen(
     teamId: String,
@@ -158,15 +245,25 @@ fun CycleScreen(
     onAdd: () -> Unit,
     onDuplicate: () -> Unit,
     onChild: (String) -> Unit,
+    onNewChild: (LocalDate) -> Unit,
+    onMatch: (String) -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
     val cycle by rememberCore(Unit, cycleId) { it.cycle(level, cycleId) }
     val totals by rememberCore(Unit, cycleId) { it.trainingTotals(teamId, TrainingScope.Cycle(level, cycleId)) }
     val children by rememberCore(Unit, cycleId) { it.cycleChildren(level, cycleId) }
+    val free by rememberCore(Unit, cycleId) { it.freeChildren(level, cycleId).size }
     var deleting by rememberSaveable { mutableStateOf(false) }
     var withChildren by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    val first = cycle?.firstDay?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    val last = cycle?.lastDay?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+    // a microcycle's days as the calendar reads them: its sessions and the
+    // matches of the team
+    val days by rememberAgendaBetween(teamId, first, last, level == Level.MICROCYCLE && first != null)
+    val held = children.orEmpty().map { it.id }.toSet()
+    val today = LocalDate.now()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -177,18 +274,25 @@ fun CycleScreen(
                         TextButton(onClick = onDuplicate) { Text(stringResource(R.string.tr_duplicate_session)) }
                     }
                     IconButton(onClick = onEdit) {
-                        Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.tr_edit_cycle))
+                        Icon(Icons.Filled.Edit, contentDescription = stringResource(level.editName()))
                     }
-                    DeleteIcon(stringResource(R.string.delete_forever)) { deleting = true }
+                    DeleteIcon(stringResource(R.string.tr_delete)) { deleting = true }
                 },
             )
         },
     ) { padding ->
         val modifier = Modifier.fillMaxSize().padding(padding)
         val c = cycle
-        if (c == null) {
+        if (c == null || first == null || last == null) {
             Centered(modifier) { CircularProgressIndicator() }
             return@Scaffold
+        }
+        // a new cycle after the last one inside, or on the first day; a
+        // session today when the microcycle holds it
+        val next = when (level) {
+            Level.MICROCYCLE -> today.takeIf { it in first..last } ?: first
+            else -> children.orEmpty().mapNotNull { runCatching { LocalDate.parse(it.lastDay) }.getOrNull() }
+                .maxOrNull()?.plusDays(1)?.takeIf { it <= last } ?: first
         }
         LazyColumn(modifier, contentPadding = PaddingValues(bottom = 24.dp)) {
             item(key = "data") {
@@ -207,12 +311,13 @@ fun CycleScreen(
             totals?.let { t ->
                 item(key = "totals") {
                     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        TrainingSection(R.string.tr_cycle_totals)
+                        TrainingSection(R.string.tr_sessions)
+                        // the word, then the count: "2 completata" isn't Italian
                         Text(
                             listOf(
-                                "${t.planned} ${stringResource(R.string.tr_status_planned)}",
-                                "${t.completed} ${stringResource(R.string.tr_status_completed)}",
-                                "${t.cancelled} ${stringResource(R.string.agenda_cancelled)}",
+                                "${stringResource(R.string.tr_filter_planned)} ${t.planned}",
+                                "${stringResource(R.string.tr_filter_completed)} ${t.completed}",
+                                "${stringResource(R.string.tr_filter_cancelled)} ${t.cancelled}",
                             ).joinToString(" · "),
                         )
                         Text("${stringResource(R.string.tr_planned_time)}: ${minutesText(t.plannedMinutes)}")
@@ -220,29 +325,75 @@ fun CycleScreen(
                     }
                 }
             }
-            item(key = "contains") {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text(stringResource(R.string.tr_cycle_contains), Modifier.weight(1f).title(), style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.primary)
-                    TextButton(onClick = onAdd) { Text(stringResource(R.string.tr_add_children)) }
+            item(key = "held") {
+                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // named by what it holds: microcycles, mesocycles; a
+                    // microcycle's sessions are under the counts above,
+                    // titled already
+                    level.child()?.let { down ->
+                        Text(
+                            stringResource(down.plural()),
+                            Modifier.title(),
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                    }
+                    if (children?.isEmpty() == true) {
+                        Text(stringResource(level.emptyName()), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    androidx.compose.foundation.layout.FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { onNewChild(next) }) { Text(stringResource(level.newChildName())) }
+                        // the free ones only when there are some
+                        if ((free ?: 0) > 0) {
+                            OutlinedButton(onClick = onAdd) { Text(stringResource(level.addName())) }
+                        }
+                    }
                 }
             }
-            items(children.orEmpty(), key = { it.id }) { child ->
-                ListItem(modifier = Modifier.clickable { onChild(child.id) }, headlineContent = { Text(windowText(child.firstDay, child.lastDay)) })
+            if (level == Level.MICROCYCLE) {
+                days.forEach { d ->
+                    val events = d.events.filter { e ->
+                        when (val i = e.item) {
+                            is io.github.naighes.scout4all.core.AgendaItemRecord.Session -> i.id in held
+                            is io.github.naighes.scout4all.core.AgendaItemRecord.Match -> true
+                        }
+                    }
+                    if (events.isNotEmpty()) {
+                        val date = LocalDate.parse(d.date)
+                        item(key = "day-${d.date}") { DayHeader(date, date == today) }
+                        items(events, key = { "${d.date}/${it.start}/${it.id()}" }) { e ->
+                            EventRow(e, false, { _, m -> onMatch(m) }, { _, s -> onChild(s) })
+                        }
+                    }
+                }
+            } else {
+                items(children.orEmpty(), key = { it.id }) { child ->
+                    ListItem(modifier = Modifier.clickable { onChild(child.id) }, headlineContent = { Text(windowText(child.firstDay, child.lastDay)) })
+                }
             }
             error?.let { item(key = "error") { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) } }
         }
     }
     if (deleting) {
+        val holds = children?.isNotEmpty() == true
         AlertDialog(
             onDismissRequest = { deleting = false },
             title = { Text(cycle?.title?.ifBlank { null } ?: stringResource(level.label())) },
-            text = { CheckRow(stringResource(R.string.tr_remove_with_children), withChildren, onChecked = { withChildren = it }) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // what it holds is asked only when it holds something
+                    if (holds) {
+                        Text(stringResource(R.string.tr_delete_cycle_keeps))
+                        CheckRow(stringResource(R.string.tr_remove_with_children), withChildren, onChecked = { withChildren = it })
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
                     deleting = false
                     scope.launch {
                         try {
-                            app.core { it.removeCycle(level, cycleId, withChildren) }
+                            app.core { it.removeCycle(level, cycleId, holds && withChildren) }
                             onBack()
                         } catch (e: MobileException) {
                             error = e.failure().text
@@ -284,11 +435,25 @@ private fun Level.parent(): Level? = when (this) {
 /** The form of a cycle, new (no `cycleId`) or edited. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CycleFormScreen(teamId: String, level: Level, cycleId: String?, onBack: () -> Unit, onSaved: (String) -> Unit) {
+fun CycleFormScreen(
+    teamId: String,
+    level: Level,
+    cycleId: String?,
+    onBack: () -> Unit,
+    onSaved: (String) -> Unit,
+    start: String? = null,
+    parent: String? = null,
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val draft by produceState<CycleDraft?>(null, cycleId) {
         value = try {
-            app.core { if (cycleId == null) it.newCycleDraft() else it.cycleDraft(level, cycleId) }
+            app.core {
+                when (cycleId) {
+                    // made from the sheet of a cycle: in it, from the day given
+                    null -> it.newCycleDraft().let { d -> d.copy(start = start ?: d.start, parent = parent ?: d.parent) }
+                    else -> it.cycleDraft(level, cycleId)
+                }
+            }
         } catch (_: MobileException) {
             null
         }
@@ -298,7 +463,7 @@ fun CycleFormScreen(teamId: String, level: Level, cycleId: String?, onBack: () -
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(if (cycleId == null) R.string.tr_new_cycle else R.string.tr_edit_cycle), Modifier.title()) },
+                title = { Text(stringResource(if (cycleId == null) level.createName() else level.editName()), Modifier.title()) },
                 navigationIcon = { BackButton(back) },
             )
         },
@@ -450,7 +615,7 @@ fun AddChildrenScreen(level: Level, cycleId: String, onBack: () -> Unit, onDone:
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.tr_add_children), Modifier.title()) },
+                title = { Text(stringResource(level.addName()), Modifier.title()) },
                 navigationIcon = { BackButton(onBack) },
             )
         },
