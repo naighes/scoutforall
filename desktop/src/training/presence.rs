@@ -227,7 +227,7 @@ impl PresenceTab {
         .spacing(10)
         .align_y(Alignment::Center);
         let body: Element<'a, Message> = match self.report.players.is_empty() {
-            true => text(s.no_attendance_to_count)
+            true => text(ui::capitalized(s.no_attendance_to_count))
                 .size(SIZE_SMALL)
                 .color(c.muted)
                 .into(),

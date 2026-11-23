@@ -1400,9 +1400,15 @@ impl CyclesTab {
             );
         }
         actions.push(
-            ui::action(theme::icons::DELETE, s.delete, Message::Delete, false, c)
-                .width(Length::Fill)
-                .into(),
+            ui::action(
+                theme::icons::DELETE,
+                &ui::capitalized(s.delete),
+                Message::Delete,
+                false,
+                c,
+            )
+            .width(Length::Fill)
+            .into(),
         );
         let info = ui::panel(
             Some(level_name(s, r.level)),

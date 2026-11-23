@@ -92,7 +92,8 @@ impl HistoryTab {
             return ui::body(e.clone()).color(c.danger).into();
         }
         if self.seasons.is_empty() {
-            return text(s.no_earlier_seasons)
+            // alone on the page: a capital, as on Android
+            return text(ui::capitalized(s.no_earlier_seasons))
                 .size(SIZE_SMALL)
                 .color(c.muted)
                 .into();

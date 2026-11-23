@@ -623,14 +623,27 @@ impl SessionPage {
             Mode::Browse => {
                 let planned = self.record.status == SessionStatus::Planned;
                 let panel = match self.panel {
-                    Panel::Activities => vec![
-                        ("↑ ↓".to_string(), String::new()),
-                        ("⇧↑ ⇧↓".to_string(), s.move_up.to_string()),
-                        ("Enter".to_string(), s.edit.to_string()),
-                        ("n".to_string(), s.new_activity.to_string()),
-                        ("v".to_string(), s.copy_activity.to_string()),
-                        ("⌫".to_string(), s.remove.to_string()),
-                    ],
+                    // what needs activities is said only with them
+                    Panel::Activities => match self.activities.len() {
+                        0 => vec![
+                            ("n".to_string(), s.new_activity.to_string()),
+                            ("v".to_string(), s.copy_activity.to_string()),
+                        ],
+                        1 => vec![
+                            ("Enter".to_string(), s.edit.to_string()),
+                            ("n".to_string(), s.new_activity.to_string()),
+                            ("v".to_string(), s.copy_activity.to_string()),
+                            ("⌫".to_string(), s.delete_activity.to_string()),
+                        ],
+                        _ => vec![
+                            ("↑ ↓".to_string(), String::new()),
+                            ("⇧↑ ⇧↓".to_string(), s.move_activity.to_string()),
+                            ("Enter".to_string(), s.edit.to_string()),
+                            ("n".to_string(), s.new_activity.to_string()),
+                            ("v".to_string(), s.copy_activity.to_string()),
+                            ("⌫".to_string(), s.delete_activity.to_string()),
+                        ],
+                    },
                     Panel::Attendance => vec![("Enter".to_string(), s.attendance.to_string())],
                 };
                 [
@@ -649,7 +662,7 @@ impl SessionPage {
                         false => vec![("r".to_string(), s.reopen_session.to_string())],
                     },
                     vec![
-                        ("⇧⌫".to_string(), s.delete.to_string()),
+                        ("⇧⌫".to_string(), s.delete_session.to_string()),
                         ("Esc".to_string(), s.back.to_string()),
                     ],
                 ]
@@ -871,7 +884,7 @@ impl SessionPage {
         actions.push(
             ui::action(
                 theme::icons::DELETE,
-                s.delete,
+                s.delete_session,
                 Message::DeleteSession,
                 false,
                 c,
@@ -988,9 +1001,25 @@ impl SessionPage {
         // only, the rest go under the list, on two lines if they must
         let tools = iced::widget::Row::with_children([
             ui::pill(s.copy_activity, false, Some(Message::CopyActivity), c),
-            ui::pill("↑", false, Some(Message::MoveUp), c),
-            ui::pill("↓", false, Some(Message::MoveDown), c),
-            ui::pill(s.remove, false, Some(Message::DeleteActivity), c),
+            // grey when there's nothing to move or delete
+            ui::pill(
+                "↑",
+                false,
+                (self.activities.len() > 1).then_some(Message::MoveUp),
+                c,
+            ),
+            ui::pill(
+                "↓",
+                false,
+                (self.activities.len() > 1).then_some(Message::MoveDown),
+                c,
+            ),
+            ui::pill(
+                &ui::capitalized(s.remove),
+                false,
+                (!self.activities.is_empty()).then_some(Message::DeleteActivity),
+                c,
+            ),
         ])
         .spacing(8)
         .wrap()
@@ -1200,6 +1229,44 @@ mod tests {
         type_in(&mut page, 0, "zzz");
         page.update(s(), Message::Form(FormMessage::Save));
         assert_eq!(page.mode_name(), "copy");
+    }
+
+    /// The keys of the activities are said only when they do something:
+    /// none to move or delete without activities, none to move with one;
+    /// deleting the activity and the session are told apart.
+    #[test]
+    fn the_hints_of_the_activities_follow_how_many_there_are() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, _, mut page) = page(&dir);
+        let keys = |page: &SessionPage| -> Vec<(String, String)> { page.hints(s()) };
+        let has = |page: &SessionPage, key: &str| keys(page).iter().any(|(k, _)| k == key);
+        assert!(!has(&page, "⌫"));
+        assert!(!has(&page, "⇧↑ ⇧↓"));
+        assert!(!has(&page, "Enter"));
+        for (n, name) in ["Palleggio", "Battuta"].into_iter().enumerate() {
+            core.save_activity(
+                page.id.clone(),
+                None,
+                ActivityDraft {
+                    name: name.into(),
+                    ..core.new_activity_draft()
+                },
+            )
+            .unwrap();
+            page.reload();
+            assert!(has(&page, "⌫"));
+            assert_eq!(has(&page, "⇧↑ ⇧↓"), n == 1);
+        }
+        let label = |key: &str| {
+            keys(&page)
+                .into_iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, l)| l)
+                .unwrap()
+        };
+        assert_eq!(label("⌫"), "Elimina l'attività");
+        assert_eq!(label("⇧⌫"), "Elimina la seduta");
+        assert_eq!(label("⇧↑ ⇧↓"), "Sposta");
     }
 
     /// Enter edits the activity chosen; the deletion asks first and Esc

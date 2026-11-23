@@ -967,6 +967,22 @@ impl App {
             ]),
             _ => handled,
         };
+        let task = match &mut self.screen {
+            Screen::Training(screen) => match screen.take_week_scroll() {
+                Some((id, y)) => Task::batch([
+                    task,
+                    iced::widget::operation::scroll_to(
+                        id,
+                        iced::widget::operation::AbsoluteOffset {
+                            x: None,
+                            y: Some(y),
+                        },
+                    ),
+                ]),
+                None => task,
+            },
+            _ => task,
+        };
         let focus = self.focus_id();
         match focus == self.focused {
             true => task,

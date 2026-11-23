@@ -237,6 +237,18 @@ impl TrainingScreen {
         }
     }
 
+    /// The week by the hour scrolled to its first event, once a week shown
+    /// (absolute, in pixels).
+    pub fn take_week_scroll(&mut self) -> Option<(Id, f32)> {
+        match (&self.mode, self.tab) {
+            (Mode::List, Tab::Calendar) => self.calendar.take_week_scroll(),
+            _ => {
+                self.calendar.forget_week_scroll();
+                None
+            }
+        }
+    }
+
     /// Where the list is, to keep the session chosen in sight.
     pub fn scroll(&self) -> Option<(Id, f32)> {
         match self.mode {

@@ -45,6 +45,10 @@ use {
 };
 
 const LIST: &str = "training-calendar-list";
+/// The hours of the week, scrolled to its first event.
+const WEEK: &str = "training-calendar-week";
+/// The weeks of the month, the one of the cursor kept in sight.
+const MONTH: &str = "training-calendar-month";
 
 /// The most events a month cell writes, the others are counted.
 const CELL_EVENTS: usize = 3;
@@ -159,6 +163,8 @@ pub struct CalendarTab {
     period: Period,
     /// the sessions marked for a microcycle: they stay across views
     marked: HashSet<String>,
+    /// the first day of the week already scrolled to its first event
+    week_scrolled: Option<NaiveDate>,
     /// the sessions of the team in no microcycle: the ones that can be marked
     free: HashSet<String>,
     /// the completed sessions shown whose attendance is written
@@ -246,6 +252,7 @@ impl CalendarTab {
             filter: Filter::All,
             period: Period::Any,
             marked: HashSet::new(),
+            week_scrolled: None,
             free: HashSet::new(),
             recorded: HashSet::new(),
             window: None,
@@ -697,15 +704,59 @@ impl CalendarTab {
         }
     }
 
-    /// Where the list is, to keep the event chosen in sight; the week and
-    /// the month keep their own.
+    /// Where the list is, to keep the event chosen in sight, or the month,
+    /// to keep the week of the cursor in sight (in a small window the
+    /// month doesn't fit); the week scrolls by itself (`take_week_scroll`).
     pub fn scroll(&self) -> Option<(Id, f32)> {
-        let flat = self.flat();
-        let at = flat
+        match self.view {
+            View::List => {
+                let flat = self.flat();
+                let at = flat
+                    .iter()
+                    .position(|(d, i)| *d == self.anchor && *i == self.slot)?;
+                let last = flat.len().saturating_sub(1).max(1);
+                Some((Id::new(LIST), at as f32 / last as f32))
+            }
+            View::Month => {
+                let weeks = month_weeks(self.anchor);
+                let at = weeks
+                    .iter()
+                    .position(|week| week.contains(&Some(self.anchor)))?;
+                let last = weeks.len().saturating_sub(1).max(1);
+                Some((Id::new(MONTH), at as f32 / last as f32))
+            }
+            View::Week => None,
+        }
+    }
+
+    /// The week by the hour opens an hour before its first event, as on
+    /// Android: once a week shown, the wheel free afterwards. Pixels from
+    /// the top of the hours.
+    pub fn take_week_scroll(&mut self) -> Option<(Id, f32)> {
+        let week = (self.view == View::Week && self.window.is_none())
+            .then(|| period(self.view, self.anchor).0);
+        let fresh = week != self.week_scrolled;
+        self.week_scrolled = week;
+        let earliest = self
+            .days
             .iter()
-            .position(|(d, i)| *d == self.anchor && *i == self.slot)?;
-        let last = flat.len().saturating_sub(1).max(1);
-        (self.view == View::List).then(|| (Id::new(LIST), at as f32 / last as f32))
+            .flat_map(|d| &d.events)
+            .filter_map(|e| minute_of(&e.start))
+            .min();
+        match (fresh, week, earliest) {
+            (true, Some(_), Some(minute)) => {
+                let (first, _) = self.hours_shown();
+                let hours = (minute / 60).saturating_sub(1).saturating_sub(first);
+                Some((Id::new(WEEK), hours as f32 * HOUR))
+            }
+            _ => None,
+        }
+    }
+
+    /// The week scrolled again when it shows next (its hours are drawn
+    /// anew from the top).
+    pub fn forget_week_scroll(&mut self) {
+        self.week_scrolled = None;
     }
 
     fn day_record(&self, day: NaiveDate) -> Option<&AgendaDay> {
@@ -1195,7 +1246,10 @@ impl CalendarTab {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => match self.view {
                 View::Week => self.week(s, c),
-                View::Month => scrollable(self.month(s, c)).height(Length::Fill).into(),
+                View::Month => scrollable(self.month(s, c))
+                    .id(Id::new(MONTH))
+                    .height(Length::Fill)
+                    .into(),
                 View::List => self.list(s, c),
             },
         };
@@ -1412,7 +1466,9 @@ impl CalendarTab {
         column![
             heads,
             band,
-            scrollable(row![labels, columns]).height(Length::Fill)
+            scrollable(row![labels, columns])
+                .id(Id::new(WEEK))
+                .height(Length::Fill)
         ]
         .spacing(6)
         .height(Length::Fill)
@@ -2045,6 +2101,34 @@ mod tests {
         assert_eq!(tab.key(key!(c)), Leave::Stay);
         tab.key(key!(home));
         assert_eq!(tab.key(key!(backspace)), Leave::Delete(first));
+    }
+
+    /// The week by the hour scrolls to an hour before its first event once
+    /// shown: not again while it stays, again on another week or back from
+    /// the month; nothing for a week without events.
+    #[test]
+    fn the_week_scrolls_to_an_hour_before_its_first_event_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        session(&core, &team, "2026-03-10T18:00");
+        session(&core, &team, "2026-03-12T16:30");
+        let mut tab = CalendarTab::at(core.clone(), team, day("2026-03-11"));
+        let (first, _) = tab.hours_shown();
+        let at_15 = (15 - first) as f32 * HOUR;
+        assert_eq!(tab.take_week_scroll(), Some((Id::new(WEEK), at_15)));
+        assert_eq!(tab.take_week_scroll(), None);
+        tab.key(key!(right));
+        assert_eq!(tab.take_week_scroll(), None);
+        tab.key(key!(m));
+        assert_eq!(tab.take_week_scroll(), None);
+        // the month keeps the week of the 12th in sight: the third of six
+        assert_eq!(tab.scroll(), Some((Id::new(MONTH), 0.4)));
+        tab.key(key!(w));
+        assert_eq!(tab.take_week_scroll(), Some((Id::new(WEEK), at_15)));
+        // a week without events stays at its first hour
+        tab.key(key!(pagedown));
+        assert_eq!(tab.take_week_scroll(), None);
     }
 
     /// What is to close is in the past: in the list the filter looks at
