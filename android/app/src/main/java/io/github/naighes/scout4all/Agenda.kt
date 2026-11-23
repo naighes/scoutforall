@@ -188,10 +188,10 @@ internal fun EventRow(
             ListItem(
                 colors = colors,
                 modifier = Modifier.clickable { onSession(e.teamId, i.id) },
-                overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam }).joinToString(" · ")) },
+                overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam && i.title.isNotBlank() }).joinToString(" · ")) },
                 headlineContent = {
                     Text(
-                        i.title.ifBlank { stringResource(R.string.agenda_training) },
+                        i.title.ifBlank { e.teamName },
                         textDecoration = if (cancelled) TextDecoration.LineThrough else null,
                     )
                 },

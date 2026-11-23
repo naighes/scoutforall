@@ -1643,9 +1643,10 @@ impl CalendarTab {
 /// The height of an hour in the week.
 const HOUR: f32 = 44.0;
 
-/// The hours the week shows at least: from 7 to 22.
+/// The hours the week shows at least: from 7 to midnight (training goes on
+/// until late).
 const FIRST_HOUR: u32 = 7;
-const LAST_HOUR: u32 = 22;
+const LAST_HOUR: u32 = 24;
 
 /// The width of the hours on the left of the week.
 const GUTTER: f32 = 52.0;
@@ -1738,7 +1739,7 @@ pub fn minute_of(start: &str) -> Option<u32> {
     Some(hour * 60 + minute)
 }
 
-/// The hours the week shows, the last excluded: 7–22, more when an event
+/// The hours the week shows, the last excluded: 7–24, more when an event
 /// starts before or ends after.
 pub fn hours(days: &[AgendaDay]) -> (u32, u32) {
     days.iter()
@@ -1916,10 +1917,7 @@ fn event_text<'a>(
             (
                 theme::icons::CALENDAR,
                 c.accent,
-                match title.is_empty() {
-                    true => s.training.to_string(),
-                    false => title.clone(),
-                },
+                title.clone(),
                 [event
                     .venue
                     .as_ref()
@@ -2027,13 +2025,13 @@ mod tests {
             date: "2026-11-23".into(),
             events,
         };
-        assert_eq!(hours(&[day(vec![event("2026-11-23T18:00", 90)])]), (7, 22));
+        assert_eq!(hours(&[day(vec![event("2026-11-23T18:00", 90)])]), (7, 24));
         assert_eq!(
             hours(&[day(vec![
                 event("2026-11-23T06:30", 60),
                 event("2026-11-23T21:30", 60)
             ])]),
-            (6, 23)
+            (6, 24)
         );
         assert_eq!(hours(&[day(vec![event("2026-11-23T23:00", 120)])]), (7, 24));
     }

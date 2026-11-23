@@ -313,11 +313,13 @@ pub fn today_box<'a, M: 'a>(content: impl Into<Element<'a, M>>, c: Colors) -> El
 }
 
 /// What an event is called in a line: a match "Team – Opponent" with the
-/// team, the opponent alone without; a session "Team · Title" or the title
-/// (`title` of a match is "– Opponent").
+/// team, the opponent alone without; a session "Team · Title" or the title,
+/// and the team alone when it has no title (`title` of a match is
+/// "– Opponent").
 pub fn heading(event: &AgendaEventRecord, title: String, with_team: bool) -> String {
     match (with_team, &event.item) {
         (true, AgendaItemRecord::Match { .. }) => format!("{} {title}", event.team_name),
+        (_, AgendaItemRecord::Session { .. }) if title.is_empty() => event.team_name.clone(),
         (true, AgendaItemRecord::Session { .. }) => format!("{} · {title}", event.team_name),
         (false, AgendaItemRecord::Match { .. }) => title.trim_start_matches("– ").to_string(),
         (false, AgendaItemRecord::Session { .. }) => title,
@@ -350,10 +352,7 @@ fn event_row<'a>(
             }
             (
                 theme::icons::CALENDAR,
-                match title.is_empty() {
-                    true => s.training.to_string(),
-                    false => title.clone(),
-                },
+                title.clone(),
                 [event
                     .venue
                     .as_ref()

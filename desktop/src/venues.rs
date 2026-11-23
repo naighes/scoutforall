@@ -39,6 +39,9 @@ const PINNED: usize = 6;
 pub struct VenueEditor {
     form: Form,
     id: Option<String>,
+    /// the coordinates the link filled in, to follow it while it's written
+    /// and to leave alone the ones written by hand
+    filled: Option<(String, String)>,
 }
 
 impl VenueEditor {
@@ -65,7 +68,32 @@ impl VenueEditor {
                 fields,
             ),
             id,
+            filled: None,
         })
+    }
+
+    /// The link was written: the coordinates it gives fill the two fields
+    /// when they are empty or hold the ones an earlier link filled; the ones
+    /// written by hand stay.
+    fn follow_link(&mut self, core: &Scout4All) {
+        let current = (self.form.text(LATITUDE), self.form.text(LONGITUDE));
+        let free = (current.0.trim().is_empty() && current.1.trim().is_empty())
+            || self.filled.as_ref() == Some(&current);
+        if !free {
+            return;
+        }
+        let found = core
+            .venue_link_coordinates(self.form.text(LINK))
+            .ok()
+            .flatten()
+            .map(|c| (c.latitude.to_string(), c.longitude.to_string()));
+        let (lat, lon) = found.clone().unwrap_or_default();
+        for (at, value) in [(LATITUDE, lat), (LONGITUDE, lon)] {
+            if let Some(Value::Text(text)) = self.form.fields.get_mut(at).map(|f| &mut f.value) {
+                *text = value;
+            }
+        }
+        self.filled = found;
     }
 
     fn draft(&self) -> VenueDraft {
@@ -307,6 +335,7 @@ impl VenuesScreen {
                 let saved = editor.save(&self.core);
                 self.edited(saved);
             }
+            FormOutcome::Changed(LINK) => editor.follow_link(&self.core),
             FormOutcome::Stay | FormOutcome::Changed(_) => {}
         }
     }
@@ -752,6 +781,31 @@ mod tests {
         let saved = &core.venues().unwrap()[0];
         assert_eq!(saved.latitude, Some(43.2755));
         assert_eq!(saved.longitude, Some(11.9856));
+    }
+
+    /// The coordinates appear in the form as the link is written, follow
+    /// a changed link, and leave alone the ones written by hand.
+    #[test]
+    fn the_coordinates_appear_as_the_link_is_written() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = VenuesScreen::new(app(&dir)).unwrap();
+        screen.key(s, key!(n));
+        let write = |screen: &mut VenuesScreen, field: usize, text: &str| {
+            screen.update(s, Message::Form(form::Message::Input(field, text.into())));
+        };
+        let coords = |screen: &VenuesScreen| match &screen.mode {
+            Mode::Edit(e) => (e.form.text(LATITUDE), e.form.text(LONGITUDE)),
+            _ => panic!("not editing"),
+        };
+        let google = |at: &str| format!("https://www.google.com/maps/place/X/@{at},17z");
+        write(&mut screen, LINK, &google("43.2755,11.9856"));
+        assert_eq!(coords(&screen), ("43.2755".into(), "11.9856".into()));
+        write(&mut screen, LINK, &google("44.5,12.25"));
+        assert_eq!(coords(&screen), ("44.5".into(), "12.25".into()));
+        write(&mut screen, LATITUDE, "45");
+        write(&mut screen, LINK, &google("46,13"));
+        assert_eq!(coords(&screen), ("45".into(), "12.25".into()));
     }
 
     /// The week of a gym tells every team that holds it, and marks the

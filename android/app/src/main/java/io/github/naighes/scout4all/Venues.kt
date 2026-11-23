@@ -43,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -484,6 +485,22 @@ private fun VenueFields(id: String?, draft: VenueDraft, modifier: Modifier, onCh
     var pinned by rememberSaveable { mutableStateOf(draft.pinned) }
     var failure by remember { mutableStateOf<Failure?>(null) }
     var busy by remember { mutableStateOf(false) }
+    // the coordinates the link filled in: they follow it while it's written,
+    // the ones written by hand stay
+    var filled by remember { mutableStateOf<Pair<String, String>?>(null) }
+    LaunchedEffect(link) {
+        val free = (latitude.isBlank() && longitude.isBlank()) || filled == (latitude to longitude)
+        if (free) {
+            val found = try {
+                app.core { it.venueLinkCoordinates(link) }
+            } catch (_: MobileException) {
+                null
+            }?.let { it.latitude.toString() to it.longitude.toString() }
+            latitude = found?.first.orEmpty()
+            longitude = found?.second.orEmpty()
+            filled = found
+        }
+    }
     fun edit(change: () -> Unit) {
         change()
         onChanged()
