@@ -263,20 +263,14 @@ private fun Matches(
             )
             // the training plan of the team, under its week
             item(key = "training") {
-                FilledTonalButton(
-                    onClick = onTraining,
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                ) { Text(stringResource(R.string.tr_programming)) }
+                ScreenButton(R.drawable.ic_calendar, stringResource(R.string.tr_programming), onTraining)
             }
             if (state.matches.isEmpty()) {
                 item { Text(stringResource(R.string.no_matches), Modifier.padding(16.dp)) }
             } else {
                 // the statistics of the matches together, first
                 item {
-                    FilledTonalButton(
-                        onClick = onAnalysis,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    ) { Text(stringResource(R.string.analysis)) }
+                    ScreenButton(R.drawable.ic_stats, stringResource(R.string.analysis), onAnalysis)
                 }
                 items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
             }

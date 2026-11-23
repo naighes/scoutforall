@@ -27,7 +27,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -131,7 +131,6 @@ internal fun TrainingScreen(
     teamId: String,
     onBack: () -> Unit,
     onSession: (String) -> Unit,
-    onSeries: () -> Unit,
     onCycle: (Level, String) -> Unit,
     onNewCycle: (Level) -> Unit,
     onNewOn: (LocalDate) -> Unit,
@@ -152,9 +151,6 @@ internal fun TrainingScreen(
                     title = { Text(stringResource(R.string.tr_programming), Modifier.title()) },
                     navigationIcon = { BackButton(onBack) },
                     actions = {
-                        if (part == Part.CALENDAR) {
-                            TextButton(onClick = onSeries) { Text(stringResource(R.string.tr_repeat_sessions)) }
-                        }
                         // the gyms are where sessions are held: they're
                         // added from here too, not only from the home
                         IconButton(onClick = onVenues) {
@@ -184,19 +180,24 @@ internal fun TrainingScreen(
         },
         floatingActionButton = {
             when (part) {
-                Part.CALENDAR -> FloatingActionButton(onClick = { onNewOn(day) }) {
-                    Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tr_new_session))
-                }
-                Part.CYCLES -> FloatingActionButton(onClick = { onNewCycle(level) }) {
-                    Icon(Icons.Filled.Add, contentDescription = stringResource(level.createName()))
-                }
+                // said in words: the same + makes a session here, a cycle there
+                Part.CALENDAR -> ExtendedFloatingActionButton(
+                    onClick = { onNewOn(day) },
+                    icon = { Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tr_new_session)) },
+                    text = { Text(stringResource(R.string.tr_new_session)) },
+                )
+                Part.CYCLES -> ExtendedFloatingActionButton(
+                    onClick = { onNewCycle(level) },
+                    icon = { Icon(Icons.Filled.Add, contentDescription = stringResource(level.createName())) },
+                    text = { Text(stringResource(level.createName())) },
+                )
                 else -> {}
             }
         },
     ) { padding ->
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (part) {
-            Part.CALENDAR -> CalendarTab(teamId, day, { day = it }, view, { view = it }, modifier, onSession, onMatch)
+            Part.CALENDAR -> CalendarTab(teamId, day, { day = it }, view, { view = it }, modifier, onSession, onMatch, onNewOn)
             Part.CYCLES -> CyclesTab(teamId, level, { level = it }, modifier, onCycle)
             Part.ATTENDANCE -> AttendanceTab(teamId, modifier)
         }
@@ -235,6 +236,7 @@ private fun CalendarTab(
     modifier: Modifier,
     onSession: (String) -> Unit,
     onMatch: (String) -> Unit,
+    onNewOn: (LocalDate) -> Unit,
 ) {
     var month by rememberSaveable { mutableStateOf(YearMonth.from(selected)) }
     // the gyms are shared: every team, or one gym only
@@ -389,6 +391,13 @@ private fun CalendarTab(
                     }
                 }
                 items(events, key = { "${it.teamId}/${it.start}/${it.id()}" }) { open(it) }
+                // a session on the day chosen, right under it
+                item(key = "add") {
+                    TextButton(onClick = { onNewOn(selected) }, Modifier.padding(horizontal = 8.dp)) {
+                        Icon(Icons.Filled.Add, contentDescription = null)
+                        Text(stringResource(R.string.tr_add_session), Modifier.padding(start = 8.dp))
+                    }
+                }
             }
             CalendarView.LIST -> {
                 // only the days with something, the filter too

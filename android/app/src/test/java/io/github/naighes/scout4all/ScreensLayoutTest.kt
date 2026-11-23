@@ -7,6 +7,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performSemanticsAction
@@ -165,7 +166,7 @@ class ScreensLayoutTest(private val screen: Size) {
 
     @Composable
     private fun Hub(team: String, part: Part, view: CalendarView = CalendarView.MONTH) = TrainingScreen(
-        team, onBack = {}, onSession = {}, onSeries = {}, onCycle = { _, _ -> }, onNewCycle = {}, onNewOn = {},
+        team, onBack = {}, onSession = {}, onCycle = { _, _ -> }, onNewCycle = {}, onNewOn = {},
         onMatch = {}, first = part, firstView = view,
     )
 
@@ -234,7 +235,7 @@ class ScreensLayoutTest(private val screen: Size) {
         val team = saveNationalTeam()
         val session = trainingWithActivities(team)
         assertFits("session", string(R.string.tr_activities), string(R.string.tr_complete_session)) {
-            SessionScreen(team, session, onBack = {}, onEdit = {}, onActivity = {}, onAttendance = {}, onDuplicate = {}, onSeries = {})
+            SessionScreen(team, session, onBack = {}, onEdit = {}, onActivity = {}, onAttendance = {}, onDuplicate = {})
         }
     }
 
@@ -273,32 +274,19 @@ class ScreensLayoutTest(private val screen: Size) {
         }
     }
 
-    @Test
-    fun theChangeOfASeries() {
-        val team = saveNationalTeam()
-        val first = java.time.LocalDate.now().plusDays(1)
-        val made = core {
-            it.createSeries(
-                team,
-                io.github.naighes.scout4all.core.SeriesDraft(
-                    first.toString(), first.plusWeeks(3).toString(),
-                    listOf(io.github.naighes.scout4all.core.SeriesBand(first.dayOfWeek.value.toUByte(), "20:30", 90.toUShort(), null)),
-                ),
-                false,
-            )
-        }
-        val session = made.created.first().id
-        assertFits("series-change", string(R.string.tr_series_scope), string(R.string.save)) {
-            SeriesChangeScreen(team, session, onBack = {}, onDone = {})
-        }
-    }
-
+    /** The form of a new session as a weekly series: Continue and Finish
+     * both whole at the bottom. */
     @Test
     fun theFormOfASeries() {
         val team = saveNationalTeam()
-        assertFits("series", string(R.string.tr_band_hint), string(R.string.save)) {
-            SeriesScreen(team, onBack = {}, onDone = {})
-        }
+        rule.setContent { Scout4AllTheme { SessionFormScreen(team, null, onBack = {}, onSaved = {}) } }
+        rule.waitForText(string(R.string.tr_weekly_series))
+        rule.onNode(hasText(string(R.string.tr_weekly_series)) and hasClickAction()).performClick()
+        rule.waitForText(string(R.string.tr_until))
+        rule.shot("screen-series-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.assertWhole(hasText(string(R.string.tr_continue_entry)) and hasClickAction())
+        rule.assertWhole(hasText(string(R.string.tr_finish)) and hasClickAction())
     }
 
     @Test

@@ -1,6 +1,18 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.RadioButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.semantics.Role
+import io.github.naighes.scout4all.core.SeriesScope
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -80,10 +92,21 @@ internal fun TrainingSection(title: Int) = Text(
     color = MaterialTheme.colorScheme.primary,
 )
 
-/** The form of a session, new (no `sessionId`) or edited. */
+/** The form of a session, new (no `sessionId`) or edited. A new one may be
+ * a weekly series instead: an entry after the other (Continue), all made
+ * at the end (Finish, then `onRepeated`), each entry a series of its own.
+ * A saved one in a series asks where its time, duration and gym go. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionFormScreen(teamId: String, sessionId: String?, onBack: () -> Unit, onSaved: (String) -> Unit, day: LocalDate? = null) {
+fun SessionFormScreen(
+    teamId: String,
+    sessionId: String?,
+    onBack: () -> Unit,
+    onSaved: (String) -> Unit,
+    day: LocalDate? = null,
+    time: LocalTime? = null,
+    onRepeated: () -> Unit = onBack,
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val draft by produceState<SessionDraft?>(null, sessionId) {
         value = try {
@@ -93,13 +116,21 @@ fun SessionFormScreen(teamId: String, sessionId: String?, onBack: () -> Unit, on
         }
     }
     var changed by rememberSaveable { mutableStateOf(false) }
-    val back = rememberFormBack(changed, onBack)
+    var series by rememberSaveable { mutableStateOf(false) }
+    // the entries of the series written before the one in the form
+    val entries = remember { mutableStateListOf<SeriesDraft>() }
+    val back = rememberFormBack(changed || entries.isNotEmpty(), onBack)
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
                     Text(
-                        stringResource(if (sessionId == null) R.string.tr_new_session else R.string.tr_edit_session),
+                        when {
+                            sessionId != null -> stringResource(R.string.tr_edit_session)
+                            series -> stringResource(R.string.tr_new_series) + " · " +
+                                stringResource(R.string.tr_series_entry, entries.size + 1)
+                            else -> stringResource(R.string.tr_new_session)
+                        },
                         Modifier.title(),
                     )
                 },
@@ -110,7 +141,15 @@ fun SessionFormScreen(teamId: String, sessionId: String?, onBack: () -> Unit, on
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         val d = draft
         if (d == null) Centered(modifier) { CircularProgressIndicator() }
-        else SessionFields(teamId, sessionId, d, modifier, day, onChanged = { changed = true }, onSaved = onSaved)
+        else SessionFields(
+            teamId, sessionId, d, modifier, day, time,
+            series = series && sessionId == null,
+            onSeries = { series = it },
+            entries = entries,
+            onChanged = { changed = true },
+            onSaved = onSaved,
+            onRepeated = onRepeated,
+        )
     }
 }
 
@@ -121,19 +160,25 @@ private fun SessionFields(
     draft: SessionDraft,
     modifier: Modifier,
     initialDay: LocalDate?,
+    initialTime: LocalTime?,
+    series: Boolean,
+    onSeries: (Boolean) -> Unit,
+    entries: MutableList<SeriesDraft>,
     onChanged: () -> Unit,
     onSaved: (String) -> Unit,
+    onRepeated: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
     // a new session: in the next hour; the form of the core has no day
     val first = remember {
         draft.start?.let(LocalDateTime::parse)
-            ?: initialDay?.atTime(LocalTime.of(18, 0))
+            ?: initialDay?.atTime(initialTime ?: LocalTime.of(18, 0))
             ?: LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
     }
     var day by rememberSaveable { mutableStateOf<LocalDate?>(first.toLocalDate()) }
     var time by rememberSaveable { mutableStateOf<LocalTime?>(first.toLocalTime()) }
+    var until by rememberSaveable { mutableStateOf<LocalDate?>(null) }
     var duration by rememberSaveable { mutableStateOf(draft.duration) }
     var actual by rememberSaveable { mutableStateOf(draft.actualDuration) }
     var venue by rememberSaveable { mutableStateOf(draft.venue) }
@@ -145,6 +190,10 @@ private fun SessionFields(
     var micro by rememberSaveable { mutableStateOf(draft.microcycle) }
     var touched by rememberSaveable { mutableStateOf(false) }
     var failure by remember { mutableStateOf<Failure?>(null) }
+    var entryInvalid by remember { mutableStateOf(false) }
+    var conflicts by remember { mutableStateOf<List<SeriesConflictRecord>?>(null) }
+    // the draft of a session of a series, waiting for where it goes
+    var asking by remember { mutableStateOf<SessionDraft?>(null) }
     var busy by remember { mutableStateOf(false) }
     val options = rememberMicrocycles(teamId, day ?: first.toLocalDate(), micro)
     // a new session takes the microcycle of its day, until chosen otherwise
@@ -153,41 +202,62 @@ private fun SessionFields(
     }
     fun edit(change: () -> Unit) {
         change()
+        entryInvalid = false
         onChanged()
+    }
+    fun current(): SessionDraft = draft.copy(
+        start = day?.let { d -> time?.let { t -> "${d}T${t.format(HOUR_MINUTE)}" } },
+        duration = duration,
+        actualDuration = actual,
+        venue = venue,
+        title = title,
+        objectives = objectives,
+        notes = notes,
+        finalRemarks = remarks,
+        microcycle = micro,
+    )
+    // the session written; its time, duration and gym to the others of its
+    // series the scope reaches
+    fun write(written: SessionDraft, range: SeriesScope) {
+        busy = true
+        scope.launch {
+            failure = try {
+                val saved = app.core {
+                    when {
+                        sessionId != null && range != SeriesScope.THIS -> it.saveSessionInSeries(sessionId, written, range)
+                        else -> it.saveSession(teamId, sessionId, written)
+                    }
+                }
+                onSaved(saved.id)
+                null
+            } catch (e: MobileException) {
+                e.failure()
+            }
+            busy = false
+        }
     }
     // a gym held by another team asks first, once
     fun save(confirmed: Boolean) {
         busy = true
         scope.launch {
             failure = try {
-                val start = day?.let { d -> time?.let { t -> "${d}T${t.format(HOUR_MINUTE)}" } }
+                val written = current()
+                val start = written.start
                 val busyWith = when {
                     confirmed || venue == null || start == null -> emptyList()
                     else -> duration.trim().toUShortOrNull()?.let { m ->
                         app.core { it.sessionVenueClashes(teamId, venue!!, start, m) }
                     }.orEmpty()
                 }
-                if (busyWith.isNotEmpty()) {
-                    clashes = busyWith
-                } else {
-                    val saved = app.core {
-                        it.saveSession(
-                            teamId,
-                            sessionId,
-                            draft.copy(
-                                start = start,
-                                duration = duration,
-                                actualDuration = actual,
-                                venue = venue,
-                                title = title,
-                                objectives = objectives,
-                                notes = notes,
-                                finalRemarks = remarks,
-                                microcycle = micro,
-                            ),
-                        )
+                val asks = busyWith.isEmpty() && sessionId != null &&
+                    app.core { it.asksSeriesScope(sessionId, written) }
+                when {
+                    busyWith.isNotEmpty() -> clashes = busyWith
+                    asks -> asking = written
+                    else -> {
+                        val saved = app.core { it.saveSession(teamId, sessionId, written) }
+                        onSaved(saved.id)
                     }
-                    onSaved(saved.id)
                 }
                 null
             } catch (e: MobileException) {
@@ -196,12 +266,112 @@ private fun SessionFields(
             busy = false
         }
     }
-    clashes?.let { ClashDialog(it, onConfirm = { clashes = null; save(true) }, onDismiss = { clashes = null }) }
+    // the entry in the form, if whole
+    fun entry(): SeriesDraft? {
+        val d = day ?: return null
+        val t = time ?: return null
+        val m = duration.trim().toUShortOrNull()?.takeIf { it > 0u } ?: return null
+        val last = until?.takeIf { !it.isBefore(d) } ?: return null
+        return SeriesDraft(d.toString(), last.toString(), listOf(SeriesBand(d.dayOfWeek.value.toUByte(), t.format(HOUR_MINUTE), m, venue)))
+    }
+    // Continue: the entry kept, the form ready for the next (the day after)
+    fun next() {
+        val e = entry()
+        if (e == null) {
+            entryInvalid = true
+            return
+        }
+        entries.add(e)
+        day = day?.plusDays(1)
+        entryInvalid = false
+        onChanged()
+    }
+    fun make(all: List<SeriesDraft>, others: Boolean, confirmed: Boolean) {
+        busy = true
+        scope.launch {
+            failure = try {
+                val gyms = all.any { e -> e.bands.any { it.venue != null } }
+                val busyWith = if (confirmed || !gyms) emptyList() else app.core { it.seriesVenueClashes(teamId, all) }
+                val result = when {
+                    busyWith.isNotEmpty() -> null
+                    else -> app.core { it.createSeries(teamId, all, others) }
+                }
+                when {
+                    result == null -> clashes = busyWith
+                    // nothing written: the user decides
+                    result.created.isEmpty() && result.conflicts.isNotEmpty() -> conflicts = result.conflicts
+                    else -> onRepeated()
+                }
+                null
+            } catch (e: MobileException) {
+                e.failure()
+            }
+            busy = false
+        }
+    }
+    // Finish: all the entries, the one in the form last
+    fun finish(others: Boolean = false, confirmed: Boolean = false) {
+        val e = entry()
+        if (e == null) {
+            entryInvalid = true
+            return
+        }
+        make(entries + e, others, confirmed)
+    }
+    clashes?.let {
+        ClashDialog(it, onConfirm = {
+            clashes = null
+            if (series) finish(confirmed = true) else save(true)
+        }, onDismiss = { clashes = null })
+    }
+    conflicts?.let { list ->
+        AlertDialog(
+            onDismissRequest = { conflicts = null },
+            title = { Text(stringResource(R.string.tr_series_conflicts)) },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    list.forEach { Text(momentText(it.start)) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    conflicts = null
+                    finish(others = true, confirmed = true)
+                }) { Text(stringResource(R.string.tr_create_others)) }
+            },
+            dismissButton = { TextButton(onClick = { conflicts = null }) { Text(stringResource(R.string.cancel)) } },
+        )
+    }
+    asking?.let { written ->
+        ScopeDialog(
+            stringResource(R.string.tr_scope_edit_text),
+            stringResource(R.string.save),
+            deleting = false,
+            onChosen = { range ->
+                asking = null
+                write(written, range)
+            },
+            onDismiss = { asking = null },
+        )
+    }
     Column(modifier) {
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            if (sessionId == null) {
+                val kinds = listOf(R.string.tr_single_session, R.string.tr_weekly_series)
+                SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    kinds.forEachIndexed { index, kind ->
+                        SegmentedButton(
+                            selected = series == (index == 1),
+                            onClick = { onSeries(index == 1) },
+                            shape = SegmentedButtonDefaults.itemShape(index, kinds.size),
+                        ) { Text(stringResource(kind)) }
+                    }
+                }
+            }
+            if (series && entries.isNotEmpty()) SeriesEntries(entries)
             DayField(
                 stringResource(R.string.date),
                 day,
@@ -211,35 +381,122 @@ private fun SessionFields(
             TimeField(stringResource(R.string.tr_time), time, onTime = { t -> edit { time = t } })
             NumberField(R.string.tr_session_duration, duration, ErrorFor(failure, TrainingField.DURATION)) { edit { duration = it } }
             VenueChoice(teamId, venue, onVenue = { v -> edit { venue = v } })
-            OutlinedTextField(
-                title,
-                { edit { title = it } },
-                Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.tr_session_title)) },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+            if (series) {
+                DayField(stringResource(R.string.tr_until), until, onDay = { d -> edit { until = d } })
+            } else {
+                OutlinedTextField(
+                    title,
+                    { edit { title = it } },
+                    Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.tr_session_title)) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
+                )
+                MicrocycleChoice(options, micro) { id ->
+                    edit {
+                        touched = true
+                        micro = id
+                    }
+                }
+                Lines(R.string.tr_objectives, objectives) { edit { objectives = it } }
+                NotesField(notes) { edit { notes = it } }
+                Lines(R.string.tr_final_remarks, remarks) { edit { remarks = it } }
+                NumberField(R.string.tr_session_actual, actual, ErrorFor(failure, TrainingField.ACTUAL_DURATION)) { edit { actual = it } }
+            }
+        }
+        val message = when {
+            entryInvalid -> stringResource(R.string.tr_entry_invalid)
+            else -> failure.elsewhere(TrainingField.START, TrainingField.DURATION, TrainingField.ACTUAL_DURATION)
+        }
+        message?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+        // big and at the bottom, where the thumb is
+        if (series) {
+            Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedButton(
+                    onClick = { next() },
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                ) { Text(stringResource(R.string.tr_continue_entry)) }
+                Button(
+                    onClick = { finish() },
+                    enabled = !busy,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                ) { Text(stringResource(R.string.tr_finish)) }
+            }
+        } else {
+            Button(
+                onClick = { save(false) },
+                enabled = !busy,
+                modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
+            ) { Text(stringResource(R.string.save)) }
+        }
+    }
+}
+
+/** The entries of a series written before: weekday and time, minutes, the
+ * days. */
+@Composable
+private fun SeriesEntries(entries: List<SeriesDraft>) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Text(stringResource(R.string.tr_series_entries), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+    entries.forEach { e ->
+        e.bands.forEach { b ->
+            val weekday = DayOfWeek.of(b.weekday.toInt().coerceIn(1, 7)).getDisplayName(TextStyle.FULL, Locale.getDefault())
+            Text(
+                "$weekday ${b.time} · ${b.durationMin}′ · ${dayText(LocalDate.parse(e.from))} – ${dayText(LocalDate.parse(e.to))}",
+                style = MaterialTheme.typography.bodyMedium,
             )
-            MicrocycleChoice(options, micro) { id ->
-                edit {
-                    touched = true
-                    micro = id
+        }
+    }
+}
+
+/** The question over a session of a series, on changing or deleting it:
+ * only this session, this and the following, the whole series. */
+@Composable
+internal fun ScopeDialog(
+    text: String,
+    confirm: String,
+    deleting: Boolean,
+    onChosen: (SeriesScope) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var chosen by rememberSaveable { mutableStateOf(SeriesScope.THIS) }
+    val scopes = listOf(
+        SeriesScope.THIS to R.string.tr_scope_this,
+        SeriesScope.THIS_AND_FOLLOWING to R.string.tr_scope_following,
+        SeriesScope.ALL to R.string.tr_scope_all,
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.tr_in_series_title)) },
+        text = {
+            Column(Modifier.selectableGroup()) {
+                Text(text)
+                scopes.forEach { (range, label) ->
+                    Row(
+                        Modifier.fillMaxWidth().heightIn(min = 48.dp)
+                            .selectable(selected = chosen == range, role = Role.RadioButton, onClick = { chosen = range }),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        RadioButton(selected = chosen == range, onClick = null)
+                        Text(stringResource(label), Modifier.padding(start = 12.dp))
+                    }
                 }
             }
-            Lines(R.string.tr_objectives, objectives) { edit { objectives = it } }
-            NotesField(notes) { edit { notes = it } }
-            Lines(R.string.tr_final_remarks, remarks) { edit { remarks = it } }
-            NumberField(R.string.tr_session_actual, actual, ErrorFor(failure, TrainingField.ACTUAL_DURATION)) { edit { actual = it } }
-        }
-        failure.elsewhere(TrainingField.START, TrainingField.DURATION, TrainingField.ACTUAL_DURATION)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
-        // big and at the bottom, where the thumb is
-        Button(
-            onClick = { save(false) },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
-        ) { Text(stringResource(R.string.save)) }
-    }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onChosen(chosen) },
+                colors = when (deleting) {
+                    true -> ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.error,
+                        contentColor = MaterialTheme.colorScheme.onError,
+                    )
+                    false -> ButtonDefaults.buttonColors()
+                },
+            ) { Text(confirm) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
+    )
 }
 
 @Composable
@@ -480,136 +737,6 @@ private fun CopyActivity(teamId: String, onCopy: (ActivityDraft) -> Unit) {
     }
 }
 
-/** The new series of sessions: a band for each weekday, between two days. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SeriesScreen(teamId: String, onBack: () -> Unit, onDone: () -> Unit) {
-    val app = LocalContext.current.applicationContext as Scout4AllApplication
-    val scope = rememberCoroutineScope()
-    var from by rememberSaveable { mutableStateOf<LocalDate?>(LocalDate.now()) }
-    var to by rememberSaveable { mutableStateOf<LocalDate?>(LocalDate.now().plusMonths(1)) }
-    // the gym of each weekday
-    var venues by rememberSaveable { mutableStateOf(List<String?>(7) { null }) }
-    var clashes by remember { mutableStateOf<List<VenueClashRecord>?>(null) }
-    // the time and the minutes of each weekday: no time, no session
-    var times by rememberSaveable { mutableStateOf(List<LocalTime?>(7) { null }) }
-    var minutes by rememberSaveable { mutableStateOf(List(7) { "90" }) }
-    var failure by remember { mutableStateOf<Failure?>(null) }
-    var conflicts by remember { mutableStateOf<List<SeriesConflictRecord>?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    fun create(others: Boolean, confirmed: Boolean = false) {
-        val bands = DayOfWeek.entries.mapNotNull { d ->
-            val i = d.ordinal
-            times[i]?.let { t ->
-                val m = minutes[i].trim().toUShortOrNull()
-                if (m == null) {
-                    failure = Failure(TrainingField.BANDS, minutes[i])
-                    return
-                }
-                SeriesBand((i + 1).toUByte(), t.format(HOUR_MINUTE), m, venues[i])
-            }
-        }
-        val start = from
-        val end = to
-        if (start == null || end == null) return
-        busy = true
-        scope.launch {
-            failure = try {
-                val draft = SeriesDraft(start.toString(), end.toString(), bands)
-                val busyWith = if (confirmed) emptyList() else app.core { it.seriesVenueClashes(teamId, draft) }
-                val result = when {
-                    busyWith.isNotEmpty() -> null
-                    else -> app.core { it.createSeries(teamId, draft, others) }
-                }
-                when {
-                    result == null -> clashes = busyWith
-                    // nothing written: the user decides
-                    result.conflicts.isNotEmpty() && result.created.isEmpty() && !others -> conflicts = result.conflicts
-                    else -> onDone()
-                }
-                null
-            } catch (e: MobileException) {
-                e.failure()
-            }
-            busy = false
-        }
-    }
-    val changed = venues.any { it != null } || times.any { it != null }
-    val back = rememberFormBack(changed, onBack)
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.tr_repeat_sessions), Modifier.title()) },
-                navigationIcon = { BackButton(back) },
-            )
-        },
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            Column(
-                Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp),
-            ) {
-                DayField(stringResource(R.string.tr_from), from, onDay = { d -> d?.let { from = it } }, error = ErrorFor(failure, TrainingField.RANGE))
-                DayField(stringResource(R.string.tr_to), to, onDay = { d -> d?.let { to = it } })
-                Text(stringResource(R.string.tr_band_hint), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                DayOfWeek.entries.forEach { d ->
-                    val i = d.ordinal
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(d.getDisplayName(TextStyle.FULL, Locale.getDefault()), style = MaterialTheme.typography.titleSmall)
-                        VenueChoice(teamId, venues[i], onVenue = { v -> venues = venues.toMutableList().also { it[i] = v } })
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            TimeField(
-                                stringResource(R.string.tr_time),
-                                times[i],
-                                onTime = { t -> times = times.toMutableList().also { it[i] = t } },
-                                modifier = Modifier.weight(1f),
-                                clear = stringResource(R.string.cancel),
-                            )
-                            OutlinedTextField(
-                                minutes[i],
-                                { m -> minutes = minutes.toMutableList().also { it[i] = m } },
-                                Modifier.weight(1f),
-                                label = { Text(stringResource(R.string.tr_minutes)) },
-                                singleLine = true,
-                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                            )
-                        }
-                    }
-                }
-            }
-            failure.elsewhere(TrainingField.RANGE)?.let {
-                Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-            }
-            Button(
-                onClick = { create(false) },
-                enabled = !busy,
-                modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
-            ) { Text(stringResource(R.string.save)) }
-        }
-        clashes?.let { c ->
-            ClashDialog(c, onConfirm = { clashes = null; create(false, confirmed = true) }, onDismiss = { clashes = null })
-        }
-        conflicts?.let { list ->
-            AlertDialog(
-                onDismissRequest = { conflicts = null },
-                title = { Text(stringResource(R.string.tr_series_conflicts)) },
-                text = {
-                    Column(Modifier.verticalScroll(rememberScrollState())) {
-                        list.forEach { Text(momentText(it.start)) }
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = {
-                        conflicts = null
-                        create(true)
-                    }) { Text(stringResource(R.string.tr_create_others)) }
-                },
-                dismissButton = { TextButton(onClick = { conflicts = null }) { Text(stringResource(R.string.cancel)) } },
-            )
-        }
-    }
-}
-
 /** Where a session is copied: a day and time, the microcycle, what is
  * copied. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -704,111 +831,5 @@ private fun DuplicateFields(
             enabled = !busy,
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.tr_duplicate_session)) }
-    }
-}
-
-/** What changes in the series of a session: for which sessions, what, or
- * to remove the planned ones instead. `onDone` tells whether the session
- * is gone. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SeriesChangeScreen(teamId: String, sessionId: String, onBack: () -> Unit, onDone: (gone: Boolean) -> Unit) {
-    val app = LocalContext.current.applicationContext as Scout4AllApplication
-    val session by produceState<io.github.naighes.scout4all.core.SessionRecord?>(null, sessionId) {
-        value = try {
-            app.core { it.trainingSession(sessionId) }
-        } catch (_: MobileException) {
-            null
-        }
-    }
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text(stringResource(R.string.tr_edit_series), Modifier.title()) },
-                navigationIcon = { BackButton(onBack) },
-            )
-        },
-    ) { padding ->
-        val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
-        val s = session
-        if (s == null) Centered(modifier) { CircularProgressIndicator() }
-        else SeriesChangeFields(teamId, s, modifier, onDone)
-    }
-}
-
-@Composable
-private fun SeriesChangeFields(
-    teamId: String,
-    s: io.github.naighes.scout4all.core.SessionRecord,
-    modifier: Modifier,
-    onDone: (gone: Boolean) -> Unit,
-) {
-    val app = LocalContext.current.applicationContext as Scout4AllApplication
-    val scope = rememberCoroutineScope()
-    val own = remember { LocalDateTime.parse(s.start) }
-    var range by rememberSaveable { mutableStateOf(io.github.naighes.scout4all.core.SeriesScope.THIS) }
-    var venue by rememberSaveable { mutableStateOf(s.venueId) }
-    var time by rememberSaveable { mutableStateOf<LocalTime?>(own.toLocalTime()) }
-    var minutes by rememberSaveable { mutableStateOf(s.durationMin.toString()) }
-    var remove by rememberSaveable { mutableStateOf(false) }
-    var failure by remember { mutableStateOf<Failure?>(null) }
-    var busy by remember { mutableStateOf(false) }
-    Column(modifier) {
-        Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-        ) {
-            ChoiceField(
-                stringResource(R.string.tr_series_scope),
-                listOf(
-                    io.github.naighes.scout4all.core.SeriesScope.THIS to stringResource(R.string.tr_scope_this),
-                    io.github.naighes.scout4all.core.SeriesScope.THIS_AND_FOLLOWING to stringResource(R.string.tr_scope_following),
-                    io.github.naighes.scout4all.core.SeriesScope.ALL to stringResource(R.string.tr_scope_all),
-                ),
-                range,
-                onSelect = { range = it },
-            )
-            if (!remove) {
-                VenueChoice(teamId, venue, onVenue = { venue = it })
-                TimeField(stringResource(R.string.tr_time), time, onTime = { t -> t?.let { time = it } })
-                NumberField(R.string.tr_session_duration, minutes, ErrorFor(failure, TrainingField.DURATION)) { minutes = it }
-            }
-            CheckRow(stringResource(R.string.tr_remove_series_check), remove, onChecked = { remove = it })
-        }
-        failure.elsewhere(TrainingField.DURATION)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
-        Button(
-            onClick = {
-                busy = true
-                scope.launch {
-                    failure = try {
-                        // only what is different is sent
-                        val change = io.github.naighes.scout4all.core.SeriesChange(
-                            venue = venue.takeIf { it != s.venueId },
-                            clearVenue = venue == null && s.venueId != null,
-                            time = time?.takeIf { it != own.toLocalTime() }?.format(HOUR_MINUTE),
-                            durationMin = minutes.trim().toUShortOrNull()?.takeIf { it != s.durationMin },
-                        )
-                        val gone = app.core {
-                            if (remove) {
-                                it.removeSeries(s.id, range)
-                                true
-                            } else {
-                                it.updateSeries(s.id, range, change)
-                                false
-                            }
-                        }
-                        onDone(gone)
-                        null
-                    } catch (e: MobileException) {
-                        e.failure()
-                    }
-                    busy = false
-                }
-            },
-            enabled = !busy,
-            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
-        ) { Text(stringResource(if (remove) R.string.delete else R.string.save)) }
     }
 }

@@ -206,15 +206,22 @@ private fun SeenByB(
 /** The statistics of the match, a button of their own. */
 @Composable
 private fun StatsButton(onClick: () -> Unit) =
+    ScreenButton(R.drawable.ic_stats, stringResource(R.string.match_stats), onClick)
+
+/** A button to another screen (statistics, analysis, training plan): the
+ * whole width, outlined in the primary colour, its icon before its name;
+ * the same look everywhere. */
+@Composable
+internal fun ScreenButton(icon: Int, label: String, onClick: () -> Unit) =
     OutlinedButton(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).heightIn(min = 48.dp),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary),
         colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
     ) {
-        Icon(painterResource(R.drawable.ic_stats), contentDescription = null, Modifier.size(20.dp))
+        Icon(painterResource(icon), contentDescription = null, Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
-        Text(stringResource(R.string.match_stats), Modifier.weight(1f, fill = false))
+        Text(label, Modifier.weight(1f, fill = false))
     }
 
 /** The date, the court and the sets won, big. */

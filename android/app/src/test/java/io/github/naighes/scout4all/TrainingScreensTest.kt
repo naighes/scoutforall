@@ -1,6 +1,10 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isDialog
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -41,7 +45,7 @@ class TrainingScreensTest {
         rule.setContent {
             Scout4AllTheme {
                 SessionScreen(
-                    team, session, onBack = {}, onEdit = {}, onActivity = {}, onAttendance = {}, onDuplicate = {}, onSeries = {},
+                    team, session, onBack = {}, onEdit = {}, onActivity = {}, onAttendance = {}, onDuplicate = {},
                 )
             }
         }
@@ -158,7 +162,7 @@ class TrainingScreensTest {
     private fun hub(part: Part, onNewOn: (LocalDate) -> Unit = {}, onNewCycle: (Level) -> Unit = {}) = rule.setContent {
         Scout4AllTheme {
             TrainingScreen(
-                team, onBack = {}, onSession = {}, onSeries = {}, onCycle = { _, _ -> },
+                team, onBack = {}, onSession = {}, onCycle = { _, _ -> },
                 onNewCycle = onNewCycle, onNewOn = onNewOn, onMatch = {}, first = part,
             )
         }
@@ -255,8 +259,112 @@ class TrainingScreensTest {
         val days = mutableListOf<LocalDate>()
         hub(Part.CALENDAR, onNewOn = { days += it })
         rule.waitForText(string(R.string.agenda_today))
+        // the + says what it makes
         rule.onNode(hasContentDescription(string(R.string.tr_new_session)) and hasClickAction()).performClick()
+        rule.onNodeWithText(string(R.string.tr_new_session), useUnmergedTree = true).assertExists()
         assertEquals(listOf(LocalDate.now()), days)
+        // and the day chosen offers one right under it
+        rule.onNode(hasText(string(R.string.tr_add_session)) and hasClickAction()).performScrollTo().performClick()
+        assertEquals(listOf(LocalDate.now(), LocalDate.now()), days)
+    }
+
+    /** The day of a date picker written by hand (its text mode). */
+    private fun pickDay(field: String, day: LocalDate) {
+        rule.onNode(hasText(field)).performScrollTo().performClick()
+        rule.waitForIdle()
+        rule.onNode(hasContentDescription("text input mode", substring = true, ignoreCase = true) and hasClickAction())
+            .performClick()
+        rule.onNode(hasSetTextAction() and hasAnyAncestor(isDialog()))
+            .performTextReplacement(day.format(java.time.format.DateTimeFormatter.ofPattern("MMddyyyy")))
+        rule.onNode(hasText(string(R.string.ok)) and hasClickAction()).performClick()
+        rule.waitForIdle()
+    }
+
+    private fun inDialog(text: String) {
+        rule.onNode(hasText(text) and hasClickAction() and hasAnyAncestor(isDialog())).performClick()
+        rule.waitForIdle()
+    }
+
+    /** A weekly series, entry by entry: Continue keeps the entry (the last
+     * day wanted first) and offers the day after; Finish makes them all,
+     * each entry a series of its own. */
+    @Test
+    fun aSeriesIsWrittenEntryByEntry() {
+        val monday = LocalDate.now().plusWeeks(1).with(java.time.DayOfWeek.MONDAY)
+        var repeated = false
+        rule.setContent {
+            Scout4AllTheme {
+                SessionFormScreen(team, null, onBack = {}, onSaved = {}, day = monday, onRepeated = { repeated = true })
+            }
+        }
+        rule.waitForText(string(R.string.tr_weekly_series))
+        press(string(R.string.tr_weekly_series))
+        press(string(R.string.tr_continue_entry))
+        rule.waitForText(string(R.string.tr_entry_invalid))
+        pickDay(string(R.string.tr_until), monday.plusWeeks(2))
+        press(string(R.string.tr_continue_entry))
+        rule.waitForText(string(R.string.tr_series_entry, 2), substring = true)
+        press(string(R.string.tr_finish))
+        rule.waitFor({ "not made" }) { repeated }
+        val sessions = core { it.trainingSessions(team) }
+        assertEquals(
+            listOf(monday, monday.plusDays(1), monday.plusWeeks(1), monday.plusWeeks(1).plusDays(1), monday.plusWeeks(2)),
+            sessions.map { LocalDate.parse(it.start.take(10)) },
+        )
+        assertEquals(2, sessions.mapNotNull { it.seriesId }.toSet().size)
+        assertTrue(sessions.all { it.durationMin == 120.toUShort() })
+    }
+
+    private fun twoEntries(): List<io.github.naighes.scout4all.core.SessionRecord> {
+        val monday = LocalDate.now().plusWeeks(1).with(java.time.DayOfWeek.MONDAY)
+        fun entry(first: LocalDate) = io.github.naighes.scout4all.core.SeriesDraft(
+            first.toString(), monday.plusWeeks(2).toString(),
+            listOf(io.github.naighes.scout4all.core.SeriesBand(first.dayOfWeek.value.toUByte(), "20:30", 120.toUShort(), null)),
+        )
+        return core { it.createSeries(team, listOf(entry(monday), entry(monday.plusDays(3))), false) }.created
+    }
+
+    /** A Thursday of a series changed for the whole series: the Thursdays
+     * only; a title asks nothing. */
+    @Test
+    fun aSessionOfASeriesAsksWhereItsDurationGoes() {
+        val made = twoEntries()
+        val thursday = made[1]
+        val saved = mutableListOf<String>()
+        rule.setContent { Scout4AllTheme { SessionFormScreen(team, thursday.id, onBack = {}, onSaved = { saved += it }) } }
+        rule.waitForText(string(R.string.tr_session_duration))
+        rule.type(string(R.string.tr_session_duration), "60")
+        rule.save()
+        rule.waitForText(string(R.string.tr_in_series_title))
+        rule.onNode(hasText(string(R.string.tr_scope_all))).performClick()
+        inDialog(string(R.string.save))
+        rule.waitFor({ "not saved" }) { saved.isNotEmpty() }
+        val minutes = core { it.trainingSessions(team) }.associate { it.start to it.durationMin.toInt() }
+        assertEquals(
+            made.associate { it.start to if (it.seriesId == thursday.seriesId) 60 else 120 },
+            minutes,
+        )
+    }
+
+    /** Deleting a session of a series asks which ones go. */
+    @Test
+    fun deletingASessionOfASeriesAsksWhichOnesGo() {
+        val made = twoEntries()
+        val monday = made[0]
+        rule.setContent {
+            Scout4AllTheme {
+                SessionScreen(team, monday.id, onBack = {}, onEdit = {}, onActivity = {}, onAttendance = {}, onDuplicate = {})
+            }
+        }
+        rule.waitForText(string(R.string.tr_attendance))
+        rule.onNode(hasContentDescription(string(R.string.delete)) and hasClickAction()).performClick()
+        rule.waitForText(string(R.string.tr_in_series_title))
+        rule.onNode(hasText(string(R.string.tr_scope_all))).performClick()
+        inDialog(string(R.string.delete))
+        rule.waitFor({ "not deleted" }) { core { it.trainingSessions(team) }.size < made.size }
+        val left = core { it.trainingSessions(team) }
+        assertTrue(left.isNotEmpty())
+        assertTrue(left.none { it.seriesId == monday.seriesId })
     }
 
     /** The sessions are in the calendar, no tab of their own: its list has

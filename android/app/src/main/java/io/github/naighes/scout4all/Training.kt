@@ -63,7 +63,6 @@ import io.github.naighes.scout4all.core.CycleRecord
 import io.github.naighes.scout4all.core.Level
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Move
-import io.github.naighes.scout4all.core.SeriesChange
 import io.github.naighes.scout4all.core.SeriesScope
 import io.github.naighes.scout4all.core.SessionRecord
 import io.github.naighes.scout4all.core.SessionStatus
@@ -87,7 +86,6 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
             id,
             onBack = { nav.back(entry) },
             onSession = { nav.navigate("team/$id/training/$it") },
-            onSeries = { nav.navigate("team/$id/training-series") },
             onCycle = { level, cycle -> nav.navigate("team/$id/cycles/${level.name}/$cycle") },
             onNewCycle = { level -> nav.navigate("team/$id/cycle-new/${level.name}") },
             onNewOn = { day -> nav.navigate("team/$id/training-new-on/$day") },
@@ -97,7 +95,7 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
     }
     composable("team/{id}/training-new-on/{day}") { entry ->
         val id = entry.arg("id")
-        SessionFormScreen(id, null, onBack = { nav.back(entry) }, day = runCatching { LocalDate.parse(entry.arg("day")) }.getOrNull(), onSaved = { session ->
+        SessionFormScreen(id, null, onBack = { nav.back(entry) }, day = runCatching { LocalDate.parse(entry.arg("day")) }.getOrNull(), onRepeated = { nav.back(entry) }, onSaved = { session ->
             nav.navigate("team/$id/training/$session") { popUpTo("team/{id}/training-new-on/{day}") { inclusive = true } }
         })
     }
@@ -107,10 +105,6 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
         SessionFormScreen(id, null, onBack = { nav.back(entry) }, onSaved = { session ->
             nav.navigate("team/$id/training/$session") { popUpTo("team/{id}/training-new") { inclusive = true } }
         })
-    }
-    composable("team/{id}/training-series") { entry ->
-        val id = entry.arg("id")
-        SeriesScreen(id, onBack = { nav.back(entry) }, onDone = { nav.back(entry) })
     }
     composable("team/{id}/training/{session}") { entry ->
         val id = entry.arg("id")
@@ -123,20 +117,12 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
             onActivity = { activity -> nav.navigate("team/$id/training/$session/activity/${activity ?: "new"}") },
             onAttendance = { nav.navigate("team/$id/training/$session/attendance") },
             onDuplicate = { nav.navigate("team/$id/training/$session/duplicate") },
-            onSeries = { nav.navigate("team/$id/training/$session/series") },
         )
     }
     composable("team/{id}/training/{session}/duplicate") { entry ->
         val id = entry.arg("id")
         DuplicateScreen(id, entry.arg("session"), onBack = { nav.back(entry) }, onDuplicated = { copy ->
             nav.navigate("team/$id/training/$copy") { popUpTo("team/{id}/training/{session}/duplicate") { inclusive = true } }
-        })
-    }
-    composable("team/{id}/training/{session}/series") { entry ->
-        val id = entry.arg("id")
-        SeriesChangeScreen(id, entry.arg("session"), onBack = { nav.back(entry) }, onDone = { gone ->
-            // the session removed with its series: back to the list
-            if (gone) nav.popBackStack("team/{id}/training", inclusive = false) else nav.back(entry)
         })
     }
     composable("team/{id}/training/{session}/edit") { entry ->
@@ -204,7 +190,6 @@ fun SessionScreen(
     onActivity: (String?) -> Unit,
     onAttendance: () -> Unit,
     onDuplicate: () -> Unit,
-    onSeries: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
@@ -215,6 +200,8 @@ fun SessionScreen(
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     var completing by rememberSaveable { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf(false) }
+    // in a series with other planned sessions: which ones go
+    var deletingSeries by rememberSaveable { mutableStateOf(false) }
     var removing by rememberSaveable { mutableStateOf<String?>(null) }
     fun act(call: (io.github.naighes.scout4all.core.Scout4All) -> Unit) {
         scope.launch {
@@ -233,6 +220,39 @@ fun SessionScreen(
         delete = { it.removeSession(sessionId) },
         onDeleted = onBack,
     )
+    if (deletingSeries) {
+        ScopeDialog(
+            stringResource(R.string.tr_scope_delete_text),
+            stringResource(R.string.delete),
+            deleting = true,
+            onChosen = { range ->
+                deletingSeries = false
+                scope.launch {
+                    try {
+                        app.core {
+                            if (range == io.github.naighes.scout4all.core.SeriesScope.THIS) it.removeSession(sessionId)
+                            else it.removeSeries(sessionId, range)
+                        }
+                        onBack()
+                    } catch (e: MobileException) {
+                        error = e.reason
+                    }
+                }
+            },
+            onDismiss = { deletingSeries = false },
+        )
+    }
+    // the question of the series, or the usual one
+    fun askDeletion() {
+        scope.launch {
+            val series = try {
+                app.core { it.asksSeriesScope(sessionId, null) }
+            } catch (_: MobileException) {
+                false
+            }
+            if (series) deletingSeries = true else deleting = true
+        }
+    }
     removing?.let { activity ->
         Deletion(
             stringResource(R.string.tr_delete_activity_text),
@@ -255,7 +275,7 @@ fun SessionScreen(
                         IconButton(onClick = onEdit) {
                             Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.tr_edit_session))
                         }
-                        DeleteIcon(stringResource(R.string.delete)) { deleting = true }
+                        DeleteIcon(stringResource(R.string.delete)) { askDeletion() }
                     }
                 },
             )
@@ -323,11 +343,6 @@ fun SessionScreen(
                     }
                     OutlinedButton(onClick = onDuplicate, modifier = Modifier.fillMaxWidth()) {
                         Text(stringResource(R.string.tr_duplicate_session))
-                    }
-                    if (s.seriesId != null) {
-                        OutlinedButton(onClick = onSeries, modifier = Modifier.fillMaxWidth()) {
-                            Text(stringResource(R.string.tr_edit_series))
-                        }
                     }
                 }
             }
