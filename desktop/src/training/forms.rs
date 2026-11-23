@@ -204,14 +204,14 @@ impl SessionEditor {
                 vec![s.single_session.to_string(), s.weekly_series.to_string()],
                 0,
             ),
-            Field::masked(s.date, &date, Mask::Date, s.date_placeholder),
+            Field::masked(s.date, &date, Mask::Date, s.date_placeholder).with_calendar(),
             Field::masked(s.time, &time, Mask::Time, s.time_placeholder),
             Field::text(s.session_duration, draft.duration.clone()),
             Field {
                 value: venue_value(&venues, draft.venue.as_deref()),
                 ..Field::choice(s.session_location, vec![], 0)
             },
-            Field::masked(s.until_day, "", Mask::Date, s.date_placeholder),
+            Field::masked(s.until_day, "", Mask::Date, s.date_placeholder).with_calendar(),
             Field::text(s.session_title, draft.title.clone()),
             Field::lines(s.objectives, draft.objectives.clone()),
             Field::lines(s.notes, draft.notes.clone()),
@@ -239,6 +239,7 @@ impl SessionEditor {
             s,
         };
         editor.form.focused = DATE;
+        editor.form.busy = busy_days(core, &editor.team_id);
         editor.offer_microcycles(core, draft.microcycle.as_deref());
         editor.shape();
         Ok(editor)
@@ -1081,4 +1082,17 @@ mod tests {
             Edited::Saved(_)
         ));
     }
+}
+
+/// The days of the team that already hold a session or a match, to mark in
+/// the calendars of the forms.
+pub(super) fn busy_days(
+    core: &Scout4All,
+    team_id: &str,
+) -> std::collections::HashSet<chrono::NaiveDate> {
+    core.training_agenda_between(Some(team_id.to_string()), None, None)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|d| crate::calendar::day_of(&d.date))
+        .collect()
 }

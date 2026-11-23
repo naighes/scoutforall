@@ -2,7 +2,7 @@
 //! series are written in the form of a new session, `forms`.)
 
 use {
-    super::forms::{Edited, clash_warning, microcycle_options, microcycle_value, split},
+    super::forms::{Edited, busy_days, clash_warning, microcycle_options, microcycle_value, split},
     crate::{
         form::{self, Field, Form, Outcome, Value},
         strings::Strings,
@@ -48,7 +48,7 @@ impl DuplicateEditor {
         let proposed = core.proposed_duplicate(session_id.clone())?;
         let (date, time) = split(&Some(proposed.start.clone()));
         let fields = vec![
-            Field::masked(s.date, &date, form::Mask::Date, s.date_placeholder),
+            Field::masked(s.date, &date, form::Mask::Date, s.date_placeholder).with_calendar(),
             Field::masked(s.time, &time, form::Mask::Time, s.time_placeholder),
             Field::choice(s.microcycle, vec!["–".to_string()], 0),
             Field::check(s.copy_objectives, proposed.copy_objectives, false),
@@ -62,6 +62,7 @@ impl DuplicateEditor {
             warned: false,
             s,
         };
+        editor.form.busy = busy_days(core, &editor.team_id);
         editor.offer_microcycles(core, proposed.microcycle_id.as_deref());
         Ok(editor)
     }

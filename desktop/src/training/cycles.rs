@@ -164,12 +164,13 @@ impl CycleEditor {
                 &draft.end.clone().unwrap_or_default(),
                 Mask::Date,
                 s.date_placeholder,
-            ),
+            )
+            .with_calendar(),
             _ => Field::text(s.cycle_weeks, draft.weeks.clone()),
         };
         let mut fields = vec![
             Field::text(s.session_title, draft.title.clone()),
-            Field::masked(s.cycle_start, &start, Mask::Date, s.date_placeholder),
+            Field::masked(s.cycle_start, &start, Mask::Date, s.date_placeholder).with_calendar(),
             span,
             Field::lines(s.objectives, draft.objectives.clone()),
             Field::lines(s.notes, draft.notes.clone()),
@@ -187,8 +188,10 @@ impl CycleEditor {
             Some(_) => edit_name(s, level),
             None => create_name(s, level),
         };
+        let mut form = Form::new(title, fields);
+        form.busy = super::forms::busy_days(core, &team_id);
         Ok(CycleEditor {
-            form: Form::new(title, fields),
+            form,
             team_id,
             level,
             id,

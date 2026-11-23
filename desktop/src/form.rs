@@ -9,6 +9,7 @@ use {
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
+    chrono::{Datelike, Months, NaiveDate},
     iced::{
         Alignment, Element, Length, Padding,
         widget::{
@@ -17,7 +18,15 @@ use {
         },
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
+    std::collections::HashSet,
 };
+
+/// The days of the month `day` is in.
+fn days_in(day: NaiveDate) -> u32 {
+    day.checked_add_months(Months::new(1)).map_or(31, |next| {
+        u32::try_from((next - day).num_days()).unwrap_or(31)
+    })
+}
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -188,6 +197,8 @@ pub struct Field {
     pub icons: Vec<&'static [u8]>,
     /// a password: its letters not shown
     pub secret: bool,
+    /// a date with a button that opens a month to choose the day from
+    pub calendar: bool,
 }
 
 impl Field {
@@ -199,6 +210,15 @@ impl Field {
             placeholder: String::new(),
             icons: vec![],
             secret: false,
+            calendar: false,
+        }
+    }
+
+    /// The date can be chosen from a calendar, the button beside it.
+    pub fn with_calendar(self) -> Field {
+        Field {
+            calendar: true,
+            ..self
         }
     }
 
@@ -312,6 +332,12 @@ pub enum Message {
     /// the wheel over the list of a drop-down: down (positive) or up
     Scroll(usize, i32),
     Focus(usize),
+    /// the button of a date: its calendar open or closed
+    Calendar(usize),
+    /// the calendar shows the month after (positive) or before
+    Month(i32),
+    /// a day of the calendar chosen
+    Day(NaiveDate),
     /// more about a field asked (the number and the role of a player on
     /// the score sheet): for the screen, the form stays as it is
     Details(usize),
@@ -359,6 +385,10 @@ pub struct Form {
     undo: Vec<(usize, Value)>,
     /// the changes undone, to make again
     redo: Vec<(usize, Value)>,
+    /// the calendar open: its field, and the first day of the month shown
+    pub picker: Option<(usize, NaiveDate)>,
+    /// the days already taken, marked in the calendar
+    pub busy: HashSet<NaiveDate>,
 }
 
 /// How many suggestions a search shows.
@@ -503,6 +533,8 @@ impl Form {
             hidden: vec![],
             undo: vec![],
             redo: vec![],
+            picker: None,
+            busy: HashSet::new(),
         }
     }
 
@@ -855,10 +887,43 @@ impl Form {
                 self.focused = field.min(self.fields.len().saturating_sub(1));
                 Outcome::Stay
             }
+            Message::Calendar(field) => self.toggle_calendar(field),
+            Message::Month(step) => {
+                self.picker = self.picker.map(|(at, month)| {
+                    let months = Months::new(step.unsigned_abs());
+                    let moved = match step < 0 {
+                        true => month.checked_sub_months(months),
+                        false => month.checked_add_months(months),
+                    };
+                    (at, moved.unwrap_or(month))
+                });
+                Outcome::Stay
+            }
+            Message::Day(day) => match self.picker.take() {
+                Some((field, _)) => self.write(field, day.format("%Y-%m-%d").to_string()),
+                None => Outcome::Stay,
+            },
             Message::Details(_) | Message::Another => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,
         }
+    }
+
+    /// Opens the calendar of a date at the month it holds (this one when
+    /// it holds none), or closes it.
+    fn toggle_calendar(&mut self, field: usize) -> Outcome {
+        self.focused = field;
+        let shown = self.picker.is_some_and(|(at, _)| at == field);
+        let calendar = self.fields.get(field).is_some_and(|f| f.calendar);
+        self.picker = match (shown, calendar) {
+            (false, true) => {
+                let day = NaiveDate::parse_from_str(&self.text(field), "%Y-%m-%d")
+                    .unwrap_or_else(|_| chrono::Local::now().date_naive());
+                Some((field, day.with_day(1).unwrap_or(day)))
+            }
+            _ => None,
+        };
+        Outcome::Stay
     }
 
     /// The fields shown, in order.
@@ -890,7 +955,15 @@ impl Form {
         match (ck, offering, lit) {
             (k, _, _) if is_undo(k) => self.undo(true),
             // Alt ↓ opens a drop-down, as a select of the web
+            (k, _, _) if k == key!(alt - down) && self.has_calendar(self.focused) => {
+                self.toggle_calendar(self.focused)
+            }
             (k, _, _) if k == key!(alt - down) => self.open(self.focused),
+            // a calendar open: Esc closes it, not the form
+            (k, _, _) if k == BACK_KEY && self.picker.is_some() => {
+                self.picker = None;
+                Outcome::Stay
+            }
             (k, _, _) if is_redo(k) => self.undo(false),
             // the suggestions shown: they take the keys
             (k, true, _) if k == BACK_KEY => {
@@ -918,6 +991,10 @@ impl Form {
             }
             (k, _, _) => self.move_key(k),
         }
+    }
+
+    fn has_calendar(&self, field: usize) -> bool {
+        self.fields.get(field).is_some_and(|f| f.calendar)
     }
 
     fn move_key(&mut self, ck: KeyCombination) -> Outcome {
@@ -984,7 +1061,7 @@ impl Form {
             .enumerate()
             .filter(move |(i, _)| visible.contains(i))
             .map(|(i, f)| {
-                let field = self.field(i, f, c, on);
+                let field = self.field(i, f, s, c, on);
                 match self.sections.iter().find(|(at, _)| *at == i) {
                     Some((_, title)) => column![
                         iced::widget::space::vertical().height(6),
@@ -1048,10 +1125,128 @@ impl Form {
         iced::widget::scrollable(body).height(Length::Fill).into()
     }
 
+    /// A month of days to choose from: the arrows on its name, the weeks
+    /// from Monday, the day written in the accent, today ringed, the days
+    /// already taken marked by a dot.
+    fn calendar<'a, M: Clone + 'a>(
+        &'a self,
+        month: NaiveDate,
+        chosen: Option<NaiveDate>,
+        s: &'static Strings,
+        c: Colors,
+        on: impl Fn(Message) -> M + Copy + 'a,
+    ) -> Element<'a, M> {
+        let today = chrono::Local::now().date_naive();
+        let arrow = |label: &'static str, step: i32| {
+            button(text(label).size(SIZE_BODY).color(c.text))
+                .on_press(on(Message::Month(step)))
+                .padding(Padding::from([4, 12]))
+                .style(|_, _| button::Style::default())
+        };
+        let name = format!(
+            "{} {}",
+            s.months
+                .get(month.month0() as usize)
+                .copied()
+                .unwrap_or_default(),
+            month.year()
+        );
+        let head = row![
+            arrow("‹", -1),
+            container(
+                text(name)
+                    .size(SIZE_BODY)
+                    .font(theme::fonts().bold)
+                    .color(c.text)
+            )
+            .width(Length::Fill)
+            .center_x(Length::Fill),
+            arrow("›", 1),
+        ]
+        .align_y(Alignment::Center);
+        let first =
+            month - chrono::Duration::days(i64::from(month.weekday().num_days_from_monday()));
+        let weeks =
+            (i64::from(month.weekday().num_days_from_monday()) + i64::from(days_in(month)) + 6) / 7;
+        let letters = Row::with_children(s.weekdays.iter().map(|w| {
+            container(text(*w).size(SIZE_SMALL).color(c.muted))
+                .width(Length::FillPortion(1))
+                .center_x(Length::FillPortion(1))
+                .into()
+        }));
+        let rows = (0..weeks).map(|w| {
+            Row::with_children((0..7).map(|d| {
+                let day = first + chrono::Duration::days(w * 7 + d);
+                let (here, picked, busy) = (
+                    day.month() == month.month(),
+                    Some(day) == chosen,
+                    self.busy.contains(&day),
+                );
+                let number =
+                    text(day.day().to_string())
+                        .size(SIZE_SMALL)
+                        .color(match (picked, here) {
+                            (true, _) => c.background,
+                            (false, true) => c.text,
+                            (false, false) => c.muted,
+                        });
+                let dot = text(match busy {
+                    true => "•",
+                    false => " ",
+                })
+                .size(SIZE_SMALL)
+                .color(match picked {
+                    true => c.background,
+                    false => c.accent,
+                });
+                button(column![number, dot].align_x(Alignment::Center))
+                    .width(Length::FillPortion(1))
+                    .padding(Padding::from([2, 0]))
+                    .on_press(on(Message::Day(day)))
+                    .style(move |_, status| button::Style {
+                        background: match (picked, status) {
+                            (true, _) => Some(c.accent.into()),
+                            (false, button::Status::Hovered) => Some(c.border.into()),
+                            _ => None,
+                        },
+                        border: iced::Border {
+                            color: c.accent,
+                            width: if day == today && !picked { 1.0 } else { 0.0 },
+                            radius: 6.0.into(),
+                        },
+                        ..button::Style::default()
+                    })
+                    .into()
+            }))
+            .into()
+        });
+        container(
+            Column::with_children(
+                [head.into(), letters.into()]
+                    .into_iter()
+                    .chain(rows)
+                    .collect::<Vec<Element<'a, M>>>(),
+            )
+            .spacing(2),
+        )
+        .padding(8)
+        .style(move |_| container::Style {
+            background: Some(c.background.into()),
+            border: iced::Border {
+                color: c.border,
+                width: 1.0,
+                radius: 8.0.into(),
+            },
+            ..container::Style::default()
+        })
+        .into()
+    }
+
     fn field<'a, M: Clone + 'a>(
         &'a self,
         i: usize,
         f: &'a Field,
+        s: &'static Strings,
         c: Colors,
         on: impl Fn(Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
@@ -1126,6 +1321,40 @@ impl Form {
                 field::Follow::Never,
             )
             .into(),
+            Value::Masked { text, .. } if f.calendar => {
+                let shown = self.picker.filter(|(at, _)| *at == i);
+                let toggle = container(
+                    button(ui::icon(
+                        theme::icons::CALENDAR,
+                        16.0,
+                        match shown {
+                            Some(_) => c.accent,
+                            None => c.muted,
+                        },
+                    ))
+                    .on_press(on(Message::Calendar(i)))
+                    .padding(Padding::from([8, 12]))
+                    .style(|_, _| button::Style::default()),
+                )
+                .width(Length::Fill)
+                .align_x(iced::alignment::Horizontal::Right);
+                let line = iced::widget::stack![input(text, field::Follow::Typing), toggle];
+                match shown {
+                    Some((_, month)) => column![
+                        line,
+                        self.calendar(
+                            month,
+                            NaiveDate::parse_from_str(text, "%Y-%m-%d").ok(),
+                            s,
+                            c,
+                            on
+                        )
+                    ]
+                    .spacing(4)
+                    .into(),
+                    None => line.into(),
+                }
+            }
             Value::Masked { text, .. } => input(text, field::Follow::Typing),
             Value::Search {
                 text: written,
@@ -1603,6 +1832,40 @@ mod tests {
         // ← → on a text field are the text's
         f.focused = 0;
         assert_eq!(f.key(key!(left)), Outcome::Stay);
+    }
+
+    /// The button of a date opens its month (the one the date holds), the
+    /// arrows move it, a day written in the field and the calendar closed;
+    /// Esc closes the calendar before the form; a field without the
+    /// button has none to open.
+    #[test]
+    fn a_calendar_chooses_the_day_of_a_date() {
+        let day = |y, m, d| NaiveDate::from_ymd_opt(y, m, d).unwrap();
+        let mut f = Form::new(
+            "t",
+            vec![
+                Field::masked("d", "2026-11-23", Mask::Date, "").with_calendar(),
+                Field::masked("plain", "", Mask::Date, ""),
+            ],
+        );
+        f.update(Message::Calendar(1));
+        assert_eq!(f.picker, None);
+        f.update(Message::Calendar(0));
+        assert_eq!(f.picker, Some((0, day(2026, 11, 1))));
+        f.update(Message::Month(2));
+        assert_eq!(f.picker, Some((0, day(2027, 1, 1))));
+        f.update(Message::Month(-3));
+        assert_eq!(f.picker, Some((0, day(2026, 10, 1))));
+        assert_eq!(f.key(BACK_KEY), Outcome::Stay);
+        assert_eq!(f.picker, None);
+        f.update(Message::Calendar(0));
+        assert_eq!(f.update(Message::Day(day(2026, 12, 5))), Outcome::Changed(0));
+        assert_eq!(f.text(0), "2026-12-05");
+        assert_eq!(f.picker, None);
+        assert_eq!(f.key(BACK_KEY), Outcome::Cancel);
+        assert_eq!(days_in(day(2026, 2, 1)), 28);
+        assert_eq!(days_in(day(2028, 2, 1)), 29);
+        assert_eq!(days_in(day(2026, 12, 1)), 31);
     }
 
     #[test]
