@@ -338,6 +338,7 @@ impl shots::Open {
             shots::Open::Stats(team, m) => Go::Stats(team, m, None),
             shots::Open::Analysis(team) => Go::Analysis(team),
             shots::Open::Video(team, m) => Go::Video(team, m),
+            shots::Open::Training(team) => Go::Training(team, training::screen::Open::Sessions),
         }
     }
 }

@@ -39,6 +39,8 @@ pub enum Open {
     Stats(String, String),
     Analysis(String),
     Video(String, String),
+    /// the training plan of the team, on its sessions
+    Training(String),
 }
 
 #[derive(Debug, Clone, Deserialize)]

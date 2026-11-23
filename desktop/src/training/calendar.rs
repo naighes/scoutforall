@@ -1,6 +1,8 @@
-//! The calendar of the training and the matches of a team: a week (seven
-//! columns, the bands of its microcycles above) or a month (a cell a day,
-//! the bands of its mesocycles above each row). Sessions and matches are
+//! The calendar of the training and the matches of a team, as the
+//! calendars of the mail draw it: a week (seven columns under the number of
+//! their day, the hours on the left, each event as tall as it lasts, the
+//! bands of its microcycles above) or a month (a box a day, the days of the
+//! months around in grey, the bands of its mesocycles above each row). Sessions and matches are
 //! told apart by icon and color. ← → move the day, ↑ ↓ the event of the
 //! day (the week) or the week (the month), PgUp PgDn change the period,
 //! Home goes back to today, `w` and `m` choose the view, Enter opens the
@@ -11,7 +13,7 @@ use {
     crate::{
         calendar::{day_of, text_of},
         strings::Strings,
-        theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
+        theme::{self, Colors, SIZE_BODY, SIZE_SMALL, SIZE_TITLE},
         ui,
     },
     chrono::{Datelike, Days, Duration, Months, NaiveDate},
@@ -534,11 +536,17 @@ impl CalendarTab {
                 View::Month => self.month(s, c),
             },
         };
+        // the week scrolls its hours under the heads of the days; the
+        // month as a whole
+        let body: Element<'a, Message> = match self.view {
+            View::Week => body,
+            View::Month => scrollable(body).height(Length::Fill).into(),
+        };
         column![
             Row::with_children(controls)
                 .spacing(6)
                 .align_y(Alignment::Center),
-            scrollable(body).height(Length::Fill)
+            body
         ]
         .spacing(10)
         .height(Length::Fill)
@@ -584,97 +592,243 @@ impl CalendarTab {
         .into()
     }
 
+    /// The week as the calendars of the mail draw it: the days side by
+    /// side under their number, the hours on the left, each event as tall
+    /// as it lasts, the ones at the same time side by side.
     fn week<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let days: Vec<Option<NaiveDate>> = self
-            .days
-            .iter()
-            .map(|d| day_of(&d.date))
-            .collect::<Vec<_>>();
-        let columns = Row::with_children(self.days.iter().map(|day| {
-            let date = day_of(&day.date);
-            let lit = date == Some(self.today);
-            let here = date == Some(self.anchor);
-            let head: Element<'a, Message> = match date {
-                Some(date) => ui::list_row(
-                    text(format!("{} {}", s.weekday(date), s.short_date(date)))
-                        .size(SIZE_SMALL)
-                        .font(theme::fonts().bold)
-                        .color(match lit {
-                            true => c.accent,
-                            false => c.muted,
-                        }),
-                    here && day.events.is_empty(),
-                    Some(Message::Day(date)),
-                    c,
-                ),
-                None => space::vertical().into(),
-            };
-            let events = Column::with_children(day.events.iter().enumerate().map(|(i, event)| {
-                ui::list_row(
-                    event_text(event, s, c, false, self.all_teams),
-                    here && i == self.slot,
-                    date.map(|d| Message::Event(d, i)),
-                    c,
-                )
-            }))
-            .spacing(3);
-            column![head, events]
-                .spacing(3)
-                .width(Length::FillPortion(1))
+        let dates: Vec<Option<NaiveDate>> = self.days.iter().map(|d| day_of(&d.date)).collect();
+        let (first, last) = hours(&self.days);
+        let gutter = || space::horizontal().width(Length::Fixed(GUTTER));
+        let heads = Row::with_children(
+            std::iter::once(gutter().into())
+                .chain(dates.iter().map(|date| self.day_head(*date, s, c))),
+        )
+        .spacing(1);
+        let band = row![gutter(), self.band(&dates, s, c)];
+        let labels = Column::with_children((first..last).map(|hour| {
+            container(text(format!("{hour}:00")).size(SIZE_SMALL).color(c.muted))
+                .width(Length::Fixed(GUTTER))
+                .height(Length::Fixed(HOUR))
+                .padding(Padding::ZERO.right(8))
+                .align_x(Alignment::End)
                 .into()
-        }))
-        .spacing(4);
-        column![self.band(&days, s, c), columns].spacing(6).into()
+        }));
+        // the lines between the hours and the days: the gaps between the
+        // cells, over the color of the borders
+        let columns = container(
+            Row::with_children(
+                self.days
+                    .iter()
+                    .map(|day| self.day_column(day, first, last, s, c)),
+            )
+            .spacing(1),
+        )
+        .padding(1)
+        .style(move |_| container::Style {
+            background: Some(Background::Color(c.border)),
+            ..container::Style::default()
+        });
+        column![
+            heads,
+            band,
+            scrollable(row![labels, columns]).height(Length::Fill)
+        ]
+        .spacing(6)
+        .height(Length::Fill)
+        .into()
     }
 
+    /// The head of a day of the week: its number, large, and its name;
+    /// today in the accent with a bar above, the day of the cursor lit.
+    fn day_head<'a>(
+        &'a self,
+        date: Option<NaiveDate>,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let Some(date) = date else {
+            return space::horizontal().width(Length::FillPortion(1)).into();
+        };
+        let lit = date == self.today;
+        let color = match lit {
+            true => c.accent,
+            false => c.text,
+        };
+        let bar = container(space::vertical())
+            .width(Length::Fill)
+            .height(Length::Fixed(3.0))
+            .style(move |_| container::Style {
+                background: lit.then_some(Background::Color(c.accent)),
+                ..container::Style::default()
+            });
+        let head = column![
+            text(date.day().to_string())
+                .size(SIZE_TITLE + 6.0)
+                .font(theme::fonts().bold)
+                .color(color),
+            text(s.weekday(date)).size(SIZE_SMALL).color(match lit {
+                true => c.accent,
+                false => c.muted,
+            }),
+        ]
+        .spacing(0);
+        container(column![
+            bar,
+            ui::list_row(head, date == self.anchor, Some(Message::Day(date)), c)
+        ])
+        .width(Length::FillPortion(1))
+        .into()
+    }
+
+    /// A day of the week: an hour a cell (a click chooses the day), today
+    /// on a background of its own; over them the events, where their hours
+    /// are.
+    fn day_column<'a>(
+        &'a self,
+        day: &'a AgendaDay,
+        first: u32,
+        last: u32,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let date = day_of(&day.date);
+        let background = match date == Some(self.today) {
+            true => mix(c.panel, c.accent, 0.07),
+            false => c.panel,
+        };
+        let grid = Column::with_children((first..last).map(|_| {
+            iced::widget::button(space::vertical())
+                .width(Length::Fill)
+                .height(Length::Fixed(HOUR - 1.0))
+                .on_press_maybe(date.map(Message::Day))
+                .style(move |_, _| iced::widget::button::Style {
+                    background: Some(Background::Color(background)),
+                    ..iced::widget::button::Style::default()
+                })
+                .into()
+        }))
+        .spacing(1);
+        let here = date == Some(self.anchor);
+        let placed = lanes(&day.events);
+        let layers = day.events.iter().zip(placed).enumerate().map(
+            |(i, (event, (lane, count)))| -> Element<'a, Message> {
+                let start = minute_of(&event.start).unwrap_or(first * 60);
+                let top = (start.saturating_sub(first * 60) as f32 / 60.0 * HOUR).max(0.0);
+                let tall = (f32::from(event.minutes) / 60.0 * HOUR).max(MIN_EVENT);
+                let card = event_card(
+                    event,
+                    s,
+                    c,
+                    tall < TWO_LINES,
+                    self.all_teams,
+                    here && i == self.slot,
+                    date.map(|d| Message::Event(d, i)),
+                    tall,
+                );
+                let portion = |n: usize| Length::FillPortion(u16::try_from(n).unwrap_or(1));
+                let mut parts: Vec<Element<'a, Message>> = vec![];
+                if lane > 0 {
+                    parts.push(space::horizontal().width(portion(lane)).into());
+                }
+                parts.push(
+                    column![space::vertical().height(Length::Fixed(top)), card]
+                        .width(portion(1))
+                        .into(),
+                );
+                if count > lane + 1 {
+                    parts.push(space::horizontal().width(portion(count - lane - 1)).into());
+                }
+                Row::with_children(parts)
+                    .spacing(2)
+                    .padding(Padding::from([0, 2]))
+                    .into()
+            },
+        );
+        iced::widget::Stack::with_children(std::iter::once(grid.into()).chain(layers))
+            .width(Length::FillPortion(1))
+            .into()
+    }
+
+    /// The month as the calendars of the mail draw it: a box a day, its
+    /// number at the top (today in a circle of the accent), its first
+    /// events below, the days of the months around in grey.
     fn month<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let names = Row::with_children(s.weekdays.iter().map(|n| {
             text(n.to_string())
                 .size(SIZE_SMALL)
                 .color(c.muted)
                 .width(Length::FillPortion(1))
-                .align_x(Alignment::Center)
                 .into()
         }))
-        .spacing(4);
+        .spacing(1)
+        .padding(Padding::from([0, 8]));
         let weeks = Column::with_children(month_weeks(self.anchor).into_iter().map(|week| {
-            let cells = Row::with_children(week.iter().map(|day| -> Element<'a, Message> {
-                match day {
-                    None => space::horizontal().width(Length::FillPortion(1)).into(),
-                    Some(day) => container(self.cell(*day, s, c))
-                        .width(Length::FillPortion(1))
-                        .into(),
-                }
-            }))
-            .spacing(4);
+            let cells = Row::with_children(
+                whole_week(&week)
+                    .into_iter()
+                    .map(|day| self.cell(day, week.contains(&Some(day)), s, c)),
+            )
+            .spacing(1);
             column![self.band(&week, s, c), cells].spacing(2).into()
         }))
-        .spacing(8);
+        .spacing(1);
         column![names, weeks].spacing(6).into()
     }
 
-    /// A day of the month: the number and the first events.
-    fn cell<'a>(&'a self, day: NaiveDate, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let events: &[AgendaEventRecord] = self
-            .day_record(day)
-            .map(|d| d.events.as_slice())
-            .unwrap_or_default();
-        let mut lines: Vec<Element<'a, Message>> = vec![
-            text(day.day().to_string())
-                .size(SIZE_SMALL)
-                .font(theme::fonts().bold)
-                .color(match day == self.today {
-                    true => c.accent,
-                    false => c.muted,
+    /// A day of the month: the number and the first events, the others
+    /// counted; a day of the months around only its number, in grey.
+    fn cell<'a>(
+        &'a self,
+        day: NaiveDate,
+        in_month: bool,
+        s: &'static Strings,
+        c: Colors,
+    ) -> Element<'a, Message> {
+        let events: &[AgendaEventRecord] = match in_month {
+            true => self
+                .day_record(day)
+                .map(|d| d.events.as_slice())
+                .unwrap_or_default(),
+            false => &[],
+        };
+        let number = text(match (day.day(), in_month) {
+            (1, _) | (_, false) => format!(
+                "{} {}",
+                day.day(),
+                s.months
+                    .get(day.month0() as usize)
+                    .and_then(|m| m.get(..3).or(Some(m)))
+                    .unwrap_or_default()
+            ),
+            (d, true) => d.to_string(),
+        })
+        .size(SIZE_SMALL)
+        .font(theme::fonts().bold);
+        let number: Element<'a, Message> = match (day == self.today, in_month) {
+            (true, _) => container(number.color(c.on_accent))
+                .padding(Padding::from([1, 7]))
+                .style(move |_| container::Style {
+                    background: Some(Background::Color(c.accent)),
+                    border: iced::border::rounded(10),
+                    ..container::Style::default()
                 })
                 .into(),
-        ];
-        lines.extend(
-            events
-                .iter()
-                .take(CELL_EVENTS)
-                .map(|e| event_text(e, s, c, true, self.all_teams)),
-        );
+            (false, true) => number.color(c.text).into(),
+            (false, false) => number.color(c.muted).into(),
+        };
+        let mut lines: Vec<Element<'a, Message>> = vec![number];
+        lines.extend(events.iter().take(CELL_EVENTS).enumerate().map(|(i, e)| {
+            event_card(
+                e,
+                s,
+                c,
+                true,
+                self.all_teams,
+                false,
+                Some(Message::Event(day, i)),
+                MONTH_EVENT,
+            )
+        }));
         if events.len() > CELL_EVENTS {
             lines.push(
                 text(format!("+{}", events.len() - CELL_EVENTS))
@@ -683,13 +837,198 @@ impl CalendarTab {
                     .into(),
             );
         }
-        ui::list_row(
-            Column::with_children(lines).spacing(1),
-            day == self.anchor,
-            Some(Message::Day(day)),
-            c,
-        )
+        let chosen = day == self.anchor;
+        let background = match in_month {
+            true => c.panel,
+            false => c.background,
+        };
+        iced::widget::button(Column::with_children(lines).spacing(2))
+            .width(Length::FillPortion(1))
+            .height(Length::Fixed(CELL_HEIGHT))
+            .padding(Padding::from([4, 6]))
+            .on_press(Message::Day(day))
+            .style(move |_, _| iced::widget::button::Style {
+                background: Some(Background::Color(background)),
+                text_color: c.text,
+                border: match chosen {
+                    true => iced::border::color(c.accent).width(2),
+                    false => iced::border::color(c.border).width(1),
+                },
+                ..iced::widget::button::Style::default()
+            })
+            .into()
     }
+}
+
+/// The height of an hour in the week.
+const HOUR: f32 = 44.0;
+
+/// The hours the week shows at least: from 7 to 22.
+const FIRST_HOUR: u32 = 7;
+const LAST_HOUR: u32 = 22;
+
+/// The width of the hours on the left of the week.
+const GUTTER: f32 = 52.0;
+
+/// The least height of an event of the week: a short one still readable.
+const MIN_EVENT: f32 = 22.0;
+
+/// The height from which an event of the week has room for its details.
+const TWO_LINES: f32 = 40.0;
+
+/// The height of an event in a day of the month.
+const MONTH_EVENT: f32 = 20.0;
+
+/// The height of a day of the month.
+const CELL_HEIGHT: f32 = 112.0;
+
+/// `a` with a part `amount` of `b`: a background lit, opaque.
+fn mix(a: iced::Color, b: iced::Color, amount: f32) -> iced::Color {
+    iced::Color {
+        r: a.r + (b.r - a.r) * amount,
+        g: a.g + (b.g - a.g) * amount,
+        b: a.b + (b.b - a.b) * amount,
+        a: 1.0,
+    }
+}
+
+/// The minute of the day an event starts at ("…T18:30" is 1110).
+pub fn minute_of(start: &str) -> Option<u32> {
+    let hour: u32 = start.get(11..13)?.parse().ok()?;
+    let minute: u32 = start.get(14..16)?.parse().ok()?;
+    Some(hour * 60 + minute)
+}
+
+/// The hours the week shows, the last excluded: 7–22, more when an event
+/// starts before or ends after.
+pub fn hours(days: &[AgendaDay]) -> (u32, u32) {
+    days.iter()
+        .flat_map(|d| &d.events)
+        .filter_map(|e| minute_of(&e.start).map(|start| (start, start + u32::from(e.minutes))))
+        .fold((FIRST_HOUR, LAST_HOUR), |(first, last), (start, end)| {
+            (first.min(start / 60), last.max(end.div_ceil(60).min(24)))
+        })
+}
+
+/// Where each event of a day goes across its column: its lane and the
+/// lanes of the events it overlaps with, directly or through others
+/// (each `1 / lanes` wide). The events come in order of time.
+pub fn lanes(events: &[AgendaEventRecord]) -> Vec<(usize, usize)> {
+    // an event shorter than half an hour takes half an hour: so it's drawn
+    let spans: Vec<(u32, u32)> = events
+        .iter()
+        .map(|e| {
+            let start = minute_of(&e.start).unwrap_or(0);
+            (start, start + u32::from(e.minutes).max(30))
+        })
+        .collect();
+    // the groups: the events overlapping each other, one after another
+    let groups = spans.iter().enumerate().fold(
+        Vec::<(u32, Vec<usize>)>::new(),
+        |mut groups, (i, &(start, end))| {
+            match groups.last_mut() {
+                Some((group_end, members)) if start < *group_end => {
+                    *group_end = (*group_end).max(end);
+                    members.push(i);
+                }
+                _ => groups.push((end, vec![i])),
+            }
+            groups
+        },
+    );
+    let mut placed = vec![(0, 1); spans.len()];
+    for (_, members) in groups {
+        // each in the first lane free at its start
+        let mut ends: Vec<u32> = vec![];
+        let lanes: Vec<(usize, usize)> = members
+            .iter()
+            .filter_map(|&i| spans.get(i).map(|span| (i, *span)))
+            .map(|(i, (start, end))| {
+                let lane = ends.iter().position(|e| *e <= start).unwrap_or(ends.len());
+                match ends.get_mut(lane) {
+                    Some(e) => *e = end,
+                    None => ends.push(end),
+                }
+                (i, lane)
+            })
+            .collect();
+        for (i, lane) in lanes {
+            if let Some(slot) = placed.get_mut(i) {
+                *slot = (lane, ends.len());
+            }
+        }
+    }
+    placed
+}
+
+/// The seven days of a row of the month, the ones of the months around
+/// too.
+fn whole_week(week: &[Option<NaiveDate>; 7]) -> [NaiveDate; 7] {
+    let monday = week
+        .iter()
+        .enumerate()
+        .find_map(|(i, d)| d.map(|d| d - Duration::days(i as i64)))
+        .unwrap_or_default();
+    std::array::from_fn(|i| monday + Duration::days(i as i64))
+}
+
+/// An event as a box: a bar of its color on the left (a session and a
+/// match apart by it and by the icon), on a light background of it; the
+/// one of the cursor with a border of the accent.
+#[allow(clippy::too_many_arguments)]
+fn event_card<'a>(
+    event: &AgendaEventRecord,
+    s: &'static Strings,
+    c: Colors,
+    compact: bool,
+    with_team: bool,
+    chosen: bool,
+    message: Option<Message>,
+    height: f32,
+) -> Element<'a, Message> {
+    let color = match event.item {
+        AgendaItemRecord::Session { .. } => c.accent,
+        AgendaItemRecord::Match { .. } => c.break_point,
+    };
+    let stripe = container(space::vertical())
+        .width(Length::Fixed(3.0))
+        .height(Length::Fill)
+        .style(move |_| container::Style {
+            background: Some(Background::Color(color)),
+            ..container::Style::default()
+        });
+    let body = container(event_text(event, s, c, compact, with_team))
+        .padding(Padding::from([2, 6]))
+        .width(Length::Fill)
+        .clip(true);
+    iced::widget::button(row![stripe, body].height(Length::Fill))
+        .width(Length::Fill)
+        .height(Length::Fixed(height))
+        .padding(0)
+        .on_press_maybe(message)
+        .style(move |_, status| {
+            let hovered = matches!(
+                status,
+                iced::widget::button::Status::Hovered | iced::widget::button::Status::Pressed
+            );
+            iced::widget::button::Style {
+                background: Some(Background::Color(mix(
+                    c.panel,
+                    color,
+                    match hovered {
+                        true => 0.32,
+                        false => 0.2,
+                    },
+                ))),
+                text_color: c.text,
+                border: match chosen {
+                    true => iced::border::color(c.accent).width(2).rounded(4),
+                    false => iced::border::rounded(4),
+                },
+                ..iced::widget::button::Style::default()
+            }
+        })
+        .into()
 }
 
 /// An event as a line: the icon (a session and a match apart by it and by
@@ -802,6 +1141,65 @@ mod tests {
         super::*, crate::strings::strings, scout4all_core::shapes::enums::LanguageEnum,
         scout4all_mobile::venues::VenueDraft,
     };
+
+    fn event(start: &str, minutes: u16) -> AgendaEventRecord {
+        AgendaEventRecord {
+            team_id: "t".into(),
+            team_name: "T".into(),
+            start: start.into(),
+            minutes,
+            item: AgendaItemRecord::Session {
+                id: start.into(),
+                title: String::new(),
+                status: SessionStatus::Planned,
+                to_close: false,
+            },
+            venue: None,
+            shared_venue: false,
+        }
+    }
+
+    /// The week shows 7–22, more for an event before or after; an event
+    /// past midnight stops at it.
+    #[test]
+    fn the_hours_of_the_week_hold_its_events() {
+        let day = |events| AgendaDay {
+            date: "2026-11-23".into(),
+            events,
+        };
+        assert_eq!(hours(&[day(vec![event("2026-11-23T18:00", 90)])]), (7, 22));
+        assert_eq!(
+            hours(&[day(vec![
+                event("2026-11-23T06:30", 60),
+                event("2026-11-23T21:30", 60)
+            ])]),
+            (6, 23)
+        );
+        assert_eq!(hours(&[day(vec![event("2026-11-23T23:00", 120)])]), (7, 24));
+    }
+
+    /// Events at the same time go side by side, each in the first lane
+    /// free; one starting as they end takes the whole column again.
+    #[test]
+    fn events_at_the_same_time_go_side_by_side() {
+        let events = [
+            event("2026-11-23T18:00", 90),
+            event("2026-11-23T18:30", 60),
+            event("2026-11-23T19:30", 60),
+            event("2026-11-23T21:00", 60),
+        ];
+        assert_eq!(lanes(&events), vec![(0, 2), (1, 2), (0, 1), (0, 1)]);
+        assert_eq!(minute_of("2026-11-23T18:30"), Some(1110));
+    }
+
+    /// A row of the month has all its days, the ones around too.
+    #[test]
+    fn a_row_of_the_month_has_its_seven_days() {
+        let day = |m: u32, d: u32| NaiveDate::from_ymd_opt(2026, m, d).unwrap();
+        let first = month_weeks(day(11, 1)).into_iter().next().unwrap();
+        assert_eq!(whole_week(&first)[0], day(10, 26));
+        assert_eq!(whole_week(&first)[6], day(11, 1));
+    }
 
     fn offers_venues(tab: &CalendarTab) -> bool {
         let s = strings(LanguageEnum::It);
