@@ -457,6 +457,7 @@ impl CyclesTab {
     pub fn form_error(&self) -> Option<String> {
         match &self.mode {
             Mode::Editor(e) => e.form.error.clone(),
+            Mode::Overlay(o) => o.form.error.clone(),
             _ => None,
         }
     }
@@ -1494,5 +1495,183 @@ impl CyclesTab {
         .spacing(14)
         .height(Length::Fill)
         .into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::{form::Message as FormMessage, strings::strings},
+        scout4all_core::shapes::enums::LanguageEnum,
+        scout4all_mobile::training::{ActivityDraft, SessionDraft},
+    };
+
+    fn s() -> &'static Strings {
+        strings(LanguageEnum::It)
+    }
+
+    fn app(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String) {
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = core.tutorial_team().unwrap();
+        (core, team)
+    }
+
+    fn session(core: &Scout4All, team: &str, start: &str) -> String {
+        let draft = SessionDraft {
+            start: Some(start.to_string()),
+            duration: "90".into(),
+            ..core.new_session_draft()
+        };
+        core.save_session(team.to_string(), None, draft).unwrap().id
+    }
+
+    fn cycle(
+        core: &Scout4All,
+        team: &str,
+        level: Level,
+        start: &str,
+        weeks: &str,
+        children: Vec<String>,
+    ) -> CycleRecord {
+        let draft = CycleDraft {
+            start: Some(start.into()),
+            weeks: weeks.into(),
+            ..core.new_cycle_draft()
+        };
+        core.save_cycle(team.into(), level, None, draft, children, false)
+            .unwrap()
+    }
+
+    /// A mesocycle of two weeks from 2 March holding a microcycle of the
+    /// first week, with a session on Monday and an activity in it; the
+    /// microcycle.
+    fn plan(core: &Scout4All, team: &str) -> CycleRecord {
+        let id = session(core, team, "2026-03-02T18:00");
+        core.save_activity(
+            id.clone(),
+            None,
+            ActivityDraft {
+                name: "Palleggio".into(),
+                ..core.new_activity_draft()
+            },
+        )
+        .unwrap();
+        let micro = cycle(core, team, Level::Microcycle, "2026-03-02", "1", vec![id]);
+        cycle(
+            core,
+            team,
+            Level::Mesocycle,
+            "2026-03-02",
+            "2",
+            vec![micro.id.clone()],
+        );
+        micro
+    }
+
+    fn type_in(tab: &mut CyclesTab, field: usize, text: &str) {
+        tab.update(s(), Message::Form(FormMessage::Focus(field)));
+        tab.update(s(), Message::Form(FormMessage::Input(field, text.into())));
+    }
+
+    /// `d` on a microcycle: a shift of no weeks overlaps the microcycle
+    /// itself and is refused with nothing written; two copies a week apart
+    /// copy its sessions and activities, the one out of the mesocycle stays
+    /// free and the sheet says so.
+    #[test]
+    fn a_microcycle_is_duplicated_and_an_overlap_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team) = app(&dir);
+        let micro = plan(&core, &team);
+        let mut tab = CyclesTab::new(core.clone(), team.clone());
+        tab.open(Level::Microcycle, &micro.id);
+        assert!(tab.on_card());
+        tab.key(s(), key!(d));
+        assert!(!tab.on_card());
+        type_in(&mut tab, 0, "0");
+        tab.update(s(), Message::Form(FormMessage::Save));
+        assert!(tab.form_error().is_some());
+        assert_eq!(
+            core.cycles(team.clone(), Level::Microcycle).unwrap().len(),
+            1
+        );
+        type_in(&mut tab, 0, "1");
+        type_in(&mut tab, 1, "2");
+        tab.update(s(), Message::Form(FormMessage::Save));
+        assert!(tab.on_card());
+        let micros = core.cycles(team.clone(), Level::Microcycle).unwrap();
+        let parent_of = |first: &str| {
+            micros
+                .iter()
+                .find(|c| c.first_day == first)
+                .map(|c| c.parent_id.is_some())
+        };
+        assert_eq!(parent_of("2026-03-09"), Some(true));
+        assert_eq!(parent_of("2026-03-16"), Some(false));
+        assert_eq!(
+            tab.notice,
+            Some(ui::fill(s().copies_free, &["1".to_string()]))
+        );
+        let sessions = core.training_sessions(team.clone()).unwrap();
+        assert_eq!(sessions.len(), 3);
+        assert!(sessions.iter().all(|r| {
+            core.session_activities(r.id.clone())
+                .unwrap()
+                .iter()
+                .map(|a| a.name.as_str())
+                .eq(["Palleggio"])
+        }));
+    }
+
+    /// The sheet of a mesocycle opens its microcycle, the microcycle's its
+    /// session (for the plan); only a microcycle duplicates and makes the
+    /// PDF of the plan.
+    #[test]
+    fn the_children_open_down_to_the_session_and_only_a_microcycle_has_a_plan() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team) = app(&dir);
+        let micro = plan(&core, &team);
+        let meso = core.cycles(team.clone(), Level::Mesocycle).unwrap()[0].clone();
+        let mut tab = CyclesTab::new(core.clone(), team.clone());
+        tab.open(Level::Mesocycle, &meso.id);
+        assert!(matches!(tab.key(s(), key!(p)), Leave::Stay));
+        tab.key(s(), key!(d));
+        assert!(tab.on_card());
+        assert!(matches!(tab.update(s(), Message::Child(0)), Leave::Stay));
+        assert_eq!(tab.target(), Some((Level::Microcycle, micro.id.clone())));
+        assert!(matches!(
+            tab.key(s(), key!(p)),
+            Leave::Export(crate::transfer::Export::Microcycle(id)) if id == micro.id
+        ));
+        let session = core.training_sessions(team).unwrap()[0].id.clone();
+        assert!(matches!(
+            tab.update(s(), Message::Child(0)),
+            Leave::Session(id) if id == session
+        ));
+        // a child that isn't there does nothing
+        assert!(matches!(tab.update(s(), Message::Child(5)), Leave::Stay));
+    }
+
+    /// ← → go round the levels and clear the marks; Esc on the list goes
+    /// back to the plan.
+    #[test]
+    fn the_arrows_change_the_level_and_clear_the_marks() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team) = app(&dir);
+        cycle(&core, &team, Level::Microcycle, "2026-03-02", "1", vec![]);
+        let mut tab = CyclesTab::new(core, team);
+        assert_eq!(tab.level, Level::Microcycle);
+        tab.key(s(), key!(space));
+        assert_eq!(tab.marked.len(), 1);
+        tab.key(s(), key!(right));
+        assert_eq!(tab.level, Level::Program);
+        assert!(tab.marked.is_empty());
+        assert!(tab.cycles.is_empty());
+        tab.key(s(), key!(left));
+        assert_eq!(tab.level, Level::Microcycle);
+        assert_eq!(tab.cycles.len(), 1);
+        tab.key(s(), key!(left));
+        assert_eq!(tab.level, Level::Mesocycle);
+        assert!(matches!(tab.key(s(), BACK_KEY), Leave::Back));
     }
 }

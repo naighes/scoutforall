@@ -403,3 +403,157 @@ fn event_row<'a>(
     .align_y(Alignment::Center);
     ui::list_row(body, chosen, Some(Message::Row(index)), c)
 }
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*, crate::strings::strings, scout4all_core::shapes::enums::LanguageEnum,
+        scout4all_mobile::training::SessionDraft, std::sync::Arc,
+    };
+
+    fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
+        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    fn session(core: &Scout4All, team: &str, start: &str, title: &str) -> String {
+        let draft = SessionDraft {
+            start: Some(start.to_string()),
+            duration: "90".into(),
+            title: title.into(),
+            ..core.new_session_draft()
+        };
+        core.save_session(team.to_string(), None, draft).unwrap().id
+    }
+
+    fn day(text: &str) -> NaiveDate {
+        NaiveDate::parse_from_str(text, "%Y-%m-%d").unwrap()
+    }
+
+    fn picked_session(pick: Option<Pick>) -> Option<String> {
+        match pick {
+            Some(Pick::Session { id, .. }) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// Only the days with something and today are shown; ↑ from the first
+    /// row goes round to the last, ↓ from the last to the first; a click on
+    /// a row picks it.
+    #[test]
+    fn the_rows_go_round_and_a_click_picks_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let monday = session(&core, &team, "2026-03-02T07:00", "Lunedì");
+        let friday = session(&core, &team, "2026-03-06T18:00", "Venerdì");
+        let mut agenda = Agenda::week(&core, Some(team.clone()), day("2026-03-04"));
+        assert_eq!(
+            agenda.shown_days(),
+            vec![
+                ("2026-03-02".to_string(), false),
+                ("2026-03-04".to_string(), true),
+                ("2026-03-06".to_string(), false),
+            ]
+        );
+        assert_eq!(agenda.slots_len(), 2);
+        agenda.key(&core, key!(up));
+        assert_eq!(
+            picked_session(agenda.key(&core, key!(enter))),
+            Some(friday.clone())
+        );
+        agenda.key(&core, key!(down));
+        assert_eq!(picked_session(agenda.key(&core, key!(enter))), Some(monday));
+        assert_eq!(
+            picked_session(agenda.update(&core, Message::Row(1))),
+            Some(friday.clone())
+        );
+        // the row clicked is the one chosen
+        assert_eq!(picked_session(agenda.key(&core, key!(enter))), Some(friday));
+    }
+
+    /// ‹ › change the week (the rows start again from the first), "Oggi"
+    /// comes back; a week without today and without anything shows no day.
+    #[test]
+    fn the_arrows_change_the_week_and_today_comes_back() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        session(&core, &team, "2026-03-02T07:00", "Lunedì");
+        session(&core, &team, "2026-03-10T18:00", "Martedì dopo");
+        let mut agenda = Agenda::week(&core, Some(team), day("2026-03-04"));
+        assert_eq!(
+            agenda.range(s),
+            format!(
+                "{} – {}",
+                s.short_date(day("2026-03-02")),
+                s.short_date(day("2026-03-08"))
+            )
+        );
+        agenda.update(&core, Message::Next);
+        assert_eq!(agenda.shown_days(), vec![("2026-03-10".to_string(), false)]);
+        agenda.update(&core, Message::Next);
+        assert!(agenda.is_empty());
+        assert!(agenda.shown_days().is_empty());
+        assert_eq!(agenda.key(&core, key!(enter)), None);
+        agenda.key(&core, key!(pageup));
+        agenda.key(&core, key!(pageup));
+        agenda.update(&core, Message::Previous);
+        assert!(agenda.shown_days().is_empty());
+        agenda.update(&core, Message::Today);
+        assert_eq!(agenda.shown_days().len(), 2);
+        assert_eq!(agenda.slots_len(), 1);
+    }
+
+    /// The home (no team) shows the sessions of every team.
+    #[test]
+    fn without_a_team_every_team_is_shown() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let id = session(&core, &team, "2026-03-02T07:00", "Lunedì");
+        let mut agenda = Agenda::week(&core, None, day("2026-03-04"));
+        assert_eq!(
+            agenda.update(&core, Message::Row(0)),
+            Some(Pick::Session { team_id: team, id })
+        );
+    }
+
+    fn event(item: AgendaItemRecord) -> AgendaEventRecord {
+        AgendaEventRecord {
+            team_id: "t".into(),
+            team_name: "Volley".into(),
+            start: "2026-03-02T18:00".into(),
+            minutes: 90,
+            item,
+            venue: None,
+            shared_venue: false,
+        }
+    }
+
+    /// A match "Team – Opponent" with the team, the opponent alone without;
+    /// a session "Team · Title" or the title; the team when it has none.
+    #[test]
+    fn the_heading_of_an_event() {
+        let session = event(AgendaItemRecord::Session {
+            id: "s".into(),
+            title: String::new(),
+            status: SessionStatus::Planned,
+            to_close: false,
+        });
+        let game = event(AgendaItemRecord::Match {
+            id: "m".into(),
+            opponent: "Leoni".into(),
+            opponent_team: None,
+            played: false,
+            ours: None,
+            theirs: None,
+        });
+        assert_eq!(heading(&game, "– Leoni".into(), true), "Volley – Leoni");
+        assert_eq!(heading(&game, "– Leoni".into(), false), "Leoni");
+        assert_eq!(heading(&session, "Muro".into(), true), "Volley · Muro");
+        assert_eq!(heading(&session, "Muro".into(), false), "Muro");
+        assert_eq!(heading(&session, String::new(), true), "Volley");
+        assert_eq!(heading(&session, String::new(), false), "Volley");
+    }
+}

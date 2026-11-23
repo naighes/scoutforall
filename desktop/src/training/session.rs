@@ -1079,3 +1079,178 @@ fn centered<'a>(form: Element<'a, Message>) -> Element<'a, Message> {
         .height(Length::Fill)
         .into()
 }
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::{form::Message as FormMessage, strings::strings},
+        scout4all_core::shapes::enums::LanguageEnum,
+        scout4all_mobile::training::{ActivityDraft, SessionDraft},
+    };
+
+    fn s() -> &'static Strings {
+        strings(LanguageEnum::It)
+    }
+
+    /// The app, its team and a session on 2 March at 18:00 titled "Prima".
+    fn page(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, SessionPage) {
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = core.tutorial_team().unwrap();
+        let id = session(&core, &team, "2026-03-02T18:00", "Prima");
+        let page = SessionPage::new(core.clone(), team.clone(), id).unwrap();
+        (core, team, page)
+    }
+
+    fn session(core: &Scout4All, team: &str, start: &str, title: &str) -> String {
+        let draft = SessionDraft {
+            start: Some(start.to_string()),
+            duration: "90".into(),
+            title: title.into(),
+            ..core.new_session_draft()
+        };
+        core.save_session(team.to_string(), None, draft).unwrap().id
+    }
+
+    fn type_in(page: &mut SessionPage, field: usize, text: &str) {
+        page.update(s(), Message::Form(FormMessage::Focus(field)));
+        page.update(s(), Message::Form(FormMessage::Input(field, text.into())));
+    }
+
+    /// `e` edits the session from its sheet: the title saved shows in the
+    /// sheet; Esc leaves it as it was.
+    #[test]
+    fn the_session_is_edited_from_its_sheet() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, _, mut page) = page(&dir);
+        page.key(s(), key!(e));
+        assert_eq!(page.mode_name(), "session");
+        type_in(&mut page, 6, "Ricezione");
+        page.key(s(), BACK_KEY);
+        assert_eq!(page.mode_name(), "browse");
+        assert_eq!(
+            core.training_session(page.id.clone()).unwrap().title,
+            "Prima"
+        );
+        page.key(s(), key!(e));
+        type_in(&mut page, 6, "Ricezione");
+        page.update(s(), Message::Form(FormMessage::Save));
+        assert_eq!(page.mode_name(), "browse");
+        assert_eq!(
+            core.training_session(page.id.clone()).unwrap().title,
+            "Ricezione"
+        );
+        assert!(page.title(s()).starts_with("Ricezione · "));
+    }
+
+    /// `x` cancels a planned session only, `c` doesn't complete a cancelled
+    /// one, `r` reopens it.
+    #[test]
+    fn a_session_is_cancelled_and_reopened() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, _, mut page) = page(&dir);
+        let status = |core: &Scout4All, id: &str| core.training_session(id.into()).unwrap().status;
+        page.key(s(), key!(x));
+        assert_eq!(status(&core, &page.id), SessionStatus::Cancelled);
+        page.key(s(), key!(c));
+        assert_eq!(page.mode_name(), "browse");
+        assert_eq!(status(&core, &page.id), SessionStatus::Cancelled);
+        page.update(s(), Message::Reopen);
+        assert_eq!(status(&core, &page.id), SessionStatus::Planned);
+        // a completed one isn't cancelled
+        page.key(s(), key!(c));
+        assert_eq!(status(&core, &page.id), SessionStatus::Completed);
+        page.update(s(), Message::CancelSession);
+        assert_eq!(status(&core, &page.id), SessionStatus::Completed);
+    }
+
+    /// `v` copies an activity of another session: the name searched, the
+    /// form of the activity opens filled in with its name, description and
+    /// minutes, and saved it's in the sheet.
+    #[test]
+    fn an_activity_is_copied_from_another_session() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team, mut page) = page(&dir);
+        let other = session(&core, &team, "2026-02-23T18:00", "Prima ancora");
+        core.save_activity(
+            other,
+            None,
+            ActivityDraft {
+                name: "Palleggio".into(),
+                description: "a coppie".into(),
+                planned: "20".into(),
+                ..core.new_activity_draft()
+            },
+        )
+        .unwrap();
+        page.key(s(), key!(v));
+        assert_eq!(page.mode_name(), "copy");
+        type_in(&mut page, 0, "pall");
+        page.update(s(), Message::Form(FormMessage::Save));
+        assert_eq!(page.mode_name(), "activity");
+        page.update(s(), Message::Form(FormMessage::Save));
+        assert_eq!(page.mode_name(), "browse");
+        let copied = core.session_activities(page.id.clone()).unwrap();
+        assert_eq!(copied.len(), 1);
+        assert_eq!(copied[0].name, "Palleggio");
+        assert_eq!(copied[0].description, "a coppie");
+        assert_eq!(copied[0].planned_min, Some(20));
+        // nothing found: the form says so and stays
+        page.key(s(), key!(v));
+        type_in(&mut page, 0, "zzz");
+        page.update(s(), Message::Form(FormMessage::Save));
+        assert_eq!(page.mode_name(), "copy");
+    }
+
+    /// Enter edits the activity chosen; the deletion asks first and Esc
+    /// keeps it.
+    #[test]
+    fn an_activity_is_edited_and_its_deletion_asked() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, _, mut page) = page(&dir);
+        for name in ["Palleggio", "Battuta"] {
+            core.save_activity(
+                page.id.clone(),
+                None,
+                ActivityDraft {
+                    name: name.into(),
+                    ..core.new_activity_draft()
+                },
+            )
+            .unwrap();
+        }
+        page.reload();
+        page.key(s(), key!(down));
+        page.key(s(), key!(enter));
+        assert_eq!(page.mode_name(), "activity");
+        type_in(&mut page, 0, "Battuta in salto");
+        page.update(s(), Message::Form(FormMessage::Save));
+        let names = |core: &Scout4All, id: &str| -> Vec<String> {
+            core.session_activities(id.into())
+                .unwrap()
+                .into_iter()
+                .map(|a| a.name)
+                .collect()
+        };
+        assert_eq!(
+            names(&core, &page.id),
+            vec!["Palleggio", "Battuta in salto"]
+        );
+        page.key(s(), key!(backspace));
+        assert_eq!(page.mode_name(), "delete");
+        page.key(s(), BACK_KEY);
+        assert_eq!(names(&core, &page.id).len(), 2);
+        // ⇧↓ on the last and ⇧↑ on the first stay
+        page.key(s(), key!(shift - down));
+        assert_eq!(
+            names(&core, &page.id),
+            vec!["Palleggio", "Battuta in salto"]
+        );
+        page.key(s(), key!(up));
+        page.key(s(), key!(shift - up));
+        assert_eq!(
+            names(&core, &page.id),
+            vec!["Palleggio", "Battuta in salto"]
+        );
+    }
+}
