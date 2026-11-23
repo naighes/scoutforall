@@ -590,6 +590,7 @@
     <string name="tr_single_session">Seduta singola</string>
     <string name="tr_weekly_series">Serie settimanale</string>
     <string name="tr_until">Fino al</string>
+    <string name="busy_days">Giorni già occupati: %1$s</string>
     <string name="tr_continue_entry">Continua</string>
     <string name="tr_finish">Fine</string>
     <string name="tr_new_series">Nuova serie</string>

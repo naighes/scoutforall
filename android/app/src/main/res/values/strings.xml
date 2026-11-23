@@ -592,6 +592,7 @@
     <string name="tr_single_session">One session</string>
     <string name="tr_weekly_series">Weekly series</string>
     <string name="tr_until">Until</string>
+    <string name="busy_days">Days already taken: %1$s</string>
     <string name="tr_continue_entry">Continue</string>
     <string name="tr_finish">Finish</string>
     <string name="tr_new_series">New series</string>

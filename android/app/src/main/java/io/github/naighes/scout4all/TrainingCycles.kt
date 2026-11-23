@@ -505,6 +505,7 @@ private fun CycleFields(
     var outside by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val options = rememberContaining(teamId, level.parent(), start, parent)
+    val busyDays = rememberBusyDays(teamId)
     // a new cycle takes the one that holds its first day, until chosen otherwise
     androidx.compose.runtime.LaunchedEffect(options) {
         if (cycleId == null && !touched) parent = options.firstOrNull()?.id
@@ -557,9 +558,9 @@ private fun CycleFields(
                 label = { Text(stringResource(R.string.tr_session_title)) },
                 singleLine = true,
             )
-            DayField(stringResource(R.string.tr_cycle_start), start, onDay = { d -> edit { start = d } }, error = ErrorFor(failure, TrainingField.START))
+            DayField(stringResource(R.string.tr_cycle_start), start, onDay = { d -> edit { start = d } }, error = ErrorFor(failure, TrainingField.START), busy = busyDays)
             if (level == Level.PROGRAM) {
-                DayField(stringResource(R.string.tr_cycle_end), end, onDay = { d -> edit { end = d } }, error = ErrorFor(failure, TrainingField.END))
+                DayField(stringResource(R.string.tr_cycle_end), end, onDay = { d -> edit { end = d } }, error = ErrorFor(failure, TrainingField.END), busy = busyDays)
             } else {
                 NumberField(R.string.tr_cycle_weeks, weeks, ErrorFor(failure, TrainingField.WEEKS)) { edit { weeks = it } }
             }

@@ -1,8 +1,14 @@
 package io.github.naighes.scout4all
 
+import io.github.naighes.scout4all.core.MobileException
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.produceState
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.DateRange
@@ -68,6 +74,8 @@ internal fun DayField(
     latest: LocalDate? = null,
     opensAt: LocalDate? = null,
     firstYear: Int? = null,
+    /** the days already taken, listed under the calendar */
+    busy: Set<LocalDate> = emptySet(),
 ) {
     var picking by rememberSaveable { mutableStateOf(false) }
     // a read-only field doesn't take clicks: its presses do
@@ -120,8 +128,40 @@ internal fun DayField(
             dismissButton = {
                 TextButton(onClick = { picking = false }) { Text(stringResource(R.string.cancel)) }
             },
-        ) { DatePicker(picker) }
+        ) {
+            Column {
+                DatePicker(picker)
+                // the picker draws no marks: the days of the month shown
+                // that hold something are written under it
+                val shown = picker.displayedMonthMillis.let { Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate() }
+                val taken = busy.filter { it.year == shown.year && it.month == shown.month }.map { it.dayOfMonth }.sorted()
+                if (taken.isNotEmpty()) {
+                    Text(
+                        stringResource(R.string.busy_days, taken.joinToString(", ")),
+                        Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
     }
+}
+
+/** The days of the team with a session or a match: for the calendars of
+ * the forms to say which are taken. */
+@Composable
+internal fun rememberBusyDays(teamId: String): Set<LocalDate> {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+    val days by produceState(emptySet<LocalDate>(), teamId) {
+        value = try {
+            app.core { it.trainingAgendaBetween(teamId, null, null) }
+                .mapNotNull { runCatching { LocalDate.parse(it.date.take(10)) }.getOrNull() }
+                .toSet()
+        } catch (_: MobileException) {
+            emptySet()
+        }
+    }
+    return days
 }
 
 /** The field of a time of day, as `DayField` is of a day: written as the

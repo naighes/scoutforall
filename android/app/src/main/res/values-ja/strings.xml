@@ -588,6 +588,7 @@
     <string name="tr_single_session">単発のセッション</string>
     <string name="tr_weekly_series">毎週のシリーズ</string>
     <string name="tr_until">終了日</string>
+    <string name="busy_days">予定のある日: %1$s</string>
     <string name="tr_continue_entry">続ける</string>
     <string name="tr_finish">完了</string>
     <string name="tr_new_series">新しいシリーズ</string>

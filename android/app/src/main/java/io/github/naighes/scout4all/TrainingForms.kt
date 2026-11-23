@@ -176,6 +176,7 @@ private fun SessionFields(
             ?: initialDay?.atTime(initialTime ?: LocalTime.of(18, 0))
             ?: LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
     }
+    val busyDays = rememberBusyDays(teamId)
     var day by rememberSaveable { mutableStateOf<LocalDate?>(first.toLocalDate()) }
     var time by rememberSaveable { mutableStateOf<LocalTime?>(first.toLocalTime()) }
     var until by rememberSaveable { mutableStateOf<LocalDate?>(null) }
@@ -377,12 +378,13 @@ private fun SessionFields(
                 day,
                 onDay = { d -> edit { day = d } },
                 error = ErrorFor(failure, TrainingField.START),
+                busy = busyDays,
             )
             TimeField(stringResource(R.string.tr_time), time, onTime = { t -> edit { time = t } })
             NumberField(R.string.tr_session_duration, duration, ErrorFor(failure, TrainingField.DURATION)) { edit { duration = it } }
             VenueChoice(teamId, venue, onVenue = { v -> edit { venue = v } })
             if (series) {
-                DayField(stringResource(R.string.tr_until), until, onDay = { d -> edit { until = d } })
+                DayField(stringResource(R.string.tr_until), until, onDay = { d -> edit { until = d } }, busy = busyDays)
             } else {
                 OutlinedTextField(
                     title,
@@ -817,7 +819,7 @@ private fun DuplicateFields(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            DayField(stringResource(R.string.date), day, onDay = { d -> day = d }, error = ErrorFor(failure, TrainingField.START))
+            DayField(stringResource(R.string.date), day, onDay = { d -> day = d }, error = ErrorFor(failure, TrainingField.START), busy = rememberBusyDays(teamId))
             TimeField(stringResource(R.string.tr_time), time, onTime = { time = it })
             MicrocycleChoice(options, micro) { micro = it }
             CheckRow(stringResource(R.string.tr_copy_objectives), objectives, onChecked = { objectives = it })
