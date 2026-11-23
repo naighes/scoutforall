@@ -640,6 +640,7 @@
     <string name="tr_previous_month">last month</string>
     <string name="tr_next_month">next month</string>
     <string name="tr_period_any">any date</string>
+    <string name="tr_calendar_week">Week</string>
     <string name="tr_calendar_month">Month</string>
     <string name="tr_calendar_list">List</string>
     <string name="tr_events_all">Everything</string>

@@ -186,6 +186,16 @@ class ScreensLayoutTest(private val screen: Size) {
         assertFits("calendar", string(R.string.agenda_today), null) { Hub(team, Part.CALENDAR) }
     }
 
+    /** The week by the hour: seven columns even at 320dp, the hours
+     * scrolling under the heads. */
+    @Test
+    fun theWeekByTheHourOfTheTeam() {
+        val team = saveNationalTeam()
+        planTraining(team)
+        assertFits("calendar-week", string(R.string.agenda_today), null) { Hub(team, Part.CALENDAR, CalendarView.WEEK) }
+        rule.onNode(hasTestTag(WEEK_EVENT) and hasText("Ricezione", substring = true)).assertExists()
+    }
+
     @Test
     fun theCyclesOfTheTeam() {
         val team = saveNationalTeam()

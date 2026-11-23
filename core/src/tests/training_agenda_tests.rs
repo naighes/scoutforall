@@ -22,7 +22,7 @@ mod tests {
         tests::Sqlite,
         training::{
             SessionInput, SessionStatus,
-            agenda::{AgendaEvent, AgendaItem, MatchState, Period, by_day},
+            agenda::{AgendaEvent, AgendaItem, MatchState, Period, by_day, hours, lanes},
             form::SessionForm,
         },
     };
@@ -139,6 +139,27 @@ mod tests {
         assert_eq!((month.from, month.days().len()), (day(1), 30));
         assert_eq!(Period::day(day(25)).days(), [day(25)]);
         assert!(week.contains(day(29)) && !week.contains(day(30)));
+    }
+
+    /// The week by the hour shows 7–24, earlier for an event before; an
+    /// event past midnight stops at it.
+    #[test]
+    fn the_hours_of_the_week_hold_its_events() {
+        assert_eq!(hours(&[]), (7, 24));
+        assert_eq!(hours(&[(18 * 60, 90)]), (7, 24));
+        assert_eq!(hours(&[(6 * 60 + 30, 60), (21 * 60 + 30, 60)]), (6, 24));
+        assert_eq!(hours(&[(23 * 60, 120)]), (7, 24));
+    }
+
+    /// Events at the same time go side by side, each in the first lane
+    /// free; one starting as they end takes the whole column again; a
+    /// short one counts as half an hour.
+    #[test]
+    fn events_at_the_same_time_go_side_by_side() {
+        let events = [(1080, 90), (1110, 60), (1170, 60), (1260, 60)];
+        assert_eq!(lanes(&events), vec![(0, 2), (1, 2), (0, 1), (0, 1)]);
+        assert_eq!(lanes(&[(600, 10), (620, 60)]), vec![(0, 2), (1, 2)]);
+        assert_eq!(lanes(&[]), vec![]);
     }
 
     #[tokio::test]

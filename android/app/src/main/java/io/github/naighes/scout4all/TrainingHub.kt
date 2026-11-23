@@ -71,7 +71,7 @@ internal enum class Part { CALENDAR, CYCLES, ATTENDANCE, HISTORY }
 
 /** The calendar as the month (a day to touch, what it holds below) or as
  * the list of the days with something, for a long period. */
-internal enum class CalendarView { MONTH, LIST }
+internal enum class CalendarView { WEEK, MONTH, LIST }
 
 /** What the calendar lets through: everything, the sessions only, the
  * sessions of a state (the matches have none), or the completed ones of
@@ -166,6 +166,7 @@ internal fun TrainingScreen(
     onNewOn: (LocalDate) -> Unit,
     onMatch: (String) -> Unit,
     onVenues: () -> Unit = {},
+    onNewAt: (LocalDate, java.time.LocalTime) -> Unit = { d, _ -> onNewOn(d) },
     first: Part = Part.CALENDAR,
     firstView: CalendarView = CalendarView.MONTH,
     onCreateFrom: (Level, List<String>) -> Unit = { _, _ -> },
@@ -246,7 +247,7 @@ internal fun TrainingScreen(
         when (part) {
             Part.CALENDAR -> CalendarTab(
                 teamId, day, { day = it }, view, { view = it }, modifier, onSession, onMatch, onNewOn,
-                free.orEmpty(), markedSessions, { sessions = it },
+                free.orEmpty(), markedSessions, { sessions = it }, onNewAt,
             )
             Part.CYCLES -> CyclesTab(
                 teamId, level,
@@ -306,9 +307,15 @@ private fun Part.label(): String = when (this) {
 
 // ---- calendar
 
-/** The month (a day to touch, a dot for each session and match; below,
- * what the selected day holds) or the list of the days with something.
- * The filter hides what it leaves out in both. */
+/** Where the heads of the week (with the period) are in the calendar's
+ * list: after the views and the filters, before the hours. */
+private const val WEEK_HEADS_ITEM = 2
+
+/** The week by the hour (`WeekHours`), the month (a day to touch, a dot
+ * for each session and match; below, what the selected day holds) or the
+ * list of the days with something. The filter hides what it leaves out in
+ * all three. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 private fun CalendarTab(
     teamId: String,
@@ -323,6 +330,7 @@ private fun CalendarTab(
     free: Set<String> = emptySet(),
     marked: List<String> = emptyList(),
     onMarked: (List<String>) -> Unit = {},
+    onNewAt: (LocalDate, java.time.LocalTime) -> Unit = { d, _ -> onNewOn(d) },
 ) {
     var month by rememberSaveable { mutableStateOf(YearMonth.from(selected)) }
     // the gyms are shared: every team, or one gym only
@@ -333,9 +341,10 @@ private fun CalendarTab(
     val today = LocalDate.now()
     val team = teamId.takeIf { !allTeams }
     val monthDays by rememberAgenda(team, AgendaSpan.MONTH, month.atDay(1), month)
+    val weekDays by rememberAgenda(team, AgendaSpan.WEEK, selected, weekOf(selected).first)
     val bounds = period.days(today)
     val listDays by rememberAgendaBetween(team, bounds?.first, bounds?.second, view == CalendarView.LIST)
-    val recorded by rememberRecorded(teamId, listOf(monthDays, listDays))
+    val recorded by rememberRecorded(teamId, listOf(monthDays, weekDays, listDays))
     val unrecorded = { e: AgendaEventRecord ->
         val s = e.item as? AgendaItemRecord.Session
         e.teamId == teamId && s?.status == io.github.naighes.scout4all.core.SessionStatus.COMPLETED &&
@@ -354,122 +363,166 @@ private fun CalendarTab(
     }
     var picking by remember { mutableStateOf(false) }
     var periods by remember { mutableStateOf(false) }
+    // the free sessions of the team, to make a microcycle of them
+    val mark = { e: AgendaEventRecord ->
+        (e.item as? AgendaItemRecord.Session)?.id?.takeIf { e.teamId == teamId && it in free }?.let { id ->
+            (id in marked) to { onMarked(if (id in marked) marked - id else marked + id) }
+        }
+    }
+    // the other teams' events are shown, not opened
+    val openEvent = { e: AgendaEventRecord ->
+        when (val i = e.item) {
+            is AgendaItemRecord.Session -> if (e.teamId == teamId) onSession(i.id)
+            is AgendaItemRecord.Match -> if (e.teamId == teamId) onMatch(i.id)
+        }
+    }
     val open: @Composable (AgendaEventRecord) -> Unit = { e ->
-        // the other teams' events are shown, not opened
         EventRow(
             e,
             allTeams,
             { t, m -> if (t == teamId) onMatch(m) },
             { t, s -> if (t == teamId) onSession(s) },
             unrecorded = unrecorded(e),
-            // the free sessions of the team, to make a microcycle of them
-            mark = (e.item as? AgendaItemRecord.Session)?.id?.takeIf { e.teamId == teamId && it in free }?.let { id ->
-                (id in marked) to { onMarked(if (id in marked) marked - id else marked + id) }
-            },
+            mark = mark(e),
         )
     }
-    LazyColumn(modifier, contentPadding = PaddingValues(bottom = fabRoom(marked.isNotEmpty()))) {
-        if (view == CalendarView.MONTH) {
-            item(key = "month") {
-                Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        month.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale.getDefault())).replaceFirstChar { it.uppercase() },
-                        Modifier.weight(1f).title(),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                    IconButton(onClick = { month = month.minusMonths(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
-                    }
-                    TextButton(onClick = {
-                        month = YearMonth.now()
-                        onSelected(today)
-                    }) { Text(stringResource(R.string.agenda_today)) }
-                    IconButton(onClick = { month = month.plusMonths(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
-                    }
-                }
+    // the period and its arrows: the month, or the week of the day chosen
+    val heading: @Composable () -> Unit = {
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                if (view == CalendarView.WEEK) weekText(selected)
+                else month.format(DateTimeFormatter.ofPattern("LLLL yyyy", Locale.getDefault())).replaceFirstChar { it.uppercase() },
+                Modifier.weight(1f).title(),
+                style = MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            IconButton(onClick = {
+                if (view == CalendarView.WEEK) onSelected(selected.minusWeeks(1).also { month = YearMonth.from(it) })
+                else month = month.minusMonths(1)
+            }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
+            }
+            TextButton(onClick = {
+                month = YearMonth.now()
+                onSelected(today)
+            }) { Text(stringResource(R.string.agenda_today)) }
+            IconButton(onClick = {
+                if (view == CalendarView.WEEK) onSelected(selected.plusWeeks(1).also { month = YearMonth.from(it) })
+                else month = month.plusMonths(1)
+            }) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
             }
         }
-        item(key = "views") {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                FilterChip(
-                    selected = view == CalendarView.MONTH,
-                    onClick = { onView(CalendarView.MONTH) },
-                    label = { Text(stringResource(R.string.tr_calendar_month)) },
-                )
-                FilterChip(
-                    selected = view == CalendarView.LIST,
-                    onClick = { onView(CalendarView.LIST) },
-                    label = { Text(stringResource(R.string.tr_calendar_list)) },
-                )
-                if (view == CalendarView.LIST) {
-                    Box {
-                        FilterChip(
-                            selected = period != ListPeriod.ANY,
-                            onClick = { periods = true },
-                            label = { Text(period.label()) },
-                        )
-                        androidx.compose.material3.DropdownMenu(expanded = periods, onDismissRequest = { periods = false }) {
-                            ListPeriod.entries.forEach { p ->
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(p.label()) },
-                                    onClick = { period = p; periods = false },
-                                )
-                            }
-                        }
-                    }
-                }
-                FilterChip(
-                    selected = allTeams,
-                    onClick = { allTeams = !allTeams },
-                    label = { Text(stringResource(if (allTeams) R.string.venue_all_teams else R.string.venue_this_team)) },
-                )
-                if (venues.isNotEmpty()) {
-                    Box {
-                        FilterChip(
-                            selected = venue != null,
-                            onClick = { picking = true },
-                            label = { Text(venues.firstOrNull { it.id == venue }?.name ?: stringResource(R.string.venue_all)) },
-                        )
-                        androidx.compose.material3.DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(stringResource(R.string.venue_all)) },
-                                onClick = { venue = null; picking = false },
-                            )
-                            venues.forEach { v ->
-                                androidx.compose.material3.DropdownMenuItem(
-                                    text = { Text(v.name) },
-                                    onClick = { venue = v.id; picking = false },
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        item(key = "filters") {
-            Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                EventFilter.entries.forEach {
+    }
+    val views: @Composable () -> Unit = {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            FilterChip(
+                selected = view == CalendarView.WEEK,
+                onClick = { onView(CalendarView.WEEK) },
+                label = { Text(stringResource(R.string.tr_calendar_week)) },
+            )
+            FilterChip(
+                selected = view == CalendarView.MONTH,
+                onClick = {
+                    month = YearMonth.from(selected)
+                    onView(CalendarView.MONTH)
+                },
+                label = { Text(stringResource(R.string.tr_calendar_month)) },
+            )
+            FilterChip(
+                selected = view == CalendarView.LIST,
+                onClick = { onView(CalendarView.LIST) },
+                label = { Text(stringResource(R.string.tr_calendar_list)) },
+            )
+            if (view == CalendarView.LIST) {
+                Box {
                     FilterChip(
-                        selected = filter == it,
-                        onClick = {
-                            filter = it
-                            if (it.looksBack && view == CalendarView.LIST) period = ListPeriod.ANY
-                        },
-                        label = { Text(it.label()) },
+                        selected = period != ListPeriod.ANY,
+                        onClick = { periods = true },
+                        label = { Text(period.label()) },
                     )
+                    androidx.compose.material3.DropdownMenu(expanded = periods, onDismissRequest = { periods = false }) {
+                        ListPeriod.entries.forEach { p ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(p.label()) },
+                                onClick = { period = p; periods = false },
+                            )
+                        }
+                    }
+                }
+            }
+            FilterChip(
+                selected = allTeams,
+                onClick = { allTeams = !allTeams },
+                label = { Text(stringResource(if (allTeams) R.string.venue_all_teams else R.string.venue_this_team)) },
+            )
+            if (venues.isNotEmpty()) {
+                Box {
+                    FilterChip(
+                        selected = venue != null,
+                        onClick = { picking = true },
+                        label = { Text(venues.firstOrNull { it.id == venue }?.name ?: stringResource(R.string.venue_all)) },
+                    )
+                    androidx.compose.material3.DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(stringResource(R.string.venue_all)) },
+                            onClick = { venue = null; picking = false },
+                        )
+                        venues.forEach { v ->
+                            androidx.compose.material3.DropdownMenuItem(
+                                text = { Text(v.name) },
+                                onClick = { venue = v.id; picking = false },
+                            )
+                        }
+                    }
                 }
             }
         }
+    }
+    val filters: @Composable () -> Unit = {
+        Row(
+            Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            EventFilter.entries.forEach {
+                FilterChip(
+                    selected = filter == it,
+                    onClick = {
+                        filter = it
+                        if (it.looksBack && view == CalendarView.LIST) period = ListPeriod.ANY
+                    },
+                    label = { Text(it.label()) },
+                )
+            }
+        }
+    }
+    val week = shown(weekDays)
+    val list = androidx.compose.foundation.lazy.rememberLazyListState()
+    // a week opens at its first event: the heads stay on top of the hours
+    val opening = weekOpening(week)
+    androidx.compose.runtime.LaunchedEffect(view, weekOf(selected).first, opening) {
+        // from the heads: what is past them goes under them, right below
+        if (view == CalendarView.WEEK && opening > 0) list.scrollToItem(WEEK_HEADS_ITEM, opening)
+    }
+    LazyColumn(modifier, list, contentPadding = PaddingValues(bottom = fabRoom(marked.isNotEmpty()))) {
+        if (view == CalendarView.MONTH) item(key = "month") { heading() }
+        item(key = "views") { views() }
+        item(key = "filters") { filters() }
         when (view) {
+            CalendarView.WEEK -> {
+                // the week and its arrows stay on top with the days
+                stickyHeader(key = "week-heads") {
+                    Column(Modifier.background(MaterialTheme.colorScheme.surface)) {
+                        heading()
+                        WeekHeads(week.map { LocalDate.parse(it.date) }, selected, today, onSelected)
+                    }
+                }
+                item(key = "week-hours") { WeekHours(week, today, openEvent, onNewAt, mark) }
+            }
             CalendarView.MONTH -> {
                 item(key = "grid") {
                     MonthGrid(month, selected, today, byDate, onSelected)

@@ -144,3 +144,72 @@ pub fn busy_days(events: &[AgendaEvent]) -> Vec<(NaiveDate, Vec<AgendaEvent>)> {
         days
     })
 }
+
+/// The hours a week drawn by the hour shows at least: from 7 to midnight
+/// (training goes on until late).
+pub const FIRST_HOUR: u32 = 7;
+pub const LAST_HOUR: u32 = 24;
+
+/// The hours `[first, last)` a week by the hour shows for events given as
+/// (minute of the day it starts, minutes long): 7–24, earlier for an event
+/// before; one past midnight stops at it.
+pub fn hours(spans: &[(u32, u32)]) -> (u32, u32) {
+    spans.iter().fold(
+        (FIRST_HOUR, LAST_HOUR),
+        |(first, last), &(start, minutes)| {
+            (
+                first.min(start / 60),
+                last.max((start + minutes).div_ceil(60)).min(24),
+            )
+        },
+    )
+}
+
+/// Where each event of a day goes across its column, the events given as
+/// (minute of the day it starts, minutes long) in order of time: its lane
+/// and the lanes of the events it overlaps with, directly or through
+/// others (each `1 / lanes` wide). An event shorter than half an hour
+/// takes half an hour, so it can be drawn.
+pub fn lanes(spans: &[(u32, u32)]) -> Vec<(usize, usize)> {
+    let spans: Vec<(u32, u32)> = spans
+        .iter()
+        .map(|&(start, minutes)| (start, start + minutes.max(30)))
+        .collect();
+    // the groups: the events overlapping each other, one after another
+    let groups = spans.iter().enumerate().fold(
+        Vec::<(u32, Vec<usize>)>::new(),
+        |mut groups, (i, &(start, end))| {
+            match groups.last_mut() {
+                Some((group_end, members)) if start < *group_end => {
+                    *group_end = (*group_end).max(end);
+                    members.push(i);
+                }
+                _ => groups.push((end, vec![i])),
+            }
+            groups
+        },
+    );
+    let mut placed = vec![(0, 1); spans.len()];
+    for (_, members) in groups {
+        // each in the first lane free at its start
+        let mut ends: Vec<u32> = vec![];
+        let lanes: Vec<(usize, usize)> = members
+            .iter()
+            .filter_map(|&i| spans.get(i).map(|span| (i, *span)))
+            .map(|(i, (start, end))| {
+                let lane = ends.iter().position(|e| *e <= start).unwrap_or(ends.len());
+                match ends.get_mut(lane) {
+                    Some(e) => *e = end,
+                    None => ends.push(end),
+                }
+                (i, lane)
+            })
+            .collect();
+        for (i, lane) in lanes {
+            if let Some(slot) = placed.get_mut(i) {
+                *slot = (lane, ends.len());
+            }
+        }
+    }
+    placed
+}

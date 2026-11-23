@@ -636,6 +636,7 @@
     <string name="tr_previous_month">先月</string>
     <string name="tr_next_month">来月</string>
     <string name="tr_period_any">すべての日</string>
+    <string name="tr_calendar_week">週</string>
     <string name="tr_calendar_month">月</string>
     <string name="tr_calendar_list">リスト</string>
     <string name="tr_events_all">すべて</string>

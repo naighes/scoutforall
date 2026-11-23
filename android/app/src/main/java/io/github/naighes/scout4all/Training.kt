@@ -92,6 +92,7 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
             onCycle = { level, cycle -> nav.navigate("team/$id/cycles/${level.name}/$cycle") },
             onNewCycle = { level -> nav.navigate("team/$id/cycle-new/${level.name}") },
             onNewOn = { day -> nav.navigate("team/$id/training-new-on/$day") },
+            onNewAt = { day, time -> nav.navigate("team/$id/training-new-at/$day/$time") },
             onMatch = { match -> nav.navigate("team/$id/match/${android.net.Uri.encode(match)}") },
             onVenues = { nav.navigate("venues") },
             onCreateFrom = { level, children -> nav.navigate(newCycleOf(id, level, children)) },
@@ -102,6 +103,18 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
         SessionFormScreen(id, null, onBack = { nav.back(entry) }, day = runCatching { LocalDate.parse(entry.arg("day")) }.getOrNull(), onRepeated = { nav.back(entry) }, onSaved = { session ->
             nav.navigate("team/$id/training/$session") { popUpTo("team/{id}/training-new-on/{day}") { inclusive = true } }
         })
+    }
+    composable("team/{id}/training-new-at/{day}/{time}") { entry ->
+        val id = entry.arg("id")
+        SessionFormScreen(
+            id, null, onBack = { nav.back(entry) },
+            day = runCatching { LocalDate.parse(entry.arg("day")) }.getOrNull(),
+            time = runCatching { java.time.LocalTime.parse(entry.arg("time")) }.getOrNull(),
+            onRepeated = { nav.back(entry) },
+            onSaved = { session ->
+                nav.navigate("team/$id/training/$session") { popUpTo("team/{id}/training-new-at/{day}/{time}") { inclusive = true } }
+            },
+        )
     }
     cycleRoutes(nav)
     composable("team/{id}/training-new") { entry ->

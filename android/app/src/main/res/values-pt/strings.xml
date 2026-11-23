@@ -638,6 +638,7 @@
     <string name="tr_previous_month">mês passado</string>
     <string name="tr_next_month">próximo mês</string>
     <string name="tr_period_any">qualquer data</string>
+    <string name="tr_calendar_week">Semana</string>
     <string name="tr_calendar_month">Mês</string>
     <string name="tr_calendar_list">Lista</string>
     <string name="tr_events_all">Tudo</string>

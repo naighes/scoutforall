@@ -21,7 +21,7 @@ use scout4all_core::{
     training::{
         Activity, ActivityHit, ActivityStatus, AttendanceInput, AttendanceRow, AttendanceStatus,
         Move, SessionInput, SessionStatus, TrainingSession,
-        agenda::{AgendaEvent, AgendaItem, MatchState, Period, busy_days, by_day},
+        agenda::{AgendaEvent, AgendaItem, MatchState, Period, busy_days, by_day, hours, lanes},
         cycles::{
             Child, Cycle, CycleForm, Level, Span, Window, proposed_container, proposed_microcycle,
         },
@@ -361,6 +361,70 @@ pub struct VenueRefRecord {
 pub struct AgendaDay {
     pub date: String,
     pub events: Vec<AgendaEventRecord>,
+}
+
+/// A week drawn by the hour: the hours shown `[first_hour, last_hour)` and,
+/// day by day as given, where each event goes.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct WeekLayout {
+    pub first_hour: u32,
+    pub last_hour: u32,
+    pub days: Vec<Vec<EventPlace>>,
+}
+
+/// An event in its day's column: the minute of the day it starts at, how
+/// long it is, its lane among the `lanes` it shares the time with (each
+/// `1 / lanes` of the column).
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct EventPlace {
+    pub start: u32,
+    pub minutes: u32,
+    pub lane: u32,
+    pub lanes: u32,
+}
+
+/// The minute of the day an agenda start (`YYYY-MM-DDTHH:MM`) is at.
+pub fn minute_of(start: &str) -> Option<u32> {
+    let hour: u32 = start.get(11..13)?.parse().ok()?;
+    let minute: u32 = start.get(14..16)?.parse().ok()?;
+    Some(hour * 60 + minute)
+}
+
+/// Where the events of the days go in a week drawn by the hour, the same
+/// on the desktop and on the phone: each as tall as it lasts, side by side
+/// when at the same time, the hours from 7 to midnight or earlier.
+#[uniffi::export]
+pub fn week_layout(days: &[AgendaDay]) -> WeekLayout {
+    let spans: Vec<Vec<(u32, u32)>> = days
+        .iter()
+        .map(|d| {
+            d.events
+                .iter()
+                .map(|e| (minute_of(&e.start).unwrap_or(0), u32::from(e.minutes)))
+                .collect()
+        })
+        .collect();
+    let all: Vec<(u32, u32)> = spans.iter().flatten().copied().collect();
+    let (first_hour, last_hour) = hours(&all);
+    let days = spans
+        .iter()
+        .map(|day| {
+            day.iter()
+                .zip(lanes(day))
+                .map(|(&(start, minutes), (lane, count))| EventPlace {
+                    start,
+                    minutes,
+                    lane: u32::try_from(lane).unwrap_or(0),
+                    lanes: u32::try_from(count).unwrap_or(1),
+                })
+                .collect()
+        })
+        .collect();
+    WeekLayout {
+        first_hour,
+        last_hour,
+        days,
+    }
 }
 
 /// What the totals and the attendance count.
@@ -2215,6 +2279,59 @@ mod tests {
         ));
         app.remove_cycle(Level::Microcycle, micro.id, false)
             .unwrap();
+    }
+
+    /// The week by the hour: the hours from the earliest event (7 at
+    /// least) to midnight, each event at its minute of the day, side by
+    /// side with the one at the same time, day by day.
+    #[test]
+    fn the_week_by_the_hour_places_each_event() {
+        let event = |start: &str, minutes| AgendaEventRecord {
+            team_id: "t".into(),
+            team_name: "T".into(),
+            start: start.into(),
+            minutes,
+            item: AgendaItemRecord::Session {
+                id: start.into(),
+                title: String::new(),
+                status: SessionStatus::Planned,
+                to_close: false,
+            },
+            venue: None,
+            shared_venue: false,
+        };
+        let days = [
+            AgendaDay {
+                date: "2026-11-23".into(),
+                events: vec![event("2026-11-23T18:00", 90), event("2026-11-23T18:30", 60)],
+            },
+            AgendaDay {
+                date: "2026-11-24".into(),
+                events: vec![],
+            },
+            AgendaDay {
+                date: "2026-11-25".into(),
+                events: vec![event("2026-11-25T06:30", 60)],
+            },
+        ];
+        let place = |start, minutes, lane, lanes| EventPlace {
+            start,
+            minutes,
+            lane,
+            lanes,
+        };
+        assert_eq!(
+            week_layout(&days),
+            WeekLayout {
+                first_hour: 6,
+                last_hour: 24,
+                days: vec![
+                    vec![place(1080, 90, 0, 2), place(1110, 60, 1, 2)],
+                    vec![],
+                    vec![place(390, 60, 0, 1)],
+                ],
+            }
+        );
     }
 
     #[test]

@@ -76,7 +76,7 @@ fun ComposeContentTestRule.misfits(scrolls: Boolean): List<String> {
             node.config.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
                 ?.takeIf { !scrolls && it.maxValue() > 0f }
                 ?.let { "scrolls by ${it.maxValue()}px: ${node.describe()}" },
-            node.textLayout()?.takeIf { it.cut() }?.let { "text cut: ${node.describe()}" },
+            node.textLayout()?.takeIf { it.cut() && !node.inWeekEvent() }?.let { "text cut: ${node.describe()}" },
             node.takeIf { !scrolls && it.text() != null && it.clipped() }?.let { "text clipped: ${node.describe()}" },
         )
     }
@@ -124,10 +124,17 @@ fun ComposeContentTestRule.crowded(): List<Pair<SemanticsNode, SemanticsNode>> {
     }
 }
 
-/** A day of a month grid: seven columns can't be 48dp apart on the
+/** Inside an event of the week by the hour: its box, a seventh of the
+ * width or less, cuts what it writes, as the calendars do; it's read
+ * whole (`readAs`) and opens with a touch. */
+private fun SemanticsNode.inWeekEvent(): Boolean =
+    generateSequence(parent) { it.parent }.any { it.config.getOrNull(SemanticsProperties.TestTag) == WEEK_EVENT }
+
+/** A day of a month grid or of the week by the hour, or an event side by
+ * side with another in its day: seven columns can't be 48dp apart on the
  * narrowest phones (see `DAY_OF_MONTH`); the other checks still apply. */
 private fun SemanticsNode.dayOfMonth(): Boolean =
-    config.getOrNull(SemanticsProperties.TestTag) == DAY_OF_MONTH
+    config.getOrNull(SemanticsProperties.TestTag) in setOf(DAY_OF_MONTH, WEEK_DAY, WEEK_EVENT)
 
 /** Their middles are closer than 48dp, both across and down; a border of
  * 1dp they may share. */

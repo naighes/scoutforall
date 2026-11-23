@@ -7,6 +7,9 @@ import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
@@ -29,6 +32,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.time.LocalDate
+import java.time.LocalTime
 
 /** The training on the phone: a session written in its form, its activities
  * and state, its attendance, a copy of it. */
@@ -191,13 +195,15 @@ class TrainingScreensTest {
     private fun hub(
         part: Part,
         onNewOn: (LocalDate) -> Unit = {},
+        onNewAt: (LocalDate, LocalTime) -> Unit = { _, _ -> },
+        onSession: (String) -> Unit = {},
         onNewCycle: (Level) -> Unit = {},
         onCreateFrom: (Level, List<String>) -> Unit = { _, _ -> },
     ) = rule.setContent {
         Scout4AllTheme {
             TrainingScreen(
-                team, onBack = {}, onSession = {}, onCycle = { _, _ -> },
-                onNewCycle = onNewCycle, onNewOn = onNewOn, onMatch = {}, first = part,
+                team, onBack = {}, onSession = onSession, onCycle = { _, _ -> },
+                onNewCycle = onNewCycle, onNewOn = onNewOn, onNewAt = onNewAt, onMatch = {}, first = part,
                 onCreateFrom = onCreateFrom,
             )
         }
@@ -578,6 +584,56 @@ class TrainingScreensTest {
         assertEquals(setOf(first, second), made.single().second.toSet())
         // handed over, the marks go
         rule.waitFor({ "still marked" }) { fabs(create(2)) == 0 }
+    }
+
+    /** The week by the hour: a session in its day's column, as tall as it
+     * lasts (90 minutes, an hour and a half of the hours on the left); a
+     * touch on it opens it, one on an empty half hour makes a session on
+     * that day at that time. */
+    @Test
+    fun theWeekByTheHourOpensASessionAndMakesOneAtAHalfHour() {
+        val today = LocalDate.now()
+        val held = session(today, "Ricezione")
+        val at = mutableListOf<Pair<LocalDate, LocalTime>>()
+        val opened = mutableListOf<String>()
+        hub(Part.CALENDAR, onNewAt = { d, t -> at += d to t }, onSession = { opened += it })
+        rule.waitForText(string(R.string.agenda_today))
+        press(string(R.string.tr_calendar_week))
+        val card = hasTestTag(WEEK_EVENT) and hasText("Ricezione", substring = true)
+        rule.onNode(card).performScrollTo()
+        val hour = rule.onNode(hasTestTag("$WEEK_HOUR/18")).fetchSemanticsNode().size.height
+        val tall = rule.onNode(card).fetchSemanticsNode().size.height
+        assertTrue("$tall is not an hour and a half of $hour", kotlin.math.abs(tall - hour * 3 / 2) <= hour / 10)
+        rule.onNode(card).performClick()
+        rule.waitFor({ "not opened" }) { opened.isNotEmpty() }
+        assertEquals(listOf(held), opened)
+        // not read by TalkBack (the + does the same): touched, not clicked
+        val slot = rule.onNode(hasTestTag("$WEEK_SLOT/${today}T20:30"))
+        slot.performScrollTo()
+        slot.performTouchInput { click() }
+        rule.waitFor({ "no new session" }) { at.isNotEmpty() }
+        assertEquals(listOf(today to LocalTime.of(20, 30)), at)
+    }
+
+    /** Two sessions at the same time (two teams, all of them shown) go side
+     * by side in their day, each half of it. */
+    @Test
+    fun sessionsAtTheSameTimeGoSideBySideInTheWeek() {
+        val today = LocalDate.now()
+        session(today, "Ricezione")
+        val other = saveTeam("Arezzo")
+        core { it.saveSession(other, null, it.newSessionDraft().copy(start = "${today}T18:00", duration = "90", title = "Battuta")) }
+        hub(Part.CALENDAR)
+        rule.waitForText(string(R.string.agenda_today))
+        press(string(R.string.venue_this_team))
+        press(string(R.string.tr_calendar_week))
+        val card = { title: String -> hasTestTag(WEEK_EVENT) and hasText(title, substring = true) }
+        rule.onNode(card("Battuta")).performScrollTo()
+        val a = rule.onNode(card("Ricezione")).fetchSemanticsNode().boundsInRoot
+        val b = rule.onNode(card("Battuta")).fetchSemanticsNode().boundsInRoot
+        val (left, right) = if (a.left < b.left) a to b else b to a
+        assertTrue("$left and $right overlap", left.right <= right.left)
+        assertEquals(a.top, b.top, 1f)
     }
 
     /** The free microcycles have a box; "Create mesocycle (N)" makes one of

@@ -28,11 +28,18 @@ use {
         Alignment, Background, Element, Length, Padding,
         widget::{Column, Id, Row, column, container, row, scrollable, space, text},
     },
-    scout4all_core::{training::SessionStatus, training::cycles::Level},
+    scout4all_core::{
+        training::SessionStatus,
+        training::agenda::{FIRST_HOUR, LAST_HOUR},
+        training::cycles::Level,
+    },
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{
         MobileError, Scout4All,
-        training::{AgendaDay, AgendaEventRecord, AgendaItemRecord, AgendaSpan, CycleRecord},
+        training::{
+            AgendaDay, AgendaEventRecord, AgendaItemRecord, AgendaSpan, CycleRecord, EventPlace,
+            minute_of, week_layout,
+        },
     },
     std::{collections::HashSet, sync::Arc},
 };
@@ -334,7 +341,10 @@ impl CalendarTab {
                 let last = spans.iter().map(|(_, l)| *l).max().unwrap_or(LAST_HOUR);
                 (first.saturating_sub(1), (last + 1).min(24))
             }
-            _ => hours(&self.days),
+            _ => {
+                let layout = week_layout(&self.days);
+                (layout.first_hour, layout.last_hour)
+            }
         }
     }
 
@@ -1374,11 +1384,13 @@ impl CalendarTab {
         }));
         // the lines between the hours and the days: the gaps between the
         // cells, over the color of the borders
+        let places = week_layout(&self.days).days;
         let columns = container(
             Row::with_children(
                 self.days
                     .iter()
-                    .map(|day| self.day_column(day, first, last, s, c)),
+                    .zip(places)
+                    .map(|(day, places)| self.day_column(day, places, first, last, s, c)),
             )
             .spacing(1),
         )
@@ -1446,6 +1458,7 @@ impl CalendarTab {
     fn day_column<'a>(
         &'a self,
         day: &'a AgendaDay,
+        places: Vec<EventPlace>,
         first: u32,
         last: u32,
         s: &'static Strings,
@@ -1477,11 +1490,11 @@ impl CalendarTab {
         )
         .spacing(1);
         let here = date == Some(self.anchor);
-        let placed = lanes(&day.events);
-        let layers = day.events.iter().zip(placed).enumerate().map(
-            |(i, (event, (lane, count)))| -> Element<'a, Message> {
-                let start = minute_of(&event.start).unwrap_or(first * 60);
-                let top = (start.saturating_sub(first * 60) as f32 / 60.0 * HOUR).max(0.0);
+        let layers = day.events.iter().zip(places).enumerate().map(
+            |(i, (event, place))| -> Element<'a, Message> {
+                let lane = place.lane as usize;
+                let count = place.lanes as usize;
+                let top = (place.start.saturating_sub(first * 60) as f32 / 60.0 * HOUR).max(0.0);
                 let tall = (f32::from(event.minutes) / 60.0 * HOUR).max(MIN_EVENT);
                 let card = event_card(
                     event,
@@ -1641,11 +1654,6 @@ impl CalendarTab {
 /// The height of an hour in the week.
 const HOUR: f32 = 44.0;
 
-/// The hours the week shows at least: from 7 to midnight (training goes on
-/// until late).
-const FIRST_HOUR: u32 = 7;
-const LAST_HOUR: u32 = 24;
-
 /// The width of the hours on the left of the week.
 const GUTTER: f32 = 52.0;
 
@@ -1728,75 +1736,6 @@ fn mix(a: iced::Color, b: iced::Color, amount: f32) -> iced::Color {
         b: a.b + (b.b - a.b) * amount,
         a: 1.0,
     }
-}
-
-/// The minute of the day an event starts at ("…T18:30" is 1110).
-pub fn minute_of(start: &str) -> Option<u32> {
-    let hour: u32 = start.get(11..13)?.parse().ok()?;
-    let minute: u32 = start.get(14..16)?.parse().ok()?;
-    Some(hour * 60 + minute)
-}
-
-/// The hours the week shows, the last excluded: 7–24, more when an event
-/// starts before or ends after.
-pub fn hours(days: &[AgendaDay]) -> (u32, u32) {
-    days.iter()
-        .flat_map(|d| &d.events)
-        .filter_map(|e| minute_of(&e.start).map(|start| (start, start + u32::from(e.minutes))))
-        .fold((FIRST_HOUR, LAST_HOUR), |(first, last), (start, end)| {
-            (first.min(start / 60), last.max(end.div_ceil(60).min(24)))
-        })
-}
-
-/// Where each event of a day goes across its column: its lane and the
-/// lanes of the events it overlaps with, directly or through others
-/// (each `1 / lanes` wide). The events come in order of time.
-pub fn lanes(events: &[AgendaEventRecord]) -> Vec<(usize, usize)> {
-    // an event shorter than half an hour takes half an hour: so it's drawn
-    let spans: Vec<(u32, u32)> = events
-        .iter()
-        .map(|e| {
-            let start = minute_of(&e.start).unwrap_or(0);
-            (start, start + u32::from(e.minutes).max(30))
-        })
-        .collect();
-    // the groups: the events overlapping each other, one after another
-    let groups = spans.iter().enumerate().fold(
-        Vec::<(u32, Vec<usize>)>::new(),
-        |mut groups, (i, &(start, end))| {
-            match groups.last_mut() {
-                Some((group_end, members)) if start < *group_end => {
-                    *group_end = (*group_end).max(end);
-                    members.push(i);
-                }
-                _ => groups.push((end, vec![i])),
-            }
-            groups
-        },
-    );
-    let mut placed = vec![(0, 1); spans.len()];
-    for (_, members) in groups {
-        // each in the first lane free at its start
-        let mut ends: Vec<u32> = vec![];
-        let lanes: Vec<(usize, usize)> = members
-            .iter()
-            .filter_map(|&i| spans.get(i).map(|span| (i, *span)))
-            .map(|(i, (start, end))| {
-                let lane = ends.iter().position(|e| *e <= start).unwrap_or(ends.len());
-                match ends.get_mut(lane) {
-                    Some(e) => *e = end,
-                    None => ends.push(end),
-                }
-                (i, lane)
-            })
-            .collect();
-        for (i, lane) in lanes {
-            if let Some(slot) = placed.get_mut(i) {
-                *slot = (lane, ends.len());
-            }
-        }
-    }
-    placed
 }
 
 /// The seven days of a row of the month, the ones of the months around
@@ -1997,56 +1936,6 @@ mod tests {
         super::*, crate::strings::strings, scout4all_core::shapes::enums::LanguageEnum,
         scout4all_mobile::venues::VenueDraft,
     };
-
-    fn event(start: &str, minutes: u16) -> AgendaEventRecord {
-        AgendaEventRecord {
-            team_id: "t".into(),
-            team_name: "T".into(),
-            start: start.into(),
-            minutes,
-            item: AgendaItemRecord::Session {
-                id: start.into(),
-                title: String::new(),
-                status: SessionStatus::Planned,
-                to_close: false,
-            },
-            venue: None,
-            shared_venue: false,
-        }
-    }
-
-    /// The week shows 7–22, more for an event before or after; an event
-    /// past midnight stops at it.
-    #[test]
-    fn the_hours_of_the_week_hold_its_events() {
-        let day = |events| AgendaDay {
-            date: "2026-11-23".into(),
-            events,
-        };
-        assert_eq!(hours(&[day(vec![event("2026-11-23T18:00", 90)])]), (7, 24));
-        assert_eq!(
-            hours(&[day(vec![
-                event("2026-11-23T06:30", 60),
-                event("2026-11-23T21:30", 60)
-            ])]),
-            (6, 24)
-        );
-        assert_eq!(hours(&[day(vec![event("2026-11-23T23:00", 120)])]), (7, 24));
-    }
-
-    /// Events at the same time go side by side, each in the first lane
-    /// free; one starting as they end takes the whole column again.
-    #[test]
-    fn events_at_the_same_time_go_side_by_side() {
-        let events = [
-            event("2026-11-23T18:00", 90),
-            event("2026-11-23T18:30", 60),
-            event("2026-11-23T19:30", 60),
-            event("2026-11-23T21:00", 60),
-        ];
-        assert_eq!(lanes(&events), vec![(0, 2), (1, 2), (0, 1), (0, 1)]);
-        assert_eq!(minute_of("2026-11-23T18:30"), Some(1110));
-    }
 
     /// A row of the month has all its days, the ones around too.
     #[test]
