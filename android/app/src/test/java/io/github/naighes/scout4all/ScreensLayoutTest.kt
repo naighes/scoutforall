@@ -2,6 +2,8 @@ package io.github.naighes.scout4all
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -75,6 +77,9 @@ class ScreensLayoutTest(private val screen: Size) {
         }
         rule.waitForText("Ekaterina Antropova")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        // today, always in the week, may push the match below a short screen
+        rule.waitForText(string(R.string.tr_programming))
+        rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Cortona"))
         rule.waitForText("Cortona")
         rule.shot("screen-team-matches-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
