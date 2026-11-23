@@ -318,6 +318,21 @@ class MatchFormTest {
         assertEquals(false, formOf(first).friendly)
     }
 
+    /** A new match from a day of the calendar is on that day. */
+    @Test
+    fun aNewMatchOnADayOfTheCalendar() {
+        val day = java.time.LocalDate.of(2026, 3, 10)
+        rule.setContent {
+            Scout4AllTheme { MatchFormScreen(team, null, onBack = {}, onSaved = { _, m -> saved += m }, day = day) }
+        }
+        rule.waitForText(string(R.string.opponent))
+        rule.type(string(R.string.opponent), "Pisa")
+        saveFromTheFields()
+        rule.waitFor { saved.size == 1 }
+        val date = java.time.OffsetDateTime.parse(formOf(saved.single()).date.orEmpty())
+        assertEquals(day, date.atZoneSameInstant(java.time.ZoneId.systemDefault()).toLocalDate())
+    }
+
     /** A new match of another team A: its players on the score sheet,
      * saved as its match. */
     @Test

@@ -93,6 +93,7 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
             onNewCycle = { level -> nav.navigate("team/$id/cycle-new/${level.name}") },
             onNewOn = { day -> nav.navigate("team/$id/training-new-on/$day") },
             onNewAt = { day, time -> nav.navigate("team/$id/training-new-at/$day/$time") },
+            onNewMatch = { day -> nav.navigate("team/$id/new-match-on/$day") },
             onMatch = { match -> nav.navigate("team/$id/match/${android.net.Uri.encode(match)}") },
             onVenues = { nav.navigate("venues") },
             onCreateFrom = { level, children -> nav.navigate(newCycleOf(id, level, children)) },
@@ -113,6 +114,20 @@ fun NavGraphBuilder.trainingRoutes(nav: NavController) {
             onRepeated = { nav.back(entry) },
             onSaved = { session ->
                 nav.navigate("team/$id/training/$session") { popUpTo("team/{id}/training-new-at/{day}/{time}") { inclusive = true } }
+            },
+        )
+    }
+    // a match on a day of the calendar: saved, its page (it's played
+    // later, the first set isn't started)
+    composable("team/{id}/new-match-on/{day}") { entry ->
+        val id = entry.arg("id")
+        MatchFormScreen(
+            id, null, onBack = { nav.back(entry) },
+            day = runCatching { LocalDate.parse(entry.arg("day")) }.getOrNull(),
+            onSaved = { a, m ->
+                nav.navigate("team/$a/match/${android.net.Uri.encode(m)}") {
+                    popUpTo("team/{id}/new-match-on/{day}") { inclusive = true }
+                }
             },
         )
     }

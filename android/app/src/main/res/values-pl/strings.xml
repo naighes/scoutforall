@@ -607,6 +607,7 @@
     <string name="tr_scope_edit_text">Ta sesja należy do serii. Które sesje dostają nową godzinę, czas trwania i salę?</string>
     <string name="tr_scope_delete_text">Ta sesja należy do serii. Które sesje usuwasz? Pozostałe tylko, jeśli są zaplanowane.</string>
     <string name="tr_add_session">Dodaj sesję</string>
+    <string name="tr_add_match">Dodaj mecz</string>
     <string name="tr_create_others">Utwórz pozostałe</string>
     <string name="tr_time">Godzina</string>
     <string name="tr_filter_all">Wszystkie</string>

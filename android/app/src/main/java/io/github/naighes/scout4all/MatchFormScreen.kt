@@ -198,6 +198,8 @@ class MatchFormViewModel(
     teamId: String,
     private val matchId: String?,
     example: Boolean = false,
+    /** a new match on this day of the calendar, at the time of now */
+    day: LocalDate? = null,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow<MatchFormState>(MatchFormState.Loading)
     val state: StateFlow<MatchFormState> = mutableState
@@ -212,7 +214,7 @@ class MatchFormViewModel(
                     val form = when (matchId) {
                         null -> when (example) {
                             true -> core.tutorialMatchForm(teamId, rfc3339(OffsetDateTime.now()))
-                            false -> core.newMatchForm(rfc3339(OffsetDateTime.now()))
+                            false -> core.newMatchForm(rfc3339(day?.let { onDay(it, null) } ?: OffsetDateTime.now()))
                         }
                         else -> core.matchForm(teamId, matchId)
                     }
@@ -530,9 +532,10 @@ fun MatchFormScreen(
     onBack: () -> Unit,
     onSaved: (teamId: String, matchId: String) -> Unit,
     example: Boolean = false,
+    day: LocalDate? = null,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
-    val model = viewModel { MatchFormViewModel(app, teamId, matchId, example) }
+    val model = viewModel { MatchFormViewModel(app, teamId, matchId, example, day) }
     val state by model.state.collectAsState()
     val back = rememberFormBack((state as? MatchFormState.Editing)?.changed == true, onBack)
     val onRoster = (state as? MatchFormState.Editing)?.onRoster == true

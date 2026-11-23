@@ -603,6 +603,7 @@
     <string name="tr_scope_edit_text">Esta sessão faz parte de uma série. Que sessões recebem a nova hora, duração e pavilhão?</string>
     <string name="tr_scope_delete_text">Esta sessão faz parte de uma série. Que sessões eliminas? As outras só se planeadas.</string>
     <string name="tr_add_session">Adicionar uma sessão</string>
+    <string name="tr_add_match">Adicionar uma partida</string>
     <string name="tr_create_others">Criar as outras</string>
     <string name="tr_time">Hora</string>
     <string name="tr_filter_all">Todas</string>

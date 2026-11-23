@@ -199,12 +199,13 @@ class TrainingScreensTest {
         onSession: (String) -> Unit = {},
         onNewCycle: (Level) -> Unit = {},
         onCreateFrom: (Level, List<String>) -> Unit = { _, _ -> },
+        onNewMatch: (LocalDate) -> Unit = {},
     ) = rule.setContent {
         Scout4AllTheme {
             TrainingScreen(
                 team, onBack = {}, onSession = onSession, onCycle = { _, _ -> },
                 onNewCycle = onNewCycle, onNewOn = onNewOn, onNewAt = onNewAt, onMatch = {}, first = part,
-                onCreateFrom = onCreateFrom,
+                onCreateFrom = onCreateFrom, onNewMatch = onNewMatch,
             )
         }
     }
@@ -307,6 +308,16 @@ class TrainingScreensTest {
         // and the day chosen offers one right under it
         rule.onNode(hasText(string(R.string.tr_add_session)) and hasClickAction()).performScrollTo().performClick()
         assertEquals(listOf(LocalDate.now(), LocalDate.now()), days)
+    }
+
+    /** The day chosen in the month offers a match on it too. */
+    @Test
+    fun theCalendarOpensANewMatchOnTheDay() {
+        val days = mutableListOf<LocalDate>()
+        hub(Part.CALENDAR, onNewMatch = { days += it })
+        rule.waitForText(string(R.string.agenda_today))
+        rule.onNode(hasText(string(R.string.tr_add_match)) and hasClickAction()).performScrollTo().performClick()
+        assertEquals(listOf(LocalDate.now()), days)
     }
 
     /** The day of a date picker written by hand (its text mode). */

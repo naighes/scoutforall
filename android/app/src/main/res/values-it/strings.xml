@@ -603,6 +603,7 @@
     <string name="tr_scope_edit_text">Questa seduta fa parte di una serie. A quali sedute vanno ora, durata e palestra nuove?</string>
     <string name="tr_scope_delete_text">Questa seduta fa parte di una serie. Quali sedute elimini? Le altre solo se pianificate.</string>
     <string name="tr_add_session">Aggiungi una seduta</string>
+    <string name="tr_add_match">Aggiungi una partita</string>
     <string name="tr_create_others">Crea le altre</string>
     <string name="tr_time">Ora</string>
     <string name="tr_filter_all">Tutte</string>

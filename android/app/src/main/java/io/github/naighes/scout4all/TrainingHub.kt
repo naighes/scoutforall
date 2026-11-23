@@ -167,6 +167,7 @@ internal fun TrainingScreen(
     onMatch: (String) -> Unit,
     onVenues: () -> Unit = {},
     onNewAt: (LocalDate, java.time.LocalTime) -> Unit = { d, _ -> onNewOn(d) },
+    onNewMatch: (LocalDate) -> Unit = {},
     first: Part = Part.CALENDAR,
     firstView: CalendarView = CalendarView.MONTH,
     onCreateFrom: (Level, List<String>) -> Unit = { _, _ -> },
@@ -247,7 +248,7 @@ internal fun TrainingScreen(
         when (part) {
             Part.CALENDAR -> CalendarTab(
                 teamId, day, { day = it }, view, { view = it }, modifier, onSession, onMatch, onNewOn,
-                free.orEmpty(), markedSessions, { sessions = it }, onNewAt,
+                free.orEmpty(), markedSessions, { sessions = it }, onNewAt, onNewMatch,
             )
             Part.CYCLES -> CyclesTab(
                 teamId, level,
@@ -315,7 +316,7 @@ private const val WEEK_HEADS_ITEM = 2
  * for each session and match; below, what the selected day holds) or the
  * list of the days with something. The filter hides what it leaves out in
  * all three. */
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 private fun CalendarTab(
     teamId: String,
@@ -331,6 +332,7 @@ private fun CalendarTab(
     marked: List<String> = emptyList(),
     onMarked: (List<String>) -> Unit = {},
     onNewAt: (LocalDate, java.time.LocalTime) -> Unit = { d, _ -> onNewOn(d) },
+    onNewMatch: (LocalDate) -> Unit = {},
 ) {
     var month by rememberSaveable { mutableStateOf(YearMonth.from(selected)) }
     // the gyms are shared: every team, or one gym only
@@ -539,11 +541,17 @@ private fun CalendarTab(
                     }
                 }
                 items(events, key = { "${it.teamId}/${it.start}/${it.id()}" }) { open(it) }
-                // a session on the day chosen, right under it
+                // a session or a match on the day chosen, right under it
                 item(key = "add") {
-                    TextButton(onClick = { onNewOn(selected) }, Modifier.padding(horizontal = 8.dp)) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Text(stringResource(R.string.tr_add_session), Modifier.padding(start = 8.dp))
+                    androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 8.dp)) {
+                        TextButton(onClick = { onNewOn(selected) }) {
+                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Text(stringResource(R.string.tr_add_session), Modifier.padding(start = 8.dp))
+                        }
+                        TextButton(onClick = { onNewMatch(selected) }) {
+                            Icon(Icons.Filled.Add, contentDescription = null)
+                            Text(stringResource(R.string.tr_add_match), Modifier.padding(start = 8.dp))
+                        }
                     }
                 }
             }
