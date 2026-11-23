@@ -30,7 +30,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
 import java.time.LocalDate
 import java.time.LocalTime
 
@@ -168,10 +167,7 @@ class TrainingScreensTest {
         assertEquals(saved.rows.size - 1, saved.rows.count { it.status == AttendanceStatus.PRESENT })
     }
 
-    // the dialog of the guests never gets idle under Robolectric on SDK 28
-    // (it was so before the new person): TODO/021 29g, step 2
     @Test
-    @Config(sdk = [37])
     fun aNewPersonIsAGuestAndMakesUpFromTheNote() {
         val s = session()
         val back = mutableListOf<Unit>()
