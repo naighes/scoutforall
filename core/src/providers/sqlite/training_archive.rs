@@ -428,7 +428,14 @@ pub(crate) fn merge(
             &|tx, session| {
                 let s = read_session(tx, session)?;
                 check_microcycle(tx, &s.team_id, s.microcycle_id.as_ref(), s.start)?;
-                check_session(tx, &s.team_id, Some(session), s.start, s.duration_min)
+                check_session(
+                    tx,
+                    &s.team_id,
+                    Some(session),
+                    s.status,
+                    s.start,
+                    s.duration_min,
+                )
             },
         )?;
         training.sessions = merged;

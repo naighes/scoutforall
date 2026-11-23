@@ -24,7 +24,7 @@ mod tests {
         },
         tests::Sqlite,
         training::{
-            SessionInput,
+            SessionInput, SessionStatus,
             form::SessionForm,
             overlap::{DEFAULT_MATCH_MINUTES, Slot, SlotKind, clashes},
         },
@@ -325,5 +325,58 @@ mod tests {
                 .await
                 .unwrap_err();
         assert_eq!(overlaps(&e), [Slot::session(at(23, 17, 0), 120)]);
+    }
+
+    /// Decided 2026-11-23: a cancelled session frees its slot for sessions
+    /// and matches; back from cancelled, the slot is checked again.
+    #[tokio::test]
+    async fn a_cancelled_session_frees_its_slot_until_it_is_back() {
+        let w = world();
+        let t = team(&w.p, "A").await;
+        let cancelled = w
+            .training
+            .create_session(&t.id, session(at(23, 18, 0), 120))
+            .await
+            .unwrap();
+        w.training
+            .set_session_status(&cancelled.id, SessionStatus::Cancelled)
+            .await
+            .unwrap();
+        let other = w
+            .training
+            .create_session(&t.id, session(at(23, 19, 0), 60))
+            .await
+            .unwrap();
+        the_match(&w.p, &t, None, when(23, 17)).await.unwrap();
+        let e = w
+            .training
+            .set_session_status(&cancelled.id, SessionStatus::Planned)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            overlaps(&e),
+            [
+                Slot::match_of(at(23, 17, 0), None),
+                Slot::session(at(23, 19, 0), 60)
+            ]
+        );
+        assert_eq!(
+            w.training.session(&cancelled.id).await.unwrap().status,
+            SessionStatus::Cancelled
+        );
+        // a cancelled session edited onto a busy slot stays cancelled
+        let mut input = session(at(23, 18, 30), 60);
+        input.status = SessionStatus::Cancelled;
+        w.training
+            .update_session(&cancelled.id, input)
+            .await
+            .unwrap();
+        w.training.remove_session(&other.id).await.unwrap();
+        let e = w
+            .training
+            .set_session_status(&cancelled.id, SessionStatus::Completed)
+            .await
+            .unwrap_err();
+        assert_eq!(overlaps(&e), [Slot::match_of(at(23, 17, 0), None)]);
     }
 }

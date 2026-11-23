@@ -47,7 +47,7 @@ mod tests {
     }
 
     /// A completed session with everything filled in, and three activities:
-    /// one planned, one completed, one planned.
+    /// one planned, one completed, one skipped.
     async fn rich(t: &SqliteTraining, team: &TeamEntry) -> TrainingSession {
         let s = t
             .create_session(
@@ -71,7 +71,7 @@ mod tests {
         for (name, planned, status) in [
             ("Warm up", "15", ActivityStatus::Planned),
             ("Serving", "30", ActivityStatus::Completed),
-            ("Drill", "", ActivityStatus::Planned),
+            ("Drill", "", ActivityStatus::Skipped),
         ] {
             t.add_activity(
                 &s.id,
@@ -138,7 +138,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn the_activities_are_the_planned_ones_in_order_without_actuals() {
+    async fn all_the_activities_are_copied_in_order_as_planned_without_actuals() {
         let p = Sqlite::new();
         let t = SqliteTraining::new(p.db.clone());
         let team = team(&p).await;
@@ -152,7 +152,11 @@ mod tests {
             list.iter()
                 .map(|a| (a.position, a.name.as_str(), a.planned_min))
                 .collect::<Vec<_>>(),
-            [(0, "Warm up", Some(15)), (1, "Drill", None)]
+            [
+                (0, "Warm up", Some(15)),
+                (1, "Serving", Some(30)),
+                (2, "Drill", None)
+            ]
         );
         assert!(list.iter().all(|a| {
             a.status == ActivityStatus::Planned && a.actual_min.is_none() && a.notes.is_empty()

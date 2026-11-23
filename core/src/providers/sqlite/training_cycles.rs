@@ -11,7 +11,7 @@ use crate::{
         sqlite::{
             not_found, sqlite,
             training::{
-                SqliteTraining, copy_planned_activities, insert_session, match_slots, read_session,
+                SqliteTraining, copy_activities, insert_session, match_slots, read_session,
                 session_slots,
             },
         },
@@ -641,7 +641,7 @@ impl TrainingCycles for SqliteTraining {
                             },
                         )?;
                         match input.copy_activities {
-                            true => copy_planned_activities(tx, &s.id, &copy.id),
+                            true => copy_activities(tx, &s.id, &copy.id),
                             false => Ok(()),
                         }
                     })?;

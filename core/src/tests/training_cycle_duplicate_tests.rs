@@ -247,7 +247,10 @@ mod tests {
             .collect();
         assert_eq!(
             names,
-            [("Warm up".to_string(), ActivityStatus::Planned, None)]
+            [
+                ("Warm up".to_string(), ActivityStatus::Planned, None),
+                ("Done".to_string(), ActivityStatus::Planned, None)
+            ]
         );
     }
 

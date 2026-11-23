@@ -160,8 +160,9 @@ pub(crate) fn read_session(tx: &Transaction, id: &Uuid) -> Result<TrainingSessio
     })
 }
 
-/// The sessions of the team not removed, but `except`: what a new or edited
-/// session, or a match, mustn't overlap.
+/// The sessions of the team not removed nor cancelled, but `except`: what a
+/// new or edited session, or a match, mustn't overlap. A cancelled session
+/// frees its slot (decided 2026-11-23).
 pub(crate) fn session_slots(
     tx: &Transaction,
     team_id: &Uuid,
@@ -169,15 +170,23 @@ pub(crate) fn session_slots(
 ) -> Result<Vec<Slot>, AppError> {
     tx.prepare(
         "SELECT start_local, duration_min FROM training_sessions
-         WHERE team_id = ?1 AND deleted = 0 AND (?2 IS NULL OR id <> ?2)",
+         WHERE team_id = ?1 AND deleted = 0 AND status <> ?3
+           AND (?2 IS NULL OR id <> ?2)",
     )
     .map_err(sqlite)?
-    .query_map(params![Sql(*team_id), except.map(|id| Sql(*id))], |row| {
-        Ok(Slot::session(
-            row.get::<_, Sql<NaiveDateTime>>(0)?.0,
-            row.get(1)?,
-        ))
-    })
+    .query_map(
+        params![
+            Sql(*team_id),
+            except.map(|id| Sql(*id)),
+            SessionStatus::Cancelled
+        ],
+        |row| {
+            Ok(Slot::session(
+                row.get::<_, Sql<NaiveDateTime>>(0)?.0,
+                row.get(1)?,
+            ))
+        },
+    )
     .map_err(sqlite)?
     .collect::<Result<_, _>>()
     .map_err(sqlite)
@@ -216,17 +225,23 @@ fn overlap(slot: &Slot, others: Vec<Slot>) -> Result<(), AppError> {
 }
 
 /// A session of the team in this window overlaps no other session of the
-/// team, nor a match in programma of it.
+/// team, nor a match in programma of it; a cancelled one holds no slot.
 pub(crate) fn check_session(
     tx: &Transaction,
     team_id: &Uuid,
     except: Option<&Uuid>,
+    status: SessionStatus,
     start: NaiveDateTime,
     minutes: u16,
 ) -> Result<(), AppError> {
-    let mut busy = session_slots(tx, team_id, except)?;
-    busy.extend(match_slots(tx, team_id, None)?);
-    overlap(&Slot::session(start, minutes), busy)
+    match status {
+        SessionStatus::Cancelled => Ok(()),
+        _ => {
+            let mut busy = session_slots(tx, team_id, except)?;
+            busy.extend(match_slots(tx, team_id, None)?);
+            overlap(&Slot::session(start, minutes), busy)
+        }
+    }
 }
 
 /// A match in programma of these teams (A, and B when a team) at `start`
@@ -243,16 +258,13 @@ pub(crate) fn check_match(
         .try_for_each(|team| overlap(&slot, session_slots(tx, team, None)?))
 }
 
-/// Copies the planned activities of a session (name, description, planned
-/// duration) into another, from position 0; never the completed ones.
-pub(crate) fn copy_planned_activities(
-    tx: &Transaction,
-    from: &Uuid,
-    to: &Uuid,
-) -> Result<(), AppError> {
+/// Copies all the activities of a session (name, description, planned
+/// duration) into another, from position 0, as planned: the completed and
+/// the skipped too (decided 2026-11-23); never actual durations or notes.
+pub(crate) fn copy_activities(tx: &Transaction, from: &Uuid, to: &Uuid) -> Result<(), AppError> {
     tx.prepare(
         "SELECT name, description, planned_min FROM training_activities
-         WHERE session_id = ?1 AND deleted = 0 AND status = 'planned'
+         WHERE session_id = ?1 AND deleted = 0
          ORDER BY position",
     )
     .map_err(sqlite)?
@@ -349,10 +361,10 @@ fn busy_but(tx: &Transaction, team_id: &Uuid, free: &HashSet<Uuid>) -> Result<Ve
     let mut busy: Vec<Slot> = tx
         .prepare(
             "SELECT id, start_local, duration_min FROM training_sessions
-             WHERE team_id = ?1 AND deleted = 0",
+             WHERE team_id = ?1 AND deleted = 0 AND status <> ?2",
         )
         .map_err(sqlite)?
-        .query_map([Sql(*team_id)], |row| {
+        .query_map(params![Sql(*team_id), SessionStatus::Cancelled], |row| {
             Ok((
                 row.get::<_, Sql<Uuid>>(0)?.0,
                 Slot::session(row.get::<_, Sql<NaiveDateTime>>(1)?.0, row.get(2)?),
@@ -563,7 +575,14 @@ impl TrainingWriter for SqliteTraining {
             match team {
                 true => {
                     check_microcycle(tx, team_id, input.microcycle_id.as_ref(), input.start)?;
-                    check_session(tx, team_id, None, input.start, input.duration_min)?;
+                    check_session(
+                        tx,
+                        team_id,
+                        None,
+                        input.status,
+                        input.start,
+                        input.duration_min,
+                    )?;
                     insert_session(tx, team_id, None, &input)
                 }
                 false => Err(not_found(&format!("team {team_id}"))),
@@ -588,6 +607,7 @@ impl TrainingWriter for SqliteTraining {
                 tx,
                 &session.team_id,
                 Some(session_id),
+                input.status,
                 input.start,
                 input.duration_min,
             )?;
@@ -772,6 +792,7 @@ impl TrainingWriter for SqliteTraining {
                 tx,
                 &original.team_id,
                 None,
+                SessionStatus::Planned,
                 input.start,
                 original.duration_min,
             )?;
@@ -796,7 +817,7 @@ impl TrainingWriter for SqliteTraining {
                 },
             )?;
             match input.copy_activities {
-                true => copy_planned_activities(tx, session_id, &copy.id),
+                true => copy_activities(tx, session_id, &copy.id),
                 false => Ok(()),
             }?;
             Ok(copy)
@@ -809,7 +830,19 @@ impl TrainingWriter for SqliteTraining {
         status: SessionStatus,
     ) -> Result<TrainingSession, AppError> {
         self.0.write(|tx| {
-            read_session(tx, session_id)?;
+            let s = read_session(tx, session_id)?;
+            match s.status {
+                // back from cancelled: its slot may be taken meanwhile
+                SessionStatus::Cancelled => check_session(
+                    tx,
+                    &s.team_id,
+                    Some(session_id),
+                    status,
+                    s.start,
+                    s.duration_min,
+                ),
+                _ => Ok(()),
+            }?;
             write_status(tx, session_id, status)?;
             read_session(tx, session_id)
         })
