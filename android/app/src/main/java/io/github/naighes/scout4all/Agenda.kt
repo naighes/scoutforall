@@ -1,11 +1,15 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -13,6 +17,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -21,6 +26,8 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -49,21 +56,8 @@ fun rememberAgenda(teamId: String?, span: AgendaSpan, day: LocalDate, refresh: A
     }
 }
 
-/** The events of today, only when there is something: a title and the rows. */
-fun LazyListScope.agendaToday(
-    days: List<AgendaDay>,
-    withTeam: Boolean,
-    onMatch: (teamId: String, matchId: String) -> Unit,
-    onSession: (teamId: String, sessionId: String) -> Unit = { _, _ -> },
-) {
-    val events = days.flatMap { it.events }
-    if (events.isEmpty()) return
-    item(key = "agenda-today") { AgendaTitle(R.string.agenda_today) }
-    items(events, key = { "today/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch, onSession) }
-}
-
-/** The week of [monday]: every day, the empty ones too, with the buttons
- * to move it. */
+/** The week of [monday], with the buttons to move it: the days with
+ * something planned, and today, always there and lit. */
 fun LazyListScope.agendaWeek(
     days: List<AgendaDay>,
     today: LocalDate,
@@ -94,38 +88,58 @@ fun LazyListScope.agendaWeek(
             }
         }
     }
-    // the phone is narrow: only the days with something, or a line saying
-    // there is nothing
-    val busy = days.filter { it.events.isNotEmpty() }
-    if (busy.isEmpty()) {
-        item(key = "agenda-nothing") {
-            Text(
-                stringResource(R.string.agenda_nothing),
-                Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    // the phone is narrow: only the days with something and today, or a
+    // line saying there is nothing
+    val shown = days.filter { it.events.isNotEmpty() || it.date == today.toString() }
+    if (shown.isEmpty()) {
+        item(key = "agenda-nothing") { NothingPlanned() }
+    }
+    shown.forEach { day ->
+        val date = LocalDate.parse(day.date)
+        if (date == today) {
+            // today as one block, on a background of its own
+            item(key = "day/${day.date}") {
+                TodayBox {
+                    DayHeader(date, true)
+                    if (day.events.isEmpty()) NothingPlanned()
+                    day.events.forEach { EventRow(it, withTeam, onMatch, onSession, lit = true) }
+                }
+            }
+        } else {
+            item(key = "day/${day.date}") { DayHeader(date, false) }
+            items(day.events, key = { "${day.date}/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch, onSession) }
         }
     }
-    busy.forEach { day ->
-        val date = LocalDate.parse(day.date)
-        item(key = "day/${day.date}") { DayHeader(date, date == today) }
-        items(day.events, key = { "${day.date}/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch, onSession) }
-    }
 }
+
+/** The line of a day, or a week, without anything. */
+@Composable
+internal fun NothingPlanned() = Text(
+    stringResource(R.string.agenda_nothing),
+    Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+    style = MaterialTheme.typography.bodyMedium,
+    color = MaterialTheme.colorScheme.onSurfaceVariant,
+)
+
+/** Today, lit: its rows on a light background of the accent. */
+@Composable
+internal fun TodayBox(content: @Composable ColumnScope.() -> Unit) = Column(
+    Modifier
+        .fillMaxWidth()
+        .padding(horizontal = 8.dp, vertical = 4.dp)
+        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), RoundedCornerShape(12.dp))
+        .testTag(TODAY_TAG),
+    content = content,
+)
+
+/** The test tag of today's block. */
+const val TODAY_TAG = "agenda-today"
+
 
 internal fun AgendaEventRecord.id(): String = when (val i = item) {
     is AgendaItemRecord.Session -> i.id
     is AgendaItemRecord.Match -> i.id
 }
-
-@Composable
-private fun AgendaTitle(title: Int) = Text(
-    stringResource(title),
-    Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp).title(),
-    style = MaterialTheme.typography.titleSmall,
-    color = MaterialTheme.colorScheme.primary,
-)
 
 /** The day, today in the accent. */
 @Composable
@@ -144,12 +158,16 @@ internal fun EventRow(
     withTeam: Boolean,
     onMatch: (teamId: String, matchId: String) -> Unit,
     onSession: (teamId: String, sessionId: String) -> Unit,
+    lit: Boolean = false,
 ) {
+    // on today's background the rows are clear, to let it show
+    val colors = if (lit) ListItemDefaults.colors(containerColor = Color.Transparent) else ListItemDefaults.colors()
     val time = e.start.substringAfter('T', "").take(5)
     when (val i = e.item) {
         is AgendaItemRecord.Session -> {
             val cancelled = i.status == SessionStatus.CANCELLED
             ListItem(
+                colors = colors,
                 modifier = Modifier.clickable { onSession(e.teamId, i.id) },
                 overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam }).joinToString(" · ")) },
                 headlineContent = {
@@ -173,6 +191,7 @@ internal fun EventRow(
             )
         }
         is AgendaItemRecord.Match -> ListItem(
+            colors = colors,
             modifier = Modifier.clickable { onMatch(e.teamId, i.id) },
             overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam }).joinToString(" · ")) },
             headlineContent = { Text(i.opponent) },

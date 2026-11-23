@@ -1545,23 +1545,25 @@ mod tests {
         // a week on: nothing planned, no rows, Enter does nothing
         team.key(s, key!(pagedown));
         assert!(team.week.is_empty());
+        assert!(team.week.shown_days().is_empty());
         assert!(rows(&team).is_empty());
         assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
         team.key(s, key!(home));
         assert!(rows(&team).iter().any(|p| matches!(p, Pick::Match { .. })));
     }
 
-    /// The home: today (when something is planned) and the week come
-    /// before the matches in progress; ← → go through the panels, today
-    /// is skipped while empty; Enter on a match opens it.
+    /// The home: the week comes before the matches in progress, with
+    /// today always in it and lit (there is no panel of today on its own);
+    /// ← → go through the panels; Enter on a match opens it.
     #[test]
-    fn the_home_shows_today_and_the_week_of_every_team() {
+    fn the_home_shows_the_week_of_every_team_with_today_lit() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
+        let today = chrono::Local::now().date_naive().to_string();
         let mut home = HomeScreen::new(&core, core.home().unwrap());
-        // nothing planned: today has no row to choose, the week does
-        assert!(home.today_is_empty());
+        // nothing planned: the week shows today alone, lit
+        assert_eq!(home.week_shown(), vec![(today.clone(), true)]);
         home.key(&core, s, key!(left));
         assert_eq!(home.panel_name(), "week");
         home.key(&core, s, key!(left));
@@ -1569,10 +1571,9 @@ mod tests {
         let team_id = core.tutorial_team().unwrap();
         let m = plan_today(&core, &team_id);
         let mut home = HomeScreen::new(&core, core.home().unwrap());
-        assert!(!home.today_is_empty());
+        assert_eq!(home.week_shown(), vec![(today, true)]);
         home.key(&core, s, key!(left));
-        home.key(&core, s, key!(left));
-        assert_eq!(home.panel_name(), "today");
+        assert_eq!(home.panel_name(), "week");
         // today: the session opens on its sheet, then the match
         assert!(matches!(
             home.key(&core, s, key!(enter)),

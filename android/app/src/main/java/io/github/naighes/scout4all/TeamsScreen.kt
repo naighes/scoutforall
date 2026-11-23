@@ -165,9 +165,7 @@ fun TeamsScreen(
                     var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
                     val today = LocalDate.now()
                     val week by rememberAgenda(null, AgendaSpan.WEEK, day, s.home)
-                    val now by rememberAgenda(null, AgendaSpan.DAY, today, s.home)
                     LazyColumn(modifier, list, contentPadding = PaddingValues(bottom = 88.dp)) {
-                    agendaToday(now, withTeam = true, onMatch = onMatch, onSession = onSession)
                     agendaWeek(
                         week, today, withTeam = true,
                         onPrevious = { day = day.minusWeeks(1) },

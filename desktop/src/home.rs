@@ -62,8 +62,6 @@ pub enum Message {
     Competitions,
     Venues,
     Form(form::Message),
-    /// the agenda of today
-    Today(agenda::Message),
     /// the agenda of the week
     Week(agenda::Message),
 }
@@ -81,16 +79,14 @@ pub enum Outcome {
     Venues,
 }
 
-const TODAY: usize = 0;
-const WEEK: usize = 1;
-const IN_PROGRESS: usize = 2;
-const RECENT: usize = 3;
-const TEAMS: usize = 4;
-const PANELS: usize = 5;
+const WEEK: usize = 0;
+const IN_PROGRESS: usize = 1;
+const RECENT: usize = 2;
+const TEAMS: usize = 3;
+const PANELS: usize = 4;
 
 pub struct HomeScreen {
     pub home: Home,
-    today: Agenda,
     week: Agenda,
     panel: usize,
     selected: [usize; PANELS],
@@ -109,7 +105,6 @@ impl HomeScreen {
     pub fn new(core: &Scout4All, home: Home) -> HomeScreen {
         HomeScreen {
             home,
-            today: Agenda::day(core, None, today()),
             week: Agenda::week(core, None, today()),
             panel: IN_PROGRESS,
             selected: [0; PANELS],
@@ -130,18 +125,13 @@ impl HomeScreen {
         }
     }
 
-    /// The panel after (or before) the one chosen; today, empty, has no
-    /// row to choose.
+    /// The panel after (or before) the one chosen.
     fn step(&self, forward: bool) -> usize {
         let one = match forward {
             true => 1,
             false => PANELS - 1,
         };
-        let next = (self.panel + one) % PANELS;
-        match next == TODAY && self.today.is_empty() {
-            true => (next + one) % PANELS,
-            false => next,
-        }
+        (self.panel + one) % PANELS
     }
 
     /// What the row picked in an agenda opens: a match or a session.
@@ -178,7 +168,7 @@ impl HomeScreen {
     /// What the row of `panel` at `index` opens.
     fn open(&self, panel: usize, index: usize) -> Outcome {
         match panel {
-            TODAY | WEEK => Outcome::Stay,
+            WEEK => Outcome::Stay,
             IN_PROGRESS => self
                 .home
                 .in_progress
@@ -204,7 +194,6 @@ impl HomeScreen {
                 self.edited(edited)
             }
             (_, Some(_)) | (Message::Form(_), None) => Outcome::Stay,
-            (Message::Today(m), None) => HomeScreen::picked(self.today.update(core, m)),
             (Message::Week(m), None) => HomeScreen::picked(self.week.update(core, m)),
             (Message::Scout(open), None) => Outcome::Scout(open),
             (Message::Match(team, m), None) => Outcome::Match(team, m),
@@ -231,14 +220,10 @@ impl HomeScreen {
             || ck == key!(shift - backtab)
             || ck == key!(backtab);
         let selected = self.selected.get(self.panel).copied().unwrap_or(0);
-        if self.panel == TODAY || self.panel == WEEK {
-            let agenda = match self.panel == TODAY {
-                true => &mut self.today,
-                false => &mut self.week,
-            };
-            if !(next || previous || ck == key!(n) || ck == key!(i) || ck == key!(c)) {
-                return HomeScreen::picked(agenda.key(core, ck));
-            }
+        if self.panel == WEEK
+            && !(next || previous || ck == key!(n) || ck == key!(i) || ck == key!(c))
+        {
+            return HomeScreen::picked(self.week.key(core, ck));
         }
         let moved = match ck {
             _ if next => {
@@ -270,14 +255,10 @@ impl HomeScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.editor {
             Some(editor) => editor.hints(s),
-            None if self.panel == TODAY || self.panel == WEEK => {
-                let agenda = match self.panel == TODAY {
-                    true => &self.today,
-                    false => &self.week,
-                };
+            None if self.panel == WEEK => {
                 [
                     vec![("← → ⇧⇥ ⇥".to_string(), s.panel.to_string())],
-                    agenda.hints(s),
+                    self.week.hints(s),
                     vec![
                         ("Enter".to_string(), s.open.to_string()),
                         ("n".to_string(), s.new_team.to_string()),
@@ -303,14 +284,13 @@ impl HomeScreen {
     }
 
     #[cfg(test)]
-    pub fn today_is_empty(&self) -> bool {
-        self.today.is_empty()
+    pub fn week_shown(&self) -> Vec<(String, bool)> {
+        self.week.shown_days()
     }
 
     #[cfg(test)]
     pub fn panel_name(&self) -> &'static str {
         match self.panel {
-            TODAY => "today",
             WEEK => "week",
             IN_PROGRESS => "in progress",
             RECENT => "recent",
@@ -407,20 +387,8 @@ impl HomeScreen {
             ),
             ui::add_button(s.new_team, Message::NewTeam, c),
         ];
-        // the first column: today, the week, the matches in progress; today
-        // and the matches in progress, empty, are a line
-        let today: Element<'a, Message> = match self.today.is_empty() {
-            true => ui::panel_with(
-                s.today,
-                vec![],
-                text(s.nothing_planned).size(SIZE_BODY).color(c.muted),
-                c,
-            ),
-            false => self
-                .today
-                .view(s, c, self.panel == TODAY, true)
-                .map(Message::Today),
-        };
+        // the first column: the week (today lit in it), the matches in
+        // progress; these, none, are a line
         let week = container(
             self.week
                 .view(s, c, self.panel == WEEK, true)
@@ -438,7 +406,7 @@ impl HomeScreen {
                 .height(Length::FillPortion(1))
                 .into(),
         };
-        let first = column![today, week, in_progress]
+        let first = column![week, in_progress]
             .spacing(14)
             .width(Length::FillPortion(1))
             .height(Length::Fill);

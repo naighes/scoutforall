@@ -1,6 +1,7 @@
-//! The agenda of the training and the matches, as a panel: a week (only
-//! the days with something planned, today lit; "nothing planned" when no
-//! day has) or a single day. ↑ ↓ between the events, Enter opens one;
+//! The agenda of the training and the matches, as a panel: a week, only
+//! the days with something planned and today, always there and lit (a
+//! background of its own); "nothing planned" for a day without anything
+//! and for a week without today. ↑ ↓ between the events, Enter opens one;
 //! ‹ › (or PgUp PgDn) change the week, Home goes back to today.
 //! The home shows every team (with its name), the team only its own.
 
@@ -13,8 +14,8 @@ use {
     },
     chrono::{Duration, NaiveDate},
     iced::{
-        Alignment, Element, Length,
-        widget::{Column, column, row, scrollable, text},
+        Alignment, Background, Color, Element, Length, Padding,
+        widget::{Column, column, container, row, scrollable, text},
     },
     scout4all_core::training::SessionStatus,
     scout4all_keys::{KeyCombination, key},
@@ -49,7 +50,6 @@ struct Slot(usize, usize);
 pub struct Agenda {
     /// one team, or all
     team: Option<String>,
-    span: AgendaSpan,
     /// a day of the period shown
     anchor: NaiveDate,
     today: NaiveDate,
@@ -61,18 +61,8 @@ pub struct Agenda {
 impl Agenda {
     /// The week of `today`, of `team` (all the teams without).
     pub fn week(core: &Scout4All, team: Option<String>, today: NaiveDate) -> Agenda {
-        Agenda::new(core, team, AgendaSpan::Week, today)
-    }
-
-    /// Today only.
-    pub fn day(core: &Scout4All, team: Option<String>, today: NaiveDate) -> Agenda {
-        Agenda::new(core, team, AgendaSpan::Day, today)
-    }
-
-    fn new(core: &Scout4All, team: Option<String>, span: AgendaSpan, today: NaiveDate) -> Agenda {
         let mut agenda = Agenda {
             team,
-            span,
             anchor: today,
             today,
             days: vec![],
@@ -85,7 +75,7 @@ impl Agenda {
 
     /// Read again, after a change.
     pub fn reload(&mut self, core: &Scout4All) {
-        match core.training_agenda(self.team.clone(), self.span, text_of(self.anchor)) {
+        match core.training_agenda(self.team.clone(), AgendaSpan::Week, text_of(self.anchor)) {
             Ok(days) => {
                 self.days = days;
                 self.error = None;
@@ -99,6 +89,7 @@ impl Agenda {
     }
 
     /// Whether anything is planned in the period.
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.days.iter().all(|d| d.events.is_empty())
     }
@@ -121,6 +112,24 @@ impl Agenda {
         self.pick_of(index)
     }
 
+    /// The days shown, each with whether it's today: the ones with
+    /// something planned, and today.
+    fn shown(&self) -> Vec<(&AgendaDay, bool)> {
+        self.days
+            .iter()
+            .map(|d| (d, day_of(&d.date) == Some(self.today)))
+            .filter(|(d, lit)| *lit || !d.events.is_empty())
+            .collect()
+    }
+
+    #[cfg(test)]
+    pub fn shown_days(&self) -> Vec<(String, bool)> {
+        self.shown()
+            .into_iter()
+            .map(|(d, lit)| (d.date.clone(), lit))
+            .collect()
+    }
+
     fn pick_of(&self, index: usize) -> Option<Pick> {
         let Slot(d, e) = self.slots().get(index).copied()?;
         let event = self.days.get(d)?.events.get(e)?;
@@ -137,11 +146,9 @@ impl Agenda {
     }
 
     fn shift(&mut self, core: &Scout4All, weeks: i64) {
-        if self.span == AgendaSpan::Week {
-            self.anchor += Duration::weeks(weeks);
-            self.selected = 0;
-            self.reload(core);
-        }
+        self.anchor += Duration::weeks(weeks);
+        self.selected = 0;
+        self.reload(core);
     }
 
     fn go_today(&mut self, core: &Scout4All) {
@@ -191,12 +198,11 @@ impl Agenda {
 
     /// The keys the panel answers to, for the hints.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        let mut hints = vec![("↑ ↓".to_string(), String::new())];
-        if self.span == AgendaSpan::Week {
-            hints.push(("PgUp PgDn".to_string(), s.week.to_string()));
-            hints.push(("Home".to_string(), s.today.to_string()));
-        }
-        hints
+        vec![
+            ("↑ ↓".to_string(), String::new()),
+            ("PgUp PgDn".to_string(), s.week.to_string()),
+            ("Home".to_string(), s.today.to_string()),
+        ]
     }
 
     /// The week as "3/11 – 9/11".
@@ -219,25 +225,23 @@ impl Agenda {
         active: bool,
         with_team: bool,
     ) -> Element<'a, Message> {
-        let mut rows: Vec<Element<'a, Message>> = vec![];
         let mut index = 0;
-        // a day without anything isn't shown: the week says it only when
-        // no day has anything
-        if self.is_empty() {
-            rows.push(
-                text(s.nothing_planned)
-                    .size(SIZE_SMALL)
-                    .color(c.muted)
-                    .into(),
-            );
+        let shown = self.shown();
+        let nothing = || -> Element<'a, Message> {
+            text(s.nothing_planned)
+                .size(SIZE_SMALL)
+                .color(c.muted)
+                .into()
+        };
+        let mut rows: Vec<Element<'a, Message>> = vec![];
+        // a week without today and without anything says it in a line
+        if shown.is_empty() {
+            rows.push(nothing());
         }
-        for day in self.days.iter().filter(|d| !d.events.is_empty()) {
-            let date = day_of(&day.date);
-            let lit = date == Some(self.today);
-            if self.span == AgendaSpan::Week
-                && let Some(date) = date
-            {
-                rows.push(
+        for (day, lit) in shown {
+            let mut lines: Vec<Element<'a, Message>> = vec![];
+            if let Some(date) = day_of(&day.date) {
+                lines.push(
                     text(format!("{} {}", s.weekday(date), s.short_date(date)))
                         .size(SIZE_SMALL)
                         .font(theme::fonts().bold)
@@ -248,8 +252,11 @@ impl Agenda {
                         .into(),
                 );
             }
+            if day.events.is_empty() {
+                lines.push(nothing());
+            }
             for event in &day.events {
-                rows.push(event_row(
+                lines.push(event_row(
                     event,
                     s,
                     c,
@@ -259,38 +266,47 @@ impl Agenda {
                 ));
                 index += 1;
             }
+            let group = Column::with_children(lines).spacing(3);
+            rows.push(match lit {
+                true => today_box(group, c),
+                false => group.into(),
+            });
         }
         let body: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
             None => Column::with_children(rows).spacing(3).into(),
         };
-        let mut actions: Vec<Element<'a, Message>> = vec![];
-        if self.span == AgendaSpan::Week {
-            actions.push(text(self.range(s)).size(SIZE_SMALL).color(c.muted).into());
-            if self.anchor != self.today {
-                actions.push(ui::pill(s.today, false, Some(Message::Today), c));
-            }
-            actions.push(ui::tip(
-                ui::pill("‹", false, Some(Message::Previous), c),
-                s.previous_week,
-                c,
-            ));
-            actions.push(ui::tip(
-                ui::pill("›", false, Some(Message::Next), c),
-                s.next_week,
-                c,
-            ));
+        let mut actions: Vec<Element<'a, Message>> =
+            vec![text(self.range(s)).size(SIZE_SMALL).color(c.muted).into()];
+        if self.anchor != self.today {
+            actions.push(ui::pill(s.today, false, Some(Message::Today), c));
         }
-        let title = match self.span {
-            AgendaSpan::Day => s.today,
-            _ => s.week,
-        };
-        let body: Element<'a, Message> = match self.span {
-            AgendaSpan::Week => scrollable(body).height(Length::Fill).into(),
-            _ => body,
-        };
-        ui::panel_with(title, actions, body, c)
+        actions.push(ui::tip(
+            ui::pill("‹", false, Some(Message::Previous), c),
+            s.previous_week,
+            c,
+        ));
+        actions.push(ui::tip(
+            ui::pill("›", false, Some(Message::Next), c),
+            s.next_week,
+            c,
+        ));
+        let body = scrollable(body).height(Length::Fill);
+        ui::panel_with(s.week, actions, body, c)
     }
+}
+
+/// Today, lit: a background of the accent, light, under its rows.
+pub fn today_box<'a, M: 'a>(content: impl Into<Element<'a, M>>, c: Colors) -> Element<'a, M> {
+    container(content)
+        .width(Length::Fill)
+        .padding(Padding::from([4, 6]))
+        .style(move |_| container::Style {
+            background: Some(Background::Color(Color { a: 0.07, ..c.accent })),
+            border: iced::border::rounded(6),
+            ..container::Style::default()
+        })
+        .into()
 }
 
 /// What an event is called in a line: a match "Team – Opponent" with the

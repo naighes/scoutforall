@@ -370,38 +370,25 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
                     }
                 }
             }
-            val busy = week.filter { it.occupations.isNotEmpty() }
-            if (busy.isEmpty()) {
-                item(key = "nothing") {
-                    Text(
-                        stringResource(R.string.agenda_nothing),
-                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+            // as in the agendas: the days with something and today, lit
+            val today = LocalDate.now()
+            val shown = week.filter { it.occupations.isNotEmpty() || it.date == today.toString() }
+            if (shown.isEmpty()) {
+                item(key = "nothing") { NothingPlanned() }
             }
-            busy.forEach { d ->
+            shown.forEach { d ->
                 val date = LocalDate.parse(d.date)
-                item(key = "day/${d.date}") { DayHeader(date, date == LocalDate.now()) }
-                items(d.occupations, key = { "${d.date}/${it.itemId}" }) { o ->
-                    val start = LocalDateTime.parse(o.start)
-                    val end = start.plusMinutes(o.minutes.toLong())
-                    val error = MaterialTheme.colorScheme.error
-                    ListItem(
-                        overlineContent = { Text("${start.toLocalTime().format(HOUR_MINUTE)}–${end.toLocalTime().format(HOUR_MINUTE)}") },
-                        headlineContent = {
-                            Text(
-                                o.teams.joinToString(" · ") { it.name },
-                                color = if (o.overlapping) error else MaterialTheme.colorScheme.onSurface,
-                            )
-                        },
-                        supportingContent = if (o.overlapping) {
-                            { Text(stringResource(R.string.venue_busy_mark), color = error) }
-                        } else null,
-                        trailingContent = if (o.overlapping) {
-                            { Icon(Icons.Filled.Warning, contentDescription = stringResource(R.string.venue_busy_mark), tint = error) }
-                        } else null,
-                    )
+                if (date == today) {
+                    item(key = "day/${d.date}") {
+                        TodayBox {
+                            DayHeader(date, true)
+                            if (d.occupations.isEmpty()) NothingPlanned()
+                            d.occupations.forEach { OccupationRow(it, lit = true) }
+                        }
+                    }
+                } else {
+                    item(key = "day/${d.date}") { DayHeader(date, false) }
+                    items(d.occupations, key = { "${d.date}/${it.itemId}" }) { OccupationRow(it) }
                 }
             }
         }
@@ -426,6 +413,32 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
             )
         }
     }
+}
+
+/** A session or a match in a gym: the hours, the teams, the clash. */
+@Composable
+private fun OccupationRow(o: io.github.naighes.scout4all.core.OccupationRecord, lit: Boolean = false) {
+    val start = LocalDateTime.parse(o.start)
+    val end = start.plusMinutes(o.minutes.toLong())
+    val error = MaterialTheme.colorScheme.error
+    ListItem(
+        colors = if (lit) {
+            androidx.compose.material3.ListItemDefaults.colors(containerColor = androidx.compose.ui.graphics.Color.Transparent)
+        } else androidx.compose.material3.ListItemDefaults.colors(),
+        overlineContent = { Text("${start.toLocalTime().format(HOUR_MINUTE)}–${end.toLocalTime().format(HOUR_MINUTE)}") },
+        headlineContent = {
+            Text(
+                o.teams.joinToString(" · ") { it.name },
+                color = if (o.overlapping) error else MaterialTheme.colorScheme.onSurface,
+            )
+        },
+        supportingContent = if (o.overlapping) {
+            { Text(stringResource(R.string.venue_busy_mark), color = error) }
+        } else null,
+        trailingContent = if (o.overlapping) {
+            { Icon(Icons.Filled.Warning, contentDescription = stringResource(R.string.venue_busy_mark), tint = error) }
+        } else null,
+    )
 }
 
 /** The form of a gym, new (no `id`) or edited. The coordinates left empty

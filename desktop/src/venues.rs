@@ -529,8 +529,10 @@ impl VenuesScreen {
                     .into(),
             );
         }
+        let today = Local::now().date_naive();
         let days = self.week.iter().map(|day| {
             let date = day_of(&day.date);
+            let lit = date == Some(today);
             let heading = date.map_or_else(String::new, |d| {
                 format!("{} {}", s.weekday(d), s.short_date(d))
             });
@@ -575,15 +577,23 @@ impl VenuesScreen {
                     })
                     .collect(),
             };
-            row![
+            let line = row![
                 text(heading)
                     .size(SIZE_BODY)
                     .font(bold)
+                    .color(match lit {
+                        true => c.accent,
+                        false => c.text,
+                    })
                     .width(Length::Fixed(90.0)),
                 Column::with_children(items).spacing(2),
             ]
-            .spacing(10)
-            .into()
+            .spacing(10);
+            // today lit, as in the agendas
+            match lit {
+                true => crate::agenda::today_box(line, c),
+                false => line.into(),
+            }
         });
         let actions = vec![
             ui::pill(s.today, false, Some(Message::Today), c),

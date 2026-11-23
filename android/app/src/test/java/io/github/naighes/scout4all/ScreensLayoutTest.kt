@@ -2,6 +2,8 @@ package io.github.naighes.scout4all
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createComposeRule
@@ -78,8 +80,8 @@ class ScreensLayoutTest(private val screen: Size) {
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
-    /** A training today: in the home, under Today and in the week; in the
-     * team, in the week above the matches. */
+    /** A training today: in the home and in the team, in the week (above
+     * the matches in the team), in the block of today. */
     private fun planTraining(team: String): String {
         val start = java.time.LocalDate.now().toString() + "T18:00"
         core { it.saveSession(team, null, it.newSessionDraft().copy(start = start, duration = "90", title = "Ricezione")) }
@@ -93,7 +95,22 @@ class ScreensLayoutTest(private val screen: Size) {
         assertFits("home-agenda", title) {
             TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
         }
-        rule.onAllNodes(hasText(string(R.string.agenda_today))).assertCountEquals(2)
+        // no card of today on its own: today is lit in the week, the
+        // training in it; "today" is only the button of the week
+        rule.onAllNodes(hasText(string(R.string.agenda_today))).assertCountEquals(1)
+        rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText(title))).assertExists()
+    }
+
+    @Test
+    fun theWeekOfTheHomeShowsTodayWithNothingPlanned() {
+        saveNationalTeam()
+        rule.setContent {
+            Scout4AllTheme {
+                TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
+            }
+        }
+        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText(string(R.string.agenda_nothing)))).assertExists()
     }
 
     @Test
