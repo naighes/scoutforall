@@ -24,7 +24,12 @@ import io.github.naighes.scout4all.core.SessionStatus
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onLast
+import android.content.Intent
+import android.net.Uri
+import androidx.test.core.app.ApplicationProvider
+import io.github.naighes.scout4all.core.ArchivePreview
 import org.junit.Assert.assertEquals
+import org.robolectric.Shadows.shadowOf
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -689,5 +694,106 @@ class TrainingScreensTest {
         val cycle = core { it.cycle(Level.MICROCYCLE, saved.single()) }
         assertEquals(monday.toString(), cycle.firstDay)
         assertEquals(setOf(first, second), core { it.cycleChildren(Level.MICROCYCLE, cycle.id) }.map { c -> c.id }.toSet())
+    }
+
+    /** A new activity copies one of another session: the name searched,
+     * a touch on it fills the form, saved it has the description and the
+     * minutes of the one copied. */
+    @Test
+    fun anActivityIsCopiedFromAnotherSession() {
+        val other = session(LocalDate.now().minusDays(7), "Prima")
+        core {
+            it.saveActivity(other, null, it.newActivityDraft().copy(name = "Palleggio", description = "a coppie", planned = "25"))
+        }
+        val s = session()
+        var done = false
+        rule.setContent { Scout4AllTheme { ActivityFormScreen(team, s, null, onBack = {}, onDone = { done = true }) } }
+        rule.waitForText(string(R.string.tr_copy_activity))
+        rule.type(string(R.string.tr_copy_activity), "pall")
+        rule.waitForText("Palleggio")
+        rule.onNode(hasText("Palleggio") and hasClickAction()).performClick()
+        rule.waitFor({ "not filled" }) { rule.onAllNodes(hasText("a coppie")).fetchSemanticsNodes().isNotEmpty() }
+        rule.save()
+        rule.waitFor({ "not saved" }) { done }
+        val copied = core { it.sessionActivities(s) }.single()
+        assertEquals("Palleggio", copied.name)
+        assertEquals("a coppie", copied.description)
+        assertEquals(25.toUShort(), copied.plannedMin)
+    }
+
+    /** The share of the plan says first that the notes on the players go
+     * with it; shared, the archive holds the sessions and the cycles. */
+    @Test
+    fun theTrainingIsSharedAsAnArchive() {
+        val monday = LocalDate.now().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val held = session(monday, "Ricezione")
+        core {
+            it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(start = monday.toString(), weeks = "1"), listOf(held), false)
+        }
+        session(monday.plusDays(10), "Libera")
+        hub(Part.CALENDAR)
+        rule.waitForText(string(R.string.agenda_today))
+        rule.onNode(hasContentDescription(string(R.string.tr_export_training)) and hasClickAction()).performClick()
+        rule.waitForText(string(R.string.tr_training_notes_warning))
+        rule.onNode(
+            hasContentDescription(string(R.string.tr_export_training)) and hasClickAction() and hasAnyAncestor(isDialog()),
+        ).performClick()
+        rule.onNode(hasText(string(R.string.share)) and hasClickAction()).performClick()
+        val app = ApplicationProvider.getApplicationContext<Scout4AllApplication>()
+        var chooser: Intent? = null
+        rule.waitFor({ "not shared" }) {
+            chooser = shadowOf(app).nextStartedActivity
+            chooser != null
+        }
+        @Suppress("DEPRECATION")
+        val uri = chooser?.getParcelableExtra<Intent>(Intent.EXTRA_INTENT)?.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        val bytes = app.contentResolver.openInputStream(uri!!)!!.use { it.readBytes() }
+        val preview = core { it.previewArchive(bytes, null, null) }
+        assertTrue("$preview", preview is ArchivePreview.Training)
+        val training = preview as ArchivePreview.Training
+        assertEquals(2u, training.sessions)
+        assertEquals(1u, training.cycles)
+    }
+
+    /** The sheet of a mesocycle counts the sessions of its microcycles by
+     * state, the time planned (not of the cancelled) and the time done
+     * (the planned one when not written). */
+    @Test
+    fun theSheetOfAMesocycleTotalsTheSessionsOfItsMicrocycles() {
+        val monday = LocalDate.now().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val done = session(monday, "Fatta")
+        val cancelled = session(monday.plusDays(1), "Annullata")
+        val planned = session(monday.plusDays(8), "Prevista")
+        session(monday.plusDays(3), "Libera")
+        core { it.completeSession(done, emptyList()) }
+        core { it.setSessionStatus(cancelled, SessionStatus.CANCELLED) }
+        val micros = listOf(listOf(done, cancelled), listOf(planned)).mapIndexed { i, held ->
+            core {
+                it.saveCycle(
+                    team, Level.MICROCYCLE, null,
+                    it.newCycleDraft().copy(start = monday.plusWeeks(i.toLong()).toString(), weeks = "1"), held, false,
+                ).id
+            }
+        }
+        val meso = core {
+            it.saveCycle(team, Level.MESOCYCLE, null, it.newCycleDraft().copy(start = monday.toString(), weeks = "2"), micros, false)
+        }
+        rule.setContent {
+            Scout4AllTheme {
+                CycleScreen(
+                    team, Level.MESOCYCLE, meso.id,
+                    onBack = {}, onEdit = {}, onAdd = {}, onDuplicate = {}, onChild = {}, onNewChild = {}, onMatch = {},
+                )
+            }
+        }
+        rule.waitForText(
+            listOf(
+                "${string(R.string.tr_filter_planned)} 1",
+                "${string(R.string.tr_filter_completed)} 1",
+                "${string(R.string.tr_filter_cancelled)} 1",
+            ).joinToString(" · "),
+        )
+        rule.waitForText("${string(R.string.tr_planned_time)}: 3:00")
+        rule.waitForText("${string(R.string.tr_actual_time)}: 1:30")
     }
 }
