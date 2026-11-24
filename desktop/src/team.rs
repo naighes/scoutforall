@@ -67,6 +67,8 @@ pub enum Message {
     Player(usize),
     NewMatch,
     Match(usize),
+    /// the delete button of a match of the list
+    DeleteMatch(usize),
     Week(agenda::Message),
     Import,
     Export,
@@ -399,6 +401,12 @@ impl TeamScreen {
                 self.game = i;
                 self.open_match(i)
             }
+            (Message::DeleteMatch(i), Mode::Browse) => {
+                self.panel = Panel::Matches;
+                self.game = i;
+                self.ask_deletion(s);
+                Outcome::Stay
+            }
             (Message::Week(m), Mode::Browse) => {
                 self.panel = Panel::Week;
                 TeamScreen::picked(self.week.update(&self.core, m))
@@ -726,18 +734,18 @@ impl TeamScreen {
 
     fn matches<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let active = self.panel == Panel::Matches;
-        let rows =
-            self.matches.iter().enumerate().map(|(i, m)| match m {
-                MatchListing::Match {
-                    opponent,
-                    home,
-                    date,
-                    won,
-                    lost,
-                    finished,
-                    scouted_by,
-                    ..
-                } => ui::list_row(
+        let rows = self.matches.iter().enumerate().map(|(i, m)| match m {
+            MatchListing::Match {
+                opponent,
+                home,
+                date,
+                won,
+                lost,
+                finished,
+                scouted_by,
+                ..
+            } => row![
+                ui::list_row(
                     row![
                         // home or away at a glance, as on Android
                         ui::tip(
@@ -784,17 +792,32 @@ impl TeamScreen {
                     Some(Message::Match(i)),
                     c,
                 ),
-                MatchListing::Unreadable { folder, reason } => text(format!(
-                    "{folder}{}",
-                    reason
-                        .as_ref()
-                        .map(|r| format!(": {r}"))
-                        .unwrap_or_default()
-                ))
-                .size(SIZE_SMALL)
-                .color(c.danger)
-                .into(),
-            });
+                ui::tip(
+                    ui::icon_button(
+                        theme::icons::DELETE,
+                        s.delete_match,
+                        Message::DeleteMatch(i),
+                        false,
+                        c,
+                    ),
+                    s.delete_match,
+                    c,
+                ),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .into(),
+            MatchListing::Unreadable { folder, reason } => text(format!(
+                "{folder}{}",
+                reason
+                    .as_ref()
+                    .map(|r| format!(": {r}"))
+                    .unwrap_or_default()
+            ))
+            .size(SIZE_SMALL)
+            .color(c.danger)
+            .into(),
+        });
         let list: Element<'a, Message> = match self.matches.is_empty() {
             true => ui::body(s.no_matches_yet).color(c.muted).into(),
             false => scrollable(Column::with_children(rows).spacing(3))
@@ -1088,6 +1111,10 @@ mod tests {
         team.key(s, BACK_KEY);
         assert!(matches!(team.mode, Mode::Browse));
         assert_eq!(team.matches.len(), 1);
+        // the button of the row asks the same, without the keyboard
+        team.update(s, Message::DeleteMatch(0));
+        assert!(matches!(team.mode, Mode::Delete(Deletion::Match(..))));
+        team.key(s, BACK_KEY);
         team.key(s, key!(delete));
         assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
         assert!(team.matches.is_empty());
