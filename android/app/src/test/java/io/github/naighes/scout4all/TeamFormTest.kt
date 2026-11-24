@@ -152,4 +152,49 @@ class TeamFormTest {
         assertEquals(listOf("Italia U20"), teams().map { it.name })
         rule.onAllNodesWithText(string(R.string.new_team)).assertCountEquals(0)
     }
+
+    private fun png(): ByteArray {
+        val bitmap = android.graphics.Bitmap.createBitmap(8, 4, android.graphics.Bitmap.Config.ARGB_8888)
+        return java.io.ByteArrayOutputStream().also {
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it)
+        }.toByteArray()
+    }
+
+    private fun saveWith(id: String, edit: (TeamFormViewModel) -> Unit): TeamFormViewModel {
+        val model = rule.runOnUiThread { TeamFormViewModel(app, id) }
+        rule.waitFor { model.state.value is TeamFormState.Editing }
+        rule.runOnUiThread { edit(model) }
+        rule.runOnUiThread { model.save() }
+        rule.waitFor { model.state.value == TeamFormState.Saved }
+        return model
+    }
+
+    @Test
+    fun theLogoOfATeamIsChosenAndRemovedInItsForm() {
+        val id = saveTeam("Italia")
+        assertEquals(null, core { it.teamLogo(id) })
+        // an image is shown at once and stored with the team
+        val model = rule.runOnUiThread { TeamFormViewModel(app, id) }
+        rule.waitFor { model.state.value is TeamFormState.Editing }
+        rule.runOnUiThread { model.pickLogo(png()) }
+        assertEquals(true, (model.state.value as TeamFormState.Editing).changed)
+        assertEquals(true, (model.state.value as TeamFormState.Editing).shown != null)
+        rule.runOnUiThread { model.save() }
+        rule.waitFor { model.state.value == TeamFormState.Saved }
+        assertEquals(true, core { it.teamLogo(id) } != null)
+        // read again by the form, removed
+        saveWith(id) { it.removeLogo() }
+        assertEquals(null, core { it.teamLogo(id) })
+    }
+
+    @Test
+    fun whatIsNotAnImageIsNotTheLogo() {
+        val id = saveTeam("Italia")
+        val model = rule.runOnUiThread { TeamFormViewModel(app, id) }
+        rule.waitFor { model.state.value is TeamFormState.Editing }
+        rule.runOnUiThread { model.pickLogo(ByteArray(0)) }
+        val state = model.state.value as TeamFormState.Editing
+        assertEquals(false, state.changed)
+        assertEquals(string(R.string.file_not_read), state.error)
+    }
 }

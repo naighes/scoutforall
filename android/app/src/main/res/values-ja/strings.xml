@@ -700,4 +700,8 @@
     <plurals name="tr_sessions_count">
         <item quantity="other">セッション %d件</item>
     </plurals>
+    <string name="logo">ロゴ</string>
+    <string name="choose_logo">画像を選択</string>
+    <string name="remove_logo">ロゴを削除</string>
+    <string name="no_logo">ロゴなし</string>
 </resources>

@@ -706,4 +706,8 @@
         <item quantity="one">%d seduta</item>
         <item quantity="other">%d sedute</item>
     </plurals>
+    <string name="logo">Logo</string>
+    <string name="choose_logo">Scegli un\'immagine</string>
+    <string name="remove_logo">Rimuovi il logo</string>
+    <string name="no_logo">Nessun logo</string>
 </resources>

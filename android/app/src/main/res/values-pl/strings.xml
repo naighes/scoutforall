@@ -718,4 +718,8 @@
         <item quantity="many">%d sesji</item>
         <item quantity="other">%d sesji</item>
     </plurals>
+    <string name="logo">Logo</string>
+    <string name="choose_logo">Wybierz obraz</string>
+    <string name="remove_logo">Usuń logo</string>
+    <string name="no_logo">Brak logo</string>
 </resources>

@@ -193,12 +193,18 @@ fun TeamScreen(
             TeamState.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is TeamState.Failed -> Centered(modifier) { Text(s.message) }
             is TeamState.Loaded -> Column(modifier) {
-                Text(
-                    listOfNotNull(s.team.year.toString(), s.team.classification, s.team.gender)
-                        .joinToString(" · "),
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+                Row(
+                    Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TeamLogo(id, 48.dp)
+                    Text(
+                        listOfNotNull(s.team.year.toString(), s.team.classification, s.team.gender)
+                            .joinToString(" · "),
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
                 PrimaryTabRow(selectedTabIndex = tab) {
                     val players = s.team.players.size
                     Tab(

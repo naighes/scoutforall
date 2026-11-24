@@ -708,4 +708,8 @@
         <item quantity="one">%d session</item>
         <item quantity="other">%d sessions</item>
     </plurals>
+    <string name="logo">Logo</string>
+    <string name="choose_logo">Choose an image</string>
+    <string name="remove_logo">Remove the logo</string>
+    <string name="no_logo">No logo</string>
 </resources>
