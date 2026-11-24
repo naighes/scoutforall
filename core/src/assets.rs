@@ -55,7 +55,7 @@ pub struct Image {
 impl Image {
     /// The pixels as RGBA, to show them without a decoder at hand.
     pub fn rgba(&self) -> Result<(u32, u32, Vec<u8>), AppError> {
-        let image = decode(&self.data)?.to_rgba8();
+        let image = decode_image(&self.data)?.to_rgba8();
         let (width, height) = image.dimensions();
         Ok((width, height, image.into_raw()))
     }
@@ -66,7 +66,7 @@ fn msg(text: impl Into<String>) -> AppError {
 }
 
 /// PNG, JPEG or WebP: what the bytes are, not what the name says.
-fn decode(bytes: &[u8]) -> Result<DynamicImage, AppError> {
+pub(crate) fn decode_image(bytes: &[u8]) -> Result<DynamicImage, AppError> {
     if bytes.len() > MAX_INPUT_BYTES {
         return Err(msg("image too large"));
     }
@@ -82,7 +82,7 @@ fn decode(bytes: &[u8]) -> Result<DynamicImage, AppError> {
 /// The logo: scaled down to fit `LOGO_MAX_SIDE` (never up), proportions and
 /// transparency kept, as PNG.
 pub fn normalize_logo(bytes: &[u8]) -> Result<Image, AppError> {
-    let source = decode(bytes)?;
+    let source = decode_image(bytes)?;
     let fitted = match source.width().max(source.height()) > LOGO_MAX_SIDE {
         true => source.resize(LOGO_MAX_SIDE, LOGO_MAX_SIDE, FilterType::Lanczos3),
         false => source,
@@ -104,7 +104,7 @@ pub fn normalize_logo(bytes: &[u8]) -> Result<Image, AppError> {
 /// The photo: a square of `PHOTO_SIDE` (the image is expected to be already
 /// the face, cropped), flattened on white, as JPEG.
 pub fn normalize_photo(bytes: &[u8]) -> Result<Image, AppError> {
-    let square = decode(bytes)?.resize_exact(PHOTO_SIDE, PHOTO_SIDE, FilterType::Lanczos3);
+    let square = decode_image(bytes)?.resize_exact(PHOTO_SIDE, PHOTO_SIDE, FilterType::Lanczos3);
     let rgba = square.to_rgba8();
     let mut flat = image::RgbImage::new(PHOTO_SIDE, PHOTO_SIDE);
     flat.pixels_mut().zip(rgba.pixels()).for_each(|(out, px)| {

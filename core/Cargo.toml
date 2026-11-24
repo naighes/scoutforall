@@ -21,6 +21,8 @@ futures.workspace = true
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 regex.workspace = true
 reqwest.workspace = true
+# the face in a photo (TODO/011): pure Rust, the model is in `models/`
+rustface = "0.1.7"
 # the database of the data (TODO/001, D6)
 rusqlite.workspace = true
 # the counters of the statistics: a quick hash of small keys, not SipHash,
