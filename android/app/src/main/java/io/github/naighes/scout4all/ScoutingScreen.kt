@@ -1175,11 +1175,14 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
                     ListItem(
                         modifier = Modifier.tutorial("replacement:${p.number}").clickable { model.replacement(p) },
                         leadingContent = {
-                            Text(
-                                p.number.toString(),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold,
-                            )
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text(
+                                    p.number.toString(),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                                PlayerPhoto(p.id, 40.dp)
+                            }
                         },
                         headlineContent = { Text(p.name) },
                         supportingContent = { Text(p.role) },
