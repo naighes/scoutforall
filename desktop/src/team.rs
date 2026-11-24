@@ -16,7 +16,7 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, space, text},
+        widget::{Column, Id, Row, column, container, row, scrollable, space, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{MatchListing, MobileError, Scout4All, TeamDetails, TeamRemovalCounts},
@@ -115,6 +115,7 @@ pub struct TeamScreen {
     game: usize,
     mode: Mode,
     error: Option<String>,
+    logo: Option<iced::widget::image::Handle>,
 }
 
 impl TeamScreen {
@@ -126,7 +127,9 @@ impl TeamScreen {
             Some(team_id.clone()),
             chrono::Local::now().date_naive(),
         );
+        let logo = TeamScreen::logo_of(&core, &team_id);
         Ok(TeamScreen {
+            logo,
             core,
             team_id,
             details,
@@ -138,6 +141,13 @@ impl TeamScreen {
             mode: Mode::Browse,
             error: None,
         })
+    }
+
+    fn logo_of(core: &Scout4All, team_id: &str) -> Option<iced::widget::image::Handle> {
+        core.team_logo(team_id.to_string())
+            .ok()
+            .flatten()
+            .and_then(|png| crate::editors::logo_handle(&png))
     }
 
     pub fn title(&self) -> String {
@@ -159,6 +169,7 @@ impl TeamScreen {
                     .min(self.details.players.len().saturating_sub(1));
                 self.game = self.game.min(self.matches.len().saturating_sub(1));
                 self.week.reload(&self.core);
+                self.logo = TeamScreen::logo_of(&self.core, &self.team_id);
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -626,7 +637,19 @@ impl TeamScreen {
             // the actions scroll when the window is low: none cut off
             scrollable(
                 column![
-                    text(d.name.clone()).size(22).font(theme::fonts().bold),
+                    Row::with_children(
+                        self.logo
+                            .as_ref()
+                            .map(|h| ui::logo(h, 48.0))
+                            .into_iter()
+                            .chain([text(d.name.clone())
+                                .size(22)
+                                .font(theme::fonts().bold)
+                                .into()])
+                            .collect::<Vec<Element<'a, Message>>>()
+                    )
+                    .spacing(10)
+                    .align_y(Alignment::Center),
                     line(s.year, d.year.to_string()),
                     line(s.classification, or_dash(&d.classification)),
                     line(s.gender, or_dash(&d.gender)),
@@ -1208,6 +1231,38 @@ mod tests {
         team.update(s, Message::Form(form::Message::RemoveLogo));
         team.update(s, Message::Form(Save));
         assert!(core.team_logo(team_id).unwrap().is_none());
+    }
+
+    /// The logo is shown in the list of the home and on the page of the team
+    /// once saved, and is gone with its removal.
+    #[test]
+    fn the_logo_of_a_team_is_read_for_the_home_and_its_page() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let with = core.save_team(None, team_form("Arezzo")).unwrap();
+        core.save_team(None, team_form("Siena")).unwrap();
+        core.set_team_logo(with.clone(), Some(PNG.to_vec()))
+            .unwrap();
+        let home = HomeScreen::new(&core, core.home().unwrap());
+        let shown: Vec<(String, bool)> = home
+            .home
+            .teams
+            .iter()
+            .zip(home.logos_shown())
+            .filter_map(|(t, logo)| match t {
+                scout4all_mobile::TeamListing::Team { name, .. } => Some((name.clone(), logo)),
+                scout4all_mobile::TeamListing::Unreadable { .. } => None,
+            })
+            .collect();
+        assert!(shown.contains(&("Arezzo".to_string(), true)));
+        assert!(shown.contains(&("Siena".to_string(), false)));
+        let mut team = TeamScreen::new(core.clone(), with.clone()).unwrap();
+        assert!(team.logo.is_some());
+        core.set_team_logo(with, None).unwrap();
+        team.reload();
+        assert!(team.logo.is_none());
+        let _ = s;
     }
 
     /// A team of 2025 with Anna Rossi (9, setter, with her details) and

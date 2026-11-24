@@ -82,7 +82,7 @@ enum LogoEdit {
 }
 
 /// The picture of the logo as the core keeps it, ready to show.
-fn logo_handle(png: &[u8]) -> Option<iced::widget::image::Handle> {
+pub fn logo_handle(png: &[u8]) -> Option<iced::widget::image::Handle> {
     let (width, height, pixels) = scout4all_core::assets::Image {
         mime: "image/png",
         width: 0,

@@ -553,6 +553,29 @@ pub fn ball<'a>(size: f32, c: Colors) -> svg::Svg<'a> {
         })
 }
 
+/// The logo of a team, in a square of `size` (proportions kept).
+pub fn logo<'a, M: 'a>(handle: &iced::widget::image::Handle, size: f32) -> Element<'a, M> {
+    iced::widget::image(handle.clone())
+        .width(Length::Fixed(size))
+        .height(Length::Fixed(size))
+        .content_fit(iced::ContentFit::Contain)
+        .into()
+}
+
+/// The box of the logo of a team, empty when it has none: the names line up.
+pub fn logo_slot<'a, M: 'a>(
+    handle: Option<&iced::widget::image::Handle>,
+    size: f32,
+) -> Element<'a, M> {
+    match handle {
+        Some(h) => logo(h, size),
+        None => iced::widget::space::horizontal()
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .into(),
+    }
+}
+
 /// The name of the app as the site writes it, `height` tall.
 pub fn wordmark<'a>(height: f32, c: Colors) -> svg::Svg<'a> {
     svg(svg::Handle::from_memory(theme::WORDMARK))
