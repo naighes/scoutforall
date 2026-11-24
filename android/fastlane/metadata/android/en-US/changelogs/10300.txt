@@ -1,0 +1,7 @@
+- Team logo, from the gallery or files, in the team list and page.
+- Player photo, chosen or taken with the camera; the face is cropped automatically.
+- Photos in the lineup, on the court, in substitutions and in the statistics.
+- Logos and photos in the exported archives.
+- Roles named the same in every team.
+- Analysis and training plan in the team bar; rare actions in the three-dots menu.
+- Delete matches from the list and the detail on desktop.

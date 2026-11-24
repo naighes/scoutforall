@@ -1,0 +1,7 @@
+- Logo da equipe, da galeria ou arquivos, na lista e na página da equipe.
+- Foto do atleta, escolhida ou tirada; o rosto é recortado automaticamente.
+- Fotos na escalação, em quadra, nas substituições e nas estatísticas.
+- Logos e fotos nos arquivos exportados.
+- Funções com o mesmo nome em todas as equipes.
+- Análise e treinos na barra da equipe; ações raras no menu de três pontos.
+- No desktop, exclua partidas da lista e do detalhe.

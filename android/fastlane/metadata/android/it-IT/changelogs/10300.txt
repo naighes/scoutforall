@@ -1,0 +1,7 @@
+- Logo della squadra, da galleria o file, nell'elenco e nella pagina della squadra.
+- Foto del giocatore, scelta o scattata; il volto è ritagliato in automatico.
+- Foto in formazione, in campo, nei cambi e nelle statistiche.
+- Loghi e foto negli archivi esportati.
+- Ruoli con lo stesso nome in ogni squadra.
+- Analisi e allenamenti nella barra della squadra; azioni rare nel menu dei tre puntini.
+- Su desktop elimini le partite da elenco e dettaglio.

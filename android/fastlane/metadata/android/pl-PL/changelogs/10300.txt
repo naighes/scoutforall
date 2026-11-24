@@ -1,0 +1,7 @@
+- Logo zespołu: wybierz z galerii lub plików; widoczne na liście i na stronie zespołu.
+- Zdjęcie zawodnika: wybierz lub zrób aparatem; twarz jest wykrywana i kadrowana automatycznie.
+- Zdjęcia widać w ustawieniu, na boisku, przy wyborze zmian i w statystykach.
+- Logo i zdjęcia są w eksportowanych archiwach.
+- Role mają te same nazwy w każdym zespole.
+- Analiza i plan treningów są na pasku zespołu; rzadkie akcje w menu z trzema kropkami.
+- Na desktopie mecze można usuwać z listy i ze szczegółów.
