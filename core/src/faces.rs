@@ -5,10 +5,7 @@
 //!
 //! A photo is accepted with exactly one face: none or several are errors.
 
-use crate::{
-    assets,
-    errors::AppError,
-};
+use crate::{assets, errors::AppError};
 use image::{DynamicImage, GenericImageView, ImageFormat, imageops::FilterType};
 use rustface::{Detector, ImageData};
 use std::io::Cursor;

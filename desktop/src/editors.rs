@@ -132,6 +132,18 @@ pub struct PlayerEditor {
     offered: Vec<usize>,
     /// the person chosen, while the name is still theirs
     person: Option<ExistingPlayer>,
+    /// what the photo of the player becomes when it's saved
+    photo: PhotoEdit,
+    /// the photo being shown: the saved one or the chosen one
+    shown: Option<iced::widget::image::Handle>,
+}
+
+/// What is done to the photo of a player on saving.
+enum PhotoEdit {
+    Keep,
+    Remove,
+    /// the face cropped from the file chosen
+    Replace(Vec<u8>),
 }
 
 // the fields of the player
@@ -572,6 +584,10 @@ impl Editor {
         start: PlayerForm,
     ) -> Editor {
         let roles = core.roles();
+        let photo = id
+            .as_ref()
+            .and_then(|id| core.person_photo(id.clone()).ok().flatten())
+            .and_then(|bytes| logo_handle(&bytes));
         // a new player may be a person of the registry; one saved may play
         // in other teams too, with the same details
         let existing = match &id {
@@ -620,6 +636,8 @@ impl Editor {
                 existing,
                 offered: vec![],
                 person: None,
+                photo: PhotoEdit::Keep,
+                shown: photo,
             })),
         }
     }
@@ -1588,7 +1606,16 @@ impl Editor {
                     notes: f.text(PLAYER_NOTES),
                     person: p.person.as_ref().map(|person| person.id),
                 };
-                core.save_player(p.team_id.clone(), p.id.clone(), form, namesake_confirmed)
+                let id =
+                    core.save_player(p.team_id.clone(), p.id.clone(), form, namesake_confirmed)?;
+                match &p.photo {
+                    PhotoEdit::Keep => {}
+                    PhotoEdit::Remove => core.set_person_photo(id.clone(), None)?,
+                    PhotoEdit::Replace(bytes) => {
+                        core.set_person_photo(id.clone(), Some(bytes.clone()))?
+                    }
+                }
+                Ok(id)
             }
             Kind::Match(m) => match &m.created {
                 Some((id, _)) => core
@@ -1805,6 +1832,26 @@ impl Editor {
                 self.set_logo(bytes);
                 Edited::Stay
             }
+            (None, form::Message::PickPhoto) => {
+                let file = rfd::FileDialog::new()
+                    .add_filter(s.photo, &["png", "jpg", "jpeg", "webp"])
+                    .pick_file();
+                match file.and_then(|f| std::fs::read(f).ok()) {
+                    Some(bytes) => self.update(core, s, form::Message::PhotoFile(bytes)),
+                    None => Edited::Stay,
+                }
+            }
+            (None, form::Message::PhotoFile(bytes)) => {
+                self.set_photo(s, &bytes);
+                Edited::Stay
+            }
+            (None, form::Message::RemovePhoto) => {
+                if let Kind::Player(p) = &mut self.kind {
+                    p.photo = PhotoEdit::Remove;
+                    p.shown = None;
+                }
+                Edited::Stay
+            }
             (None, form::Message::RemoveLogo) => {
                 if let Kind::Team(t) = &mut self.kind {
                     t.logo = LogoEdit::Remove;
@@ -1856,6 +1903,82 @@ impl Editor {
             }
             Err(e) => self.form.error = Some(e.to_string()),
         }
+    }
+
+    /// Whether the photo of the player is shown (tests).
+    #[cfg(test)]
+    pub fn photo_shown(&self) -> bool {
+        matches!(&self.kind, Kind::Player(p) if p.shown.is_some())
+    }
+
+    /// The file chosen as the photo: its face shown to confirm (by saving
+    /// the form), or the reason it can't be used.
+    fn set_photo(&mut self, s: &Strings, bytes: &[u8]) {
+        let Kind::Player(p) = &mut self.kind else {
+            return;
+        };
+        use scout4all_core::faces::PhotoError;
+        match scout4all_core::faces::crop_face(bytes) {
+            Ok(face) => {
+                p.shown = logo_handle(&face);
+                p.photo = PhotoEdit::Replace(face);
+                self.form.error = None;
+            }
+            Err(PhotoError::NoFace) => self.form.error = Some(s.no_face.to_string()),
+            Err(PhotoError::ManyFaces(n)) => {
+                self.form.error = Some(ui::fill(s.many_faces, &[n.to_string()]))
+            }
+            Err(e) => self.form.error = Some(e.to_string()),
+        }
+    }
+
+    /// The photo of the player: its picture (or the empty box) and the
+    /// buttons.
+    fn photo_panel<'a, M: Clone + 'a>(
+        p: &'a PlayerEditor,
+        s: &'static Strings,
+        c: Colors,
+        on: impl Fn(form::Message) -> M + Copy + 'a,
+    ) -> Element<'a, M> {
+        let picture: Element<'a, M> = match &p.shown {
+            Some(handle) => iced::widget::image(handle.clone())
+                .width(Length::Fixed(LOGO_BOX))
+                .height(Length::Fixed(LOGO_BOX))
+                .content_fit(iced::ContentFit::Cover)
+                .into(),
+            None => container(text(s.no_photo).size(SIZE_SMALL).color(c.muted))
+                .center_x(Length::Fixed(LOGO_BOX))
+                .center_y(Length::Fixed(LOGO_BOX))
+                .style(move |_| container::Style {
+                    border: iced::Border {
+                        color: c.border,
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..container::Style::default()
+                })
+                .into(),
+        };
+        column![
+            ui::section(s.photo, c),
+            picture,
+            ui::action(
+                theme::icons::EDIT,
+                s.choose_photo,
+                on(form::Message::PickPhoto),
+                false,
+                c
+            ),
+            ui::action_maybe(
+                theme::icons::DELETE,
+                s.remove_photo,
+                p.shown.is_some().then(|| on(form::Message::RemovePhoto)),
+                false,
+                c
+            ),
+        ]
+        .spacing(10)
+        .into()
     }
 
     /// The logo of the team: its picture (or the empty box) and the buttons.
@@ -2114,6 +2237,10 @@ impl Editor {
                 (None, None, Kind::Team(t)) => {
                     self.form
                         .view(s, c, on, Some(Self::logo_panel(t, s, c, on)))
+                }
+                (None, None, Kind::Player(p)) => {
+                    self.form
+                        .view(s, c, on, Some(Self::photo_panel(p, s, c, on)))
                 }
                 (None, None, _) => self.form.view(s, c, on, None),
             },

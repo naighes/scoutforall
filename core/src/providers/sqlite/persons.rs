@@ -127,6 +127,8 @@ impl SqlitePersons {
                 0 => Err(not_found(&format!("person {person_id}"))),
                 _ => Ok(()),
             }?;
+            // their photo goes with them
+            crate::assets::set_person_photo(tx, &person_id.to_string(), None)?;
             tx.execute(
                 "UPDATE team_members SET deleted = 1 WHERE person_id = ?1",
                 [id],

@@ -1233,6 +1233,65 @@ mod tests {
         assert!(core.team_logo(team_id).unwrap().is_none());
     }
 
+    /// The photo of a player: chosen (the face is cropped, shown, saved with
+    /// the player), refused with the reason when it has no face or many,
+    /// removed; it goes with the person when they are removed from the
+    /// registry.
+    #[test]
+    fn the_photo_of_a_player_is_chosen_removed_and_goes_with_the_person() {
+        const ONE: &[u8] = include_bytes!("../../core/src/tests/fixtures/solvay_one_face.jpg");
+        const THREE: &[u8] = include_bytes!("../../core/src/tests/fixtures/solvay_three_faces.jpg");
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (team_id, anna) = senior(&core);
+        assert!(core.person_photo(anna.clone()).unwrap().is_none());
+        let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
+        let edit = |team: &mut TeamScreen| {
+            let at = team.details.players.iter().position(|p| p.id == anna);
+            team.update(s, Message::Player(at.unwrap()));
+        };
+        edit(&mut team);
+        // several faces: refused, nothing chosen
+        team.update(s, Message::Form(form::Message::PhotoFile(THREE.to_vec())));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert_eq!(
+            editor.form.error.as_deref(),
+            Some(ui::fill(s.many_faces, &["3".to_string()]).as_str())
+        );
+        // not an image: refused too
+        team.update(s, Message::Form(form::Message::PhotoFile(b"no".to_vec())));
+        // one face: chosen, not saved yet
+        team.update(s, Message::Form(form::Message::PhotoFile(ONE.to_vec())));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(editor.form.error.is_none());
+        assert!(core.person_photo(anna.clone()).unwrap().is_none());
+        team.update(s, Message::Form(Save));
+        let saved = core.person_photo(anna.clone()).unwrap().unwrap();
+        assert_eq!(saved.get(..2), Some(&[0xff, 0xd8][..]), "a JPEG");
+        // the photo comes back in the form
+        edit(&mut team);
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(editor.photo_shown());
+        // removed
+        team.update(s, Message::Form(form::Message::RemovePhoto));
+        team.update(s, Message::Form(Save));
+        assert!(core.person_photo(anna.clone()).unwrap().is_none());
+        // chosen again, then the person is removed: the photo goes too
+        edit(&mut team);
+        team.update(s, Message::Form(form::Message::PhotoFile(ONE.to_vec())));
+        team.update(s, Message::Form(Save));
+        assert!(core.person_photo(anna.clone()).unwrap().is_some());
+        core.delete_person(anna.clone()).unwrap();
+        assert!(core.person_photo(anna).unwrap().is_none());
+    }
+
     /// The logo is shown in the list of the home and on the page of the team
     /// once saved, and is gone with its removal.
     #[test]

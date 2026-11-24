@@ -4891,6 +4891,26 @@ impl Scout4All {
         )?)
     }
 
+    /// The photo of the person (the player's id is theirs) as JPEG, if
+    /// they have one.
+    pub fn person_photo(&self, person_id: String) -> Result<Option<Vec<u8>>, MobileError> {
+        Ok(scout4all_core::assets::person_photo(&self.db, &person_id)?.map(|image| image.data))
+    }
+
+    /// The face cropped (`core::faces::crop_face`) becomes the photo of the
+    /// person (as JPEG), `None` removes it.
+    pub fn set_person_photo(
+        &self,
+        person_id: String,
+        bytes: Option<Vec<u8>>,
+    ) -> Result<(), MobileError> {
+        Ok(scout4all_core::assets::store_person_photo(
+            &self.db,
+            &person_id,
+            bytes.as_deref(),
+        )?)
+    }
+
     /// The archive of the team, its players without its matches.
     pub fn export_team(&self, team_id: String) -> Result<ExportedArchive, MobileError> {
         let id = parse_id(&team_id)?;

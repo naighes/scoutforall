@@ -253,3 +253,28 @@ pub fn team_logo(db: &Database, team_id: &str) -> Result<Option<Image>, AppError
 pub fn store_team_logo(db: &Database, team_id: &str, bytes: Option<&[u8]>) -> Result<(), AppError> {
     db.write(|tx| set_team_logo(tx, team_id, bytes))
 }
+
+/// The photo of the person (the face, as JPEG), if they have one.
+pub fn person_photo(db: &Database, person_id: &str) -> Result<Option<Image>, AppError> {
+    db.read(|tx| {
+        let id: Option<String> = tx
+            .query_row(
+                "SELECT photo_asset_id FROM persons WHERE id = ?1",
+                [person_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::IO(e.into()))?
+            .flatten();
+        id.map(|id| load(tx, &id)).transpose().map(Option::flatten)
+    })
+}
+
+/// `set_person_photo` in one transaction on the shared database.
+pub fn store_person_photo(
+    db: &Database,
+    person_id: &str,
+    bytes: Option<&[u8]>,
+) -> Result<(), AppError> {
+    db.write(|tx| set_person_photo(tx, person_id, bytes))
+}

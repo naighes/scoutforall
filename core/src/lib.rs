@@ -4,7 +4,6 @@
 pub mod analysis;
 pub mod analytics;
 pub mod assets;
-pub mod faces;
 pub mod benchmark;
 pub mod competition_form;
 pub mod constants;
@@ -15,6 +14,7 @@ pub mod dvw;
 pub mod errors;
 pub mod event_edit;
 pub mod example;
+pub mod faces;
 pub mod legacy;
 pub mod localization;
 pub mod logging;

@@ -349,6 +349,11 @@ pub enum Message {
     /// the bytes of the file of the logo
     LogoFile(Vec<u8>),
     RemoveLogo,
+    /// the photo of a player to be chosen from a file (the screen asks)
+    PickPhoto,
+    /// the bytes of the file of the photo
+    PhotoFile(Vec<u8>),
+    RemovePhoto,
     Save,
     Cancel,
 }
@@ -912,7 +917,10 @@ impl Form {
             | Message::Another
             | Message::PickLogo
             | Message::LogoFile(_)
-            | Message::RemoveLogo => Outcome::Stay,
+            | Message::RemoveLogo
+            | Message::PickPhoto
+            | Message::PhotoFile(_)
+            | Message::RemovePhoto => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,
         }
