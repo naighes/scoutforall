@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -352,12 +353,16 @@ private fun PlayerRow(player: Player, onPlayer: (String) -> Unit) = ListItem(
     modifier = Modifier.clickable { onPlayer(player.id) },
     leadingContent = {
         // the number first: it's what the scout looks for
-        Box(Modifier.width(40.dp), contentAlignment = Alignment.CenterEnd) {
-            Text(
-                player.number.toString(),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-            )
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.width(40.dp), contentAlignment = Alignment.CenterEnd) {
+                Text(
+                    player.number.toString(),
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            PlayerPhoto(player.id, 40.dp)
         }
     },
     headlineContent = { Text(player.name) },

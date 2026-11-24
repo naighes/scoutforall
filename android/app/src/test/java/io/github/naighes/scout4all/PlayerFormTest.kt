@@ -1,6 +1,7 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -227,5 +228,13 @@ class PlayerFormTest {
         rule.waitFor { !editing(model).finding }
         assertEquals(string(R.string.file_not_read), editing(model).error)
         assertEquals(false, editing(model).changed)
+    }
+
+    @Test
+    fun thePhotoOfAPlayerIsShownInTheRowOfTheTeam() {
+        val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
+        core { it.setPersonPhoto(player, core { c -> c.cropFace(fixture("solvay_one_face.jpg")) }) }
+        rule.setContent { Scout4AllTheme { PlayerPhoto(player) } }
+        rule.waitFor { rule.onAllNodesWithTag(SHOWN_IMAGE).fetchSemanticsNodes().size == 1 }
     }
 }

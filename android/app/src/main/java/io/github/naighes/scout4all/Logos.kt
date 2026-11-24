@@ -13,9 +13,13 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.MobileException
+
+/** Tag of the image shown by [LogoBox], for the tests. */
+const val SHOWN_IMAGE = "shown-image"
 
 /** The image the bytes hold, null when they are none or no image. */
 fun decodeImage(bytes: ByteArray?): ImageBitmap? =
@@ -36,13 +40,28 @@ fun TeamLogo(teamId: String, size: Dp = 40.dp, modifier: Modifier = Modifier) {
     LogoBox(bytes, size, modifier)
 }
 
+/** The photo of the player (the id of the player is the one of the person)
+ * in a square: an empty box without it, so the names line up. */
+@Composable
+fun PlayerPhoto(playerId: String, size: Dp = 40.dp, modifier: Modifier = Modifier) {
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    val bytes by produceState<ByteArray?>(null, playerId) {
+        value = try {
+            app.core { it.personPhoto(playerId) }
+        } catch (e: MobileException) {
+            null
+        }
+    }
+    LogoBox(bytes, size, modifier)
+}
+
 /** `bytes` in a square, an empty box when null or not an image. */
 @Composable
 fun LogoBox(bytes: ByteArray?, size: Dp, modifier: Modifier = Modifier) {
     val image = remember(bytes) { decodeImage(bytes) }
     Box(modifier.size(size)) {
         image?.let {
-            Image(it, contentDescription = null, Modifier.size(size), contentScale = ContentScale.Fit)
+            Image(it, contentDescription = null, Modifier.size(size).testTag(SHOWN_IMAGE), contentScale = ContentScale.Fit)
         }
     }
 }
