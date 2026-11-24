@@ -142,4 +142,20 @@ mod tests {
             .unwrap();
         assert_eq!(teams, 0);
     }
+
+    #[tokio::test]
+    async fn the_logo_goes_with_the_removed_team_and_the_photos_stay() {
+        use crate::providers::{sqlite::teams::SqliteTeamWriter, team_writer::TeamWriter};
+        let db = with_team(true);
+        SqliteTeamWriter::new(db.clone()).remove(&uuid(TEAM)).await.unwrap();
+        assert!(assets::team_logo(&db, TEAM).unwrap().is_none());
+        assert!(assets::person_photo(&db, PERSON).unwrap().is_some());
+        let rows: i64 = db
+            .read(|tx| {
+                tx.query_row("SELECT count(*) FROM assets", [], |r| r.get(0))
+                    .map_err(crate::providers::sqlite::sqlite)
+            })
+            .unwrap();
+        assert_eq!(rows, 2);
+    }
 }
