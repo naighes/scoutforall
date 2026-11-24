@@ -1090,6 +1090,43 @@ mod tests {
         assert!(matches!(stats.key(BACK_KEY), crate::stats::Outcome::Back));
     }
 
+    /// The detail of a match deletes it too: the button or ⌫ asks, any
+    /// other key gives up, Enter deletes and goes back to the team.
+    #[test]
+    fn the_detail_of_a_match_deletes_it_once_confirmed() {
+        use crate::game::{self, MatchScreen};
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team_id = core.tutorial_team().unwrap();
+        let date = chrono::DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").unwrap();
+        let m = core.tutorial_match_form(team_id.clone(), date).unwrap();
+        core.save_match(team_id.clone(), None, m).unwrap();
+        let match_id = core
+            .matches(team_id.clone())
+            .unwrap()
+            .into_iter()
+            .find_map(|l| match l {
+                MatchListing::Match { id, .. } => Some(id),
+                MatchListing::Unreadable { .. } => None,
+            });
+        let mut screen =
+            MatchScreen::new(core.clone(), team_id.clone(), match_id.unwrap()).unwrap();
+        assert!(
+            screen
+                .hints(s)
+                .iter()
+                .any(|(_, what)| what == s.delete_match)
+        );
+        screen.update(s, game::Message::Delete);
+        assert!(screen.hints(s).iter().any(|(_, what)| what == s.delete));
+        assert!(matches!(screen.key(s, BACK_KEY), game::Outcome::Stay));
+        assert_eq!(core.matches(team_id.clone()).unwrap().len(), 1);
+        screen.key(s, key!(backspace));
+        assert!(matches!(screen.key(s, key!(enter)), game::Outcome::Deleted));
+        assert!(core.matches(team_id).unwrap().is_empty());
+    }
+
     /// ⌫ asks to delete the match chosen, Esc doesn't, Enter does; ⇧⌫
     /// asks for the team, and the team deleted goes back to the home.
     #[test]

@@ -1862,7 +1862,7 @@ fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -
 fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
     match outcome {
         game::Outcome::Stay => Go::Stay,
-        game::Outcome::Back => Go::Team(screen.team_id.clone()),
+        game::Outcome::Back | game::Outcome::Deleted => Go::Team(screen.team_id.clone()),
         game::Outcome::Stats => Go::Stats(screen.team_id.clone(), screen.match_id.clone(), None),
         game::Outcome::StatsOfB(a) => {
             Go::Stats(a, screen.match_id.clone(), Some(screen.team_id.clone()))
