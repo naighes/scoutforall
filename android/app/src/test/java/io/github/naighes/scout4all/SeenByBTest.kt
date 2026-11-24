@@ -70,8 +70,8 @@ class SeenByBTest {
         rule.waitForText(string(R.string.scouted_by_text, "Italia", "Serbia"))
         // the set as B sees it, nothing to change or scout
         rule.onNodeWithText(string(R.string.score_to, 0, 25)).assertExists()
-        rule.onAllNodesWithContentDescription(string(R.string.edit_match)).assertCountEquals(0)
-        rule.onAllNodesWithContentDescription(string(R.string.delete_match)).assertCountEquals(0)
+        // no export, edit or delete: not even the menu of them
+        rule.onAllNodesWithContentDescription(string(R.string.more_actions)).assertCountEquals(0)
         rule.onNode(hasText(string(R.string.match_stats))).assertDoesNotExist()
         rule.onNode(hasText(string(R.string.open_as_team, "Italia")) and hasClickAction()).performClick()
         assertEquals(italia, openedAs)

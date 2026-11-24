@@ -65,6 +65,8 @@ pub struct StartScreen {
     step: Step,
     lineup: Lineup,
     choices: Vec<LineupPlayer>,
+    /// the photos of the players of our team, by player id
+    photos: std::collections::HashMap<String, iced::widget::image::Handle>,
     selected: usize,
     error: Option<String>,
     /// where the choices were when a position was clicked: back there once
@@ -101,12 +103,26 @@ impl StartScreen {
             step,
             lineup,
             choices: vec![],
+            photos: std::collections::HashMap::new(),
             selected: 0,
             error: None,
             resume: None,
         };
         screen.go_to(step);
         screen
+    }
+
+    /// The photos of the players of the team, shown in the choices and on
+    /// the court of the lineup.
+    pub fn with_photos(mut self, core: &scout4all_mobile::Scout4All) -> Self {
+        self.photos = crate::editors::team_photos(core, &self.team_id);
+        self
+    }
+
+    /// The players with a photo, by their ids.
+    #[cfg(test)]
+    pub fn photo_ids(&self) -> Vec<String> {
+        self.photos.keys().cloned().collect()
     }
 
     /// The match, for the bar on top.
@@ -473,6 +489,7 @@ impl StartScreen {
                                 .size(SIZE_BODY)
                                 .font(bold)
                                 .width(Length::Fixed(32.0)),
+                            ui::logo_slot(self.photos.get(&p.id), 24.0),
                             ui::name(p.name.clone()),
                             text(p.role_name.clone().unwrap_or_default())
                                 .size(SIZE_SMALL)
@@ -532,10 +549,18 @@ impl StartScreen {
             let current = self.step == Step::Position(position);
             let content: Element<'a, Message> = match player {
                 Some(p) => column![
-                    text(p.number.to_string())
-                        .size(30)
-                        .font(bold)
-                        .color(c.accent),
+                    row![
+                        text(p.number.to_string())
+                            .size(30)
+                            .font(bold)
+                            .color(c.accent),
+                        self.photos.get(&p.id).map_or_else(
+                            || Element::from(space::horizontal().width(0)),
+                            |h| ui::logo(h, 32.0)
+                        ),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
                     ui::body(match setter.as_deref() == Some(p.id.as_str()) {
                         true => format!("▲ {}", names::fitted(&p.name, NAME_ROOM)),
                         false => names::fitted(&p.name, NAME_ROOM),
@@ -733,6 +758,24 @@ mod tests {
             app.save_player(team.clone(), None, player, false).unwrap();
         }
         team
+    }
+
+    /// The photo of a player is read when the lineup opens, for the
+    /// choices and the court; the others have none.
+    #[test]
+    fn the_photo_of_a_player_is_read_for_the_lineup() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = new_match(&app);
+        let first = app.team(team.clone()).unwrap().players[0].id.clone();
+        let open = |app: &Scout4All| {
+            let start = app.set_start(team.clone(), m.clone()).unwrap();
+            StartScreen::new(start, None, team.clone(), m.clone()).with_photos(app)
+        };
+        assert!(open(&app).photo_ids().is_empty());
+        app.set_person_photo(first.clone(), Some(crate::scouting::tests::PNG.to_vec()))
+            .unwrap();
+        assert_eq!(open(&app).photo_ids(), vec![first]);
     }
 
     fn press(screen: &mut StartScreen, ck: KeyCombination) -> Outcome {

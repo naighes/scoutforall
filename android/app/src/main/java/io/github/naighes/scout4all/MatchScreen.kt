@@ -13,7 +13,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -83,18 +87,22 @@ fun MatchScreen(
                 actions = {
                     // seen by B, scouted by A: nothing to change from here
                     if ((state as? MatchState.Loaded)?.match?.scoutedBy == null && state is MatchState.Loaded) {
-                        ExportButton(stringResource(R.string.export_match)) { it.exportMatch(teamId, matchId) }
-                        IconButton(onClick = onEdit) {
-                            Icon(Icons.Filled.Edit, contentDescription = stringResource(R.string.edit_match))
-                        }
+                        val exporter = rememberExporter { it.exportMatch(teamId, matchId) }
+                        var asking by rememberSaveable { mutableStateOf(false) }
                         val m = (state as? MatchState.Loaded)?.match
                         val name = m?.let { "${it.opponent} · ${matchDate(it.date)}" }.orEmpty()
-                        DeleteButton(
-                            stringResource(R.string.delete_match),
+                        Deletion(
                             stringResource(R.string.delete_match_text, name),
+                            asking,
+                            { asking = it },
                             delete = { it.deleteMatch(teamId, matchId) },
                             onDeleted = onDeleted,
                         )
+                        MoreMenu { close ->
+                            ExportEntries(exporter, close)
+                            MenuEntry(stringResource(R.string.edit_match), Icons.Filled.Edit, close, onEdit)
+                            MenuEntry(stringResource(R.string.delete_match), Icons.Filled.Delete, close) { asking = true }
+                        }
                     }
                 },
             )

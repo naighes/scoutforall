@@ -16,7 +16,7 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, space, text},
+        widget::{Column, Id, Row, column, container, row, scrollable, space, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{MatchListing, MobileError, Scout4All, TeamDetails, TeamRemovalCounts},
@@ -67,6 +67,8 @@ pub enum Message {
     Player(usize),
     NewMatch,
     Match(usize),
+    /// the delete button of a match of the list
+    DeleteMatch(usize),
     Week(agenda::Message),
     Import,
     Export,
@@ -100,6 +102,8 @@ pub enum Outcome {
     OpenTeam(String),
     /// the training of the team
     Training(crate::training::screen::Open),
+    /// the file of a photo, to crop its face off the thread of the screen
+    Crop(Vec<u8>),
 }
 
 pub struct TeamScreen {
@@ -113,6 +117,9 @@ pub struct TeamScreen {
     game: usize,
     mode: Mode,
     error: Option<String>,
+    logo: Option<iced::widget::image::Handle>,
+    /// the photos of the players of the list, in its order
+    photos: Vec<Option<iced::widget::image::Handle>>,
 }
 
 impl TeamScreen {
@@ -124,7 +131,11 @@ impl TeamScreen {
             Some(team_id.clone()),
             chrono::Local::now().date_naive(),
         );
+        let logo = TeamScreen::logo_of(&core, &team_id);
+        let photos = TeamScreen::photos_of(&core, &details);
         Ok(TeamScreen {
+            logo,
+            photos,
             core,
             team_id,
             details,
@@ -136,6 +147,35 @@ impl TeamScreen {
             mode: Mode::Browse,
             error: None,
         })
+    }
+
+    fn logo_of(core: &Scout4All, team_id: &str) -> Option<iced::widget::image::Handle> {
+        core.team_logo(team_id.to_string())
+            .ok()
+            .flatten()
+            .and_then(|png| crate::editors::logo_handle(&png))
+    }
+
+    fn photos_of(
+        core: &Scout4All,
+        details: &TeamDetails,
+    ) -> Vec<Option<iced::widget::image::Handle>> {
+        details
+            .players
+            .iter()
+            .map(|p| {
+                core.person_photo(p.id.clone())
+                    .ok()
+                    .flatten()
+                    .and_then(|jpeg| crate::editors::logo_handle(&jpeg))
+            })
+            .collect()
+    }
+
+    /// The photos of the players of the list, shown or not.
+    #[cfg(test)]
+    pub fn photos_shown(&self) -> Vec<bool> {
+        self.photos.iter().map(Option::is_some).collect()
     }
 
     pub fn title(&self) -> String {
@@ -157,6 +197,8 @@ impl TeamScreen {
                     .min(self.details.players.len().saturating_sub(1));
                 self.game = self.game.min(self.matches.len().saturating_sub(1));
                 self.week.reload(&self.core);
+                self.logo = TeamScreen::logo_of(&self.core, &self.team_id);
+                self.photos = TeamScreen::photos_of(&self.core, &self.details);
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -343,6 +385,7 @@ impl TeamScreen {
         let season = matches!(&self.mode, Mode::Edit(e) if e.is_season());
         match edited {
             Edited::Stay => Outcome::Stay,
+            Edited::Crop(bytes) => Outcome::Crop(bytes),
             Edited::Cancel => {
                 self.mode = Mode::Browse;
                 Outcome::Stay
@@ -398,6 +441,12 @@ impl TeamScreen {
                 self.panel = Panel::Matches;
                 self.game = i;
                 self.open_match(i)
+            }
+            (Message::DeleteMatch(i), Mode::Browse) => {
+                self.panel = Panel::Matches;
+                self.game = i;
+                self.ask_deletion(s);
+                Outcome::Stay
             }
             (Message::Week(m), Mode::Browse) => {
                 self.panel = Panel::Week;
@@ -618,7 +667,19 @@ impl TeamScreen {
             // the actions scroll when the window is low: none cut off
             scrollable(
                 column![
-                    text(d.name.clone()).size(22).font(theme::fonts().bold),
+                    Row::with_children(
+                        self.logo
+                            .as_ref()
+                            .map(|h| ui::logo(h, 48.0))
+                            .into_iter()
+                            .chain([text(d.name.clone())
+                                .size(22)
+                                .font(theme::fonts().bold)
+                                .into()])
+                            .collect::<Vec<Element<'a, Message>>>()
+                    )
+                    .spacing(10)
+                    .align_y(Alignment::Center),
                     line(s.year, d.year.to_string()),
                     line(s.classification, or_dash(&d.classification)),
                     line(s.gender, or_dash(&d.gender)),
@@ -693,6 +754,7 @@ impl TeamScreen {
         let rows = self.details.players.iter().enumerate().map(|(i, p)| {
             ui::list_row(
                 row![
+                    ui::logo_slot(self.photos.get(i).and_then(Option::as_ref), 28.0),
                     text(p.number.to_string())
                         .size(SIZE_BODY)
                         .font(theme::fonts().bold)
@@ -726,18 +788,18 @@ impl TeamScreen {
 
     fn matches<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let active = self.panel == Panel::Matches;
-        let rows =
-            self.matches.iter().enumerate().map(|(i, m)| match m {
-                MatchListing::Match {
-                    opponent,
-                    home,
-                    date,
-                    won,
-                    lost,
-                    finished,
-                    scouted_by,
-                    ..
-                } => ui::list_row(
+        let rows = self.matches.iter().enumerate().map(|(i, m)| match m {
+            MatchListing::Match {
+                opponent,
+                home,
+                date,
+                won,
+                lost,
+                finished,
+                scouted_by,
+                ..
+            } => row![
+                ui::list_row(
                     row![
                         // home or away at a glance, as on Android
                         ui::tip(
@@ -784,17 +846,32 @@ impl TeamScreen {
                     Some(Message::Match(i)),
                     c,
                 ),
-                MatchListing::Unreadable { folder, reason } => text(format!(
-                    "{folder}{}",
-                    reason
-                        .as_ref()
-                        .map(|r| format!(": {r}"))
-                        .unwrap_or_default()
-                ))
-                .size(SIZE_SMALL)
-                .color(c.danger)
-                .into(),
-            });
+                ui::tip(
+                    ui::icon_button(
+                        theme::icons::DELETE,
+                        s.delete_match,
+                        Message::DeleteMatch(i),
+                        false,
+                        c,
+                    ),
+                    s.delete_match,
+                    c,
+                ),
+            ]
+            .spacing(4)
+            .align_y(Alignment::Center)
+            .into(),
+            MatchListing::Unreadable { folder, reason } => text(format!(
+                "{folder}{}",
+                reason
+                    .as_ref()
+                    .map(|r| format!(": {r}"))
+                    .unwrap_or_default()
+            ))
+            .size(SIZE_SMALL)
+            .color(c.danger)
+            .into(),
+        });
         let list: Element<'a, Message> = match self.matches.is_empty() {
             true => ui::body(s.no_matches_yet).color(c.muted).into(),
             false => scrollable(Column::with_children(rows).spacing(3))
@@ -1067,6 +1144,43 @@ mod tests {
         assert!(matches!(stats.key(BACK_KEY), crate::stats::Outcome::Back));
     }
 
+    /// The detail of a match deletes it too: the button or ⌫ asks, any
+    /// other key gives up, Enter deletes and goes back to the team.
+    #[test]
+    fn the_detail_of_a_match_deletes_it_once_confirmed() {
+        use crate::game::{self, MatchScreen};
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team_id = core.tutorial_team().unwrap();
+        let date = chrono::DateTime::parse_from_rfc3339("2026-10-24T18:00:00+02:00").unwrap();
+        let m = core.tutorial_match_form(team_id.clone(), date).unwrap();
+        core.save_match(team_id.clone(), None, m).unwrap();
+        let match_id = core
+            .matches(team_id.clone())
+            .unwrap()
+            .into_iter()
+            .find_map(|l| match l {
+                MatchListing::Match { id, .. } => Some(id),
+                MatchListing::Unreadable { .. } => None,
+            });
+        let mut screen =
+            MatchScreen::new(core.clone(), team_id.clone(), match_id.unwrap()).unwrap();
+        assert!(
+            screen
+                .hints(s)
+                .iter()
+                .any(|(_, what)| what == s.delete_match)
+        );
+        screen.update(s, game::Message::Delete);
+        assert!(screen.hints(s).iter().any(|(_, what)| what == s.delete));
+        assert!(matches!(screen.key(s, BACK_KEY), game::Outcome::Stay));
+        assert_eq!(core.matches(team_id.clone()).unwrap().len(), 1);
+        screen.key(s, key!(backspace));
+        assert!(matches!(screen.key(s, key!(enter)), game::Outcome::Deleted));
+        assert!(core.matches(team_id).unwrap().is_empty());
+    }
+
     /// ⌫ asks to delete the match chosen, Esc doesn't, Enter does; ⇧⌫
     /// asks for the team, and the team deleted goes back to the home.
     #[test]
@@ -1088,6 +1202,10 @@ mod tests {
         team.key(s, BACK_KEY);
         assert!(matches!(team.mode, Mode::Browse));
         assert_eq!(team.matches.len(), 1);
+        // the button of the row asks the same, without the keyboard
+        team.update(s, Message::DeleteMatch(0));
+        assert!(matches!(team.mode, Mode::Delete(Deletion::Match(..))));
+        team.key(s, BACK_KEY);
         team.key(s, key!(delete));
         assert!(matches!(team.key(s, key!(enter)), Outcome::Stay));
         assert!(team.matches.is_empty());
@@ -1103,6 +1221,170 @@ mod tests {
         team.update(s, Message::DeleteTeam);
         assert!(matches!(team.update(s, Message::Confirm), Outcome::Back));
         assert!(core.home().unwrap().teams.is_empty());
+    }
+
+    /// A 1x1 red PNG.
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x38,
+        0x21, 0x27, 0xf7, 0x1f, 0x00, 0x04, 0xba, 0x02, 0x04, 0x3e, 0x57, 0x1f, 0xc7, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    /// The logo of a team: chosen, saved with the team, replaced by a file
+    /// that isn't an image (refused, the saved one stays), removed.
+    #[test]
+    fn the_logo_of_a_team_is_chosen_and_removed() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team_id = core.save_team(None, team_form("Arezzo")).unwrap();
+        assert!(core.team_logo(team_id.clone()).unwrap().is_none());
+        let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
+        team.update(s, Message::EditTeam);
+        team.update(s, Message::Form(form::Message::LogoFile(PNG.to_vec())));
+        // chosen, not saved yet
+        assert!(core.team_logo(team_id.clone()).unwrap().is_none());
+        team.update(s, Message::Form(Save));
+        assert!(core.team_logo(team_id.clone()).unwrap().is_some());
+        // not an image: an error on the form, the logo stays
+        team.update(s, Message::EditTeam);
+        team.update(s, Message::Form(form::Message::LogoFile(b"no".to_vec())));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(editor.form.error.is_some());
+        team.update(s, Message::Form(Save));
+        assert!(core.team_logo(team_id.clone()).unwrap().is_some());
+        // removed
+        team.update(s, Message::EditTeam);
+        team.update(s, Message::Form(form::Message::RemoveLogo));
+        team.update(s, Message::Form(Save));
+        assert!(core.team_logo(team_id).unwrap().is_none());
+    }
+
+    /// The photo of a player: chosen (the face is cropped, shown, saved with
+    /// the player), refused with the reason when it has no face or many,
+    /// removed; it goes with the person when they are removed from the
+    /// registry.
+    #[test]
+    fn the_photo_of_a_player_is_chosen_removed_and_goes_with_the_person() {
+        const ONE: &[u8] = include_bytes!("../../core/src/tests/fixtures/solvay_one_face.jpg");
+        const THREE: &[u8] = include_bytes!("../../core/src/tests/fixtures/solvay_three_faces.jpg");
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (team_id, anna) = senior(&core);
+        assert!(core.person_photo(anna.clone()).unwrap().is_none());
+        let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
+        let edit = |team: &mut TeamScreen| {
+            let at = team.details.players.iter().position(|p| p.id == anna);
+            team.update(s, Message::Player(at.unwrap()));
+        };
+        edit(&mut team);
+        // the file only asks the screen to crop its face (off its thread)
+        assert!(matches!(
+            team.update(s, Message::Form(form::Message::PhotoFile(ONE.to_vec()))),
+            Outcome::Crop(_)
+        ));
+        // several faces: refused, nothing chosen
+        team.update(s, Message::Form(form::Message::Cropped(form::crop(THREE))));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert_eq!(
+            editor.form.error.as_deref(),
+            Some(ui::fill(s.many_faces, &["3".to_string()]).as_str())
+        );
+        // not an image: refused too
+        team.update(s, Message::Form(form::Message::Cropped(form::crop(b"no"))));
+        // one face: chosen, not saved yet
+        team.update(s, Message::Form(form::Message::Cropped(form::crop(ONE))));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(editor.form.error.is_none());
+        assert!(core.person_photo(anna.clone()).unwrap().is_none());
+        team.update(s, Message::Form(Save));
+        let saved = core.person_photo(anna.clone()).unwrap().unwrap();
+        assert_eq!(saved.get(..2), Some(&[0xff, 0xd8][..]), "a JPEG");
+        // the photo comes back in the form
+        edit(&mut team);
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(editor.photo_shown());
+        // removed
+        team.update(s, Message::Form(form::Message::RemovePhoto));
+        team.update(s, Message::Form(Save));
+        assert!(core.person_photo(anna.clone()).unwrap().is_none());
+        // chosen again, then the person is removed: the photo goes too
+        edit(&mut team);
+        team.update(s, Message::Form(form::Message::Cropped(form::crop(ONE))));
+        team.update(s, Message::Form(Save));
+        assert!(core.person_photo(anna.clone()).unwrap().is_some());
+        core.delete_person(anna.clone()).unwrap();
+        assert!(core.person_photo(anna).unwrap().is_none());
+    }
+
+    /// The logo is shown in the list of the home and on the page of the team
+    /// once saved, and is gone with its removal.
+    #[test]
+    fn the_logo_of_a_team_is_read_for_the_home_and_its_page() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let with = core.save_team(None, team_form("Arezzo")).unwrap();
+        core.save_team(None, team_form("Siena")).unwrap();
+        core.set_team_logo(with.clone(), Some(PNG.to_vec()))
+            .unwrap();
+        let home = HomeScreen::new(&core, core.home().unwrap());
+        let shown: Vec<(String, bool)> = home
+            .home
+            .teams
+            .iter()
+            .zip(home.logos_shown())
+            .filter_map(|(t, logo)| match t {
+                scout4all_mobile::TeamListing::Team { name, .. } => Some((name.clone(), logo)),
+                scout4all_mobile::TeamListing::Unreadable { .. } => None,
+            })
+            .collect();
+        assert!(shown.contains(&("Arezzo".to_string(), true)));
+        assert!(shown.contains(&("Siena".to_string(), false)));
+        let mut team = TeamScreen::new(core.clone(), with.clone()).unwrap();
+        assert!(team.logo.is_some());
+        core.set_team_logo(with, None).unwrap();
+        team.reload();
+        assert!(team.logo.is_none());
+        let _ = s;
+    }
+
+    /// The photo of a player is read for the list of the team, and is gone
+    /// with its removal.
+    #[test]
+    fn the_photo_of_a_player_is_read_for_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (team_id, anna) = senior(&core);
+        let mut team = TeamScreen::new(core.clone(), team_id).unwrap();
+        assert!(team.photos_shown().iter().all(|shown| !shown));
+        assert_eq!(team.photos_shown().len(), team.details.players.len());
+        core.set_person_photo(anna.clone(), Some(PNG.to_vec()))
+            .unwrap();
+        team.reload();
+        let with: Vec<&str> = team
+            .details
+            .players
+            .iter()
+            .zip(team.photos_shown())
+            .filter(|(_, shown)| *shown)
+            .map(|(p, _)| p.id.as_str())
+            .collect();
+        assert_eq!(with, vec![anna.as_str()]);
+        core.set_person_photo(anna, None).unwrap();
+        team.reload();
+        assert!(team.photos_shown().iter().all(|shown| !shown));
     }
 
     /// A team of 2025 with Anna Rossi (9, setter, with her details) and
@@ -1250,6 +1532,33 @@ mod tests {
             players.as_slice(),
             [_, Player { name, number: 11, id, .. }] if name == "P1 bis" && !ids.contains(id)
         ));
+    }
+
+    /// A person of the registry taken as a new player brings their photo into
+    /// the form (the preview); a name written over takes it away.
+    #[test]
+    fn the_photo_of_a_person_of_the_registry_is_shown_once_taken() {
+        const ONE: &[u8] = include_bytes!("../../core/src/tests/fixtures/solvay_one_face.jpg");
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (_senior, anna) = senior(&core);
+        core.set_person_photo(anna, Some(form::crop(ONE).unwrap()))
+            .unwrap();
+        let under = core.save_team(None, team_form("Cortona U19")).unwrap();
+        let mut team = TeamScreen::new(core.clone(), under).unwrap();
+        team.update(s, Message::NewPlayer);
+        team.update(s, Message::Form(Input(0, "Anna".into())));
+        team.update(s, Message::Form(Take(0, 0)));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(editor.photo_shown());
+        team.update(s, Message::Form(Input(0, "Anna B".into())));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(!editor.photo_shown());
     }
 
     /// ⌫ on a player: Enter removes them from the team only (still in the

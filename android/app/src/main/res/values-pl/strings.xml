@@ -81,7 +81,6 @@
     <string name="serving_team">Zagrywka</string>
     <string name="position_n">Poz %d</string>
     <string name="setter">Rozgrywający</string>
-    <string name="setter_women">Rozgrywająca</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Drugi libero</string>
     <string name="none">Brak</string>
@@ -154,7 +153,7 @@
     <string name="zone_attacks">%d at.</string>
     <string name="serve_zone">Kierunek zagrywki</string>
     <string name="zone_chosen">wybrana</string>
-    <string name="serves_by_zone">Zagrywki według stref</string>
+    <string name="serves_by_zone">Zagrywki według stref docelowych</string>
     <string name="zones_told">strefa podana w %1$d z %2$d zagrywek</string>
     <string name="serve_start">Strefa wyjścia zagrywki</string>
     <string name="serves_by_start">Zagrywki według strefy wyjścia</string>
@@ -170,7 +169,7 @@
     <string name="receptions_by_zone">Przyjęcia według stref</string>
     <string name="reception_zones_told">strefa podana w %1$d z %2$d przyjęć</string>
     <string name="attack_zone">Kierunek ataku</string>
-    <string name="attacks_by_zone">Ataki według stref</string>
+    <string name="attacks_by_zone">Ataki według stref docelowych</string>
     <string name="attack_zones_told">strefa podana w %1$d z %2$d ataków</string>
     <string name="dig_zone">Strefa obrony</string>
     <string name="digs_by_zone">Obrony według stref</string>
@@ -367,6 +366,7 @@
     <string name="dvw_sets">sety</string>
     <string name="dvw_next">Dalej</string>
     <!-- the analysis of a team over several matches -->
+    <string name="more_actions">Więcej działań</string>
     <string name="analysis">Analiza</string>
     <string name="period">Okres</string>
     <string name="last_month">Ostatni miesiąc</string>
@@ -718,4 +718,14 @@
         <item quantity="many">%d sesji</item>
         <item quantity="other">%d sesji</item>
     </plurals>
+    <string name="logo">Logo</string>
+    <string name="choose_logo">Wybierz obraz</string>
+    <string name="remove_logo">Usuń logo</string>
+    <string name="no_logo">Brak logo</string>
+    <string name="choose_photo">Wybierz zdjęcie</string>
+    <string name="take_photo">Zrób zdjęcie</string>
+    <string name="remove_photo">Usuń zdjęcie</string>
+    <string name="no_photo">Brak zdjęcia</string>
+    <string name="no_face">Nie znaleziono twarzy na zdjęciu: wybierz takie, na którym twarz jest wyraźna.</string>
+    <string name="many_faces">Znaleziono %1$d twarzy na zdjęciu: wybierz takie z jedną osobą.</string>
 </resources>

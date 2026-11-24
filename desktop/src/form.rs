@@ -319,6 +319,25 @@ impl Field {
     }
 }
 
+/// Why no face was cropped from a photo.
+#[derive(Debug, Clone)]
+pub enum Face {
+    None,
+    Many(usize),
+    Other(String),
+}
+
+/// The face of a photo cropped: slow (~0,3 s), so not on the thread of the
+/// screen.
+pub fn crop(bytes: &[u8]) -> Result<Vec<u8>, Face> {
+    use scout4all_core::faces::{PhotoError, crop_face};
+    crop_face(bytes).map_err(|e| match e {
+        PhotoError::NoFace => Face::None,
+        PhotoError::ManyFaces(n) => Face::Many(n),
+        e => Face::Other(e.to_string()),
+    })
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Input(usize, String),
@@ -344,6 +363,19 @@ pub enum Message {
     /// the other answer of a question asked over the form (not the one
     /// Save gives, not Cancel): for the screen, the form stays as it is
     Another,
+    /// the image of a team to be chosen from a file (the screen asks)
+    PickLogo,
+    /// the bytes of the file of the logo
+    LogoFile(Vec<u8>),
+    RemoveLogo,
+    /// the photo of a player to be chosen from a file (the screen asks)
+    PickPhoto,
+    /// the bytes of the file of the photo
+    PhotoFile(Vec<u8>),
+    /// the face cropped from the file of the photo (made off the thread
+    /// of the screen) or why not
+    Cropped(Result<Vec<u8>, Face>),
+    RemovePhoto,
     Save,
     Cancel,
 }
@@ -903,7 +935,15 @@ impl Form {
                 Some((field, _)) => self.write(field, day.format("%Y-%m-%d").to_string()),
                 None => Outcome::Stay,
             },
-            Message::Details(_) | Message::Another => Outcome::Stay,
+            Message::Details(_)
+            | Message::Another
+            | Message::PickLogo
+            | Message::LogoFile(_)
+            | Message::RemoveLogo
+            | Message::PickPhoto
+            | Message::PhotoFile(_)
+            | Message::Cropped(_)
+            | Message::RemovePhoto => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,
         }

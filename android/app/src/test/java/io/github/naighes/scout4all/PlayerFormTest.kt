@@ -1,6 +1,11 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.unit.dp
+import kotlin.math.abs
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -31,7 +36,7 @@ class PlayerFormTest {
 
     private fun players() = core { it.team(team) }.players
 
-    private fun role(role: RoleEnum) = core { it.roles(team) }.first { it.value == role }.name
+    private fun role(role: RoleEnum) = core { it.roles() }.first { it.value == role }.name
 
     @Test
     fun aPlayerWithoutNumberIsNotSaved() {
@@ -169,5 +174,99 @@ class PlayerFormTest {
         rule.save()
         rule.waitFor { done == 1 }
         assertEquals("", players().single().form.birthDate)
+    }
+
+    private fun fixture(name: String) = javaClass.classLoader!!.getResourceAsStream(name)!!.use { it.readBytes() }
+
+    private fun modelOf(player: String): PlayerFormViewModel {
+        val model = rule.runOnUiThread { PlayerFormViewModel(app, team, player) }
+        rule.waitFor { model.state.value is PlayerFormState.Editing }
+        return model
+    }
+
+    private fun editing(model: PlayerFormViewModel) = model.state.value as PlayerFormState.Editing
+
+    @Test
+    fun thePhotoOfAPlayerIsChosenStoredWithTheFormAndRemoved() {
+        val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
+        val model = modelOf(player)
+        rule.runOnUiThread { model.pickPhoto(fixture("solvay_one_face.jpg")) }
+        rule.waitFor { !editing(model).finding }
+        assertEquals(null, editing(model).error)
+        assertEquals(true, editing(model).changed)
+        assertEquals(true, editing(model).shown != null)
+        // stored with the save, not before
+        assertEquals(null, core { it.personPhoto(player) })
+        rule.runOnUiThread { model.save() }
+        rule.waitFor { model.state.value == PlayerFormState.Done }
+        assertEquals(true, core { it.personPhoto(player) } != null)
+        // read again by the form, removed
+        val again = modelOf(player)
+        assertEquals(true, editing(again).shown != null)
+        rule.runOnUiThread { again.removePhoto() }
+        rule.runOnUiThread { again.save() }
+        rule.waitFor { again.state.value == PlayerFormState.Done }
+        assertEquals(null, core { it.personPhoto(player) })
+    }
+
+    @Test
+    fun aNewPlayerGetsThePhotoChosenInItsForm() {
+        val model = rule.runOnUiThread { PlayerFormViewModel(app, team, null) }
+        rule.waitFor { model.state.value is PlayerFormState.Editing }
+        rule.runOnUiThread { model.change(null) { it.copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER) } }
+        rule.runOnUiThread { model.pickPhoto(fixture("solvay_one_face.jpg")) }
+        rule.waitFor { !editing(model).finding }
+        rule.runOnUiThread { model.save() }
+        rule.waitFor { model.state.value == PlayerFormState.Done }
+        assertEquals(true, core { it.personPhoto(players().single().id) } != null)
+    }
+
+    @Test
+    fun thePhotoOfAPersonOfTheRegistryIsShownOnceChosenAndGoneWithAnotherName() {
+        val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
+        core { it.setPersonPhoto(player, it.cropFace(fixture("solvay_one_face.jpg"))) }
+        val other = saveTeam("Altra")
+        val model = rule.runOnUiThread { PlayerFormViewModel(app, other, null) }
+        rule.waitFor { model.state.value is PlayerFormState.Editing }
+        assertEquals(null, editing(model).shown)
+        rule.runOnUiThread { model.pickExisting(editing(model).existing.single().label) }
+        rule.waitFor { editing(model).shown != null }
+        // a name written over is a new person: no photo
+        rule.runOnUiThread { model.name("Paola Egonu bis") }
+        assertEquals(null, editing(model).shown)
+    }
+
+    @Test
+    fun aPhotoWithoutOrWithManyFacesIsAnErrorOfTheForm() {
+        val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
+        val model = modelOf(player)
+        rule.runOnUiThread { model.pickPhoto(fixture("solvay_three_faces.jpg")) }
+        rule.waitFor { !editing(model).finding }
+        assertEquals(string(R.string.many_faces, 3), editing(model).error)
+        rule.runOnUiThread { model.pickPhoto(ByteArray(0)) }
+        rule.waitFor { !editing(model).finding }
+        assertEquals(string(R.string.file_not_read), editing(model).error)
+        assertEquals(false, editing(model).changed)
+    }
+
+    @Test
+    fun thePhotoOfAPlayerIsShownInTheRowOfTheTeam() {
+        val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
+        core { it.setPersonPhoto(player, core { c -> c.cropFace(fixture("solvay_one_face.jpg")) }) }
+        rule.setContent { Scout4AllTheme { PlayerPhoto(player) } }
+        rule.waitFor { rule.onAllNodesWithTag(SHOWN_IMAGE).fetchSemanticsNodes().size == 1 }
+    }
+
+    @Test
+    fun thePhotoIsLargeCentredAndItsButtonsAreRightBelow() {
+        show()
+        val panel = rule.onNodeWithTag(PHOTO_PANEL).getUnclippedBoundsInRoot()
+        val circle = rule.onNodeWithTag(PHOTO_CIRCLE).getUnclippedBoundsInRoot()
+        val choose = rule.onNodeWithText(string(R.string.choose_photo)).getUnclippedBoundsInRoot()
+        val take = rule.onNodeWithText(string(R.string.take_photo)).getUnclippedBoundsInRoot()
+        assertEquals(160.dp, circle.right - circle.left)
+        assert(abs(((circle.left + circle.right) - (panel.left + panel.right)).value) < 1f) { "the photo is centred" }
+        assert(choose.top >= circle.bottom && take.top >= circle.bottom) { "the buttons are below the photo" }
+        assert(choose.top - circle.bottom < 32.dp) { "right below" }
     }
 }

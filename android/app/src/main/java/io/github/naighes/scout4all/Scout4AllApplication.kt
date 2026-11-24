@@ -164,4 +164,6 @@ val MobileException.reason: String
         is MobileException.InvalidTraining -> reason
         is MobileException.Overlap -> reason
         is MobileException.ChildrenOutside -> reason
+        is MobileException.NoFace -> reason
+        is MobileException.ManyFaces -> reason
     }.replaceFirstChar { it.titlecase(Locale.getDefault()) }

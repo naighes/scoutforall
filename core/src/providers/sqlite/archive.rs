@@ -52,7 +52,7 @@ use crate::{
     legacy::migrate::{same, unzip},
     localization::{Labels, Language},
     providers::sqlite::{
-        Database, matches::replayed, not_found, rows::match_rows, sqlite, summary,
+        Database, archive_assets, matches::replayed, not_found, rows::match_rows, sqlite, summary,
         teams::read_team, training_archive,
     },
     shapes::{
@@ -245,16 +245,18 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
         Subject::Team(id) | Subject::TeamWithMatches(id) => (Kind::Team, id, None),
         Subject::Training(id) => (Kind::Team, id, Some(Contents::Training)),
     };
-    let tables = match subject {
-        Subject::Training(team) => training_archive::tables(db, team)?,
+    let (tables, images) = match subject {
+        Subject::Training(team) => (training_archive::tables(db, team)?, vec![]),
         _ => db.read(|tx| {
             let ids = selection(tx, subject)?;
-            TABLES
+            let mut tables = TABLES
                 .iter()
                 .map(|(table, order)| {
                     dump(tx, table, filter(table), order, &ids).map(|rows| (*table, rows))
                 })
-                .collect::<Result<Vec<_>, _>>()
+                .collect::<Result<Vec<_>, _>>()?;
+            let images = archive_assets::gather(tx, &mut tables)?;
+            Ok((tables, images))
         })?,
     };
     let gyms = tables
@@ -281,6 +283,7 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
     {
         files.push((format!("{table}.json"), pretty(rows)?));
     }
+    files.extend(images);
     zip_files(&files, Deflated)
 }
 
@@ -466,6 +469,7 @@ fn only_name(mut row: Row) -> Row {
     row.insert("birth_date".into(), Json::Null);
     row.insert("height_cm".into(), Json::Null);
     row.insert("notes".into(), Json::from(""));
+    row.insert("photo_asset_id".into(), Json::Null);
     row
 }
 
@@ -654,6 +658,7 @@ fn staged(archive: &[u8], labels: &Labels) -> Result<(Manifest, Connection), App
     let mut staging = db::open_in_memory_with(MIGRATIONS.get(..schema).unwrap_or(MIGRATIONS))?;
     load(&staging, &files, labels)?;
     db::migrate(&mut staging, MIGRATIONS)?;
+    archive_assets::stage(&staging, &files, labels)?;
     Ok((manifest, staging))
 }
 
@@ -670,7 +675,7 @@ pub(crate) fn merge_staged(
 ) -> Result<Imported, AppError> {
     let labels = language.labels();
     let staged = staging.transaction().map_err(sqlite)?;
-    let tables: Vec<(&str, Vec<Row>)> = TABLES
+    let mut tables: Vec<(&str, Vec<Row>)> = TABLES
         .iter()
         .map(|(table, order)| {
             select(
@@ -681,6 +686,7 @@ pub(crate) fn merge_staged(
             .map(|rows| (*table, rows))
         })
         .collect::<Result<_, _>>()?;
+    let images = archive_assets::links(&mut tables);
     let of = |name: &str| {
         tables
             .iter()
@@ -722,6 +728,7 @@ pub(crate) fn merge_staged(
             matches_here: 0,
             training: TrainingMerged::default(),
         };
+        archive_assets::adopt(tx, &staged, &images)?;
         for m in of("matches") {
             let added = merge_match(tx, &staged, m, &of)?;
             match added {
@@ -759,7 +766,12 @@ pub(crate) fn copy_team(
         let known = columns(staging, table)?;
         select(local, &format!("SELECT * FROM {table} WHERE {filter}"), &id)?
             .iter()
-            .try_for_each(|row| insert(staging, table, &known, row))
+            .map(|row| {
+                let mut row = row.clone();
+                archive_assets::strip(&mut row);
+                row
+            })
+            .try_for_each(|row| insert(staging, table, &known, &row))
             .map_err(|e| AppError::IO(IOError::Msg(e)))
     })
 }
@@ -828,7 +840,12 @@ pub(crate) fn local(tx: &Connection, table: &str, row: &Row) -> Result<Option<Ro
         &format!("SELECT * FROM {table} WHERE {}", clause.join(" AND ")),
         &values,
     )
-    .map(|rows| rows.into_iter().next())
+    .map(|rows| {
+        rows.into_iter().next().map(|mut row| {
+            archive_assets::strip(&mut row);
+            row
+        })
+    })
 }
 
 pub(crate) fn deleted(row: &Row) -> bool {
@@ -858,6 +875,10 @@ pub(crate) fn merge(
 ) -> Result<Merged, AppError> {
     let known = columns(tx, table)?;
     rows.iter().try_fold(Merged::default(), |merged, row| {
+        // the images are not compared: they're adopted apart
+        let mut stripped = row.clone();
+        archive_assets::strip(&mut stripped);
+        let row = &stripped;
         let here = local(tx, table, row)?;
         let written = match &here {
             None => insert(tx, table, &known, row).map(|()| true),

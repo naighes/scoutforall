@@ -251,6 +251,7 @@ private fun TeamRow(
         colors = ListItemDefaults.colors(
             containerColor = if (team.pinned) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
         ),
+        leadingContent = { TeamLogo(team.id, 40.dp) },
         headlineContent = { Text(team.name) },
         supportingContent = {
             val players = team.players.toInt()

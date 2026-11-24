@@ -38,6 +38,12 @@ pub enum Message {
     OpenAsA,
     /// the gym of the match, in the map
     Map,
+    /// ask to delete the match
+    Delete,
+    /// the deletion confirmed
+    Confirm,
+    /// the deletion given up
+    Cancel,
 }
 
 pub enum Outcome {
@@ -61,6 +67,8 @@ pub enum Outcome {
     /// the statistics as this team B sees them, of the match of team A
     /// scouted on both sides
     StatsOfB(String),
+    /// the match deleted: back to its team
+    Deleted,
 }
 
 pub struct MatchScreen {
@@ -72,6 +80,8 @@ pub struct MatchScreen {
     /// the gym it's played in, if one is set
     venue: Option<VenueRecord>,
     editor: Option<Box<Editor>>,
+    /// the deletion of the match, waiting for the answer
+    asking: bool,
     error: Option<String>,
 }
 
@@ -92,6 +102,7 @@ impl MatchScreen {
             details,
             venue,
             editor: None,
+            asking: false,
             error: None,
         })
     }
@@ -162,7 +173,7 @@ impl MatchScreen {
 
     fn edited(&mut self, edited: Edited) {
         match edited {
-            Edited::Stay => {}
+            Edited::Stay | Edited::Crop(_) => {}
             Edited::Cancel => self.editor = None,
             Edited::Saved(_) => {
                 self.editor = None;
@@ -180,9 +191,34 @@ impl MatchScreen {
         }
     }
 
+    /// The match deleted, or the error told.
+    fn delete(&mut self) -> Outcome {
+        self.asking = false;
+        match self
+            .core
+            .delete_match(self.team_id.clone(), self.match_id.clone())
+        {
+            Ok(()) => Outcome::Deleted,
+            Err(e) => {
+                self.error = Some(e.to_string());
+                Outcome::Stay
+            }
+        }
+    }
+
     pub fn update(&mut self, s: &Strings, message: Message) -> Outcome {
         let seen_by_b = self.scouted_by().is_some();
         match (message, &mut self.editor) {
+            (Message::Confirm, None) if self.asking && !seen_by_b => self.delete(),
+            (Message::Cancel, None) => {
+                self.asking = false;
+                Outcome::Stay
+            }
+            (Message::Delete, None) if !seen_by_b => {
+                self.asking = true;
+                Outcome::Stay
+            }
+            (_, None) if self.asking => Outcome::Stay,
             (Message::Form(m), Some(editor)) => {
                 let edited = editor.update(&self.core, s, m);
                 self.edited(edited);
@@ -207,6 +243,7 @@ impl MatchScreen {
                 self.edit(s);
                 Outcome::Stay
             }
+            (Message::Delete | Message::Confirm, None) => Outcome::Stay,
         }
     }
 
@@ -216,6 +253,16 @@ impl MatchScreen {
             (Some(editor), ck) => {
                 let edited = editor.key(&self.core, s, ck);
                 self.edited(edited);
+                Outcome::Stay
+            }
+            (None, k) if self.asking && k == key!(enter) => self.delete(),
+            (None, _) if self.asking => {
+                // Esc gives up, any other key too: nothing is deleted by chance
+                self.asking = false;
+                Outcome::Stay
+            }
+            (None, k) if !seen_by_b && (k == key!(backspace) || k == key!(delete)) => {
+                self.asking = true;
                 Outcome::Stay
             }
             (None, k) if k == BACK_KEY => Outcome::Back,
@@ -256,6 +303,10 @@ impl MatchScreen {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match (&self.editor, self.scouted_by()) {
             (Some(editor), _) => editor.hints(s),
+            (None, _) if self.asking => vec![
+                ("Enter".to_string(), s.delete.to_string()),
+                ("Esc".to_string(), s.cancel.to_string()),
+            ],
             (None, Some(a)) => [(
                 "Enter".to_string(),
                 ui::fill(s.open_as_team, std::slice::from_ref(&a.team_name)),
@@ -276,6 +327,7 @@ impl MatchScreen {
                 vec![
                     ("s".to_string(), s.stats.to_string()),
                     ("e".to_string(), s.edit_match.to_string()),
+                    ("⌫".to_string(), s.delete_match.to_string()),
                     ("x".to_string(), s.export_match.to_string()),
                     ("p".to_string(), s.match_report.to_string()),
                     ("v".to_string(), s.video.to_string()),
@@ -294,6 +346,22 @@ impl MatchScreen {
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         if let Some(editor) = &self.editor {
             return editor.view(s, c, Message::Form);
+        }
+        if self.asking {
+            return ui::confirm_deletion(
+                s,
+                &ui::fill(
+                    s.delete_match_text,
+                    &[format!(
+                        "{} · {}",
+                        self.details.opponent,
+                        s.day(&self.details.date)
+                    )],
+                ),
+                Message::Confirm,
+                Message::Cancel,
+                c,
+            );
         }
         let d = &self.details;
         let bold = theme::fonts().bold;
@@ -397,8 +465,9 @@ impl MatchScreen {
                     action(theme::icons::PDF, s.match_report, Message::Report),
                     action(theme::icons::VIDEO, s.video, Message::Video),
                     action(theme::icons::RECORD, s.record_video, Message::Record),
+                    action(theme::icons::DELETE, s.delete_match, Message::Delete),
                 ],
-                3,
+                4,
             ),
         };
         let summary = ui::panel(

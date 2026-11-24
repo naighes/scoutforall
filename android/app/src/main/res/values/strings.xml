@@ -82,7 +82,6 @@
     <string name="serving_team">Serving</string>
     <string name="position_n">Pos %d</string>
     <string name="setter">Setter</string>
-    <string name="setter_women">Setter</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Second libero</string>
     <string name="none">None</string>
@@ -153,7 +152,7 @@
     <string name="zone_attacks">%d att</string>
     <string name="serve_zone">Serve destination</string>
     <string name="zone_chosen">chosen</string>
-    <string name="serves_by_zone">Serves by zone</string>
+    <string name="serves_by_zone">Serves by destination zone</string>
     <string name="zones_told">zone told for %1$d of %2$d serves</string>
     <string name="serve_start">Serve start zone</string>
     <string name="serves_by_start">Serves by start zone</string>
@@ -169,7 +168,7 @@
     <string name="receptions_by_zone">Receptions by zone</string>
     <string name="reception_zones_told">zone told for %1$d of %2$d receptions</string>
     <string name="attack_zone">Attack destination</string>
-    <string name="attacks_by_zone">Attacks by zone</string>
+    <string name="attacks_by_zone">Attacks by destination zone</string>
     <string name="attack_zones_told">zone told for %1$d of %2$d attacks</string>
     <string name="dig_zone">Defense zone</string>
     <string name="digs_by_zone">Digs by zone</string>
@@ -366,6 +365,7 @@
     <string name="dvw_sets">sets</string>
     <string name="dvw_next">Next</string>
     <!-- the analysis of a team over several matches -->
+    <string name="more_actions">More actions</string>
     <string name="analysis">Analysis</string>
     <string name="period">Period</string>
     <string name="last_month">Last month</string>
@@ -708,4 +708,14 @@
         <item quantity="one">%d session</item>
         <item quantity="other">%d sessions</item>
     </plurals>
+    <string name="logo">Logo</string>
+    <string name="choose_logo">Choose an image</string>
+    <string name="remove_logo">Remove the logo</string>
+    <string name="no_logo">No logo</string>
+    <string name="choose_photo">Choose a photo</string>
+    <string name="take_photo">Take a photo</string>
+    <string name="remove_photo">Remove the photo</string>
+    <string name="no_photo">No photo</string>
+    <string name="no_face">No face found in the photo: choose one where the face is clear.</string>
+    <string name="many_faces">%1$d faces found in the photo: choose one with a single person.</string>
 </resources>

@@ -145,6 +145,8 @@ pub struct ScoutingScreen {
     trend: Trend,
     /// how long reading the snapshot took last, in milliseconds
     pub refresh_ms: u128,
+    /// the photos of the players of our team, by player id, read once
+    photos: std::collections::HashMap<String, iced::widget::image::Handle>,
 }
 
 impl ScoutingScreen {
@@ -180,7 +182,21 @@ impl ScoutingScreen {
             series: 0,
             trend,
             refresh_ms: 0,
+            photos: std::collections::HashMap::new(),
         }
+    }
+
+    /// The photos of the players of the team, shown beside the names of
+    /// the players to choose.
+    pub fn with_photos(mut self, core: &scout4all_mobile::Scout4All) -> Self {
+        self.photos = crate::editors::team_photos(core, &self.team_id);
+        self
+    }
+
+    /// The players with a photo, by their ids.
+    #[cfg(test)]
+    pub fn photo_ids(&self) -> Vec<String> {
+        self.photos.keys().cloned().collect()
     }
 
     /// The keys as changed in the settings.
@@ -1587,9 +1603,13 @@ impl ScoutingScreen {
             Content::Players { pickable, .. } => pickable,
             Content::Target { .. } => true,
         };
-        let court = canvas(Court { content, colors: c })
-            .width(Length::Fill)
-            .height(Length::Fill);
+        let court = canvas(Court {
+            content,
+            colors: c,
+            photos: self.photos.clone(),
+        })
+        .width(Length::Fill)
+        .height(Length::Fill);
         ui::lit_panel(None, iced::Element::from(court).map(Message::Court), lit, c)
     }
 
@@ -1954,9 +1974,10 @@ impl ScoutingScreen {
 
     /// With the shirt number on the key, the name alone.
     fn player_label<'a>(&self, p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
+        let photo = self.photos.get(&p.id.to_string());
         match self.keys.player_keys {
-            PlayerKeysEnum::Number => ui::name(p.name.clone()),
-            PlayerKeysEnum::Role => player_label(p, c),
+            PlayerKeysEnum::Number => with_photo(photo, ui::name(p.name.clone())),
+            PlayerKeysEnum::Role => with_photo(photo, player_label(p, c)),
         }
     }
 
@@ -1976,6 +1997,24 @@ impl ScoutingScreen {
         })
     }
 }
+
+/// The photo of the player before the label, when there is one: the rows
+/// do not grow (the box is as tall as a line).
+fn with_photo<'a>(
+    photo: Option<&iced::widget::image::Handle>,
+    label: Element<'a, Message>,
+) -> Element<'a, Message> {
+    match photo {
+        Some(h) => row![ui::logo(h, PHOTO_SIZE), label]
+            .spacing(6)
+            .align_y(Alignment::Center)
+            .into(),
+        None => label,
+    }
+}
+
+/// The side of the photo of a player to choose.
+const PHOTO_SIZE: f32 = 24.0;
 
 fn player_label<'a>(p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
     row![
@@ -2074,6 +2113,37 @@ pub(crate) mod tests {
         start.choose_libero(Some(ids[6].clone())).unwrap();
         core.start_set(start).unwrap();
         (team, m)
+    }
+
+    /// A 1x1 red PNG.
+    pub(crate) const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x38,
+        0x21, 0x27, 0xf7, 0x1f, 0x00, 0x04, 0xba, 0x02, 0x04, 0x3e, 0x57, 0x1f, 0xc7, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    /// The photo of a player is read when the scouting opens, for the
+    /// players to choose; the others have none.
+    #[test]
+    fn the_photo_of_a_player_is_read_for_the_choices() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let (team, m) = team_with_shirts(&core);
+        let details = core.team(team.clone()).unwrap();
+        let first = details.players[0].id.clone();
+        let open = |core: &Scout4All| {
+            let scouting = core
+                .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
+                .unwrap();
+            ScoutingScreen::new(scouting, ScoutingKeys::default(), team.clone(), m.clone())
+                .with_photos(core)
+        };
+        assert!(open(&core).photo_ids().is_empty());
+        core.set_person_photo(first.clone(), Some(PNG.to_vec()))
+            .unwrap();
+        assert_eq!(open(&core).photo_ids(), vec![first]);
     }
 
     fn shirt_screen(keys: ScoutingKeys) -> (tempfile::TempDir, ScoutingScreen) {

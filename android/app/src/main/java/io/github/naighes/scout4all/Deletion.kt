@@ -109,13 +109,3 @@ fun Deletion(
         )
     }
 }
-
-/** The button of the top bar that deletes, once confirmed (`Deletion`). */
-@Composable
-fun DeleteButton(description: String, text: String, delete: (Scout4All) -> Unit, onDeleted: () -> Unit) {
-    var asking by rememberSaveable { mutableStateOf(false) }
-    IconButton(onClick = { asking = true }) {
-        Icon(Icons.Filled.Delete, contentDescription = description)
-    }
-    Deletion(text, asking, { asking = it }, delete, onDeleted)
-}

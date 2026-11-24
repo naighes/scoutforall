@@ -14,7 +14,9 @@ use std::{
 };
 
 mod analysis_tests;
+mod archive_assets_tests;
 mod archive_tests;
+mod assets_tests;
 mod ball_tests;
 mod benchmark_tests;
 mod competition_filter_tests;
@@ -31,6 +33,7 @@ mod dvw_translate_tests;
 mod edit_event_tests;
 mod event_validation_tests;
 mod example_tests;
+mod faces_tests;
 mod fault_tests;
 mod finished_match_tests;
 mod flags_tests;

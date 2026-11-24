@@ -140,6 +140,8 @@ enum Screen {
 /// Where a key or a click leads.
 enum Go {
     Stay,
+    /// the file of a photo, whose face is cropped in a thread
+    CropFace(Vec<u8>),
     /// the video of the actions picked to make
     Montage,
     /// a file made, to share or save: what it shows, the file
@@ -469,6 +471,16 @@ impl App {
         let core = self.core.clone();
         let opened = match go {
             Go::Stay => return Task::none(),
+            Go::CropFace(bytes) => {
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || form::crop(&bytes))
+                            .await
+                            .unwrap_or_else(|e| Err(form::Face::Other(e.to_string())))
+                    },
+                    |face| Message::Team(team::Message::Form(form::Message::Cropped(face))),
+                );
+            }
             Go::Export(export) => return self.export(export),
             Go::Import(team) => {
                 let s = self.strings;
@@ -593,22 +605,23 @@ impl App {
                         .map(|of_b| (start, of_b))
                 })
                 .map(|(start, of_b)| {
-                    Screen::Start(Box::new(start::StartScreen::new(
-                        start,
-                        of_b,
-                        open.team_id,
-                        open.match_id,
-                    )))
+                    Screen::Start(Box::new(
+                        start::StartScreen::new(start, of_b, open.team_id, open.match_id)
+                            .with_photos(&core),
+                    ))
                 }),
             Go::Scout(open) => core
                 .scouting_in_order(&open.team_id, &open.match_id, ChoiceOrder::EventFirst)
                 .map(|scouting| {
-                    Screen::Scouting(Box::new(ScoutingScreen::new(
-                        scouting,
-                        self.keys.clone(),
-                        open.team_id,
-                        open.match_id,
-                    )))
+                    Screen::Scouting(Box::new(
+                        ScoutingScreen::new(
+                            scouting,
+                            self.keys.clone(),
+                            open.team_id,
+                            open.match_id,
+                        )
+                        .with_photos(&core),
+                    ))
                 }),
         };
         match opened {
@@ -1740,6 +1753,7 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
         team::Outcome::OpenTeam(team) => Go::Team(team),
         team::Outcome::Training(open) => Go::Training(team_id.to_string(), open),
+        team::Outcome::Crop(bytes) => Go::CropFace(bytes),
     }
 }
 
@@ -1862,7 +1876,7 @@ fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -
 fn match_go(screen: &MatchScreen, outcome: game::Outcome) -> Go {
     match outcome {
         game::Outcome::Stay => Go::Stay,
-        game::Outcome::Back => Go::Team(screen.team_id.clone()),
+        game::Outcome::Back | game::Outcome::Deleted => Go::Team(screen.team_id.clone()),
         game::Outcome::Stats => Go::Stats(screen.team_id.clone(), screen.match_id.clone(), None),
         game::Outcome::StatsOfB(a) => {
             Go::Stats(a, screen.match_id.clone(), Some(screen.team_id.clone()))

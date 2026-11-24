@@ -1,6 +1,25 @@
 package io.github.naighes.scout4all
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.style.TextAlign
+import androidx.core.content.FileProvider
+import java.io.File
+import java.util.UUID
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -93,14 +112,35 @@ sealed interface PlayerFormState {
         val existing: List<ExistingPlayer> = emptyList(),
         /** the other teams the player plays in, with the same details */
         val otherTeams: List<String> = emptyList(),
+        /** the photo the player has now, as JPEG */
+        val stored: ByteArray? = null,
+        /** what the form does with the photo when saved */
+        val photo: PhotoEdit = PhotoEdit.Keep,
+        /** the photo being read: the face is looked for */
+        val finding: Boolean = false,
     ) : PlayerFormState {
         /** the person of the registry chosen, while the name is theirs */
         val chosen: ExistingPlayer? get() = form.person?.let { p -> existing.firstOrNull { it.id == p } }
 
-        val changed: Boolean get() = form != loaded
+        val changed: Boolean get() = form != loaded || photo != PhotoEdit.Keep
+
+        /** the photo the preview shows */
+        val shown: ByteArray? get() = when (photo) {
+            PhotoEdit.Keep -> stored
+            is PhotoEdit.Replace -> photo.bytes
+            PhotoEdit.Remove -> null
+        }
     }
     /** saved or removed: the screen goes back */
     data object Done : PlayerFormState
+}
+
+/** What the form does with the photo of the player when saved. */
+sealed interface PhotoEdit {
+    data object Keep : PhotoEdit
+    data object Remove : PhotoEdit
+    /** the face cropped, as PNG */
+    class Replace(val bytes: ByteArray) : PhotoEdit
 }
 
 /** A new player of the team (`playerId` null) or one being edited. The core
@@ -121,11 +161,12 @@ class PlayerFormViewModel(
                     PlayerFormState.Editing(
                         // a new one: the first number free
                         form = player?.form ?: core.newPlayerForm(teamId),
-                        roles = core.roles(teamId),
+                        roles = core.roles(),
                         savedName = player?.name.orEmpty(),
                         savedNumber = player?.number?.toInt() ?: 0,
                         existing = if (playerId == null) core.existingPlayers(teamId) else emptyList(),
                         otherTeams = playerId?.let { core.otherTeams(teamId, it) }.orEmpty(),
+                        stored = playerId?.let { core.personPhoto(it) },
                     )
                 }
             } catch (e: MobileException) {
@@ -152,15 +193,24 @@ class PlayerFormViewModel(
      * it's their name; another name is a new person. */
     fun name(name: String) = update { s ->
         val person = s.chosen?.takeIf { it.name == name }?.id
-        s.copy(form = s.form.copy(name = name, person = person), invalid = s.invalid?.takeIf { it.first != PlayerField.NAME }, error = null)
+        // a new player: the photo shown is the one of the person chosen, if any
+        val stored = if (person == null && s.form.person != null) null else s.stored
+        s.copy(form = s.form.copy(name = name, person = person), stored = stored, invalid = s.invalid?.takeIf { it.first != PlayerField.NAME }, error = null)
     }
 
     /** A person of the registry picked by their label: the form with their
      * details, the number and the role of their most recent team. */
-    fun pickExisting(label: String) = update { s ->
-        when (val choice = s.existing.firstOrNull { it.label == label }) {
-            null -> s
-            else -> s.copy(form = choice.form, invalid = null, error = null)
+    fun pickExisting(label: String) {
+        val choice = (mutableState.value as? PlayerFormState.Editing)?.existing?.firstOrNull { it.label == label } ?: return
+        update { s -> s.copy(form = choice.form, stored = null, invalid = null, error = null) }
+        // the photo of the person, shown as the preview
+        viewModelScope.launch {
+            val photo = try {
+                app.core { core -> core.personPhoto(choice.id.toString()) }
+            } catch (e: MobileException) {
+                null
+            }
+            update { s -> if (s.form.person == choice.id) s.copy(stored = photo) else s }
         }
     }
 
@@ -169,8 +219,41 @@ class PlayerFormViewModel(
 
     fun confirmRemoval(confirming: Boolean) = update { it.copy(confirmingRemoval = confirming) }
 
+    /** The face the picture holds becomes the photo, shown at once and
+     * stored when the form is saved; no face, many faces or no image are
+     * errors of the form. */
+    fun pickPhoto(bytes: ByteArray) {
+        update { it.copy(finding = true, error = null) }
+        viewModelScope.launch {
+            val face = try {
+                Result.success(app.core { it.cropFace(bytes) })
+            } catch (e: MobileException) {
+                Result.failure(e)
+            }
+            update { s ->
+                val failure = face.exceptionOrNull()
+                when {
+                    failure == null -> s.copy(finding = false, photo = PhotoEdit.Replace(face.getOrThrow()), error = null)
+                    failure is MobileException.NoFace -> s.copy(finding = false, error = app.getString(R.string.no_face))
+                    failure is MobileException.ManyFaces ->
+                        s.copy(finding = false, error = app.getString(R.string.many_faces, failure.count.toInt()))
+                    else -> s.copy(finding = false, error = app.getString(R.string.file_not_read))
+                }
+            }
+        }
+    }
+
+    fun removePhoto() = update { it.copy(photo = PhotoEdit.Remove, error = null) }
+
     fun save(namesakeConfirmed: Boolean = false) = submit { core ->
-        core.savePlayer(teamId, playerId, (mutableState.value as PlayerFormState.Editing).form, namesakeConfirmed)
+        val editing = mutableState.value as PlayerFormState.Editing
+        val id = core.savePlayer(teamId, playerId, editing.form, namesakeConfirmed)
+        // the id of the player is the one of the person
+        when (val photo = editing.photo) {
+            PhotoEdit.Keep -> {}
+            PhotoEdit.Remove -> core.setPersonPhoto(id, null)
+            is PhotoEdit.Replace -> core.setPersonPhoto(id, photo.bytes)
+        }
     }
 
     fun dismissNamesake() = update { it.copy(namesake = null) }
@@ -244,6 +327,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            PhotoPanel(state.shown, state.finding, model::pickPhoto, model::removePhoto)
             when (state.existing.isEmpty()) {
                 // the details are the person's, the same in every team
                 true -> OutlinedTextField(
@@ -334,6 +418,77 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.save)) }
     }
+
+/** The photo with its preview, the buttons to choose it (gallery, files),
+ * take it with the camera or remove it. */
+@Composable
+private fun PhotoPanel(shown: ByteArray?, finding: Boolean, onPick: (ByteArray) -> Unit, onRemove: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        scope.launch { onPick(readUri(context, uri)) }
+    }
+    // the camera writes where the app says (the provider of the cache): no
+    // permission needed, the camera app does it
+    var taken by remember { mutableStateOf<Pair<File, Uri>?>(null) }
+    val take = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { done ->
+        val file = taken?.first
+        taken = null
+        if (file != null) {
+            scope.launch {
+                if (done) onPick(readUri(context, Uri.fromFile(file)))
+                withContext(Dispatchers.IO) { file.delete() }
+            }
+        }
+    }
+    // the face in a circle, centred, its buttons right below
+    Column(
+        Modifier.fillMaxWidth().testTag(PHOTO_PANEL),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier.size(PHOTO_SIZE).clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                .testTag(PHOTO_CIRCLE),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                finding -> CircularProgressIndicator()
+                shown == null ->
+                    Text(stringResource(R.string.no_photo), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+                else -> LogoBox(shown, PHOTO_SIZE)
+            }
+        }
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            OutlinedButton(onClick = { pick.launch("image/*") }, enabled = !finding) {
+                Text(stringResource(R.string.choose_photo))
+            }
+            OutlinedButton(
+                onClick = {
+                    val file = File(File(context.cacheDir, "photos").apply { mkdirs() }, "${UUID.randomUUID()}.jpg")
+                    val uri = FileProvider.getUriForFile(context, "${context.packageName}.files", file)
+                    taken = file to uri
+                    take.launch(uri)
+                },
+                enabled = !finding,
+            ) { Text(stringResource(R.string.take_photo)) }
+        }
+        if (shown != null) {
+            TextButton(onClick = onRemove) { Text(stringResource(R.string.remove_photo)) }
+        }
+    }
+}
+
+/** The side of the photo in the form of the player. */
+private val PHOTO_SIZE = 160.dp
+
+/** Tags of the photo panel and of its circle (tests). */
+const val PHOTO_PANEL = "photo_panel"
+const val PHOTO_CIRCLE = "photo_circle"
 
 /** "Also plays in: …", when they do. */
 @Composable

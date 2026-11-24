@@ -103,7 +103,7 @@ class NewSeasonViewModel(private val app: Scout4AllApplication, private val team
                         core.genders(),
                         core.classifications(),
                         season.form.country?.let { CountryChoice(it, core.countryName(it)) },
-                        core.roles(teamId),
+                        core.roles(),
                     )
                 }
             } catch (e: MobileException) {

@@ -40,13 +40,15 @@ class DeletionTest {
             }
         }
         rule.waitForText("Alessia Orro")
-        rule.onNodeWithContentDescription(string(R.string.delete_team)).performClick()
+        rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick()
+        rule.onNodeWithText(string(R.string.delete_team)).performClick()
         rule.onNodeWithText(string(R.string.permanent_deletion)).assertExists()
         rule.onNodeWithText(string(R.string.irreversible)).assertExists()
         rule.onNodeWithText(string(R.string.delete_team_text, "Italia", 1)).assertExists()
         rule.onNodeWithText(string(R.string.cancel)).performClick()
         assertEquals(listOf("Italia", "Serbia"), teams())
-        rule.onNodeWithContentDescription(string(R.string.delete_team)).performClick()
+        rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick()
+        rule.onNodeWithText(string(R.string.delete_team)).performClick()
         rule.onNodeWithText(string(R.string.delete)).performClick()
         rule.waitFor { deleted == 1 }
         assertEquals(listOf("Serbia"), teams())
@@ -69,7 +71,8 @@ class DeletionTest {
             }
         }
         rule.waitForText("Alessia Orro")
-        rule.onNodeWithContentDescription(string(R.string.delete_team)).performClick()
+        rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick()
+        rule.onNodeWithText(string(R.string.delete_team)).performClick()
         val text = string(R.string.delete_team_text, "Italia", 1) + " " + string(R.string.delete_team_kept, 1, "Italia")
         rule.waitForText(text)
         rule.onNodeWithText(string(R.string.delete)).performClick()
@@ -91,7 +94,8 @@ class DeletionTest {
             }
         }
         rule.waitForText(string(R.string.resume_set_n, 1))
-        rule.onNodeWithContentDescription(string(R.string.delete_match)).performClick()
+        rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick()
+        rule.onNodeWithText(string(R.string.delete_match)).performClick()
         rule.onNodeWithText(string(R.string.delete)).performClick()
         rule.waitFor { deleted == 1 }
         assertEquals(emptyList<MatchListing>(), core { it.matches(team) })

@@ -206,6 +206,8 @@ impl TeamWriter for SqliteTeamWriter {
                 [Sql(*team_id)],
             )
             .map_err(sqlite)?;
+            // its logo goes with it; the photos stay with the persons
+            crate::assets::set_team_logo(tx, &team_id.to_string(), None)?;
             // its training goes with it (TODO/021 §2)
             [
                 "training_sessions",

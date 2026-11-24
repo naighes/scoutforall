@@ -81,7 +81,6 @@
     <string name="serving_team">サーブ権</string>
     <string name="position_n">P%d</string>
     <string name="setter">セッター</string>
-    <string name="setter_women">セッター</string>
     <string name="libero">リベロ</string>
     <string name="fallback_libero">控えのリベロ</string>
     <string name="none">なし</string>
@@ -151,7 +150,7 @@
     <string name="zone_attacks">%d本</string>
     <string name="serve_zone">サーブのコース</string>
     <string name="zone_chosen">選択済み</string>
-    <string name="serves_by_zone">ゾーン別サーブ</string>
+    <string name="serves_by_zone">着地ゾーン別サーブ</string>
     <string name="zones_told">ゾーン指定 %1$d/%2$d本</string>
     <string name="serve_start">サーブ開始ゾーン</string>
     <string name="serves_by_start">サーブ開始ゾーン別</string>
@@ -167,7 +166,7 @@
     <string name="receptions_by_zone">ゾーン別レセプション</string>
     <string name="reception_zones_told">ゾーン指定 %1$d/%2$d本</string>
     <string name="attack_zone">アタックのコース</string>
-    <string name="attacks_by_zone">ゾーン別アタック</string>
+    <string name="attacks_by_zone">着地ゾーン別アタック</string>
     <string name="attack_zones_told">ゾーン指定 %1$d/%2$d本</string>
     <string name="dig_zone">ディグのゾーン</string>
     <string name="digs_by_zone">ゾーン別ディグ</string>
@@ -364,6 +363,7 @@
     <string name="dvw_sets">セット</string>
     <string name="dvw_next">次へ</string>
     <!-- the analysis of a team over several matches -->
+    <string name="more_actions">その他の操作</string>
     <string name="analysis">分析</string>
     <string name="period">期間</string>
     <string name="last_month">直近1か月</string>
@@ -700,4 +700,14 @@
     <plurals name="tr_sessions_count">
         <item quantity="other">セッション %d件</item>
     </plurals>
+    <string name="logo">ロゴ</string>
+    <string name="choose_logo">画像を選択</string>
+    <string name="remove_logo">ロゴを削除</string>
+    <string name="no_logo">ロゴなし</string>
+    <string name="choose_photo">写真を選ぶ</string>
+    <string name="take_photo">写真を撮る</string>
+    <string name="remove_photo">写真を削除</string>
+    <string name="no_photo">写真なし</string>
+    <string name="no_face">写真に顔が見つかりません。顔がはっきり写っている写真を選んでください。</string>
+    <string name="many_faces">写真に%1$d人の顔が見つかりました。1人だけ写っている写真を選んでください。</string>
 </resources>

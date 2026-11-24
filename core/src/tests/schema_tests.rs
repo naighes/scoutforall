@@ -144,8 +144,9 @@ mod tests {
     #[test]
     fn a_new_database_has_the_tables_of_this_version() {
         let db = db::open_in_memory().unwrap();
-        assert_eq!(db::schema_version(), 6);
+        assert_eq!(db::schema_version(), 7);
         let expected: &[(&str, &[&str])] = &[
+            ("assets", &["id", "kind", "mime", "width", "height", "data"]),
             (
                 "competitions",
                 &[
@@ -254,7 +255,15 @@ mod tests {
             ),
             (
                 "persons",
-                &["id", "name", "birth_date", "height_cm", "notes", "deleted"],
+                &[
+                    "id",
+                    "name",
+                    "birth_date",
+                    "height_cm",
+                    "notes",
+                    "deleted",
+                    "photo_asset_id",
+                ],
             ),
             (
                 "set_lineups",
@@ -305,6 +314,7 @@ mod tests {
                     "gender",
                     "country",
                     "deleted",
+                    "logo_asset_id",
                 ],
             ),
             (

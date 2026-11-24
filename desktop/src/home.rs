@@ -92,6 +92,8 @@ pub struct HomeScreen {
     selected: [usize; PANELS],
     /// a new team, being written
     editor: Option<Box<Editor>>,
+    /// the logos of the teams of the list, in its order
+    logos: Vec<Option<iced::widget::image::Handle>>,
 }
 
 fn team_id(t: &TeamListing) -> Option<String> {
@@ -103,7 +105,20 @@ fn team_id(t: &TeamListing) -> Option<String> {
 
 impl HomeScreen {
     pub fn new(core: &Scout4All, home: Home) -> HomeScreen {
+        let logos = home
+            .teams
+            .iter()
+            .map(|t| match t {
+                TeamListing::Team { id, .. } => core
+                    .team_logo(id.clone())
+                    .ok()
+                    .flatten()
+                    .and_then(|png| crate::editors::logo_handle(&png)),
+                TeamListing::Unreadable { .. } => None,
+            })
+            .collect();
         HomeScreen {
+            logos,
             home,
             week: Agenda::week(core, None, today()),
             panel: IN_PROGRESS,
@@ -153,7 +168,7 @@ impl HomeScreen {
 
     fn edited(&mut self, edited: Edited) -> Outcome {
         match edited {
-            Edited::Stay => Outcome::Stay,
+            Edited::Stay | Edited::Crop(_) => Outcome::Stay,
             Edited::Cancel => {
                 self.editor = None;
                 Outcome::Stay
@@ -282,6 +297,11 @@ impl HomeScreen {
     }
 
     #[cfg(test)]
+    pub fn logos_shown(&self) -> Vec<bool> {
+        self.logos.iter().map(Option::is_some).collect()
+    }
+
+    #[cfg(test)]
     pub fn week_shown(&self) -> Vec<(String, bool)> {
         self.week.shown_days()
     }
@@ -358,6 +378,7 @@ impl HomeScreen {
                             false => c.muted,
                         })
                         .width(Length::Fixed(22.0)),
+                        ui::logo_slot(self.logos.get(i).and_then(Option::as_ref), 28.0),
                         text(name.clone())
                             .size(SIZE_BODY)
                             .font(theme::fonts().bold)

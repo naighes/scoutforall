@@ -1,6 +1,17 @@
 package io.github.naighes.scout4all
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.text.style.TextAlign
+import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -72,11 +83,28 @@ sealed interface TeamFormState {
         val saving: Boolean = false,
         /** the form as it was read: changed, going back asks first */
         val loaded: TeamForm = form,
+        /** the logo the team has now, as PNG */
+        val stored: ByteArray? = null,
+        /** what the form does with it once saved */
+        val logo: LogoEdit = LogoEdit.Keep,
     ) : TeamFormState {
-        val changed: Boolean get() = form != loaded
+        val changed: Boolean get() = form != loaded || logo != LogoEdit.Keep
+        /** the logo the preview shows */
+        val shown: ByteArray? get() = when (logo) {
+            LogoEdit.Keep -> stored
+            is LogoEdit.Replace -> logo.bytes
+            LogoEdit.Remove -> null
+        }
     }
     /** saved: the screen goes back */
     data object Saved : TeamFormState
+}
+
+/** What the form does with the logo of the team when saved. */
+sealed interface LogoEdit {
+    data object Keep : LogoEdit
+    data object Remove : LogoEdit
+    class Replace(val bytes: ByteArray) : LogoEdit
 }
 
 /** A new team (`id` null) or one being edited. The core checks the form. */
@@ -95,6 +123,7 @@ class TeamFormViewModel(private val app: Scout4AllApplication, private val id: S
                         classifications = core.classifications(),
                         genders = core.genders(),
                         country = form.country?.let { CountryChoice(it, core.countryName(it)) },
+                        stored = id?.let { core.teamLogo(it) },
                     )
                 }
             } catch (e: MobileException) {
@@ -121,13 +150,33 @@ class TeamFormViewModel(private val app: Scout4AllApplication, private val id: S
         mutableState.update { s -> (s as? TeamFormState.Editing)?.copy(country = choice) ?: s }
     }
 
+    /** The image chosen: it has to be one, the core shrinks it on save. */
+    fun pickLogo(bytes: ByteArray) = mutableState.update { s ->
+        when {
+            s !is TeamFormState.Editing -> s
+            decodeImage(bytes) == null -> s.copy(error = app.getString(R.string.file_not_read))
+            else -> s.copy(logo = LogoEdit.Replace(bytes), error = null)
+        }
+    }
+
+    fun removeLogo() = mutableState.update { s ->
+        (s as? TeamFormState.Editing)?.copy(logo = LogoEdit.Remove, error = null) ?: s
+    }
+
     fun save() {
         val editing = mutableState.value as? TeamFormState.Editing ?: return
         if (editing.saving) return
         mutableState.value = editing.copy(saving = true)
         viewModelScope.launch {
             mutableState.value = try {
-                app.core { it.saveTeam(id, editing.form) }
+                app.core { core ->
+                    val saved = core.saveTeam(id, editing.form)
+                    when (val logo = editing.logo) {
+                        LogoEdit.Keep -> {}
+                        LogoEdit.Remove -> core.setTeamLogo(saved, null)
+                        is LogoEdit.Replace -> core.setTeamLogo(saved, logo.bytes)
+                    }
+                }
                 TeamFormState.Saved
             } catch (e: MobileException.InvalidTeam) {
                 editing.copy(invalid = e.field to e.reason, error = null)
@@ -172,6 +221,7 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
+            LogoPanel(state.shown, model::pickLogo, model::removeLogo)
             TeamFields(
                 state.form,
                 state.genders,
@@ -196,6 +246,35 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.save)) }
     }
+
+/** The logo with its preview, the buttons to choose (gallery, files) or
+ * remove it. */
+@Composable
+private fun LogoPanel(shown: ByteArray?, onPick: (ByteArray) -> Unit, onRemove: () -> Unit) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        uri ?: return@rememberLauncherForActivityResult
+        // not read: the picture is not an image either
+        scope.launch { onPick(readUri(context, uri)) }
+    }
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+            if (shown == null) {
+                Text(stringResource(R.string.no_logo), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+            } else {
+                LogoBox(shown, 96.dp)
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(R.string.logo), Modifier.title(), style = MaterialTheme.typography.titleSmall)
+            OutlinedButton(onClick = { pick.launch("image/*") }) { Text(stringResource(R.string.choose_logo)) }
+            if (shown != null) {
+                TextButton(onClick = onRemove) { Text(stringResource(R.string.remove_logo)) }
+            }
+        }
+    }
+}
 
 /** The fields of a team (of its form, of a new season), `error` the one
  * of each as the core tells. */

@@ -451,6 +451,12 @@ uniffi::custom_type!(MatchDate, String, {
 pub enum MobileError {
     #[error("{reason}")]
     Failed { reason: String },
+    /// no face in the photo chosen for a player
+    #[error("{reason}")]
+    NoFace { reason: String },
+    /// more than one face in the photo chosen for a player
+    #[error("{reason}")]
+    ManyFaces { count: u32, reason: String },
     /// a field of the team form, which the app shows next to it
     #[error("{reason}")]
     InvalidTeam { field: TeamField, reason: String },
@@ -1221,9 +1227,6 @@ pub struct Lineup {
     pub allows_fallback_libero: bool,
     /// nothing missing: the set can start
     pub complete: bool,
-    /// a women's team: the setter named in the feminine
-    #[uniffi(default)]
-    pub women: bool,
 }
 
 /// Starting a set of a match: the choices so far, which the core checks.
@@ -1245,7 +1248,7 @@ impl SetStart {
         let form = self.form();
         let player = |id: Option<Uuid>| {
             id.and_then(|id| self.team.find_player(id))
-                .map(|p| lineup_player(&self.team, p, self.labels))
+                .map(|p| lineup_player(p, self.labels))
         };
         Lineup {
             set_number: form.set_number,
@@ -1263,7 +1266,6 @@ impl SetStart {
                 true => form.validate_side(&self.team).is_ok(),
                 false => form.clone().validate(&self.team).is_ok(),
             },
-            women: self.team.gender == Some(GenderEnum::Women),
         }
     }
 
@@ -1329,7 +1331,7 @@ impl SetStart {
     fn choices(&self, players: Vec<&PlayerEntry>) -> Vec<LineupPlayer> {
         let mut choices: Vec<LineupPlayer> = players
             .into_iter()
-            .map(|p| lineup_player(&self.team, p, self.labels))
+            .map(|p| lineup_player(p, self.labels))
             .collect();
         choices.sort_by_key(|p| p.number);
         choices
@@ -1601,9 +1603,6 @@ pub struct CorrectionState {
 /// What the scouting screen shows.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
 pub struct ScoutingState {
-    /// a women's team: the setter named in the feminine
-    #[uniffi(default)]
-    pub women: bool,
     pub set_number: u8,
     pub team: String,
     pub opponent: String,
@@ -2231,7 +2230,6 @@ impl Scouting {
             }
         };
         ScoutingState {
-            women: team.gender == Some(GenderEnum::Women),
             set_number: session.set().set_number,
             team: team.name.clone(),
             opponent: session
@@ -2260,7 +2258,7 @@ impl Scouting {
             player: session
                 .player()
                 .and_then(|id| team.find_player(id))
-                .map(|p| self.scouting_player(team, p)),
+                .map(|p| self.scouting_player(p)),
             events,
             ball: snapshot.get_ball_side(),
             last_touch: snapshot
@@ -2882,7 +2880,7 @@ fn detail_of(
     let player_of = |id: Uuid| {
         teams
             .iter()
-            .find_map(|t| t.find_player(id).map(|p| scouting_player(t, p, labels)))
+            .find_map(|t| t.find_player(id).map(|p| scouting_player(p, labels)))
     };
     let (fundamental, freeballs) =
         match Breakdown::from_start(stats, event, &narrowed, filter.serve_start) {
@@ -3113,7 +3111,7 @@ pub(crate) fn choosable(
         .filter_map(|id| {
             teams
                 .iter()
-                .find_map(|t| t.find_player(id).map(|p| scouting_player(t, p, labels)))
+                .find_map(|t| t.find_player(id).map(|p| scouting_player(p, labels)))
         })
         .collect();
     players.sort_by_key(|p| p.number);
@@ -3156,7 +3154,7 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
         player: e
             .player
             .and_then(|id| team.find_player(id))
-            .map(|p| scouting_player(team, p, labels)),
+            .map(|p| scouting_player(p, labels)),
         eval: e.eval.map(|v| v.friendly_name(e.event_type, labels)),
         symbol: e.eval.map(|v| v.to_string()),
         technique: e.technique.map(|t| t.to_string()),
@@ -3168,14 +3166,14 @@ fn scouted_event(team: &TeamEntry, e: &EventEntry, labels: &Labels) -> ScoutedEv
 }
 
 /// The player of `team`, the role in its gender.
-fn scouting_player(team: &TeamEntry, p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
+fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
     ScoutingPlayer {
         id: p.id.to_string(),
         name: p.name.clone(),
         number: p.number,
         role: p
             .role
-            .map_or_else(String::new, |r| r.name(team.gender, labels).to_string()),
+            .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
     }
 }
 
@@ -3330,7 +3328,7 @@ impl Scouting {
         choices
             .into_iter()
             .filter_map(|c| session.team().find_player(c.id))
-            .map(|p| self.scouting_player(session.team(), p))
+            .map(|p| self.scouting_player(p))
             .collect()
     }
 
@@ -3351,8 +3349,8 @@ impl Scouting {
         scouted_event(team, e, self.labels)
     }
 
-    fn scouting_player(&self, team: &TeamEntry, p: &PlayerEntry) -> ScoutingPlayer {
-        scouting_player(team, p, self.labels)
+    fn scouting_player(&self, p: &PlayerEntry) -> ScoutingPlayer {
+        scouting_player(p, self.labels)
     }
 }
 
@@ -4632,16 +4630,14 @@ impl Scout4All {
             .collect()
     }
 
-    /// The roles to give a player of the team, in its gender (a team not
-    /// read: as a men's).
-    pub fn roles(&self, team_id: String) -> Vec<RoleChoice> {
+    /// The roles to give a player, the same in every team.
+    pub fn roles(&self) -> Vec<RoleChoice> {
         let labels = self.language.labels();
-        let gender = self.read_team(&team_id).ok().and_then(|t| t.gender);
         RoleEnum::ALL
             .iter()
             .map(|r| RoleChoice {
                 value: *r,
-                name: r.name(gender, labels).to_string(),
+                name: r.friendly_name(labels).to_string(),
             })
             .collect()
     }
@@ -4879,6 +4875,62 @@ impl Scout4All {
             log_error(&format!("could not pin the new team: {e:?}"));
         }
         Ok(team.id.to_string())
+    }
+
+    /// The logo of the team as PNG, if it has one.
+    pub fn team_logo(&self, team_id: String) -> Result<Option<Vec<u8>>, MobileError> {
+        Ok(scout4all_core::assets::team_logo(&self.db, &team_id)?.map(|image| image.data))
+    }
+
+    /// The image the file holds becomes the logo of the team (shrunk, as
+    /// PNG), `None` removes it; the team is left as it is if the image
+    /// can't be read.
+    pub fn set_team_logo(
+        &self,
+        team_id: String,
+        bytes: Option<Vec<u8>>,
+    ) -> Result<(), MobileError> {
+        Ok(scout4all_core::assets::store_team_logo(
+            &self.db,
+            &team_id,
+            bytes.as_deref(),
+        )?)
+    }
+
+    /// The photo of the person (the player's id is theirs) as JPEG, if
+    /// they have one.
+    pub fn person_photo(&self, person_id: String) -> Result<Option<Vec<u8>>, MobileError> {
+        Ok(scout4all_core::assets::person_photo(&self.db, &person_id)?.map(|image| image.data))
+    }
+
+    /// The face the photo holds, cropped (square PNG): for the preview, then
+    /// `set_person_photo`. No face or many faces are errors of their own.
+    pub fn crop_face(&self, bytes: Vec<u8>) -> Result<Vec<u8>, MobileError> {
+        use scout4all_core::faces::{PhotoError, crop_face};
+        crop_face(&bytes).map_err(|e| match e {
+            PhotoError::NoFace => MobileError::NoFace {
+                reason: e.to_string(),
+            },
+            PhotoError::ManyFaces(n) => MobileError::ManyFaces {
+                count: u32::try_from(n).unwrap_or(u32::MAX),
+                reason: e.to_string(),
+            },
+            PhotoError::Image(e) => e.into(),
+        })
+    }
+
+    /// The face cropped (`core::faces::crop_face`) becomes the photo of the
+    /// person (as JPEG), `None` removes it.
+    pub fn set_person_photo(
+        &self,
+        person_id: String,
+        bytes: Option<Vec<u8>>,
+    ) -> Result<(), MobileError> {
+        Ok(scout4all_core::assets::store_person_photo(
+            &self.db,
+            &person_id,
+            bytes.as_deref(),
+        )?)
     }
 
     /// The archive of the team, its players without its matches.
@@ -5780,10 +5832,7 @@ impl Scout4All {
                 id: c.player.id,
                 name: c.player.name,
                 number: c.player.number,
-                role: c
-                    .player
-                    .role
-                    .map(|r| r.name(team.gender, labels).to_string()),
+                role: c.player.role.map(|r| r.friendly_name(labels).to_string()),
                 chosen: c.chosen,
                 played: c.played,
                 role_value: c.player.role,
@@ -5824,7 +5873,7 @@ impl Scout4All {
                     name: p.name.clone(),
                     number: m.number,
                     role: m.role,
-                    role_name: m.role.map(|r| r.name(team.gender, labels).to_string()),
+                    role_name: m.role.map(|r| r.friendly_name(labels).to_string()),
                     chosen: m.chosen,
                 })
             })
@@ -5904,13 +5953,13 @@ fn index(position: u8) -> usize {
     usize::from(position).wrapping_sub(1)
 }
 
-fn lineup_player(team: &TeamEntry, p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
+fn lineup_player(p: &PlayerEntry, labels: &Labels) -> LineupPlayer {
     LineupPlayer {
         id: p.id.to_string(),
         name: p.name.clone(),
         number: p.number,
         role: p.role,
-        role_name: p.role.map(|r| r.name(team.gender, labels).to_string()),
+        role_name: p.role.map(|r| r.friendly_name(labels).to_string()),
     }
 }
 
@@ -6087,7 +6136,7 @@ fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
             id: p.id.to_string(),
             name: p.name.clone(),
             number: p.number,
-            role: p.role.map(|r| r.name(team.gender, labels).to_string()),
+            role: p.role.map(|r| r.friendly_name(labels).to_string()),
             form: PlayerForm::of(p),
         })
         .collect();
@@ -6698,6 +6747,49 @@ mod tests {
         assert!(config.get("language").is_some(), "{config}");
     }
 
+    /// The opponent made from the match form starts unpinned, as the
+    /// imported teams; the teams made by hand start pinned.
+    #[test]
+    fn the_opponent_made_in_the_match_form_is_not_pinned() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        app.accept_terms().unwrap();
+        let team = app.save_team(None, form("Pisa")).unwrap();
+        for n in 1..=7 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n}"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        app.save_match(
+            team,
+            None,
+            MatchForm {
+                create_opponent: true,
+                ..match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8")
+            },
+        )
+        .unwrap();
+        let pins: Vec<(String, bool)> = app
+            .teams()
+            .unwrap()
+            .into_iter()
+            .filter_map(|t| match t {
+                TeamListing::Team { name, pinned, .. } => Some((name, pinned)),
+                TeamListing::Unreadable { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            pins,
+            [("Pisa", true), ("Arezzo", false)]
+                .map(|(n, p)| (n.to_string(), p))
+                .to_vec()
+        );
+    }
+
     #[test]
     fn an_invalid_form_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
@@ -6993,12 +7085,12 @@ mod tests {
             .collect();
         assert_eq!(listed, vec![("Bea", 3), ("Anna", 12)]);
         assert_eq!(players[1].id, anna);
-        // a women's team: the roles in the feminine
-        assert_eq!(players[1].role.as_deref(), Some("palleggiatrice"));
+        // the roles are neutral, in a women's team too
+        assert_eq!(players[1].role.as_deref(), Some("palleggiatore"));
         assert_eq!(players[1].form, player("Anna", "12"));
-        let roles = app.roles(team.clone());
+        let roles = app.roles();
         let setter = roles.iter().find(|r| r.value == RoleEnum::Setter);
-        assert_eq!(setter.map(|r| r.name.as_str()), Some("palleggiatrice"));
+        assert_eq!(setter.map(|r| r.name.as_str()), Some("palleggiatore"));
         let men = app
             .save_team(
                 None,
@@ -9121,6 +9213,53 @@ mod tests {
                 efficiency: None
             })
         );
+    }
+
+    /// Our attack by the zone it went to is shown as our serve: their
+    /// court as our server sees it, 1 6 5 / 9 8 7 / 2 3 4.
+    #[test]
+    fn the_attacks_by_zone_as_the_serves() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = match_with_a_set(&app);
+        let scouting = started_set(&app, &team, &m);
+        // our serve in the net, their serve received, then our attack to 9
+        scouting.choose_eval(EvalEnum::Error).unwrap();
+        scouting.choose_event(EventTypeEnum::P).unwrap();
+        let player = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(player).unwrap();
+        scouting.touch_target(6, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        scouting.choose_event(EventTypeEnum::A).unwrap();
+        let attacker = scouting.player_choices().into_iter().next().unwrap().id;
+        scouting.choose_player(attacker).unwrap();
+        scouting.touch_target(9, "A".into()).unwrap();
+        scouting.choose_eval(EvalEnum::Positive).unwrap();
+        let attack = scouting
+            .detail(StatsScope::Match, EventTypeEnum::A, DetailFilter::default())
+            .unwrap()
+            .fundamental
+            .unwrap();
+        let rows: Vec<Vec<&str>> = attack
+            .targets
+            .iter()
+            .map(|row| row.iter().map(|t| t.label.as_str()).collect())
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                vec!["1", "6", "5"],
+                vec!["9", "8", "7"],
+                vec!["2", "3", "4"]
+            ]
+        );
+        let z9 = attack
+            .targets
+            .iter()
+            .flatten()
+            .find(|t| t.label == "9")
+            .unwrap();
+        assert_eq!((z9.count, z9.share), (1.0, 100.0));
     }
 
     /// Where our serve starts from: the five zones from the left as our

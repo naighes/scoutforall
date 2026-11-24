@@ -268,6 +268,9 @@ pub struct StatsScreen {
     core: Arc<Scout4All>,
     pub team_id: String,
     pub source: Source,
+    /// the photos of the players of the team, by player id (the players of
+    /// team B have none)
+    photos: std::collections::HashMap<String, iced::widget::image::Handle>,
     title: String,
     page: usize,
     scope: StatsScope,
@@ -760,6 +763,7 @@ impl StatsScreen {
         let today = Local::now().date_naive();
         let choices = core.situation_choices();
         StatsScreen {
+            photos: crate::editors::team_photos(&core, &team_id),
             core,
             team_id,
             source,
@@ -3074,6 +3078,7 @@ impl StatsScreen {
                     .font(theme::fonts().bold)
                     .color(c.accent)
                     .width(Length::Fixed(30.0)),
+                ui::logo_slot(self.photos.get(&p.player.id), 24.0),
                 ui::name(p.player.name.clone()),
                 num(p.total.to_string(), 44.0),
                 text(pct(p.efficiency))
@@ -4282,6 +4287,24 @@ pub(crate) mod tests {
                 .map(|l| (l.team_name.as_str(), l.opponent.as_str())),
             Some(("Cortona", "Siena"))
         );
+    }
+
+    /// The photos of the players are read for the table of the players.
+    #[test]
+    fn the_photo_of_a_player_is_read_for_the_statistics() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let m = match core.matches(team.clone()).unwrap().into_iter().next() {
+            Some(scout4all_mobile::MatchListing::Match { id, .. }) => id,
+            _ => unreachable!("a match"),
+        };
+        let open = || StatsScreen::new(core.clone(), team.clone(), m.clone()).unwrap();
+        assert!(open().photos.is_empty());
+        let first = core.team(team.clone()).unwrap().players[0].id.clone();
+        core.set_person_photo(first.clone(), Some(crate::scouting::tests::PNG.to_vec()))
+            .unwrap();
+        assert_eq!(open().photos.keys().collect::<Vec<_>>(), vec![&first]);
     }
 
     /// The detail of a match has the filters on the situation too.
