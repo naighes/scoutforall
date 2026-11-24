@@ -154,10 +154,9 @@ pub fn load(db: &Connection, id: &str) -> Result<Option<Image>, AppError> {
         |row| {
             let mime: String = row.get(0)?;
             Ok(Image {
-                mime: if mime == "image/png" {
-                    "image/png"
-                } else {
-                    "image/jpeg"
+                mime: match mime.as_str() {
+                    "image/png" => "image/png",
+                    _ => "image/jpeg",
                 },
                 width: row.get(1)?,
                 height: row.get(2)?,
