@@ -62,7 +62,7 @@ class ScreensLayoutTest(private val screen: Size) {
     @Test
     fun theTeam() {
         val team = saveNationalTeam()
-        assertFits("team", "Ekaterina Antropova") {
+        assertFits("team", "Monica De Gennaro") {
             TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
         }
     }
@@ -76,7 +76,7 @@ class ScreensLayoutTest(private val screen: Size) {
                 TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
             }
         }
-        rule.waitForText("Ekaterina Antropova")
+        rule.waitForText("Monica De Gennaro")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         // today, always in the week, may push the match below a short screen
         rule.waitForText(string(R.string.agenda_week))
@@ -128,7 +128,7 @@ class ScreensLayoutTest(private val screen: Size) {
                 TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
             }
         }
-        rule.waitForText("Ekaterina Antropova")
+        rule.waitForText("Monica De Gennaro")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(title)
         rule.shot("screen-team-week-$screen")
