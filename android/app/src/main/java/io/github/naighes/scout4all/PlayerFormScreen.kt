@@ -5,6 +5,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.testTag
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.OutlinedButton
@@ -438,17 +442,28 @@ private fun PhotoPanel(shown: ByteArray?, finding: Boolean, onPick: (ByteArray) 
             }
         }
     }
-    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+    // the face in a circle, centred, its buttons right below
+    Column(
+        Modifier.fillMaxWidth().testTag(PHOTO_PANEL),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            Modifier.size(PHOTO_SIZE).clip(CircleShape).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                .testTag(PHOTO_CIRCLE),
+            contentAlignment = Alignment.Center,
+        ) {
             when {
                 finding -> CircularProgressIndicator()
                 shown == null ->
                     Text(stringResource(R.string.no_photo), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
-                else -> LogoBox(shown, 96.dp)
+                else -> LogoBox(shown, PHOTO_SIZE)
             }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(stringResource(R.string.photo), Modifier.title(), style = MaterialTheme.typography.titleSmall)
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
             OutlinedButton(onClick = { pick.launch("image/*") }, enabled = !finding) {
                 Text(stringResource(R.string.choose_photo))
             }
@@ -461,12 +476,19 @@ private fun PhotoPanel(shown: ByteArray?, finding: Boolean, onPick: (ByteArray) 
                 },
                 enabled = !finding,
             ) { Text(stringResource(R.string.take_photo)) }
-            if (shown != null) {
-                TextButton(onClick = onRemove) { Text(stringResource(R.string.remove_photo)) }
-            }
+        }
+        if (shown != null) {
+            TextButton(onClick = onRemove) { Text(stringResource(R.string.remove_photo)) }
         }
     }
 }
+
+/** The side of the photo in the form of the player. */
+private val PHOTO_SIZE = 160.dp
+
+/** Tags of the photo panel and of its circle (tests). */
+const val PHOTO_PANEL = "photo_panel"
+const val PHOTO_CIRCLE = "photo_circle"
 
 /** "Also plays in: …", when they do. */
 @Composable

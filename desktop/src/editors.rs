@@ -1966,8 +1966,8 @@ impl Editor {
         }
     }
 
-    /// The photo of the player: its picture (or the empty box) and the
-    /// buttons.
+    /// The photo of the player: the face in a circle, centred, its buttons
+    /// right below.
     fn photo_panel<'a, M: Clone + 'a>(
         p: &'a PlayerEditor,
         s: &'static Strings,
@@ -1979,6 +1979,7 @@ impl Editor {
                 .width(Length::Fixed(LOGO_BOX))
                 .height(Length::Fixed(LOGO_BOX))
                 .content_fit(iced::ContentFit::Cover)
+                .border_radius(LOGO_BOX / 2.0)
                 .into(),
             None => container(text(s.no_photo).size(SIZE_SMALL).color(c.muted))
                 .center_x(Length::Fixed(LOGO_BOX))
@@ -1987,7 +1988,7 @@ impl Editor {
                     border: iced::Border {
                         color: c.border,
                         width: 1.0,
-                        radius: 8.0.into(),
+                        radius: (LOGO_BOX / 2.0).into(),
                     },
                     ..container::Style::default()
                 })
@@ -1995,21 +1996,26 @@ impl Editor {
         };
         column![
             ui::section(s.photo, c),
-            picture,
-            ui::action(
-                theme::icons::EDIT,
-                s.choose_photo,
-                on(form::Message::PickPhoto),
-                false,
-                c
-            ),
-            ui::action_maybe(
-                theme::icons::DELETE,
-                s.remove_photo,
-                p.shown.is_some().then(|| on(form::Message::RemovePhoto)),
-                false,
-                c
-            ),
+            column![
+                picture,
+                ui::action(
+                    theme::icons::EDIT,
+                    s.choose_photo,
+                    on(form::Message::PickPhoto),
+                    false,
+                    c
+                ),
+                ui::action_maybe(
+                    theme::icons::DELETE,
+                    s.remove_photo,
+                    p.shown.is_some().then(|| on(form::Message::RemovePhoto)),
+                    false,
+                    c
+                ),
+            ]
+            .spacing(10)
+            .width(Length::Fill)
+            .align_x(iced::Alignment::Center),
         ]
         .spacing(10)
         .into()
