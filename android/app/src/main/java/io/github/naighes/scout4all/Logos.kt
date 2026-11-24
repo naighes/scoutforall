@@ -46,3 +46,14 @@ fun LogoBox(bytes: ByteArray?, size: Dp, modifier: Modifier = Modifier) {
         }
     }
 }
+
+/** The bytes of the file or picture at `uri`, empty when it can't be read
+ * (so not an image either). */
+suspend fun readUri(context: android.content.Context, uri: android.net.Uri): ByteArray =
+    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        try {
+            context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+        } catch (e: java.io.IOException) {
+            null
+        } ?: ByteArray(0)
+    }

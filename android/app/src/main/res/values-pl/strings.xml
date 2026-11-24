@@ -722,4 +722,11 @@
     <string name="choose_logo">Wybierz obraz</string>
     <string name="remove_logo">Usuń logo</string>
     <string name="no_logo">Brak logo</string>
+    <string name="photo">Zdjęcie</string>
+    <string name="choose_photo">Wybierz zdjęcie</string>
+    <string name="take_photo">Zrób zdjęcie</string>
+    <string name="remove_photo">Usuń zdjęcie</string>
+    <string name="no_photo">Brak zdjęcia</string>
+    <string name="no_face">Nie znaleziono twarzy na zdjęciu: wybierz takie, na którym twarz jest wyraźna.</string>
+    <string name="many_faces">Znaleziono %1$d twarzy na zdjęciu: wybierz takie z jedną osobą.</string>
 </resources>

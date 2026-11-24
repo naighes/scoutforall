@@ -451,6 +451,12 @@ uniffi::custom_type!(MatchDate, String, {
 pub enum MobileError {
     #[error("{reason}")]
     Failed { reason: String },
+    /// no face in the photo chosen for a player
+    #[error("{reason}")]
+    NoFace { reason: String },
+    /// more than one face in the photo chosen for a player
+    #[error("{reason}")]
+    ManyFaces { count: u32, reason: String },
     /// a field of the team form, which the app shows next to it
     #[error("{reason}")]
     InvalidTeam { field: TeamField, reason: String },
@@ -4895,6 +4901,22 @@ impl Scout4All {
     /// they have one.
     pub fn person_photo(&self, person_id: String) -> Result<Option<Vec<u8>>, MobileError> {
         Ok(scout4all_core::assets::person_photo(&self.db, &person_id)?.map(|image| image.data))
+    }
+
+    /// The face the photo holds, cropped (square PNG): for the preview, then
+    /// `set_person_photo`. No face or many faces are errors of their own.
+    pub fn crop_face(&self, bytes: Vec<u8>) -> Result<Vec<u8>, MobileError> {
+        use scout4all_core::faces::{PhotoError, crop_face};
+        crop_face(&bytes).map_err(|e| match e {
+            PhotoError::NoFace => MobileError::NoFace {
+                reason: e.to_string(),
+            },
+            PhotoError::ManyFaces(n) => MobileError::ManyFaces {
+                count: u32::try_from(n).unwrap_or(u32::MAX),
+                reason: e.to_string(),
+            },
+            PhotoError::Image(e) => e.into(),
+        })
     }
 
     /// The face cropped (`core::faces::crop_face`) becomes the photo of the

@@ -255,17 +255,8 @@ private fun LogoPanel(shown: ByteArray?, onPick: (ByteArray) -> Unit, onRemove: 
     val scope = rememberCoroutineScope()
     val pick = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
         uri ?: return@rememberLauncherForActivityResult
-        scope.launch {
-            val bytes = withContext(Dispatchers.IO) {
-                try {
-                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                } catch (e: IOException) {
-                    null
-                }
-            }
-            // not read: the picture is not an image either
-            onPick(bytes ?: ByteArray(0))
-        }
+        // not read: the picture is not an image either
+        scope.launch { onPick(readUri(context, uri)) }
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {

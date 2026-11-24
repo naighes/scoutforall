@@ -710,4 +710,11 @@
     <string name="choose_logo">Scegli un\'immagine</string>
     <string name="remove_logo">Rimuovi il logo</string>
     <string name="no_logo">Nessun logo</string>
+    <string name="photo">Foto</string>
+    <string name="choose_photo">Scegli una foto</string>
+    <string name="take_photo">Scatta una foto</string>
+    <string name="remove_photo">Rimuovi la foto</string>
+    <string name="no_photo">Nessuna foto</string>
+    <string name="no_face">Nessun volto trovato nella foto: scegline una in cui il volto sia ben visibile.</string>
+    <string name="many_faces">Trovati %1$d volti nella foto: scegline una con una sola persona.</string>
 </resources>

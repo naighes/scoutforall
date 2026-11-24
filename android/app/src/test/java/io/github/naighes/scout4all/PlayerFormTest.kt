@@ -170,4 +170,62 @@ class PlayerFormTest {
         rule.waitFor { done == 1 }
         assertEquals("", players().single().form.birthDate)
     }
+
+    private fun fixture(name: String) = javaClass.classLoader!!.getResourceAsStream(name)!!.use { it.readBytes() }
+
+    private fun modelOf(player: String): PlayerFormViewModel {
+        val model = rule.runOnUiThread { PlayerFormViewModel(app, team, player) }
+        rule.waitFor { model.state.value is PlayerFormState.Editing }
+        return model
+    }
+
+    private fun editing(model: PlayerFormViewModel) = model.state.value as PlayerFormState.Editing
+
+    @Test
+    fun thePhotoOfAPlayerIsChosenStoredWithTheFormAndRemoved() {
+        val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
+        val model = modelOf(player)
+        rule.runOnUiThread { model.pickPhoto(fixture("solvay_one_face.jpg")) }
+        rule.waitFor { !editing(model).finding }
+        assertEquals(null, editing(model).error)
+        assertEquals(true, editing(model).changed)
+        assertEquals(true, editing(model).shown != null)
+        // stored with the save, not before
+        assertEquals(null, core { it.personPhoto(player) })
+        rule.runOnUiThread { model.save() }
+        rule.waitFor { model.state.value == PlayerFormState.Done }
+        assertEquals(true, core { it.personPhoto(player) } != null)
+        // read again by the form, removed
+        val again = modelOf(player)
+        assertEquals(true, editing(again).shown != null)
+        rule.runOnUiThread { again.removePhoto() }
+        rule.runOnUiThread { again.save() }
+        rule.waitFor { again.state.value == PlayerFormState.Done }
+        assertEquals(null, core { it.personPhoto(player) })
+    }
+
+    @Test
+    fun aNewPlayerGetsThePhotoChosenInItsForm() {
+        val model = rule.runOnUiThread { PlayerFormViewModel(app, team, null) }
+        rule.waitFor { model.state.value is PlayerFormState.Editing }
+        rule.runOnUiThread { model.change(null) { it.copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER) } }
+        rule.runOnUiThread { model.pickPhoto(fixture("solvay_one_face.jpg")) }
+        rule.waitFor { !editing(model).finding }
+        rule.runOnUiThread { model.save() }
+        rule.waitFor { model.state.value == PlayerFormState.Done }
+        assertEquals(true, core { it.personPhoto(players().single().id) } != null)
+    }
+
+    @Test
+    fun aPhotoWithoutOrWithManyFacesIsAnErrorOfTheForm() {
+        val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
+        val model = modelOf(player)
+        rule.runOnUiThread { model.pickPhoto(fixture("solvay_three_faces.jpg")) }
+        rule.waitFor { !editing(model).finding }
+        assertEquals(string(R.string.many_faces, 3), editing(model).error)
+        rule.runOnUiThread { model.pickPhoto(ByteArray(0)) }
+        rule.waitFor { !editing(model).finding }
+        assertEquals(string(R.string.file_not_read), editing(model).error)
+        assertEquals(false, editing(model).changed)
+    }
 }

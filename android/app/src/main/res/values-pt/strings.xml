@@ -710,4 +710,11 @@
     <string name="choose_logo">Escolher uma imagem</string>
     <string name="remove_logo">Remover o logo</string>
     <string name="no_logo">Sem logo</string>
+    <string name="photo">Foto</string>
+    <string name="choose_photo">Escolher uma foto</string>
+    <string name="take_photo">Tirar uma foto</string>
+    <string name="remove_photo">Remover a foto</string>
+    <string name="no_photo">Sem foto</string>
+    <string name="no_face">Nenhum rosto encontrado na foto: escolha uma em que o rosto esteja nítido.</string>
+    <string name="many_faces">%1$d rostos encontrados na foto: escolha uma com uma só pessoa.</string>
 </resources>
