@@ -189,20 +189,7 @@ impl ScoutingScreen {
     /// The photos of the players of the team, shown beside the names of
     /// the players to choose.
     pub fn with_photos(mut self, core: &scout4all_mobile::Scout4All) -> Self {
-        self.photos = core
-            .team(self.team_id.clone())
-            .map(|details| details.players)
-            .unwrap_or_default()
-            .into_iter()
-            .filter_map(|p| {
-                let handle = core
-                    .person_photo(p.id.clone())
-                    .ok()
-                    .flatten()
-                    .and_then(|jpeg| crate::editors::logo_handle(&jpeg))?;
-                Some((p.id, handle))
-            })
-            .collect();
+        self.photos = crate::editors::team_photos(core, &self.team_id);
         self
     }
 
@@ -2129,7 +2116,7 @@ pub(crate) mod tests {
     }
 
     /// A 1x1 red PNG.
-    const PNG: &[u8] = &[
+    pub(crate) const PNG: &[u8] = &[
         0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
         0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
         0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x38,

@@ -462,17 +462,20 @@ private fun PlayerPicker(pick: Pick, lineup: Lineup, model: SetStartViewModel, m
                 ListItem(
                     modifier = Modifier.clickable { model.choose(pick, player.id) },
                     leadingContent = {
-                        Box(Modifier.width(40.dp), contentAlignment = Alignment.CenterEnd) {
-                            Text(
-                                player.number.toString(),
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (player.id == current?.id) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                            )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Box(Modifier.width(40.dp), contentAlignment = Alignment.CenterEnd) {
+                                Text(
+                                    player.number.toString(),
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = if (player.id == current?.id) {
+                                        MaterialTheme.colorScheme.primary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                            PlayerPhoto(player.id, 40.dp)
                         }
                     },
                     headlineContent = { Text(player.name) },

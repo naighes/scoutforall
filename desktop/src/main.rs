@@ -598,7 +598,8 @@ impl App {
                         of_b,
                         open.team_id,
                         open.match_id,
-                    )))
+                    )
+                    .with_photos(&core)))
                 }),
             Go::Scout(open) => core
                 .scouting_in_order(&open.team_id, &open.match_id, ChoiceOrder::EventFirst)

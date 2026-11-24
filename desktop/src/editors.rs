@@ -81,6 +81,26 @@ enum LogoEdit {
     Replace(Vec<u8>),
 }
 
+/// The photos of the players of a team, by player id: only who has one.
+pub fn team_photos(
+    core: &scout4all_mobile::Scout4All,
+    team_id: &str,
+) -> std::collections::HashMap<String, iced::widget::image::Handle> {
+    core.team(team_id.to_string())
+        .map(|details| details.players)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|p| {
+            let handle = core
+                .person_photo(p.id.clone())
+                .ok()
+                .flatten()
+                .and_then(|jpeg| logo_handle(&jpeg))?;
+            Some((p.id, handle))
+        })
+        .collect()
+}
+
 /// The picture of the logo as the core keeps it, ready to show.
 pub fn logo_handle(png: &[u8]) -> Option<iced::widget::image::Handle> {
     let (width, height, pixels) = scout4all_core::assets::Image {
