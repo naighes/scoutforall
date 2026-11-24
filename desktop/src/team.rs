@@ -116,6 +116,8 @@ pub struct TeamScreen {
     mode: Mode,
     error: Option<String>,
     logo: Option<iced::widget::image::Handle>,
+    /// the photos of the players of the list, in its order
+    photos: Vec<Option<iced::widget::image::Handle>>,
 }
 
 impl TeamScreen {
@@ -128,8 +130,10 @@ impl TeamScreen {
             chrono::Local::now().date_naive(),
         );
         let logo = TeamScreen::logo_of(&core, &team_id);
+        let photos = TeamScreen::photos_of(&core, &details);
         Ok(TeamScreen {
             logo,
+            photos,
             core,
             team_id,
             details,
@@ -148,6 +152,28 @@ impl TeamScreen {
             .ok()
             .flatten()
             .and_then(|png| crate::editors::logo_handle(&png))
+    }
+
+    fn photos_of(
+        core: &Scout4All,
+        details: &TeamDetails,
+    ) -> Vec<Option<iced::widget::image::Handle>> {
+        details
+            .players
+            .iter()
+            .map(|p| {
+                core.person_photo(p.id.clone())
+                    .ok()
+                    .flatten()
+                    .and_then(|jpeg| crate::editors::logo_handle(&jpeg))
+            })
+            .collect()
+    }
+
+    /// The photos of the players of the list, shown or not.
+    #[cfg(test)]
+    pub fn photos_shown(&self) -> Vec<bool> {
+        self.photos.iter().map(Option::is_some).collect()
     }
 
     pub fn title(&self) -> String {
@@ -170,6 +196,7 @@ impl TeamScreen {
                 self.game = self.game.min(self.matches.len().saturating_sub(1));
                 self.week.reload(&self.core);
                 self.logo = TeamScreen::logo_of(&self.core, &self.team_id);
+                self.photos = TeamScreen::photos_of(&self.core, &self.details);
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -724,6 +751,7 @@ impl TeamScreen {
         let rows = self.details.players.iter().enumerate().map(|(i, p)| {
             ui::list_row(
                 row![
+                    ui::logo_slot(self.photos.get(i).and_then(Option::as_ref), 28.0),
                     text(p.number.to_string())
                         .size(SIZE_BODY)
                         .font(theme::fonts().bold)
@@ -1322,6 +1350,33 @@ mod tests {
         team.reload();
         assert!(team.logo.is_none());
         let _ = s;
+    }
+
+    /// The photo of a player is read for the list of the team, and is gone
+    /// with its removal.
+    #[test]
+    fn the_photo_of_a_player_is_read_for_the_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (team_id, anna) = senior(&core);
+        let mut team = TeamScreen::new(core.clone(), team_id).unwrap();
+        assert!(team.photos_shown().iter().all(|shown| !shown));
+        assert_eq!(team.photos_shown().len(), team.details.players.len());
+        core.set_person_photo(anna.clone(), Some(PNG.to_vec()))
+            .unwrap();
+        team.reload();
+        let with: Vec<&str> = team
+            .details
+            .players
+            .iter()
+            .zip(team.photos_shown())
+            .filter(|(_, shown)| *shown)
+            .map(|(p, _)| p.id.as_str())
+            .collect();
+        assert_eq!(with, vec![anna.as_str()]);
+        core.set_person_photo(anna, None).unwrap();
+        team.reload();
+        assert!(team.photos_shown().iter().all(|shown| !shown));
     }
 
     /// A team of 2025 with Anna Rossi (9, setter, with her details) and
