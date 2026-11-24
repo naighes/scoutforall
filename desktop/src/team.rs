@@ -1169,6 +1169,47 @@ mod tests {
         assert!(core.home().unwrap().teams.is_empty());
     }
 
+    /// A 1x1 red PNG.
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x38,
+        0x21, 0x27, 0xf7, 0x1f, 0x00, 0x04, 0xba, 0x02, 0x04, 0x3e, 0x57, 0x1f, 0xc7, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
+    /// The logo of a team: chosen, saved with the team, replaced by a file
+    /// that isn't an image (refused, the saved one stays), removed.
+    #[test]
+    fn the_logo_of_a_team_is_chosen_and_removed() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team_id = core.save_team(None, team_form("Arezzo")).unwrap();
+        assert!(core.team_logo(team_id.clone()).unwrap().is_none());
+        let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
+        team.update(s, Message::EditTeam);
+        team.update(s, Message::Form(form::Message::LogoFile(PNG.to_vec())));
+        // chosen, not saved yet
+        assert!(core.team_logo(team_id.clone()).unwrap().is_none());
+        team.update(s, Message::Form(Save));
+        assert!(core.team_logo(team_id.clone()).unwrap().is_some());
+        // not an image: an error on the form, the logo stays
+        team.update(s, Message::EditTeam);
+        team.update(s, Message::Form(form::Message::LogoFile(b"no".to_vec())));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(editor.form.error.is_some());
+        team.update(s, Message::Form(Save));
+        assert!(core.team_logo(team_id.clone()).unwrap().is_some());
+        // removed
+        team.update(s, Message::EditTeam);
+        team.update(s, Message::Form(form::Message::RemoveLogo));
+        team.update(s, Message::Form(Save));
+        assert!(core.team_logo(team_id).unwrap().is_none());
+    }
+
     /// A team of 2025 with Anna Rossi (9, setter, with her details) and
     /// six more players; its id and Anna's.
     fn senior(core: &Scout4All) -> (String, String) {

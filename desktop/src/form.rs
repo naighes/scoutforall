@@ -344,6 +344,11 @@ pub enum Message {
     /// the other answer of a question asked over the form (not the one
     /// Save gives, not Cancel): for the screen, the form stays as it is
     Another,
+    /// the image of a team to be chosen from a file (the screen asks)
+    PickLogo,
+    /// the bytes of the file of the logo
+    LogoFile(Vec<u8>),
+    RemoveLogo,
     Save,
     Cancel,
 }
@@ -903,7 +908,11 @@ impl Form {
                 Some((field, _)) => self.write(field, day.format("%Y-%m-%d").to_string()),
                 None => Outcome::Stay,
             },
-            Message::Details(_) | Message::Another => Outcome::Stay,
+            Message::Details(_)
+            | Message::Another
+            | Message::PickLogo
+            | Message::LogoFile(_)
+            | Message::RemoveLogo => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,
         }

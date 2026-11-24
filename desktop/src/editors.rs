@@ -67,7 +67,37 @@ pub struct TeamEditor {
     id: Option<String>,
     classifications: Vec<ClassificationChoice>,
     genders: Vec<GenderChoice>,
+    /// what the logo of the team becomes when it's saved
+    logo: LogoEdit,
+    /// the logo being shown: the saved one or the chosen one
+    shown: Option<iced::widget::image::Handle>,
 }
+
+/// What is done to the logo of a team on saving.
+enum LogoEdit {
+    Keep,
+    Remove,
+    /// the file chosen
+    Replace(Vec<u8>),
+}
+
+/// The picture of the logo as the core keeps it, ready to show.
+fn logo_handle(png: &[u8]) -> Option<iced::widget::image::Handle> {
+    let (width, height, pixels) = scout4all_core::assets::Image {
+        mime: "image/png",
+        width: 0,
+        height: 0,
+        data: png.to_vec(),
+    }
+    .rgba()
+    .ok()?;
+    Some(iced::widget::image::Handle::from_rgba(
+        width, height, pixels,
+    ))
+}
+
+/// The side of the box of the logo.
+const LOGO_BOX: f32 = 160.0;
 
 // the fields of the team
 const TEAM_NAME: usize = 0;
@@ -478,9 +508,14 @@ impl Editor {
             namesake: None,
             same_person: None,
             kind: Kind::Team(TeamEditor {
+                shown: id
+                    .as_ref()
+                    .and_then(|id| core.team_logo(id.clone()).ok().flatten())
+                    .and_then(|png| logo_handle(&png)),
                 id,
                 classifications,
                 genders,
+                logo: LogoEdit::Keep,
             }),
         }
     }
@@ -1497,7 +1532,15 @@ impl Editor {
         match &self.kind {
             Kind::Team(t) => {
                 let form = team_form_of(core, s, f, &t.classifications, &t.genders)?;
-                core.save_team(t.id.clone(), form)
+                let id = core.save_team(t.id.clone(), form)?;
+                match &t.logo {
+                    LogoEdit::Keep => {}
+                    LogoEdit::Remove => core.set_team_logo(id.clone(), None)?,
+                    LogoEdit::Replace(bytes) => {
+                        core.set_team_logo(id.clone(), Some(bytes.clone()))?
+                    }
+                }
+                Ok(id)
             }
             Kind::Season(t) => {
                 let form = team_form_of(core, s, f, &t.classifications, &t.genders)?;
@@ -1749,6 +1792,26 @@ impl Editor {
                 Edited::Stay
             }
             (Some(_), _) => Edited::Stay,
+            (None, form::Message::PickLogo) => {
+                let file = rfd::FileDialog::new()
+                    .add_filter(s.logo, &["png", "jpg", "jpeg", "webp"])
+                    .pick_file();
+                match file.and_then(|f| std::fs::read(f).ok()) {
+                    Some(bytes) => self.update(core, s, form::Message::LogoFile(bytes)),
+                    None => Edited::Stay,
+                }
+            }
+            (None, form::Message::LogoFile(bytes)) => {
+                self.set_logo(bytes);
+                Edited::Stay
+            }
+            (None, form::Message::RemoveLogo) => {
+                if let Kind::Team(t) = &mut self.kind {
+                    t.logo = LogoEdit::Remove;
+                    t.shown = None;
+                }
+                Edited::Stay
+            }
             (None, message) => match (self.correction(), message) {
                 (Some(form), message) => {
                     let outcome = form.update(message);
@@ -1777,6 +1840,70 @@ impl Editor {
                 }
             },
         }
+    }
+
+    /// The file chosen as the logo: shown if it's an image the core
+    /// takes, else the error.
+    fn set_logo(&mut self, bytes: Vec<u8>) {
+        let Kind::Team(t) = &mut self.kind else {
+            return;
+        };
+        match scout4all_core::assets::normalize_logo(&bytes) {
+            Ok(image) => {
+                t.shown = logo_handle(&image.data);
+                t.logo = LogoEdit::Replace(bytes);
+                self.form.error = None;
+            }
+            Err(e) => self.form.error = Some(e.to_string()),
+        }
+    }
+
+    /// The logo of the team: its picture (or the empty box) and the buttons.
+    fn logo_panel<'a, M: Clone + 'a>(
+        t: &'a TeamEditor,
+        s: &'static Strings,
+        c: Colors,
+        on: impl Fn(form::Message) -> M + Copy + 'a,
+    ) -> Element<'a, M> {
+        let picture: Element<'a, M> = match &t.shown {
+            Some(handle) => iced::widget::image(handle.clone())
+                .width(Length::Fixed(LOGO_BOX))
+                .height(Length::Fixed(LOGO_BOX))
+                .content_fit(iced::ContentFit::Contain)
+                .into(),
+            None => container(text(s.no_logo).size(SIZE_SMALL).color(c.muted))
+                .center_x(Length::Fixed(LOGO_BOX))
+                .center_y(Length::Fixed(LOGO_BOX))
+                .style(move |_| container::Style {
+                    border: iced::Border {
+                        color: c.border,
+                        width: 1.0,
+                        radius: 8.0.into(),
+                    },
+                    ..container::Style::default()
+                })
+                .into(),
+        };
+        column![
+            ui::section(s.logo, c),
+            picture,
+            ui::action(
+                theme::icons::EDIT,
+                s.choose_logo,
+                on(form::Message::PickLogo),
+                false,
+                c
+            ),
+            ui::action_maybe(
+                theme::icons::DELETE,
+                s.remove_logo,
+                t.shown.is_some().then(|| on(form::Message::RemoveLogo)),
+                false,
+                c
+            ),
+        ]
+        .spacing(10)
+        .into()
     }
 
     pub fn key(&mut self, core: &Scout4All, s: &Strings, ck: KeyCombination) -> Edited {
@@ -1983,6 +2110,10 @@ impl Editor {
                         false => (s.roster.to_string(), None),
                     };
                     self.sheet_view(sheet, title, count, add, s, c, on)
+                }
+                (None, None, Kind::Team(t)) => {
+                    self.form
+                        .view(s, c, on, Some(Self::logo_panel(t, s, c, on)))
                 }
                 (None, None, _) => self.form.view(s, c, on, None),
             },

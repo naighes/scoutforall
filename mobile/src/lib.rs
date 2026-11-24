@@ -4871,6 +4871,26 @@ impl Scout4All {
         Ok(team.id.to_string())
     }
 
+    /// The logo of the team as PNG, if it has one.
+    pub fn team_logo(&self, team_id: String) -> Result<Option<Vec<u8>>, MobileError> {
+        Ok(scout4all_core::assets::team_logo(&self.db, &team_id)?.map(|image| image.data))
+    }
+
+    /// The image the file holds becomes the logo of the team (shrunk, as
+    /// PNG), `None` removes it; the team is left as it is if the image
+    /// can't be read.
+    pub fn set_team_logo(
+        &self,
+        team_id: String,
+        bytes: Option<Vec<u8>>,
+    ) -> Result<(), MobileError> {
+        Ok(scout4all_core::assets::store_team_logo(
+            &self.db,
+            &team_id,
+            bytes.as_deref(),
+        )?)
+    }
+
     /// The archive of the team, its players without its matches.
     pub fn export_team(&self, team_id: String) -> Result<ExportedArchive, MobileError> {
         let id = parse_id(&team_id)?;

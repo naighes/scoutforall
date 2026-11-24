@@ -6,7 +6,10 @@
 //! - a logo keeps its proportions and its transparency (PNG);
 //! - a photo is a square JPEG (no transparency to keep, much smaller).
 
-use crate::errors::{AppError, IOError};
+use crate::{
+    errors::{AppError, IOError},
+    providers::sqlite::Database,
+};
 use image::{
     DynamicImage, ImageEncoder, ImageFormat,
     codecs::{jpeg::JpegEncoder, png::PngEncoder},
@@ -47,6 +50,15 @@ pub struct Image {
     pub width: u32,
     pub height: u32,
     pub data: Vec<u8>,
+}
+
+impl Image {
+    /// The pixels as RGBA, to show them without a decoder at hand.
+    pub fn rgba(&self) -> Result<(u32, u32, Vec<u8>), AppError> {
+        let image = decode(&self.data)?.to_rgba8();
+        let (width, height) = image.dimensions();
+        Ok((width, height, image.into_raw()))
+    }
 }
 
 fn msg(text: impl Into<String>) -> AppError {
@@ -219,4 +231,25 @@ fn replace(
     )
     .map_err(|e| AppError::IO(e.into()))?;
     previous.map(|id| delete(db, &id)).transpose().map(|_| ())
+}
+
+/// The logo of the team, if it has one.
+pub fn team_logo(db: &Database, team_id: &str) -> Result<Option<Image>, AppError> {
+    db.read(|tx| {
+        let id: Option<String> = tx
+            .query_row(
+                "SELECT logo_asset_id FROM teams WHERE id = ?1",
+                [team_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::IO(e.into()))?
+            .flatten();
+        id.map(|id| load(tx, &id)).transpose().map(Option::flatten)
+    })
+}
+
+/// `set_team_logo` in one transaction on the shared database.
+pub fn store_team_logo(db: &Database, team_id: &str, bytes: Option<&[u8]>) -> Result<(), AppError> {
+    db.write(|tx| set_team_logo(tx, team_id, bytes))
 }
