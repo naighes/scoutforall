@@ -14,6 +14,7 @@ use std::{
 };
 
 mod analysis_tests;
+mod archive_assets_tests;
 mod archive_tests;
 mod assets_tests;
 mod ball_tests;
