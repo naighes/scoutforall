@@ -1616,7 +1616,11 @@ impl ScoutingScreen {
             Content::Players { pickable, .. } => pickable,
             Content::Target { .. } => true,
         };
-        let court = canvas(Court { content, colors: c })
+        let court = canvas(Court {
+            content,
+            colors: c,
+            photos: self.photos.clone(),
+        })
             .width(Length::Fill)
             .height(Length::Fill);
         ui::lit_panel(None, iced::Element::from(court).map(Message::Court), lit, c)

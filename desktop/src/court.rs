@@ -39,6 +39,8 @@ pub enum Content {
 pub struct Court {
     pub content: Content,
     pub colors: Colors,
+    /// the photos of the players, by player id: they fill the circle
+    pub photos: std::collections::HashMap<String, iced::widget::image::Handle>,
 }
 
 #[derive(Debug, Clone)]
@@ -268,6 +270,19 @@ impl Court {
                 (false, _) => c.button,
             };
             frame.fill(&Path::circle(center, radius), fill);
+            // the photo fills the circle, darkened so the number reads
+            if let Some(handle) = self.photos.get(&p.id) {
+                let mut image = iced::advanced::image::Image::new(handle.clone());
+                image.border_radius = radius.into();
+                frame.draw_image(
+                    Rectangle::new(
+                        Point::new(center.x - radius, center.y - radius),
+                        Size::new(radius * 2.0, radius * 2.0),
+                    ),
+                    image,
+                );
+                frame.fill(&Path::circle(center, radius), Color::from_rgba(0.0, 0.0, 0.0, 0.35));
+            }
             let pickable = matches!(self.content, Content::Players { pickable: true, .. });
             let serving = match &self.content {
                 Content::Players {
@@ -306,7 +321,10 @@ impl Court {
                 font: crate::theme::fonts().bold,
                 content: p.number.to_string(),
                 position: center,
-                color: c.text,
+                color: match self.photos.contains_key(&p.id) {
+                    true => Color::WHITE,
+                    false => c.text,
+                },
                 size: (radius * 0.9).into(),
                 align_x: iced::widget::text::Alignment::Center,
                 align_y: iced::alignment::Vertical::Center,
