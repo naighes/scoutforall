@@ -281,7 +281,10 @@ impl Court {
                     ),
                     image,
                 );
-                frame.fill(&Path::circle(center, radius), Color::from_rgba(0.0, 0.0, 0.0, 0.35));
+                frame.fill(
+                    &Path::circle(center, radius),
+                    Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                );
             }
             let pickable = matches!(self.content, Content::Players { pickable: true, .. });
             let serving = match &self.content {

@@ -1608,8 +1608,8 @@ impl ScoutingScreen {
             colors: c,
             photos: self.photos.clone(),
         })
-            .width(Length::Fill)
-            .height(Length::Fill);
+        .width(Length::Fill)
+        .height(Length::Fill);
         ui::lit_panel(None, iced::Element::from(court).map(Message::Court), lit, c)
     }
 

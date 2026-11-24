@@ -554,12 +554,10 @@ impl StartScreen {
                             .size(30)
                             .font(bold)
                             .color(c.accent),
-                        self.photos
-                            .get(&p.id)
-                            .map_or_else(
-                                || Element::from(space::horizontal().width(0)),
-                                |h| ui::logo(h, 32.0)
-                            ),
+                        self.photos.get(&p.id).map_or_else(
+                            || Element::from(space::horizontal().width(0)),
+                            |h| ui::logo(h, 32.0)
+                        ),
                     ]
                     .spacing(8)
                     .align_y(Alignment::Center),

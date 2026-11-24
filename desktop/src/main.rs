@@ -605,24 +605,23 @@ impl App {
                         .map(|of_b| (start, of_b))
                 })
                 .map(|(start, of_b)| {
-                    Screen::Start(Box::new(start::StartScreen::new(
-                        start,
-                        of_b,
-                        open.team_id,
-                        open.match_id,
-                    )
-                    .with_photos(&core)))
+                    Screen::Start(Box::new(
+                        start::StartScreen::new(start, of_b, open.team_id, open.match_id)
+                            .with_photos(&core),
+                    ))
                 }),
             Go::Scout(open) => core
                 .scouting_in_order(&open.team_id, &open.match_id, ChoiceOrder::EventFirst)
                 .map(|scouting| {
-                    Screen::Scouting(Box::new(ScoutingScreen::new(
-                        scouting,
-                        self.keys.clone(),
-                        open.team_id,
-                        open.match_id,
-                    )
-                    .with_photos(&core)))
+                    Screen::Scouting(Box::new(
+                        ScoutingScreen::new(
+                            scouting,
+                            self.keys.clone(),
+                            open.team_id,
+                            open.match_id,
+                        )
+                        .with_photos(&core),
+                    ))
                 }),
         };
         match opened {
