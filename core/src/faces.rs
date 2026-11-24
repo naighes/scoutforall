@@ -79,7 +79,7 @@ pub fn crop_square(face: (i32, i32, u32, u32), width: u32, height: u32) -> Squar
         .max(1);
     let center = |start: i32, len: u32| i64::from(start) + i64::from(len) / 2;
     let place = |center: i64, limit: u32| {
-        (center - i64::from(side) / 2).clamp(0, i64::from(limit - side)) as u32
+        (center - i64::from(side) / 2).clamp(0, i64::from(limit.saturating_sub(side))) as u32
     };
     Square {
         x: place(center(x, w), width),
