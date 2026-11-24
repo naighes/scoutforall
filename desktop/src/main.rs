@@ -608,7 +608,8 @@ impl App {
                         self.keys.clone(),
                         open.team_id,
                         open.match_id,
-                    )))
+                    )
+                    .with_photos(&core)))
                 }),
         };
         match opened {
