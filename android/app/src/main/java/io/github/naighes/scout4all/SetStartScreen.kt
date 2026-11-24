@@ -310,6 +310,7 @@ private fun SetStartContent(state: SetStartState.Choosing, model: SetStartViewMo
                             name = player?.name,
                             setter = player != null && player.id == lineup.setter?.id,
                             highlighted = pick == Pick.Position(position),
+                            photoId = player?.id,
                         )
                     },
                     onPosition = { model.open(Pick.Position(it)) },

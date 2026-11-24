@@ -2,6 +2,7 @@ package io.github.naighes.scout4all
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.graphics.PathEffect
 import kotlin.math.abs
 import kotlin.math.ceil
@@ -100,6 +102,9 @@ data class CourtSlot(
     /** how good the efficiency is for the level of the team, 0 (red) to 1
      * (green); none without the level */
     val grade: Double? = null,
+    /** the id of the player, to show the photo in the jersey (the number
+     * stays over it); none without */
+    val photoId: String? = null,
 )
 
 /** Where the ball is: on our side, by the player who touched it last, or
@@ -557,12 +562,18 @@ private fun Token(slot: CourtSlot, scale: Float, dim: Float = 1f) = Box {
     ) {
         Box(contentAlignment = Alignment.Center) {
             val size = (22.dp * scale).jerseySp()
+            val photo = if (empty) null else slot.photoId?.let { photoOf(it) }
+            // the photo fills the jersey, darkened so that the number reads on any face
+            photo?.let {
+                Image(it, contentDescription = null, Modifier.fillMaxSize().testTag(SHOWN_IMAGE), contentScale = ContentScale.Crop)
+                Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.35f)))
+            }
             Text(
                 slot.number?.toString() ?: "+",
                 modifier = if (empty) Modifier.readAs(stringResource(R.string.no_player)) else Modifier,
                 style = MaterialTheme.typography.titleLarge.copy(fontSize = size, lineHeight = size),
                 fontWeight = FontWeight.Bold,
-                color = number,
+                color = if (photo != null) Color.White else number,
             )
         }
     }

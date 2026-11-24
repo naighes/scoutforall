@@ -646,6 +646,7 @@ private fun ScoutingContent(view: ScoutingView, model: ScoutingViewModel, system
                             spotlight = player?.spotlight == true,
                             efficiency = player?.efficiency,
                             grade = player?.grade,
+                            photoId = player?.id,
                         )
                     },
                     onPosition = { position -> players.getOrNull(position - 1)?.let { model.player(it.id) } },

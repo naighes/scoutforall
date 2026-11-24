@@ -55,6 +55,20 @@ fun PlayerPhoto(playerId: String, size: Dp = 40.dp, modifier: Modifier = Modifie
     LogoBox(bytes, size, modifier)
 }
 
+/** The photo of the player, decoded once; null without it. */
+@Composable
+fun photoOf(playerId: String): androidx.compose.ui.graphics.ImageBitmap? {
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    val bytes by produceState<ByteArray?>(null, playerId) {
+        value = try {
+            app.core { it.personPhoto(playerId) }
+        } catch (e: MobileException) {
+            null
+        }
+    }
+    return remember(bytes) { decodeImage(bytes) }
+}
+
 /** `bytes` in a square, an empty box when null or not an image. */
 @Composable
 fun LogoBox(bytes: ByteArray?, size: Dp, modifier: Modifier = Modifier) {
