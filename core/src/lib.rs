@@ -3,6 +3,7 @@
 //! statistics, the PDF report, the persistence and the analytics.
 pub mod analysis;
 pub mod analytics;
+pub mod assets;
 pub mod benchmark;
 pub mod competition_form;
 pub mod constants;

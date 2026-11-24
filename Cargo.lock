@@ -6076,6 +6076,7 @@ dependencies = [
  "dirs 7.0.0",
  "encoding_rs",
  "futures",
+ "image",
  "regex",
  "reqwest",
  "rusqlite",

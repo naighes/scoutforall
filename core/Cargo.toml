@@ -17,6 +17,8 @@ csv.workspace = true
 # the DataVolley files written in the code pages of Windows
 encoding_rs.workspace = true
 futures.workspace = true
+# decoding, resizing and encoding of the images of teams and persons
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 regex.workspace = true
 reqwest.workspace = true
 # the database of the data (TODO/001, D6)
