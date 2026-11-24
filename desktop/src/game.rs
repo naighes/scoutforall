@@ -173,7 +173,7 @@ impl MatchScreen {
 
     fn edited(&mut self, edited: Edited) {
         match edited {
-            Edited::Stay => {}
+            Edited::Stay | Edited::Crop(_) => {}
             Edited::Cancel => self.editor = None,
             Edited::Saved(_) => {
                 self.editor = None;

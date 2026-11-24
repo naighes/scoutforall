@@ -114,7 +114,7 @@ impl CompetitionsScreen {
 
     fn edited(&mut self, edited: Edited) {
         match edited {
-            Edited::Stay => {}
+            Edited::Stay | Edited::Crop(_) => {}
             Edited::Cancel => self.mode = Mode::Browse,
             Edited::Saved(_) => {
                 self.mode = Mode::Browse;

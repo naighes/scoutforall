@@ -140,6 +140,8 @@ enum Screen {
 /// Where a key or a click leads.
 enum Go {
     Stay,
+    /// the file of a photo, whose face is cropped in a thread
+    CropFace(Vec<u8>),
     /// the video of the actions picked to make
     Montage,
     /// a file made, to share or save: what it shows, the file
@@ -469,6 +471,16 @@ impl App {
         let core = self.core.clone();
         let opened = match go {
             Go::Stay => return Task::none(),
+            Go::CropFace(bytes) => {
+                return Task::perform(
+                    async move {
+                        tokio::task::spawn_blocking(move || form::crop(&bytes))
+                            .await
+                            .unwrap_or_else(|e| Err(form::Face::Other(e.to_string())))
+                    },
+                    |face| Message::Team(team::Message::Form(form::Message::Cropped(face))),
+                );
+            }
             Go::Export(export) => return self.export(export),
             Go::Import(team) => {
                 let s = self.strings;
@@ -1742,6 +1754,7 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
         team::Outcome::OpenTeam(team) => Go::Team(team),
         team::Outcome::Training(open) => Go::Training(team_id.to_string(), open),
+        team::Outcome::Crop(bytes) => Go::CropFace(bytes),
     }
 }
 

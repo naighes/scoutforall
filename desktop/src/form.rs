@@ -319,6 +319,25 @@ impl Field {
     }
 }
 
+/// Why no face was cropped from a photo.
+#[derive(Debug, Clone)]
+pub enum Face {
+    None,
+    Many(usize),
+    Other(String),
+}
+
+/// The face of a photo cropped: slow (~0,3 s), so not on the thread of the
+/// screen.
+pub fn crop(bytes: &[u8]) -> Result<Vec<u8>, Face> {
+    use scout4all_core::faces::{PhotoError, crop_face};
+    crop_face(bytes).map_err(|e| match e {
+        PhotoError::NoFace => Face::None,
+        PhotoError::ManyFaces(n) => Face::Many(n),
+        e => Face::Other(e.to_string()),
+    })
+}
+
 #[derive(Debug, Clone)]
 pub enum Message {
     Input(usize, String),
@@ -353,6 +372,9 @@ pub enum Message {
     PickPhoto,
     /// the bytes of the file of the photo
     PhotoFile(Vec<u8>),
+    /// the face cropped from the file of the photo (made off the thread
+    /// of the screen) or why not
+    Cropped(Result<Vec<u8>, Face>),
     RemovePhoto,
     Save,
     Cancel,
@@ -920,6 +942,7 @@ impl Form {
             | Message::RemoveLogo
             | Message::PickPhoto
             | Message::PhotoFile(_)
+            | Message::Cropped(_)
             | Message::RemovePhoto => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,

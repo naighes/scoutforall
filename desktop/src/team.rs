@@ -102,6 +102,8 @@ pub enum Outcome {
     OpenTeam(String),
     /// the training of the team
     Training(crate::training::screen::Open),
+    /// the file of a photo, to crop its face off the thread of the screen
+    Crop(Vec<u8>),
 }
 
 pub struct TeamScreen {
@@ -383,6 +385,7 @@ impl TeamScreen {
         let season = matches!(&self.mode, Mode::Edit(e) if e.is_season());
         match edited {
             Edited::Stay => Outcome::Stay,
+            Edited::Crop(bytes) => Outcome::Crop(bytes),
             Edited::Cancel => {
                 self.mode = Mode::Browse;
                 Outcome::Stay
@@ -1280,8 +1283,13 @@ mod tests {
             team.update(s, Message::Player(at.unwrap()));
         };
         edit(&mut team);
+        // the file only asks the screen to crop its face (off its thread)
+        assert!(matches!(
+            team.update(s, Message::Form(form::Message::PhotoFile(ONE.to_vec()))),
+            Outcome::Crop(_)
+        ));
         // several faces: refused, nothing chosen
-        team.update(s, Message::Form(form::Message::PhotoFile(THREE.to_vec())));
+        team.update(s, Message::Form(form::Message::Cropped(form::crop(THREE))));
         let Mode::Edit(editor) = &team.mode else {
             unreachable!("the form")
         };
@@ -1290,9 +1298,9 @@ mod tests {
             Some(ui::fill(s.many_faces, &["3".to_string()]).as_str())
         );
         // not an image: refused too
-        team.update(s, Message::Form(form::Message::PhotoFile(b"no".to_vec())));
+        team.update(s, Message::Form(form::Message::Cropped(form::crop(b"no"))));
         // one face: chosen, not saved yet
-        team.update(s, Message::Form(form::Message::PhotoFile(ONE.to_vec())));
+        team.update(s, Message::Form(form::Message::Cropped(form::crop(ONE))));
         let Mode::Edit(editor) = &team.mode else {
             unreachable!("the form")
         };
@@ -1313,7 +1321,7 @@ mod tests {
         assert!(core.person_photo(anna.clone()).unwrap().is_none());
         // chosen again, then the person is removed: the photo goes too
         edit(&mut team);
-        team.update(s, Message::Form(form::Message::PhotoFile(ONE.to_vec())));
+        team.update(s, Message::Form(form::Message::Cropped(form::crop(ONE))));
         team.update(s, Message::Form(Save));
         assert!(core.person_photo(anna.clone()).unwrap().is_some());
         core.delete_person(anna.clone()).unwrap();

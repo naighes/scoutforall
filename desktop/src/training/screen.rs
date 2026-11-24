@@ -406,7 +406,7 @@ impl TrainingScreen {
             _ => None,
         };
         match (edited, team) {
-            (editors::Edited::Stay, _) => Outcome::Stay,
+            (editors::Edited::Stay | editors::Edited::Crop(_), _) => Outcome::Stay,
             (editors::Edited::Saved(id), Some(team)) => Outcome::NewMatch { team, id },
             (editors::Edited::Cancel | editors::Edited::Saved(_), _) => {
                 self.mode = Mode::List;

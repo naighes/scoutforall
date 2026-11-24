@@ -168,7 +168,7 @@ impl HomeScreen {
 
     fn edited(&mut self, edited: Edited) -> Outcome {
         match edited {
-            Edited::Stay => Outcome::Stay,
+            Edited::Stay | Edited::Crop(_) => Outcome::Stay,
             Edited::Cancel => {
                 self.editor = None;
                 Outcome::Stay

@@ -38,6 +38,8 @@ pub enum Edited {
     Cancel,
     /// saved: the id of the team, of the player or of the match
     Saved(String),
+    /// the file of a photo, whose face the screen has cropped
+    Crop(Vec<u8>),
 }
 
 const DATE_FORMAT: &str = "%Y-%m-%d";
@@ -1861,8 +1863,9 @@ impl Editor {
                     None => Edited::Stay,
                 }
             }
-            (None, form::Message::PhotoFile(bytes)) => {
-                self.set_photo(s, &bytes);
+            (None, form::Message::PhotoFile(bytes)) => Edited::Crop(bytes),
+            (None, form::Message::Cropped(face)) => {
+                self.set_photo(s, face);
                 Edited::Stay
             }
             (None, form::Message::RemovePhoto) => {
@@ -1933,22 +1936,21 @@ impl Editor {
 
     /// The file chosen as the photo: its face shown to confirm (by saving
     /// the form), or the reason it can't be used.
-    fn set_photo(&mut self, s: &Strings, bytes: &[u8]) {
+    fn set_photo(&mut self, s: &Strings, face: Result<Vec<u8>, form::Face>) {
         let Kind::Player(p) = &mut self.kind else {
             return;
         };
-        use scout4all_core::faces::PhotoError;
-        match scout4all_core::faces::crop_face(bytes) {
+        match face {
             Ok(face) => {
                 p.shown = logo_handle(&face);
                 p.photo = PhotoEdit::Replace(face);
                 self.form.error = None;
             }
-            Err(PhotoError::NoFace) => self.form.error = Some(s.no_face.to_string()),
-            Err(PhotoError::ManyFaces(n)) => {
+            Err(form::Face::None) => self.form.error = Some(s.no_face.to_string()),
+            Err(form::Face::Many(n)) => {
                 self.form.error = Some(ui::fill(s.many_faces, &[n.to_string()]))
             }
-            Err(e) => self.form.error = Some(e.to_string()),
+            Err(form::Face::Other(e)) => self.form.error = Some(e),
         }
     }
 
