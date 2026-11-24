@@ -1534,6 +1534,33 @@ mod tests {
         ));
     }
 
+    /// A person of the registry taken as a new player brings their photo into
+    /// the form (the preview); a name written over takes it away.
+    #[test]
+    fn the_photo_of_a_person_of_the_registry_is_shown_once_taken() {
+        const ONE: &[u8] = include_bytes!("../../core/src/tests/fixtures/solvay_one_face.jpg");
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (_senior, anna) = senior(&core);
+        core.set_person_photo(anna, Some(form::crop(ONE).unwrap()))
+            .unwrap();
+        let under = core.save_team(None, team_form("Cortona U19")).unwrap();
+        let mut team = TeamScreen::new(core.clone(), under).unwrap();
+        team.update(s, Message::NewPlayer);
+        team.update(s, Message::Form(Input(0, "Anna".into())));
+        team.update(s, Message::Form(Take(0, 0)));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(editor.photo_shown());
+        team.update(s, Message::Form(Input(0, "Anna B".into())));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("the form")
+        };
+        assert!(!editor.photo_shown());
+    }
+
     /// ⌫ on a player: Enter removes them from the team only (still in the
     /// other one, offered again); "a" from the registry, so from every
     /// team.

@@ -734,6 +734,10 @@ impl Editor {
             .is_some_and(|person| !same_name(&person.name, &written))
         {
             p.person = None;
+            // the photo shown was the one of that person (a new player has none)
+            if matches!(p.photo, PhotoEdit::Keep) && p.id.is_none() {
+                p.shown = None;
+            }
             if let Some(field) = self.form.fields.get_mut(PLAYER_NAME) {
                 field.hint = Some(s.name_or_existing.to_string());
             }
@@ -766,7 +770,7 @@ impl Editor {
 
     /// The person of the registry offered `n`th taken: the form gets their
     /// details, and the number and the role of their most recent team.
-    fn take_person(&mut self, s: &Strings, n: usize) {
+    fn take_person(&mut self, core: &Scout4All, s: &Strings, n: usize) {
         let Kind::Player(p) = &mut self.kind else {
             return;
         };
@@ -815,6 +819,14 @@ impl Editor {
         }
         if let Some(f) = self.form.fields.get_mut(PLAYER_NAME) {
             f.hint = Some(hint);
+        }
+        // the photo of the person is the preview, unless one was chosen
+        if matches!(p.photo, PhotoEdit::Keep) {
+            p.shown = core
+                .person_photo(person.id.to_string())
+                .ok()
+                .flatten()
+                .and_then(|jpeg| logo_handle(&jpeg));
         }
         p.person = Some(person);
     }
@@ -1902,7 +1914,7 @@ impl Editor {
                     {
                         let n = *n;
                         let outcome = self.form.update(message);
-                        self.take_person(s, n);
+                        self.take_person(core, s, n);
                         return self.outcome(core, s, outcome);
                     }
                     let outcome = self.form.update(message);
@@ -2093,7 +2105,7 @@ impl Editor {
         };
         if let Some(n) = taking {
             let outcome = self.form.key(ck);
-            self.take_person(s, n);
+            self.take_person(core, s, n);
             return self.outcome(core, s, outcome);
         }
         // the score sheet is a grid: the arrows move in it

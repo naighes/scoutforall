@@ -218,6 +218,21 @@ class PlayerFormTest {
     }
 
     @Test
+    fun thePhotoOfAPersonOfTheRegistryIsShownOnceChosenAndGoneWithAnotherName() {
+        val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
+        core { it.setPersonPhoto(player, it.cropFace(fixture("solvay_one_face.jpg"))) }
+        val other = saveTeam("Altra")
+        val model = rule.runOnUiThread { PlayerFormViewModel(app, other, null) }
+        rule.waitFor { model.state.value is PlayerFormState.Editing }
+        assertEquals(null, editing(model).shown)
+        rule.runOnUiThread { model.pickExisting(editing(model).existing.single().label) }
+        rule.waitFor { editing(model).shown != null }
+        // a name written over is a new person: no photo
+        rule.runOnUiThread { model.name("Paola Egonu bis") }
+        assertEquals(null, editing(model).shown)
+    }
+
+    @Test
     fun aPhotoWithoutOrWithManyFacesIsAnErrorOfTheForm() {
         val player = core { it.savePlayer(team, null, it.newPlayerForm(team).copy(name = "Paola Egonu", role = RoleEnum.OPPOSITE_HITTER), false) }
         val model = modelOf(player)

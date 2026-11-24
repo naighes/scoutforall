@@ -189,15 +189,24 @@ class PlayerFormViewModel(
      * it's their name; another name is a new person. */
     fun name(name: String) = update { s ->
         val person = s.chosen?.takeIf { it.name == name }?.id
-        s.copy(form = s.form.copy(name = name, person = person), invalid = s.invalid?.takeIf { it.first != PlayerField.NAME }, error = null)
+        // a new player: the photo shown is the one of the person chosen, if any
+        val stored = if (person == null && s.form.person != null) null else s.stored
+        s.copy(form = s.form.copy(name = name, person = person), stored = stored, invalid = s.invalid?.takeIf { it.first != PlayerField.NAME }, error = null)
     }
 
     /** A person of the registry picked by their label: the form with their
      * details, the number and the role of their most recent team. */
-    fun pickExisting(label: String) = update { s ->
-        when (val choice = s.existing.firstOrNull { it.label == label }) {
-            null -> s
-            else -> s.copy(form = choice.form, invalid = null, error = null)
+    fun pickExisting(label: String) {
+        val choice = (mutableState.value as? PlayerFormState.Editing)?.existing?.firstOrNull { it.label == label } ?: return
+        update { s -> s.copy(form = choice.form, stored = null, invalid = null, error = null) }
+        // the photo of the person, shown as the preview
+        viewModelScope.launch {
+            val photo = try {
+                app.core { core -> core.personPhoto(choice.id.toString()) }
+            } catch (e: MobileException) {
+                null
+            }
+            update { s -> if (s.form.person == choice.id) s.copy(stored = photo) else s }
         }
     }
 
