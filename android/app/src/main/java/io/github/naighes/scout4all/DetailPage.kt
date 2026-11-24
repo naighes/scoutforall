@@ -607,6 +607,7 @@ private fun PlayerRow(p: PlayerStats, selected: Boolean, onClick: () -> Unit) = 
             color = MaterialTheme.colorScheme.surface,
         )
     }
+    PlayerPhoto(p.player.id, 32.dp)
     Column(Modifier.weight(1f)) {
         Text(p.player.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(
