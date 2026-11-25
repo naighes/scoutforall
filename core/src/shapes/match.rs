@@ -82,6 +82,14 @@ impl MatchSummary {
     }
 }
 
+/// A match that scouted the players of a team, from its side.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoutedSummary {
+    pub summary: MatchSummary,
+    /// team A, when the team is B of a match scouted on both sides
+    pub team_a: Option<TeamEntry>,
+}
+
 /// A match a team plays, as its list shows it: from its side.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PlayedMatch {

@@ -25,6 +25,8 @@ mod home;
 mod keymap;
 mod live;
 mod paths;
+mod period;
+mod player_stats;
 mod profile;
 mod scouting;
 mod settings;
@@ -157,6 +159,10 @@ enum Go {
     Player(String, String),
     /// the numbers of that profile, worked out off the thread of the screen
     LoadProfile(String, String),
+    /// back to the statistics of the profile of a player of a team
+    PlayerStatistics(String, String, Box<player_stats::Filters>),
+    /// the analysis of a team narrowed to a player, named
+    PlayerDetail(String, String, String, Box<player_stats::Filters>),
     /// the training of the team: what it opens on
     Training(String, training::screen::Open),
     Match(String, String),
@@ -508,6 +514,19 @@ impl App {
                 }
                 Screen::Team(Box::new(screen))
             }),
+            Go::PlayerStatistics(team, player, filters) => {
+                TeamScreen::new(core, team.clone()).map(|mut screen| {
+                    if screen.show_profile(&player) {
+                        screen.show_statistics(*filters);
+                        then = Some(Go::LoadProfile(team, player));
+                    }
+                    Screen::Team(Box::new(screen))
+                })
+            }
+            Go::PlayerDetail(team, player, name, filters) => {
+                stats::StatsScreen::player(core, team, player, &name, *filters, self.strings)
+                    .map(|screen| Screen::Stats(Box::new(screen)))
+            }
             Go::LoadProfile(team, player) => {
                 return Task::perform(team::load_profile(core, team, player), |loaded| {
                     Message::Team(loaded)
@@ -1772,6 +1791,11 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::OpenTeam(team) => Go::Team(team),
         team::Outcome::OpenPlayer { team, player } => Go::Player(team, player),
         team::Outcome::LoadProfile(player) => Go::LoadProfile(team_id.to_string(), player),
+        team::Outcome::PlayerDetail {
+            player,
+            name,
+            filters,
+        } => Go::PlayerDetail(team_id.to_string(), player, name, filters),
         team::Outcome::Training(open) => Go::Training(team_id.to_string(), open),
         team::Outcome::Crop(bytes) => Go::CropFace(bytes),
     }
@@ -1886,9 +1910,12 @@ fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -
         stats::Outcome::WatchTour(matches) => {
             Go::TeamClips(screen.team_id.clone(), matches, screen.clips_title(s))
         }
-        stats::Outcome::Back => match screen.match_id() {
-            Some(m) => Go::Match(screen.of_b.clone().unwrap_or(screen.team_id.clone()), m),
-            None => Go::Team(screen.team_id.clone()),
+        stats::Outcome::Back => match (screen.match_id(), screen.player_filters()) {
+            (Some(m), _) => Go::Match(screen.of_b.clone().unwrap_or(screen.team_id.clone()), m),
+            (None, Some((player, filters))) => {
+                Go::PlayerStatistics(screen.team_id.clone(), player, Box::new(filters))
+            }
+            (None, None) => Go::Team(screen.team_id.clone()),
         },
     }
 }

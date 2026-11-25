@@ -20,6 +20,8 @@ pub enum Period {
     /// from the same day of the month before, today included
     #[default]
     LastMonth,
+    /// every one: a team lasts one season
+    Season,
     /// the last ones played
     LastMatches(u32),
     /// both days included
@@ -27,8 +29,8 @@ pub enum Period {
 }
 
 impl Period {
-    /// The days of the period, first and last: for the last matches, of
-    /// the ones chosen; `None` with no matches.
+    /// The days of the period, first and last: for the season and the last
+    /// matches, of the ones chosen; `None` with no matches.
     pub fn days<M: Played>(
         &self,
         matches: &[&M],
@@ -37,7 +39,7 @@ impl Period {
         match self {
             Period::LastMonth => Some((month_before(today), today)),
             Period::Between { from, to } => Some((*from, *to)),
-            Period::LastMatches(_) => matches
+            Period::Season | Period::LastMatches(_) => matches
                 .first()
                 .zip(matches.last())
                 .map(|(first, last)| (day(first), day(last))),
@@ -65,6 +67,7 @@ impl Period {
             .collect();
         played.sort_by_key(|m| m.date());
         match self {
+            Period::Season => played,
             Period::LastMonth => {
                 let from = month_before(today);
                 played.retain(|m| day(m) >= from);

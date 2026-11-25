@@ -11363,6 +11363,74 @@ mod tests {
         scouting.choose_event(EventTypeEnum::OE).unwrap();
     }
 
+    /// A team that was only B of a match scouted on both sides has it in
+    /// its analysis and in the statistics of its players, which tell the
+    /// same figures as the analysis narrowed to the player.
+    #[test]
+    fn the_statistics_of_a_player_of_side_b() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let team = app
+            .import_dvw(
+                THREE_SETS.to_vec(),
+                DvwChoice {
+                    opponent: DvwOpponent::NewTeam,
+                    ..dvw_choice(DvwSide::Home, None)
+                },
+            )
+            .unwrap()
+            .team_id;
+        let b = app.analysis_opponents(team.clone()).unwrap()[0].id;
+        let season = |filter| {
+            app.team_analysis(
+                b.to_string(),
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::S,
+                filter,
+            )
+            .unwrap()
+        };
+        let all = season(DetailFilter::default());
+        assert_eq!(all.matches.len(), 1);
+        let from_a = app
+            .opponent_analysis(
+                team,
+                b,
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        assert_eq!(all.matches, from_a.matches);
+        assert_eq!(all.summary, from_a.summary);
+        let server = all.detail.players[0].id.clone();
+        let stats = app
+            .player_statistics(b.to_string(), server.clone(), AnalysisPeriod::Season, None)
+            .unwrap();
+        let narrowed = season(DetailFilter {
+            players: vec![server],
+            ..DetailFilter::default()
+        });
+        let detail = narrowed.detail.fundamental.unwrap();
+        let serve = &stats.fundamentals[0];
+        assert_eq!(serve.event, EventTypeEnum::S);
+        assert_eq!(serve.measure, PlayerMeasure::Efficiency);
+        assert_eq!(serve.value, detail.efficiency);
+        assert_eq!(serve.total, detail.total);
+        assert_eq!(serve.points, detail.points);
+        assert_eq!(serve.errors, detail.errors);
+        let trend = narrowed
+            .trend
+            .iter()
+            .find(|t| t.series == Series::Serve)
+            .unwrap();
+        assert_eq!(stats.trend.first(), Some(trend));
+        assert_eq!(stats.matches, narrowed.matches);
+        assert!(stats.fundamentals.iter().all(|f| f.total > 0));
+    }
+
     fn analysis_of(
         app: &Scout4All,
         team: &str,

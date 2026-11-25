@@ -136,6 +136,24 @@ mod tests {
     }
 
     #[test]
+    fn the_whole_season_but_the_matches_to_come() {
+        let t = Team::new();
+        let matches = vec![
+            t.played((2026, 11, 5), &[Perfect]),
+            t.played((2025, 9, 20), &[Perfect]),
+            unplayed((2026, 11, 1)),
+            t.played((2026, 11, 6), &[Perfect]),
+        ];
+        let today = date(2026, 11, 5);
+        let chosen = Period::Season.select(&matches, today);
+        assert_eq!(ids(&chosen), ["(2025, 9, 20)", "(2026, 11, 5)"]);
+        assert_eq!(
+            Period::Season.days(&chosen, today),
+            Some((date(2025, 9, 20), today))
+        );
+    }
+
+    #[test]
     fn the_last_matches_played() {
         let t = Team::new();
         let matches = vec![

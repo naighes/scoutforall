@@ -4,6 +4,7 @@
 
 use {
     crate::{
+        player_stats::PlayerStats,
         strings::Strings,
         team::Message,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
@@ -36,6 +37,15 @@ pub struct Profile {
     /// the id of the player: the list may change its order
     pub player: String,
     pub numbers: Numbers,
+    pub tab: Tab,
+    /// read the first time its tab shows
+    pub stats: Option<Box<PlayerStats>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tab {
+    Profile,
+    Statistics,
 }
 
 /// The numbers of the season, worked out off the thread of the screen.
@@ -82,6 +92,30 @@ impl Item {
 
 pub fn view<'a>(
     shown: Shown<'a>,
+    open: &'a Profile,
+    s: &'static Strings,
+    c: Colors,
+) -> Element<'a, Message> {
+    let pill =
+        |name: &str, tab: Tab| ui::pill(name, open.tab == tab, Some(Message::ProfileTab(tab)), c);
+    let tabs = row![
+        pill(s.profile_tab, Tab::Profile),
+        pill(s.statistics_tab, Tab::Statistics)
+    ]
+    .spacing(6);
+    let body: Element<'a, Message> = match (open.tab, &open.stats) {
+        (Tab::Statistics, Some(stats)) => stats.view(s, c).map(Message::PlayerStats),
+        (Tab::Statistics, None) => space::vertical().into(),
+        (Tab::Profile, _) => scrollable(details(&shown, &open.numbers, s, c))
+            .height(Length::Fill)
+            .into(),
+    };
+    column![header(&shown, c), tabs, body].spacing(14).into()
+}
+
+/// The numbers of the season and what the registry says of the person.
+fn details<'a>(
+    shown: &Shown<'a>,
     numbers: &'a Numbers,
     s: &'static Strings,
     c: Colors,
@@ -112,16 +146,14 @@ pub fn view<'a>(
                 ..container::Style::default()
             })
     });
-    let details = Column::new()
+    Column::new()
         .push(season)
         .push(rule)
         .push(grid(fields, FIELD_COLUMNS, FIELD_SIZE, c))
         .push(notes)
         .push(others)
         .spacing(22)
-        .padding([8, 16]);
-    column![header(&shown, c), scrollable(details).height(Length::Fill)]
-        .spacing(14)
+        .padding([8, 16])
         .into()
 }
 

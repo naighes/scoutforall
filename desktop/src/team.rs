@@ -10,7 +10,8 @@ use {
         agenda::{self, Agenda, Pick},
         editors::{Edited, Editor},
         form,
-        profile::{self, Numbers, Profile},
+        player_stats::{self, Filters, PlayerStats},
+        profile::{self, Numbers, Profile, Tab},
         strings::Strings,
         theme::{self, Colors, SIZE_SMALL},
         ui,
@@ -19,7 +20,6 @@ use {
         Alignment, Element, Length,
         widget::{Column, Id, Row, column, container, row, scrollable, space, text},
     },
-    scout4all_core::names::initials,
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         MatchListing, MobileError, PlayerProfile, Scout4All, TeamDetails, TeamRemovalCounts,
@@ -89,6 +89,9 @@ pub enum Message {
     Analysis,
     Programming,
     DeleteTeam,
+    /// a tab of the profile
+    ProfileTab(Tab),
+    PlayerStats(player_stats::Message),
     Form(form::Message),
     Confirm,
     /// the player of the deletion asked removed from the registry
@@ -121,6 +124,12 @@ pub enum Outcome {
     /// the numbers of the profile of a player, to work out with
     /// `load_profile` off the thread of the screen
     LoadProfile(String),
+    /// the analysis narrowed to the player of the profile
+    PlayerDetail {
+        player: String,
+        name: String,
+        filters: Box<Filters>,
+    },
     /// the training of the team
     Training(crate::training::screen::Open),
     /// the file of a photo, to crop its face off the thread of the screen
@@ -231,10 +240,64 @@ impl TeamScreen {
                 self.profile = Some(Profile {
                     player: player.to_string(),
                     numbers: Numbers::Loading,
+                    tab: Tab::Profile,
+                    stats: None,
                 });
                 true
             }
             None => false,
+        }
+    }
+
+    /// The tab of the statistics of the profile open, with the filters.
+    pub fn show_statistics(&mut self, filters: Filters) {
+        if let Some(open) = &mut self.profile {
+            open.tab = Tab::Statistics;
+            open.stats = Some(Box::new(PlayerStats::new(
+                &self.core,
+                &self.team_id,
+                &open.player,
+                filters,
+            )));
+        }
+    }
+
+    fn profile_tab(&mut self, tab: Tab) {
+        let read = self.profile.as_ref().is_some_and(|p| p.stats.is_some());
+        match (tab, read) {
+            (Tab::Statistics, false) => self.show_statistics(Filters::default()),
+            (Tab::Statistics, true) | (Tab::Profile, _) => {
+                if let Some(open) = &mut self.profile {
+                    open.tab = tab;
+                }
+            }
+        }
+    }
+
+    fn player_stats(&mut self, message: player_stats::Message) -> Outcome {
+        let Some(open) = &mut self.profile else {
+            return Outcome::Stay;
+        };
+        let Some(stats) = &mut open.stats else {
+            return Outcome::Stay;
+        };
+        match message {
+            player_stats::Message::Detail => Outcome::PlayerDetail {
+                player: open.player.clone(),
+                name: self
+                    .details
+                    .players
+                    .iter()
+                    .find(|p| p.id == open.player)
+                    .map(|p| p.name.clone())
+                    .unwrap_or_default(),
+                filters: Box::new(stats.filters.clone()),
+            },
+            message
+            @ (player_stats::Message::Period(_) | player_stats::Message::Competition(_)) => {
+                stats.update(&self.core, &self.team_id, &open.player, message);
+                Outcome::Stay
+            }
         }
     }
 
@@ -294,6 +357,11 @@ impl TeamScreen {
                     .profile
                     .take()
                     .filter(|open| self.details.players.iter().any(|p| p.id == open.player));
+                if let Some(open) = &mut self.profile
+                    && let Some(stats) = &mut open.stats
+                {
+                    stats.load(&self.core, &self.team_id, &open.player);
+                }
                 self.game = self.game.min(self.matches.len().saturating_sub(1));
                 self.week.reload(&self.core);
                 self.logo = TeamScreen::logo_of(&self.core, &self.team_id);
@@ -538,6 +606,11 @@ impl TeamScreen {
                 self.ask_deletion(s);
                 Outcome::Stay
             }
+            (Message::ProfileTab(tab), Mode::Browse, Some(_)) => {
+                self.profile_tab(tab);
+                Outcome::Stay
+            }
+            (Message::PlayerStats(m), Mode::Browse, Some(_)) => self.player_stats(m),
             // nothing of the page of the team while a profile is over it
             (
                 Message::Form(_)
@@ -565,7 +638,9 @@ impl TeamScreen {
                 | Message::DeletePerson
                 | Message::OtherTeam(_)
                 | Message::EditPlayer
-                | Message::DeletePlayer,
+                | Message::DeletePlayer
+                | Message::ProfileTab(_)
+                | Message::PlayerStats(_),
                 Mode::Browse,
                 None,
             ) => Outcome::Stay,
@@ -631,22 +706,8 @@ impl TeamScreen {
                 _ => Outcome::Stay,
             };
         }
-        if self.profile.is_some() {
-            return match ck {
-                k if k == BACK_KEY => {
-                    self.profile = None;
-                    Outcome::Stay
-                }
-                k if k == key!(e) || k == key!(enter) => {
-                    self.edit_player(s, Some(self.player));
-                    Outcome::Stay
-                }
-                k if k == key!(backspace) || k == key!(delete) => {
-                    self.ask_deletion(s);
-                    Outcome::Stay
-                }
-                _ => Outcome::Stay,
-            };
+        if let Some(tab) = self.profile.as_ref().map(|p| p.tab) {
+            return self.profile_key(s, tab, ck);
         }
         if self.panel == Panel::Week
             && [
@@ -717,6 +778,67 @@ impl TeamScreen {
         Outcome::Stay
     }
 
+    /// ⇧⇥ ⇥ between the tabs (← → too, where they change no filter), as on
+    /// the page of the team; the statistics take the keys of the analysis.
+    fn profile_key(&mut self, s: &Strings, tab: Tab, ck: KeyCombination) -> Outcome {
+        let other = match tab {
+            Tab::Profile => Tab::Statistics,
+            Tab::Statistics => Tab::Profile,
+        };
+        let switch = ck == key!(tab)
+            || ck == key!(shift - tab)
+            || ck == key!(shift - backtab)
+            || ck == key!(backtab);
+        let arrows = tab == Tab::Profile && (ck == key!(left) || ck == key!(right));
+        match ck {
+            k if k == BACK_KEY => {
+                self.profile = None;
+                Outcome::Stay
+            }
+            _ if switch || arrows => {
+                self.profile_tab(other);
+                Outcome::Stay
+            }
+            k if k == key!(e) || (k == key!(enter) && tab == Tab::Profile) => {
+                self.edit_player(s, Some(self.player));
+                Outcome::Stay
+            }
+            // ⌫ writes the days of the period on the statistics
+            k if tab == Tab::Profile && (k == key!(backspace) || k == key!(delete)) => {
+                self.ask_deletion(s);
+                Outcome::Stay
+            }
+            k => {
+                let message = match (tab, self.profile.as_mut().and_then(|p| p.stats.as_mut())) {
+                    (Tab::Statistics, Some(stats)) => stats.key(k),
+                    (Tab::Statistics, None) | (Tab::Profile, _) => None,
+                };
+                match message {
+                    Some(message) => self.player_stats(message),
+                    None => Outcome::Stay,
+                }
+            }
+        }
+    }
+
+    fn profile_hints(&self, s: &Strings) -> Vec<(String, String)> {
+        let own = match self.profile.as_ref().map(|p| (p.tab, p.stats.as_ref())) {
+            Some((Tab::Statistics, Some(stats))) => [("⇧⇥ ⇥".to_string(), s.page.to_string())]
+                .into_iter()
+                .chain(stats.hints(s))
+                .chain([("e".to_string(), s.edit.to_string())])
+                .collect(),
+            _ => vec![
+                ("← → ⇧⇥ ⇥".to_string(), s.page.to_string()),
+                ("Enter / e".to_string(), s.edit.to_string()),
+                ("⌫".to_string(), s.remove_player.to_string()),
+            ],
+        };
+        own.into_iter()
+            .chain([("Esc".to_string(), s.back.to_string())])
+            .collect()
+    }
+
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match (&self.mode, self.panel) {
             (Mode::Edit(editor), _) => editor.hints(s),
@@ -729,11 +851,7 @@ impl TeamScreen {
                 ("Enter".to_string(), s.delete.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
-            (Mode::Browse, _) if self.profile.is_some() => vec![
-                ("Enter / e".to_string(), s.edit.to_string()),
-                ("⌫".to_string(), s.remove_player.to_string()),
-                ("Esc".to_string(), s.back.to_string()),
-            ],
+            (Mode::Browse, _) if self.profile.is_some() => self.profile_hints(s),
             (Mode::Browse, panel) => {
                 let new = match panel {
                     Panel::Players => s.new_player,
@@ -951,7 +1069,7 @@ impl TeamScreen {
                 )
                 .into(),
             ],
-            container(profile::view(shown, &open.numbers, s, c))
+            container(profile::view(shown, open, s, c))
                 .width(Length::Fill)
                 .height(Length::Fill),
             c,
