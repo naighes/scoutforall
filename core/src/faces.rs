@@ -31,8 +31,9 @@ const MIN_SCORE: f64 = 2.0;
 /// A face smaller than this fraction of the largest is background, not a
 /// second person.
 const BACKGROUND_FRACTION: f64 = 0.4;
-/// The crop is this many times the width of the face found (hair, chin).
-const MARGIN: f64 = 1.7;
+/// The crop is this many times the width of the face found (head and
+/// shoulders where the source photo contains them).
+const MARGIN: f64 = 2.2;
 
 #[derive(Debug)]
 pub enum PhotoError {
@@ -86,13 +87,16 @@ pub fn crop_square(face: (i32, i32, u32, u32), width: u32, height: u32) -> Squar
         .min(width)
         .min(height)
         .max(1);
-    let center = |start: i32, len: u32| i64::from(start) + i64::from(len) / 2;
+    // Put the face a little above the middle, leaving more of the torso in
+    // the square while keeping the same framing for old circular thumbnails.
+    let center_x = i64::from(x) + i64::from(w) / 2;
+    let center_y = i64::from(y) + i64::from(h) / 2 + i64::from(h) / 5;
     let place = |center: i64, limit: u32| {
         (center - i64::from(side) / 2).clamp(0, i64::from(limit.saturating_sub(side))) as u32
     };
     Square {
-        x: place(center(x, w), width),
-        y: place(center(y, h), height),
+        x: place(center_x, width),
+        y: place(center_y, height),
         side,
     }
 }

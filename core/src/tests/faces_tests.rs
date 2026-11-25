@@ -53,19 +53,19 @@ mod tests {
 
     #[test]
     fn the_crop_has_a_margin_and_stays_inside_the_photo() {
-        // in the middle: centered, with margin
+        // in the middle: wider margin, with the face above the middle
         let middle = crop_square((400, 300, 100, 100), 1000, 800);
         assert_eq!(
             middle,
             Square {
-                x: 365,
-                y: 265,
-                side: 170
+                x: 340,
+                y: 260,
+                side: 220
             }
         );
         // at the corner: shifted, not cut
         let corner = crop_square((0, 0, 100, 100), 1000, 800);
-        assert_eq!((corner.x, corner.y, corner.side), (0, 0, 170));
+        assert_eq!((corner.x, corner.y, corner.side), (0, 0, 220));
         let far = crop_square((950, 750, 100, 100), 1000, 800);
         assert_eq!((far.x + far.side, far.y + far.side), (1000, 800));
         // a face as large as the photo: the square shrinks to the photo
