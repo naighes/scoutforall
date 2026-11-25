@@ -4897,14 +4897,15 @@ impl Scout4All {
         )?)
     }
 
-    /// The photo of the person (the player's id is theirs) as JPEG, if
-    /// they have one.
+    /// The photo of the person (the player's id is theirs) as PNG, if they
+    /// have one. Previously saved JPEGs remain readable.
     pub fn person_photo(&self, person_id: String) -> Result<Option<Vec<u8>>, MobileError> {
         Ok(scout4all_core::assets::person_photo(&self.db, &person_id)?.map(|image| image.data))
     }
 
-    /// The face the photo holds, cropped (square PNG): for the preview, then
-    /// `set_person_photo`. No face or many faces are errors of their own.
+    /// The person in the photo, cropped to a square with a transparent
+    /// background (PNG): for the preview, then `set_person_photo`. No face or
+    /// many faces are errors of their own.
     pub fn crop_face(&self, bytes: Vec<u8>) -> Result<Vec<u8>, MobileError> {
         use scout4all_core::faces::{PhotoError, crop_face};
         crop_face(&bytes).map_err(|e| match e {
@@ -4919,8 +4920,8 @@ impl Scout4All {
         })
     }
 
-    /// The face cropped (`core::faces::crop_face`) becomes the photo of the
-    /// person (as JPEG), `None` removes it.
+    /// The cropped person (`core::faces::crop_face`) becomes the photo of the
+    /// person (as PNG), `None` removes it.
     pub fn set_person_photo(
         &self,
         person_id: String,

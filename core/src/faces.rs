@@ -1,16 +1,25 @@
-//! The face of a person in a photo (TODO/011 §2.1): found by a detector that
-//! runs on the device (`rustface`, the model is built in, see
-//! `models/README.md`), then cropped as a square with some margin. Only the
-//! position is found: nobody is recognized.
+//! The person in a photo (TODO/011 §2.1): a detector finds the face, then a
+//! local segmentation model removes the background before the square crop.
+//! Both models run on the device (see `models/README.md`); nobody is
+//! recognized.
 //!
 //! A photo is accepted with exactly one face: none or several are errors.
 
 use crate::{assets, errors::AppError};
-use image::{DynamicImage, GenericImageView, ImageFormat, imageops::FilterType};
+use image::{
+    DynamicImage, GenericImageView, GrayImage, ImageFormat, RgbaImage, imageops::FilterType,
+};
 use rustface::{Detector, ImageData};
-use std::io::Cursor;
+use std::{io::Cursor, sync::OnceLock};
+use tract_onnx::prelude::{
+    Framework, InferenceModelExt, IntoRunnable, Tensor, TypedRunnableModel, tvec,
+};
 
 static MODEL: &[u8] = include_bytes!("../models/seeta_fd_frontal_v1.0.bin");
+static SEGMENTATION_MODEL: &[u8] = include_bytes!("../models/u2netp.onnx");
+
+const SEGMENTATION_SIDE: u32 = 320;
+static SEGMENTER: OnceLock<Result<std::sync::Arc<TypedRunnableModel>, String>> = OnceLock::new();
 
 /// The detector looks at an image no larger than this (the time grows with
 /// the pixels, a face is still large in it).
@@ -99,6 +108,91 @@ fn detector() -> Result<Box<dyn Detector>, PhotoError> {
     Ok(detector)
 }
 
+fn segmenter() -> Result<&'static std::sync::Arc<TypedRunnableModel>, PhotoError> {
+    SEGMENTER
+        .get_or_init(|| {
+            tract_onnx::onnx()
+                .model_for_read(&mut Cursor::new(SEGMENTATION_MODEL))
+                .and_then(|model| model.into_optimized())
+                .and_then(IntoRunnable::into_runnable)
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(|error| {
+            PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(error.clone())))
+        })
+}
+
+/// Runs the local U2NetP model once per uploaded photo and applies its mask
+/// to the original pixels. The loaded model is reused for later uploads.
+fn remove_background(image: &DynamicImage) -> Result<RgbaImage, PhotoError> {
+    let resized = image.resize_exact(SEGMENTATION_SIDE, SEGMENTATION_SIDE, FilterType::CatmullRom);
+    let rgb = resized.to_rgb8();
+    let mean = [0.485_f32, 0.456, 0.406];
+    let deviation = [0.229_f32, 0.224, 0.225];
+    let input_values: Vec<f32> = (0..3)
+        .flat_map(|channel| {
+            rgb.pixels().map(move |pixel| {
+                (f32::from(pixel[channel]) / 255.0 - mean[channel]) / deviation[channel]
+            })
+        })
+        .collect();
+    let input = tract_onnx::prelude::tract_ndarray::Array4::from_shape_vec(
+        (1, 3, SEGMENTATION_SIDE as usize, SEGMENTATION_SIDE as usize),
+        input_values,
+    )
+    .map_err(|error| {
+        PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(error.to_string())))
+    })?;
+    let output = segmenter()?
+        .run(tvec!(Tensor::from(input).into()))
+        .map_err(|error| {
+            PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(error.to_string())))
+        })?;
+    let mask_output = output.first().ok_or_else(|| {
+        PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(
+            "segmentation produced no mask".to_string(),
+        )))
+    })?;
+    let mask = mask_output.to_plain_array_view::<f32>().map_err(|error| {
+        PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(error.to_string())))
+    })?;
+    if mask.shape() != [1, 1, SEGMENTATION_SIDE as usize, SEGMENTATION_SIDE as usize] {
+        return Err(PhotoError::Image(AppError::IO(
+            crate::errors::IOError::Msg("unexpected segmentation mask size".to_string()),
+        )));
+    }
+    let (minimum, maximum) = mask
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), value| {
+            (min.min(*value), max.max(*value))
+        });
+    if !minimum.is_finite() || !maximum.is_finite() || maximum <= minimum {
+        return Err(PhotoError::Image(AppError::IO(
+            crate::errors::IOError::Msg("invalid segmentation mask".to_string()),
+        )));
+    }
+    let mask_pixels: Vec<u8> = mask
+        .iter()
+        .map(|value| (((value - minimum) / (maximum - minimum)).clamp(0.0, 1.0) * 255.0) as u8)
+        .collect();
+    let mask = GrayImage::from_raw(SEGMENTATION_SIDE, SEGMENTATION_SIDE, mask_pixels).ok_or_else(
+        || {
+            PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(
+                "invalid segmentation mask size".to_string(),
+            )))
+        },
+    )?;
+    let mask = image::imageops::resize(&mask, image.width(), image.height(), FilterType::Lanczos3);
+    let mut rgba = image.to_rgba8();
+    rgba.pixels_mut()
+        .zip(mask.pixels())
+        .for_each(|(pixel, alpha)| {
+            pixel[3] = alpha[0];
+        });
+    Ok(rgba)
+}
+
 /// The significant faces of the image, in its own pixels.
 fn faces(image: &DynamicImage) -> Result<Vec<(i32, i32, u32, u32)>, PhotoError> {
     let (width, height) = image.dimensions();
@@ -137,10 +231,11 @@ pub fn crop_face(bytes: &[u8]) -> Result<Vec<u8>, PhotoError> {
         many => return Err(PhotoError::ManyFaces(many.len())),
     };
     let square = crop_square(face, width, height);
+    let foreground = remove_background(&image)?;
+    let crop =
+        DynamicImage::ImageRgba8(foreground).crop_imm(square.x, square.y, square.side, square.side);
     let mut out = Vec::new();
-    image
-        .crop_imm(square.x, square.y, square.side, square.side)
-        .write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+    crop.write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
         .map_err(|e| PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(e.to_string()))))?;
     Ok(out)
 }

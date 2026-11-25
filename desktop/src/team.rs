@@ -1308,7 +1308,7 @@ mod tests {
         assert!(core.person_photo(anna.clone()).unwrap().is_none());
         team.update(s, Message::Form(Save));
         let saved = core.person_photo(anna.clone()).unwrap().unwrap();
-        assert_eq!(saved.get(..2), Some(&[0xff, 0xd8][..]), "a JPEG");
+        assert!(saved.starts_with(b"\x89PNG\r\n\x1a\n"), "a transparent PNG");
         // the photo comes back in the form
         edit(&mut team);
         let Mode::Edit(editor) = &team.mode else {

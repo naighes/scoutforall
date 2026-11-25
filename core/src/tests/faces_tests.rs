@@ -14,10 +14,14 @@ mod tests {
     #[test]
     fn a_photo_with_one_face_is_cropped_as_a_square_around_it() {
         let png = crop_face(ONE_FACE).unwrap();
-        let image = image::load_from_memory_with_format(&png, ImageFormat::Png).unwrap();
+        let image = image::load_from_memory_with_format(&png, ImageFormat::Png)
+            .unwrap()
+            .to_rgba8();
         assert_eq!(image.width(), image.height());
         assert!(image.width() >= 65, "the crop holds the face and a margin");
         assert!(image.width() <= 100, "the crop is inside the photo");
+        assert!(image.get_pixel(image.width() / 2, image.height() / 2)[3] > 0);
+        assert!(image.pixels().any(|pixel| pixel[3] == 0));
     }
 
     #[test]

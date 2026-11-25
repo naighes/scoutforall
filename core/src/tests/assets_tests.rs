@@ -83,12 +83,56 @@ mod tests {
     }
 
     #[test]
-    fn a_photo_is_a_small_square_jpeg() {
+    fn a_photo_is_a_small_square_png() {
         let bytes = encoded(900, 600, Rgba([120, 80, 60, 255]), ImageFormat::Png);
         let photo = assets::normalize_photo(&bytes).unwrap();
         assert_eq!((photo.width, photo.height), (PHOTO_SIDE, PHOTO_SIDE));
+        assert_eq!(photo.mime, "image/png");
+        assert_eq!(
+            image::load_from_memory(&photo.data).unwrap().color(),
+            image::ColorType::Rgba8
+        );
+    }
+
+    #[test]
+    fn a_photo_keeps_its_transparent_background() {
+        let mut pixels = RgbaImage::from_pixel(80, 80, Rgba([10, 20, 30, 0]));
+        for y in 30..50 {
+            for x in 30..50 {
+                pixels.put_pixel(x, y, Rgba([200, 100, 50, 255]));
+            }
+        }
+        let mut bytes = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(pixels)
+            .write_to(&mut bytes, ImageFormat::Png)
+            .unwrap();
+        let photo = assets::normalize_photo(&bytes.into_inner()).unwrap();
+        let restored = image::load_from_memory(&photo.data).unwrap().to_rgba8();
+        assert_eq!(restored.get_pixel(0, 0)[3], 0);
+        assert!(restored.get_pixel(PHOTO_SIDE / 2, PHOTO_SIDE / 2)[3] > 240);
+    }
+
+    #[test]
+    fn existing_jpeg_photos_are_read_without_reencoding() {
+        let db = database();
+        let bytes = encoded(40, 30, Rgba([10, 20, 30, 255]), ImageFormat::Jpeg);
+        db.execute(
+            "INSERT INTO assets (id, kind, mime, width, height, data)
+             VALUES ('44444444-4444-4444-4444-444444444444', 'person_photo', 'image/jpeg', 40, 30, ?1)",
+            [&bytes],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE persons SET photo_asset_id = '44444444-4444-4444-4444-444444444444' WHERE id = ?1",
+            [PERSON],
+        )
+        .unwrap();
+        let photo = assets::load(&db, "44444444-4444-4444-4444-444444444444")
+            .unwrap()
+            .unwrap();
         assert_eq!(photo.mime, "image/jpeg");
-        assert!(photo.data.len() < bytes.len());
+        assert_eq!((photo.width, photo.height), (40, 30));
+        assert_eq!(photo.data, bytes);
     }
 
     #[test]

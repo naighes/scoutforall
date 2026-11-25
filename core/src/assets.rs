@@ -4,16 +4,14 @@
 //! (`photo_asset_id`) points to. The same code serves every app.
 //!
 //! - a logo keeps its proportions and its transparency (PNG);
-//! - a photo is a square JPEG (no transparency to keep, much smaller).
+//! - a photo is a square PNG, so the transparent background is kept.
 
 use crate::{
     errors::{AppError, IOError},
     providers::sqlite::Database,
 };
 use image::{
-    DynamicImage, ImageEncoder, ImageFormat,
-    codecs::{jpeg::JpegEncoder, png::PngEncoder},
-    imageops::FilterType,
+    DynamicImage, ImageEncoder, ImageFormat, codecs::png::PngEncoder, imageops::FilterType,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -22,8 +20,6 @@ use uuid::Uuid;
 pub const LOGO_MAX_SIDE: u32 = 256;
 /// The side of a photo, in pixels.
 pub const PHOTO_SIDE: u32 = 256;
-/// The quality of the JPEG of a photo.
-pub const PHOTO_QUALITY: u8 = 80;
 /// The largest file taken in, before decoding: a bigger one is refused
 /// instead of filling the memory.
 pub const MAX_INPUT_BYTES: usize = 25 * 1024 * 1024;
@@ -102,27 +98,21 @@ pub fn normalize_logo(bytes: &[u8]) -> Result<Image, AppError> {
 }
 
 /// The photo: a square of `PHOTO_SIDE` (the image is expected to be already
-/// the face, cropped), flattened on white, as JPEG.
+/// the person, cropped), with transparency kept, as PNG.
 pub fn normalize_photo(bytes: &[u8]) -> Result<Image, AppError> {
     let square = decode_image(bytes)?.resize_exact(PHOTO_SIDE, PHOTO_SIDE, FilterType::Lanczos3);
     let rgba = square.to_rgba8();
-    let mut flat = image::RgbImage::new(PHOTO_SIDE, PHOTO_SIDE);
-    flat.pixels_mut().zip(rgba.pixels()).for_each(|(out, px)| {
-        let alpha = u32::from(px[3]);
-        let on_white = |c: u8| ((u32::from(c) * alpha + 255 * (255 - alpha)) / 255) as u8;
-        *out = image::Rgb([on_white(px[0]), on_white(px[1]), on_white(px[2])]);
-    });
     let mut data = Vec::new();
-    JpegEncoder::new_with_quality(&mut data, PHOTO_QUALITY)
+    PngEncoder::new(&mut data)
         .write_image(
-            &flat,
+            &rgba,
             PHOTO_SIDE,
             PHOTO_SIDE,
-            image::ExtendedColorType::Rgb8,
+            image::ExtendedColorType::Rgba8,
         )
         .map_err(|e| msg(e.to_string()))?;
     Ok(Image {
-        mime: "image/jpeg",
+        mime: "image/png",
         width: PHOTO_SIDE,
         height: PHOTO_SIDE,
         data,
@@ -188,7 +178,7 @@ pub fn set_team_logo(db: &Connection, team_id: &str, bytes: Option<&[u8]>) -> Re
     )
 }
 
-/// The photo of a person, as `set_team_logo`; `bytes` is the face already
+/// The photo of a person, as `set_team_logo`; `bytes` is the person already
 /// cropped.
 pub fn set_person_photo(
     db: &Connection,
@@ -253,7 +243,7 @@ pub fn store_team_logo(db: &Database, team_id: &str, bytes: Option<&[u8]>) -> Re
     db.write(|tx| set_team_logo(tx, team_id, bytes))
 }
 
-/// The photo of the person (the face, as JPEG), if they have one.
+/// The photo of the person (as PNG for new photos; old JPEGs remain readable), if they have one.
 pub fn person_photo(db: &Database, person_id: &str) -> Result<Option<Image>, AppError> {
     db.read(|tx| {
         let id: Option<String> = tx
