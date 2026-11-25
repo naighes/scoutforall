@@ -473,12 +473,10 @@ impl App {
         let opened = match go {
             Go::Stay => return Task::none(),
             Go::CropFace(bytes) => {
+                // the executor of iced is a pool of threads: not the thread
+                // of the screen, and no runtime of tokio on it
                 return Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || form::crop(&bytes))
-                            .await
-                            .unwrap_or_else(|e| Err(form::Face::Other(e.to_string())))
-                    },
+                    async move { form::crop(&bytes) },
                     |face| Message::Team(team::Message::Form(form::Message::Cropped(face))),
                 );
             }
