@@ -1,8 +1,13 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
@@ -13,7 +18,9 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.AnnotatedString
 import java.time.LocalDate
+import io.github.naighes.scout4all.core.AnalysisPeriod
 import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.Scout4All
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -57,6 +64,44 @@ class AnalysisLayoutTest(private val screen: Size) {
         rule.shot("analysis-between-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
+
+    /** The statistics tab of the profile, then the analysis narrowed to the
+     * player: no player to choose. */
+    @Test
+    fun theStatisticsOfAPlayer() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona")
+        val server = core { c -> c.playerStatisticsOfAll(team) }
+        var detail by mutableStateOf<LockedAnalysis?>(null)
+        rule.setContent {
+            Scout4AllTheme {
+                when (val locked = detail) {
+                    null -> PlayerProfileScreen(team, server, onBack = {}, onEdit = {}, onTeam = {}, onDeleted = {}, onDetail = { detail = it })
+                    else -> AnalysisScreen(team, onBack = {}, locked = locked)
+                }
+            }
+        }
+        rule.waitForText("ALESSIA ORRO", substring = true)
+        // a phone on its side is short: the header scrolls away first
+        val scrollTo = { text: String -> rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(text)) }
+        scrollTo(string(R.string.statistics))
+        click(string(R.string.statistics))
+        rule.waitForIdle()
+        rule.waitFor {
+            runCatching { scrollTo(string(R.string.stats_detail)) }.isSuccess
+        }
+        rule.shot("player-statistics-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        click(string(R.string.stats_detail))
+        rule.waitForText(string(R.string.stats_trend))
+        rule.onAllNodesWithText(string(R.string.filter_player)).assertCountEquals(0)
+        assertEquals(PeriodKind.Season, detail?.choice?.kind)
+    }
+
+    /** The first player of the team with a touch. */
+    private fun Scout4All.playerStatisticsOfAll(team: String): String = team(team).players.first {
+        playerStatistics(team, it.id, AnalysisPeriod.Season, null).fundamentals.isNotEmpty()
+    }.id
 
     private fun click(text: String) {
         rule.onNode(hasText(text) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)

@@ -175,6 +175,8 @@ pub enum Outcome {
 /// The player the analysis is narrowed to, opened from their profile.
 struct Locked {
     player: String,
+    /// the ones of the profile, to open it again with
+    filters: Filters,
 }
 
 pub struct StatsScreen {
@@ -765,7 +767,10 @@ impl StatsScreen {
         let title = format!("{name} – {}", s.analysis);
         let mut screen = StatsScreen::with(core, team_id, Source::Team, title);
         screen.filter.players = vec![player.clone()];
-        screen.locked = Some(Locked { player });
+        screen.locked = Some(Locked {
+            player,
+            filters: filters.clone(),
+        });
         screen.choice = filters.choice;
         screen.period = filters.period;
         screen.competition = filters.competition;
@@ -776,17 +781,12 @@ impl StatsScreen {
         }
     }
 
-    /// The player of a narrowed analysis and its filters, to go back to
-    /// their profile.
+    /// The player of a narrowed analysis and the filters of their profile,
+    /// to go back to it.
     pub fn player_filters(&self) -> Option<(String, Filters)> {
-        self.locked.as_ref().map(|locked| {
-            let filters = Filters {
-                choice: self.choice.clone(),
-                period: self.period.clone(),
-                competition: self.competition,
-            };
-            (locked.player.clone(), filters)
-        })
+        self.locked
+            .as_ref()
+            .map(|locked| (locked.player.clone(), locked.filters.clone()))
     }
 
     /// Opened from the page of team B `team_b`: the statistics of B.

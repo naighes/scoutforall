@@ -370,6 +370,7 @@
     <string name="analysis">Analiza</string>
     <string name="period">Okres</string>
     <string name="last_month">Ostatni miesiąc</string>
+    <string name="season_period">Cały sezon</string>
     <string name="last_matches">Ostatnie %1$d</string>
     <string name="between">Od – do</string>
     <string name="from_day">Od</string>
@@ -734,7 +735,6 @@
     <string name="attendance">Obecność</string>
     <string name="no_matches_played">Brak rozegranych meczów</string>
     <string name="also_plays_in">Gra także w</string>
-    <string name="player_statistics_coming">Statystyki zawodnika będą dostępne tutaj.</string>
     <string name="player_out_of">z %1$d</string>
     <string name="player_points_detail">Atak %1$d · Blok %2$d · Serwis %3$d</string>
     <string name="dominant_hand">Ręka dominująca</string>

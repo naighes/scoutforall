@@ -299,6 +299,28 @@ private fun Navigation(
                 onEdit = { nav.navigate("team/$id/player/$player/edit") },
                 onTeam = { team -> nav.navigate("team/$team/player/$player") },
                 onDeleted = { nav.back(entry) },
+                onDetail = { locked ->
+                    val choice = locked.choice
+                    nav.navigate(
+                        "team/$id/player/$player/analysis?kind=${choice.kind.name}&count=${choice.count}" +
+                            "&from=${choice.from}&to=${choice.to}&competition=${locked.competition.orEmpty()}",
+                    )
+                },
+            )
+        }
+        composable("team/{id}/player/{player}/analysis?kind={kind}&count={count}&from={from}&to={to}&competition={competition}") { entry ->
+            val argument = { name: String -> entry.arguments?.getString(name).orEmpty() }
+            val choice = PeriodChoice(
+                PeriodKind.entries.firstOrNull { it.name == argument("kind") } ?: PeriodKind.Season,
+                argument("count").toIntOrNull() ?: 1,
+                argument("from"),
+                argument("to"),
+            )
+            AnalysisScreen(
+                argument("id"),
+                onBack = { nav.back(entry) },
+                onWatch = { nav.watch(it) },
+                locked = LockedAnalysis(argument("player"), choice, argument("competition").ifEmpty { null }),
             )
         }
         composable("team/{id}/player/{player}/edit") { entry ->

@@ -367,6 +367,7 @@
     <string name="analysis">分析</string>
     <string name="period">期間</string>
     <string name="last_month">直近1か月</string>
+    <string name="season_period">シーズン全体</string>
     <string name="last_matches">直近%1$d試合</string>
     <string name="between">期間指定</string>
     <string name="from_day">開始</string>
@@ -716,7 +717,6 @@
     <string name="attendance">出席率</string>
     <string name="no_matches_played">出場した試合はありません</string>
     <string name="also_plays_in">他の所属チーム</string>
-    <string name="player_statistics_coming">選手の統計はここに表示されます。</string>
     <string name="player_out_of">全%1$d試合</string>
     <string name="player_points_detail">攻撃 %1$d · ブロック %2$d · サーブ %3$d</string>
     <string name="dominant_hand">利き手</string>

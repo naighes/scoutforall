@@ -74,17 +74,19 @@ private val ITEM_COLUMNS = 2
 /** Read only profile for one player in one team season. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlayerProfileScreen(
+internal fun PlayerProfileScreen(
     teamId: String,
     playerId: String,
     onBack: () -> Unit,
     onEdit: () -> Unit,
     onTeam: (String) -> Unit,
     onDeleted: () -> Unit,
+    onDetail: (LockedAnalysis) -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     var state by remember(teamId, playerId) { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    val statistics = playerStatisticsState(teamId, playerId, shown = tab == 1)
     var asking by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(teamId, playerId) {
@@ -145,11 +147,9 @@ fun PlayerProfileScreen(
                 item {
                     when (tab) {
                         0 -> ProfileDetails(s.data, onTeam)
-                        else -> Text(
-                            stringResource(R.string.player_statistics_coming),
-                            Modifier.padding(20.dp),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        else -> PlayerStatisticsTab(statistics) {
+                            onDetail(LockedAnalysis(playerId, statistics.choice, statistics.competition))
+                        }
                     }
                 }
             }
