@@ -112,6 +112,13 @@ fn detector() -> Result<Box<dyn Detector>, PhotoError> {
     Ok(detector)
 }
 
+/// A failure of the segmentation, told as an image error.
+fn failed(message: impl std::fmt::Display) -> PhotoError {
+    PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(
+        message.to_string(),
+    )))
+}
+
 fn segmenter() -> Result<&'static std::sync::Arc<TypedRunnableModel>, PhotoError> {
     SEGMENTER
         .get_or_init(|| {
@@ -122,9 +129,31 @@ fn segmenter() -> Result<&'static std::sync::Arc<TypedRunnableModel>, PhotoError
                 .map_err(|error| error.to_string())
         })
         .as_ref()
-        .map_err(|error| {
-            PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(error.clone())))
-        })
+        .map_err(failed)
+}
+
+/// The output of the model as a grey mask, its range stretched to the whole
+/// scale: an unexpected size, values not finite or all alike are errors.
+pub(crate) fn mask_of(shape: &[usize], values: &[f32]) -> Result<GrayImage, PhotoError> {
+    let side = SEGMENTATION_SIDE as usize;
+    let (minimum, maximum) = values
+        .iter()
+        .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), value| {
+            (min.min(*value), max.max(*value))
+        });
+    let usable = values.iter().all(|v| v.is_finite()) && maximum > minimum;
+    match (shape == [1, 1, side, side], usable) {
+        (false, _) => Err(failed("unexpected segmentation mask size")),
+        (_, false) => Err(failed("invalid segmentation mask")),
+        (true, true) => {
+            let pixels = values
+                .iter()
+                .map(|v| (((v - minimum) / (maximum - minimum)).clamp(0.0, 1.0) * 255.0) as u8)
+                .collect();
+            GrayImage::from_raw(SEGMENTATION_SIDE, SEGMENTATION_SIDE, pixels)
+                .ok_or_else(|| failed("invalid segmentation mask size"))
+        }
+    }
 }
 
 /// Runs the local U2NetP model once per uploaded photo and applies its mask
@@ -145,48 +174,16 @@ fn remove_background(image: &DynamicImage) -> Result<RgbaImage, PhotoError> {
         (1, 3, SEGMENTATION_SIDE as usize, SEGMENTATION_SIDE as usize),
         input_values,
     )
-    .map_err(|error| {
-        PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(error.to_string())))
-    })?;
+    .map_err(failed)?;
     let output = segmenter()?
         .run(tvec!(Tensor::from(input).into()))
-        .map_err(|error| {
-            PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(error.to_string())))
-        })?;
-    let mask_output = output.first().ok_or_else(|| {
-        PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(
-            "segmentation produced no mask".to_string(),
-        )))
-    })?;
-    let mask = mask_output.to_plain_array_view::<f32>().map_err(|error| {
-        PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(error.to_string())))
-    })?;
-    if mask.shape() != [1, 1, SEGMENTATION_SIDE as usize, SEGMENTATION_SIDE as usize] {
-        return Err(PhotoError::Image(AppError::IO(
-            crate::errors::IOError::Msg("unexpected segmentation mask size".to_string()),
-        )));
-    }
-    let (minimum, maximum) = mask
-        .iter()
-        .fold((f32::INFINITY, f32::NEG_INFINITY), |(min, max), value| {
-            (min.min(*value), max.max(*value))
-        });
-    if !minimum.is_finite() || !maximum.is_finite() || maximum <= minimum {
-        return Err(PhotoError::Image(AppError::IO(
-            crate::errors::IOError::Msg("invalid segmentation mask".to_string()),
-        )));
-    }
-    let mask_pixels: Vec<u8> = mask
-        .iter()
-        .map(|value| (((value - minimum) / (maximum - minimum)).clamp(0.0, 1.0) * 255.0) as u8)
-        .collect();
-    let mask = GrayImage::from_raw(SEGMENTATION_SIDE, SEGMENTATION_SIDE, mask_pixels).ok_or_else(
-        || {
-            PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(
-                "invalid segmentation mask size".to_string(),
-            )))
-        },
-    )?;
+        .map_err(failed)?;
+    let output = output
+        .first()
+        .ok_or_else(|| failed("segmentation produced no mask"))?;
+    let output = output.to_plain_array_view::<f32>().map_err(failed)?;
+    let values: Vec<f32> = output.iter().copied().collect();
+    let mask = mask_of(output.shape(), &values)?;
     let mask = image::imageops::resize(&mask, image.width(), image.height(), FilterType::Lanczos3);
     let mut rgba = image.to_rgba8();
     rgba.pixels_mut()

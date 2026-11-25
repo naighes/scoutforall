@@ -29,6 +29,16 @@ pub fn fitted(name: &str, room: usize) -> String {
     }
 }
 
+/// The first letters of the first two words, capital: for a player without
+/// a photo.
+pub fn initials(name: &str) -> String {
+    name.split_whitespace()
+        .take(2)
+        .filter_map(|word| word.chars().next())
+        .flat_map(char::to_uppercase)
+        .collect()
+}
+
 /// `text` in at most `room` characters: when longer, the first ones and
 /// `mark` in place of the rest.
 pub fn cut(text: &str, room: usize, mark: char) -> String {

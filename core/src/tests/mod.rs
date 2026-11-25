@@ -51,6 +51,7 @@ mod match_form_tests;
 mod migrate_tests;
 mod pinned_teams_tests;
 mod player_form_tests;
+mod player_profile_tests;
 mod point_sequence_tests;
 mod point_without_cause_tests;
 mod provider_tests;

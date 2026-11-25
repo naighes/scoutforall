@@ -22,15 +22,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
-import io.github.naighes.scout4all.core.PlayerProfileStats
+import io.github.naighes.scout4all.core.PlayerProfile
 import io.github.naighes.scout4all.core.TeamDetails
 import kotlinx.coroutines.launch
 import java.time.LocalDate
-import java.time.Period
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-private data class ProfileData(val team: TeamDetails, val player: Player, val stats: PlayerProfileStats)
+private data class ProfileData(val team: TeamDetails, val player: Player, val stats: PlayerProfile)
 
 /** Read only profile for one player in one team season. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -56,7 +55,7 @@ fun PlayerProfileScreen(
             data = app.core { core ->
                 val team = core.team(teamId)
                 val player = team.players.first { it.id == playerId }
-                ProfileData(team, player, core.playerProfileStats(teamId, playerId))
+                ProfileData(team, player, core.playerProfile(teamId, playerId))
             }
             error = null
         } catch (e: MobileException) { error = e.reason }
@@ -102,7 +101,7 @@ fun PlayerProfileScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(18.dp),
                     ) {
-                        ProfileAvatar(d.player.id, d.player.name, 104.dp)
+                        ProfileAvatar(d.player.id, d.stats.initials, 104.dp)
                         Column(Modifier.weight(1f)) {
                             Text(d.player.number.toString().padStart(2, '0'), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
                             Text(d.player.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -126,14 +125,14 @@ fun PlayerProfileScreen(
 }
 
 @Composable
-private fun ProfileAvatar(playerId: String, name: String, size: androidx.compose.ui.unit.Dp) {
+private fun ProfileAvatar(playerId: String, initials: String, size: androidx.compose.ui.unit.Dp) {
     val photo = photoOf(playerId)
     Box(
         Modifier.size(size).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center,
     ) {
         if (photo != null) Image(photo, contentDescription = null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-        else Text(name.split(Regex("\\s+")).take(2).mapNotNull { it.firstOrNull() }.joinToString("").uppercase(), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        else Text(initials, style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
     }
 }
 
@@ -154,14 +153,13 @@ private fun ProfileDetails(d: ProfileData, onTeam: (String) -> Unit, modifier: M
                         stringResource(R.string.player_points_detail, s.attackPoints.toInt(), s.blockPoints.toInt(), s.servePoints.toInt()),
                     )
                 }
-                if (s.trainingSessions > 0u) ProfileMetric(stringResource(R.string.attendance), s.attendancePercent?.let { "$it%" } ?: "—", Modifier.weight(1f))
+                if (s.hasTraining) ProfileMetric(stringResource(R.string.attendance), s.attendancePercent?.let { "$it%" } ?: "—", Modifier.weight(1f))
             }
         }
         item {
             val birth = runCatching { LocalDate.parse(f.birthDate) }.getOrNull()
-            val age = birth?.let { Period.between(it, LocalDate.now()).years }
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                birth?.let { ProfileField(stringResource(R.string.birth_date), "${it.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))}${age?.let { years -> " ($years)" }.orEmpty()}") }
+                birth?.let { ProfileField(stringResource(R.string.birth_date), "${it.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))}${s.age?.let { " ($it)" }.orEmpty()}") }
                 f.nationality?.let { code ->
                     var country by remember(code) { mutableStateOf("") }
                     val app = LocalContext.current.applicationContext as Scout4AllApplication

@@ -332,6 +332,26 @@ impl SqliteMatchReader {
         })
     }
 
+    /// The matches that scouted the players of `team`, each from its side:
+    /// those it's A of, and those scouted on both sides it's B of. The
+    /// unreadable ones are left out, as in the analysis.
+    pub async fn read_scouted(&self, team: &TeamEntry) -> Result<Vec<MatchEntry>, AppError> {
+        let as_a = self.read_all(team).await?;
+        let as_b = self.db.read(|tx| matches_as_b(tx, team.id))?;
+        let as_b = as_b.into_iter().filter_map(|(id, a, _)| {
+            self.db
+                .read(|tx| read_team(tx, &a))
+                .and_then(|a| self.read_of_b(&a, &id))
+                .ok()
+                .flatten()
+        });
+        Ok(as_a
+            .into_iter()
+            .filter_map(Result::ok)
+            .chain(as_b)
+            .collect())
+    }
+
     /// The match in which `team` is B, as B sees it: team A, and whether
     /// B plays at home; `None` when the team isn't B of that match, or the
     /// match was removed.

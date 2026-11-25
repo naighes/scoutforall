@@ -5,7 +5,6 @@
 //! between players and matches, ↑ ↓ in the list, ⌫ deletes the one
 //! chosen, ⇧⌫ the team, t starts the new season.
 
-use chrono::Datelike;
 use {
     crate::{
         agenda::{self, Agenda, Pick},
@@ -129,7 +128,7 @@ pub struct TeamScreen {
     logo: Option<iced::widget::image::Handle>,
     /// the photos of the players of the list, in its order
     photos: Vec<Option<iced::widget::image::Handle>>,
-    profile_stats: Option<scout4all_mobile::PlayerProfileStats>,
+    profile_stats: Option<scout4all_mobile::PlayerProfile>,
     profile_error: Option<String>,
     return_to_profile: bool,
 }
@@ -282,7 +281,7 @@ impl TeamScreen {
         if let Some(player) = self.details.players.get(index) {
             match self
                 .core
-                .player_profile_stats(self.team_id.clone(), player.id.clone())
+                .player_profile(self.team_id.clone(), player.id.clone())
             {
                 Ok(stats) => self.profile_stats = Some(stats),
                 Err(error) => self.profile_error = Some(error.to_string()),
@@ -871,7 +870,7 @@ impl TeamScreen {
         let summary: Element<'a, Message> = match stats {
             Some(v) if v.matches_played == 0 => row![
                 ui::body(s.no_matches_played).color(c.muted),
-                if v.training_sessions > 0 {
+                if v.has_training {
                     line(
                         s.attendance.to_string(),
                         v.attendance_percent
@@ -897,7 +896,7 @@ impl TeamScreen {
                         v.points, v.attack_points, v.block_points, v.serve_points
                     )
                 ),
-                if v.training_sessions > 0 {
+                if v.has_training {
                     line(
                         s.attendance.to_string(),
                         v.attendance_percent
@@ -975,13 +974,7 @@ impl TeamScreen {
             .and_then(Option::as_ref)
             .map(|photo| ui::logo(photo, 112.0))
             .unwrap_or_else(|| {
-                let initials = player
-                    .name
-                    .split_whitespace()
-                    .take(2)
-                    .filter_map(|word| word.chars().next())
-                    .collect::<String>()
-                    .to_uppercase();
+                let initials = stats.map(|v| v.initials.clone()).unwrap_or_default();
                 container(
                     text(initials)
                         .size(48)
@@ -1029,13 +1022,12 @@ impl TeamScreen {
                     .parse::<chrono::NaiveDate>()
                     .ok()
                     .map(|date| {
-                        let today = chrono::Local::now().date_naive();
-                        let age = today.year()
-                            - date.year()
-                            - i32::from((today.month(), today.day()) < (date.month(), date.day()));
+                        let day = s.day(&date.to_string());
                         line(
                             s.birth_date.to_string(),
-                            format!("{} ({age})", s.day(&date.to_string())),
+                            stats
+                                .and_then(|v| v.age)
+                                .map_or(day.clone(), |age| format!("{day} ({age})")),
                         )
                     })
                     .unwrap_or_else(|| column![]),

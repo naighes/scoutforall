@@ -38,9 +38,10 @@ use scout4all_core::{
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error, log_info},
     match_form::{CompetitionInput, MatchForm, MatchFormError, RosterNumber},
+    names,
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
     player_form::{self, PlayerForm, PlayerFormError, name_the_removed},
-    player_profile::PlayerSeasonStats,
+    player_profile::{PlayerSeasonStats, age, has_training},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -827,9 +828,14 @@ pub struct ProfileTeam {
     pub role: Option<RoleEnum>,
 }
 
-/// Season totals for the player in one team.
+/// What the profile of a player in one team shows beyond the form: the
+/// season totals and what's worked out from the person.
 #[derive(Debug, Clone, PartialEq, uniffi::Record)]
-pub struct PlayerProfileStats {
+pub struct PlayerProfile {
+    /// in place of a missing photo
+    pub initials: String,
+    /// today, none without a birth date
+    pub age: Option<u32>,
     pub matches_played: u32,
     pub matches_scouted: u32,
     pub sets_played: u32,
@@ -837,9 +843,8 @@ pub struct PlayerProfileStats {
     pub attack_points: u32,
     pub block_points: u32,
     pub serve_points: u32,
-    pub training_sessions: u32,
-    /// completed sessions with attendance recorded
-    pub attendance_sessions: u32,
+    /// whether to show the attendance (`player_profile::has_training`)
+    pub has_training: bool,
     /// present includes late; absent sessions form the denominator
     pub attendance_percent: Option<u8>,
     pub other_teams: Vec<ProfileTeam>,
@@ -3911,37 +3916,25 @@ impl Scout4All {
 
     /// The player's participation, points, training presence and other
     /// teams in this season.
-    pub fn player_profile_stats(
+    pub fn player_profile(
         &self,
         team_id: String,
         player_id: String,
-    ) -> Result<PlayerProfileStats, MobileError> {
+    ) -> Result<PlayerProfile, MobileError> {
         let player_id = parse_id(&player_id)?;
         let team = self.read_team(&team_id)?;
-        if !team
+        let player = team
             .find_player(player_id)
-            .is_some_and(|player| !player.deleted)
-        {
-            return Err(failed(format!(
-                "player {player_id} is not active in team {team_id}"
-            )));
-        }
-
-        let listed_matches = self.runtime.block_on(self.match_reader.read_all(&team))?;
-        let matches: Vec<MatchEntry> = listed_matches
-            .into_iter()
-            .filter_map(Result::ok)
-            .filter(|m| !m.sets.is_empty())
-            .collect();
-        let summaries = self
+            .filter(|player| !player.deleted)
+            .ok_or_else(|| {
+                failed(format!(
+                    "player {player_id} is not active in team {team_id}"
+                ))
+            })?;
+        let matches = self
             .runtime
-            .block_on(self.match_reader.read_summaries(&team))?;
-        let matches_scouted = summaries
-            .iter()
-            .filter_map(|m| m.as_ref().ok())
-            .filter(|m| m.sets > 0)
-            .count();
-        let stats = PlayerSeasonStats::of(player_id, &matches, matches_scouted);
+            .block_on(self.match_reader.read_scouted(&team))?;
+        let stats = PlayerSeasonStats::of(player_id, &matches)?;
 
         let totals = self
             .runtime
@@ -3969,7 +3962,11 @@ impl Scout4All {
             })
             .collect();
 
-        Ok(PlayerProfileStats {
+        Ok(PlayerProfile {
+            initials: names::initials(&player.name),
+            age: player
+                .birth_date
+                .and_then(|birth| age(birth, Local::now().date_naive())),
             matches_played: stats.matches_played,
             matches_scouted: stats.matches_scouted,
             sets_played: stats.sets_played,
@@ -3977,11 +3974,7 @@ impl Scout4All {
             attack_points: stats.attack_points,
             block_points: stats.block_points,
             serve_points: stats.serve_points,
-            training_sessions: totals
-                .planned
-                .saturating_add(totals.completed)
-                .saturating_add(totals.cancelled),
-            attendance_sessions: attendance.sessions,
+            has_training: has_training(&totals),
             attendance_percent,
             other_teams,
         })
@@ -7052,12 +7045,14 @@ mod tests {
             app.save_player(team.clone(), None, form, false).unwrap();
         }
 
-        let profile = app.player_profile_stats(first, player_id).unwrap();
+        let profile = app.player_profile(first, player_id).unwrap();
+        assert_eq!(profile.initials, "AP");
+        assert_eq!(profile.age, None);
         assert_eq!(profile.matches_played, 0);
         assert_eq!(profile.matches_scouted, 0);
         assert_eq!(profile.sets_played, 0);
         assert_eq!(profile.points, 0);
-        assert_eq!(profile.training_sessions, 0);
+        assert!(!profile.has_training);
         assert_eq!(profile.attendance_percent, None);
         assert_eq!(
             profile

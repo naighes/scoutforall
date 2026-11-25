@@ -12,6 +12,7 @@ mod tests {
         event_edit::Correcting,
         localization::Language,
         match_form::{MatchInput, Opponent},
+        player_profile::PlayerSeasonStats,
         providers::{
             match_reader::MatchReader,
             match_writer::MatchWriter,
@@ -540,6 +541,39 @@ mod tests {
         let of_sides = sides[0].b.as_ref().map(|b| b.stats.clone());
         assert_eq!(Some(match_stats(&of_b).unwrap()), of_sides);
         assert_ne!(of_sides, Some(Stats::new()));
+    }
+
+    /// A player of B counts in the season the matches scouted on both
+    /// sides; scouted on A's side only, the match isn't theirs.
+    #[tokio::test]
+    async fn the_profile_of_a_player_of_b_counts_the_matches_on_both_sides() {
+        for both in [true, false] {
+            let p = Sqlite::new();
+            let (_, b, m) = set_one(&p, both).await;
+            if both {
+                add(
+                    &p,
+                    &m,
+                    &[
+                        (Side::A, S, m.team.players[0].id, Positive),
+                        (Side::B, P, libero(&b), Negative),
+                        (Side::B, A, b.players[1].id, Perfect),
+                    ],
+                );
+            }
+            let matches = p.match_reader.read_scouted(&b).await.unwrap();
+            let season = PlayerSeasonStats::of(b.players[1].id, &matches).unwrap();
+            let expected = u32::from(both);
+            assert_eq!(
+                (
+                    season.matches_scouted,
+                    season.matches_played,
+                    season.sets_played,
+                    season.attack_points
+                ),
+                (expected, expected, expected, expected)
+            );
+        }
     }
 
     /// The event of B born from a touch of A is told with the event of A

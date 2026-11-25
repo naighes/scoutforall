@@ -4,7 +4,7 @@
 
 #[cfg(test)]
 mod tests {
-    use crate::faces::{PhotoError, Square, crop_face, crop_square};
+    use crate::faces::{PhotoError, Square, crop_face, crop_square, mask_of};
     use image::{DynamicImage, ImageFormat, Rgb, RgbImage};
     use std::io::Cursor;
 
@@ -71,5 +71,43 @@ mod tests {
         // a face as large as the photo: the square shrinks to the photo
         let big = crop_square((0, 0, 90, 90), 100, 120);
         assert_eq!(big.side, 100);
+    }
+
+    const SIDE: usize = 320;
+    const SHAPE: [usize; 4] = [1, 1, SIDE, SIDE];
+
+    /// Values going from 2 to 4 over the whole mask.
+    fn values() -> Vec<f32> {
+        let last = (SIDE * SIDE - 1) as f32;
+        (0..SIDE * SIDE)
+            .map(|i| 2.0 + 2.0 * i as f32 / last)
+            .collect()
+    }
+
+    #[test]
+    fn the_mask_takes_the_whole_grey_scale() {
+        let mask = mask_of(&SHAPE, &values()).unwrap();
+        assert_eq!(mask.get_pixel(0, 0).0, [0]);
+        assert_eq!(mask.get_pixel(319, 319).0, [255]);
+    }
+
+    #[test]
+    fn a_mask_that_cant_be_used_is_an_error() {
+        let with = |value| {
+            let mut values = values();
+            values[7] = value;
+            values
+        };
+        let refused = [
+            mask_of(&[1, 1, SIDE, 1], &values()),
+            mask_of(&SHAPE, &values()[1..]),
+            mask_of(&SHAPE, &vec![0.5; SIDE * SIDE]),
+            mask_of(&SHAPE, &with(f32::NAN)),
+            mask_of(&SHAPE, &with(f32::INFINITY)),
+            mask_of(&SHAPE, &[]),
+        ];
+        for mask in refused {
+            assert!(matches!(mask, Err(PhotoError::Image(_))));
+        }
     }
 }
