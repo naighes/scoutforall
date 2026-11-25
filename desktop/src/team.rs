@@ -5,6 +5,7 @@
 //! between players and matches, ↑ ↓ in the list, ⌫ deletes the one
 //! chosen, ⇧⌫ the team, t starts the new season.
 
+use chrono::Datelike;
 use {
     crate::{
         agenda::{self, Agenda, Pick},
@@ -33,6 +34,7 @@ pub enum Panel {
 
 enum Mode {
     Browse,
+    Profile(usize),
     Edit(Box<Editor>),
     /// what to delete, once confirmed
     Delete(Deletion),
@@ -65,6 +67,9 @@ pub enum Message {
     NewSeason,
     NewPlayer,
     Player(usize),
+    OtherTeam(String),
+    EditPlayer,
+    DeletePlayer,
     NewMatch,
     Match(usize),
     /// the delete button of a match of the list
@@ -100,6 +105,10 @@ pub enum Outcome {
     Analysis,
     /// a team saved now (the new season), to open
     OpenTeam(String),
+    OpenPlayer {
+        team: String,
+        player: String,
+    },
     /// the training of the team
     Training(crate::training::screen::Open),
     /// the file of a photo, to crop its face off the thread of the screen
@@ -120,6 +129,9 @@ pub struct TeamScreen {
     logo: Option<iced::widget::image::Handle>,
     /// the photos of the players of the list, in its order
     photos: Vec<Option<iced::widget::image::Handle>>,
+    profile_stats: Option<scout4all_mobile::PlayerProfileStats>,
+    profile_error: Option<String>,
+    return_to_profile: bool,
 }
 
 impl TeamScreen {
@@ -146,6 +158,9 @@ impl TeamScreen {
             game: 0,
             mode: Mode::Browse,
             error: None,
+            profile_stats: None,
+            profile_error: None,
+            return_to_profile: false,
         })
     }
 
@@ -182,6 +197,15 @@ impl TeamScreen {
         self.details.name.clone()
     }
 
+    pub fn open_player_profile(&mut self, player_id: &str) {
+        if let Some(index) = self.details.players.iter().position(|p| p.id == player_id) {
+            self.player = index;
+            self.panel = Panel::Players;
+            self.mode = Mode::Profile(index);
+            self.load_profile(index);
+        }
+    }
+
     /// Read again after a change.
     fn reload(&mut self) {
         let read = self
@@ -199,6 +223,12 @@ impl TeamScreen {
                 self.week.reload(&self.core);
                 self.logo = TeamScreen::logo_of(&self.core, &self.team_id);
                 self.photos = TeamScreen::photos_of(&self.core, &self.details);
+                if let Some(index) = match &self.mode {
+                    Mode::Profile(index) => Some(*index),
+                    _ => None,
+                } {
+                    self.load_profile(index);
+                }
             }
             Err(e) => self.error = Some(e.to_string()),
         }
@@ -207,7 +237,7 @@ impl TeamScreen {
     pub fn focus_id(&self) -> Option<Id> {
         match &self.mode {
             Mode::Edit(editor) => Some(editor.focus_id()),
-            Mode::Browse | Mode::Delete(_) => None,
+            Mode::Browse | Mode::Profile(_) | Mode::Delete(_) => None,
         }
     }
 
@@ -229,6 +259,7 @@ impl TeamScreen {
     }
 
     fn edit_player(&mut self, s: &Strings, index: Option<usize>) {
+        self.return_to_profile = matches!(&self.mode, Mode::Profile(_));
         let player = index.and_then(|i| self.details.players.get(i));
         let editor = Editor::player(
             s,
@@ -243,6 +274,20 @@ impl TeamScreen {
             }),
         );
         self.edit(Ok(editor));
+    }
+
+    fn load_profile(&mut self, index: usize) {
+        self.profile_stats = None;
+        self.profile_error = None;
+        if let Some(player) = self.details.players.get(index) {
+            match self
+                .core
+                .player_profile_stats(self.team_id.clone(), player.id.clone())
+            {
+                Ok(stats) => self.profile_stats = Some(stats),
+                Err(error) => self.profile_error = Some(error.to_string()),
+            }
+        }
     }
 
     /// The new season of the team (D15), a step at a time.
@@ -314,12 +359,13 @@ impl TeamScreen {
     /// Deleted as confirmed: the team gone, back to the home.
     fn delete(&mut self) -> Outcome {
         let mode = std::mem::replace(&mut self.mode, Mode::Browse);
+        self.return_to_profile = false;
         let team = self.team_id.clone();
         let deleted = match &mode {
             Mode::Delete(Deletion::Player(p)) => self.core.remove_player(team, p.id.clone()),
             Mode::Delete(Deletion::Match(id, _)) => self.core.delete_match(team, id.clone()),
             Mode::Delete(Deletion::Team(_)) => self.core.delete_team(team),
-            Mode::Browse | Mode::Edit(_) => Ok(()),
+            Mode::Browse | Mode::Profile(_) | Mode::Edit(_) => Ok(()),
         };
         match (deleted, mode) {
             (Ok(()), Mode::Delete(Deletion::Team(_))) => Outcome::Back,
@@ -387,11 +433,19 @@ impl TeamScreen {
             Edited::Stay => Outcome::Stay,
             Edited::Crop(bytes) => Outcome::Crop(bytes),
             Edited::Cancel => {
-                self.mode = Mode::Browse;
+                self.mode = if self.return_to_profile {
+                    Mode::Profile(self.player)
+                } else {
+                    Mode::Browse
+                };
                 Outcome::Stay
             }
             Edited::Saved(id) => {
-                self.mode = Mode::Browse;
+                self.mode = if self.return_to_profile {
+                    Mode::Profile(self.player)
+                } else {
+                    Mode::Browse
+                };
                 self.reload();
                 match (new_match, season) {
                     (Some(team), _) => Outcome::OpenNewMatch { team, id },
@@ -411,7 +465,12 @@ impl TeamScreen {
             (Message::Confirm, Mode::Delete(_)) => self.delete(),
             (Message::DeletePerson, Mode::Delete(Deletion::Player(_))) => self.delete_person(),
             (Message::Cancel, _) => {
-                self.mode = Mode::Browse;
+                self.mode = if self.return_to_profile {
+                    self.return_to_profile = false;
+                    Mode::Profile(self.player)
+                } else {
+                    Mode::Browse
+                };
                 Outcome::Stay
             }
             (_, Mode::Edit(_) | Mode::Delete(_)) => Outcome::Stay,
@@ -430,7 +489,23 @@ impl TeamScreen {
             (Message::Player(i), Mode::Browse) => {
                 self.panel = Panel::Players;
                 self.player = i;
+                self.mode = Mode::Profile(i);
+                self.load_profile(i);
+                Outcome::Stay
+            }
+            (Message::OtherTeam(team), Mode::Profile(_)) => Outcome::OpenPlayer {
+                team,
+                player: self.details.players[self.player].id.clone(),
+            },
+            (Message::EditPlayer, Mode::Profile(i)) => {
+                let i = *i;
                 self.edit_player(s, Some(i));
+                Outcome::Stay
+            }
+            (Message::DeletePlayer, Mode::Profile(i)) => {
+                self.player = *i;
+                self.return_to_profile = true;
+                self.ask_deletion(s);
                 Outcome::Stay
             }
             (Message::NewMatch, Mode::Browse) => {
@@ -462,9 +537,15 @@ impl TeamScreen {
                 self.ask_team_deletion();
                 Outcome::Stay
             }
-            (Message::Form(_) | Message::Confirm | Message::DeletePerson, Mode::Browse) => {
-                Outcome::Stay
-            }
+            (
+                Message::Form(_)
+                | Message::Confirm
+                | Message::DeletePerson
+                | Message::EditPlayer
+                | Message::DeletePlayer,
+                Mode::Browse | Mode::Profile(_),
+            ) => Outcome::Stay,
+            _ => Outcome::Stay,
         }
     }
 
@@ -479,7 +560,31 @@ impl TeamScreen {
                 k if k == key!(enter) => self.delete(),
                 k if k == key!(a) && player => self.delete_person(),
                 k if k == BACK_KEY => {
+                    self.mode = if self.return_to_profile {
+                        self.return_to_profile = false;
+                        Mode::Profile(self.player)
+                    } else {
+                        Mode::Browse
+                    };
+                    Outcome::Stay
+                }
+                _ => Outcome::Stay,
+            };
+        }
+        if let Mode::Profile(i) = &self.mode {
+            let i = *i;
+            return match ck {
+                k if k == BACK_KEY => {
                     self.mode = Mode::Browse;
+                    Outcome::Stay
+                }
+                k if k == key!(e) || k == key!(enter) => {
+                    self.edit_player(s, Some(i));
+                    Outcome::Stay
+                }
+                k if k == key!(backspace) || k == key!(delete) => {
+                    self.player = i;
+                    self.ask_deletion(s);
                     Outcome::Stay
                 }
                 _ => Outcome::Stay,
@@ -566,6 +671,11 @@ impl TeamScreen {
                 ("Enter".to_string(), s.delete.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
             ],
+            (Mode::Profile(_), _) => vec![
+                ("Enter / e".to_string(), s.edit.to_string()),
+                ("⌫".to_string(), s.remove_player.to_string()),
+                ("Esc".to_string(), s.back.to_string()),
+            ],
             (Mode::Browse, panel) => {
                 let enter = match panel {
                     Panel::Players => s.edit,
@@ -644,10 +754,11 @@ impl TeamScreen {
             .spacing(14)
             .height(Length::Fill)
             .into(),
+            Mode::Profile(i) => self.profile(*i, s, c),
         };
         let error: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
+            None => column![].into(),
         };
         column![error, body].spacing(10).into()
     }
@@ -745,6 +856,229 @@ impl TeamScreen {
                 }),
             )
             .height(Length::Fill),
+            c,
+        )
+    }
+
+    fn profile<'a>(&'a self, index: usize, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let Some(player) = self.details.players.get(index) else {
+            return space::vertical().into();
+        };
+        let stats = self.profile_stats.as_ref();
+        let line = |label: String, value: String| {
+            column![text(label).size(SIZE_SMALL).color(c.muted), ui::body(value)].spacing(2)
+        };
+        let summary: Element<'a, Message> = match stats {
+            Some(v) if v.matches_played == 0 => row![
+                ui::body(s.no_matches_played).color(c.muted),
+                if v.training_sessions > 0 {
+                    line(
+                        s.attendance.to_string(),
+                        v.attendance_percent
+                            .map(|n| format!("{n}%"))
+                            .unwrap_or_else(|| "–".to_string()),
+                    )
+                } else {
+                    column![]
+                },
+            ]
+            .spacing(28)
+            .into(),
+            Some(v) => row![
+                line(
+                    s.matches.to_string(),
+                    format!("{} / {}", v.matches_played, v.matches_scouted)
+                ),
+                line(s.sets.to_string(), v.sets_played.to_string()),
+                line(
+                    s.points.to_string(),
+                    format!(
+                        "{} ({} + {} + {})",
+                        v.points, v.attack_points, v.block_points, v.serve_points
+                    )
+                ),
+                if v.training_sessions > 0 {
+                    line(
+                        s.attendance.to_string(),
+                        v.attendance_percent
+                            .map(|n| format!("{n}%"))
+                            .unwrap_or_else(|| "–".to_string()),
+                    )
+                } else {
+                    column![]
+                },
+            ]
+            .spacing(28)
+            .into(),
+            None if self.profile_error.is_some() => {
+                ui::body(self.profile_error.clone().unwrap_or_default())
+                    .color(c.danger)
+                    .into()
+            }
+            None => space::vertical().into(),
+        };
+        let notes: Element<'a, Message> = if player.form.notes.is_empty() {
+            space::vertical().height(0).into()
+        } else {
+            line(s.notes.to_string(), player.form.notes.clone()).into()
+        };
+        let federation: Element<'a, Message> = if player.form.federation_id.is_empty() {
+            space::vertical().height(0).into()
+        } else {
+            line(
+                s.federation_id.to_string(),
+                player.form.federation_id.clone(),
+            )
+            .into()
+        };
+        let hand: Element<'a, Message> = player
+            .form
+            .dominant_hand
+            .map(|hand| {
+                line(
+                    s.dominant_hand.to_string(),
+                    match hand {
+                        scout4all_core::shapes::player::DominantHand::Right => s.right.to_string(),
+                        scout4all_core::shapes::player::DominantHand::Left => s.left.to_string(),
+                    },
+                )
+                .into()
+            })
+            .unwrap_or_else(|| space::vertical().height(0).into());
+        let others: Element<'a, Message> = stats
+            .map(|v| {
+                let entries = v.other_teams.iter().map(|team| {
+                    iced::widget::button(text(format!(
+                        "{} · {} {}",
+                        team.number, team.name, team.year
+                    )))
+                    .on_press(Message::OtherTeam(team.id.clone()))
+                    .into()
+                });
+                if v.other_teams.is_empty() {
+                    space::vertical().height(0).into()
+                } else {
+                    column![
+                        text(ui::capitalized(s.teams))
+                            .size(SIZE_SMALL)
+                            .color(c.muted),
+                        Column::with_children(entries)
+                    ]
+                    .spacing(4)
+                    .into()
+                }
+            })
+            .unwrap_or_else(|| space::vertical().height(0).into());
+        let avatar: Element<'a, Message> = self
+            .photos
+            .get(index)
+            .and_then(Option::as_ref)
+            .map(|photo| ui::logo(photo, 112.0))
+            .unwrap_or_else(|| {
+                let initials = player
+                    .name
+                    .split_whitespace()
+                    .take(2)
+                    .filter_map(|word| word.chars().next())
+                    .collect::<String>()
+                    .to_uppercase();
+                container(
+                    text(initials)
+                        .size(48)
+                        .font(theme::fonts().bold)
+                        .color(c.accent),
+                )
+                .width(Length::Fixed(112.0))
+                .height(Length::Fixed(112.0))
+                .center_x(Length::Fill)
+                .center_y(Length::Fill)
+                .into()
+            });
+        let info = column![
+            row![
+                avatar,
+                column![
+                    text(format!("{:02}", player.number))
+                        .size(48)
+                        .font(theme::fonts().bold)
+                        .color(c.accent),
+                    text(player.name.clone()).size(30).font(theme::fonts().bold),
+                    text(format!(
+                        "{} · {} {}",
+                        player.role.clone().unwrap_or_default(),
+                        self.details.name,
+                        self.details.year
+                    ))
+                    .size(SIZE_BODY)
+                    .color(c.muted),
+                ]
+                .spacing(4),
+                space::horizontal().width(Length::Fill),
+                self.logo
+                    .as_ref()
+                    .map(|h| ui::logo(h, 54.0))
+                    .unwrap_or_else(|| space::horizontal().width(Length::Fixed(54.0)).into()),
+            ]
+            .spacing(18)
+            .align_y(Alignment::Center),
+            summary,
+            row![
+                player
+                    .form
+                    .birth_date
+                    .parse::<chrono::NaiveDate>()
+                    .ok()
+                    .map(|date| {
+                        let today = chrono::Local::now().date_naive();
+                        let age = today.year()
+                            - date.year()
+                            - i32::from((today.month(), today.day()) < (date.month(), date.day()));
+                        line(
+                            s.birth_date.to_string(),
+                            format!("{} ({age})", s.day(&date.to_string())),
+                        )
+                    })
+                    .unwrap_or_else(|| column![]),
+                player
+                    .form
+                    .nationality
+                    .map(|country| line(
+                        s.nationality.to_string(),
+                        self.core.country_name(country).to_string()
+                    ))
+                    .unwrap_or_else(|| column![]),
+                player
+                    .form
+                    .height_cm
+                    .parse::<u16>()
+                    .ok()
+                    .map(|height| line(s.height.to_string(), format!("{height} cm")))
+                    .unwrap_or_else(|| column![]),
+            ]
+            .spacing(24),
+            notes,
+            federation,
+            hand,
+            others,
+        ]
+        .spacing(24)
+        .padding(24);
+        ui::panel_with(
+            s.player,
+            vec![
+                ui::action(theme::icons::EDIT, s.edit, Message::EditPlayer, false, c).into(),
+                ui::action(
+                    theme::icons::DELETE,
+                    s.remove_player,
+                    Message::DeletePlayer,
+                    false,
+                    c,
+                )
+                .into(),
+            ],
+            container(scrollable(info))
+                .width(Length::Fill)
+                .height(Length::Fill),
             c,
         )
     }
@@ -1281,6 +1615,7 @@ mod tests {
         let edit = |team: &mut TeamScreen| {
             let at = team.details.players.iter().position(|p| p.id == anna);
             team.update(s, Message::Player(at.unwrap()));
+            team.update(s, Message::EditPlayer);
         };
         edit(&mut team);
         // the file only asks the screen to crop its face (off its thread)

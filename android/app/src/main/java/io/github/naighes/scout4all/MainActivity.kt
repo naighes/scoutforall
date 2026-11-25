@@ -293,6 +293,17 @@ private fun Navigation(
         composable("team/{id}/player/{player}") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val player = entry.arguments?.getString("player").orEmpty()
+            PlayerProfileScreen(
+                id, player,
+                onBack = { nav.back(entry) },
+                onEdit = { nav.navigate("team/$id/player/$player/edit") },
+                onTeam = { team -> nav.navigate("team/$team/player/$player") },
+                onDeleted = { nav.back(entry) },
+            )
+        }
+        composable("team/{id}/player/{player}/edit") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val player = entry.arguments?.getString("player").orEmpty()
             PlayerFormScreen(id, player, onBack = { nav.back(entry) }, onDone = { nav.back(entry) })
         }
         composable("team/{id}/new-match") { entry ->

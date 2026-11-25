@@ -729,6 +729,13 @@
     <string name="no_face">Nie znaleziono twarzy na zdjęciu: wybierz takie, na którym twarz jest wyraźna.</string>
     <string name="many_faces">Znaleziono %1$d twarzy na zdjęciu: wybierz takie z jedną osobą.</string>
     <string name="nationality">Narodowość</string>
+    <string name="profile">Profil</string>
+    <string name="sets">Sety</string>
+    <string name="attendance">Obecność</string>
+    <string name="no_matches_played">Brak rozegranych meczów</string>
+    <string name="also_plays_in">Gra także w</string>
+    <string name="player_statistics_coming">Statystyki zawodnika będą dostępne tutaj.</string>
+    <string name="player_points_detail">Atak %1$d · Blok %2$d · Serwis %3$d</string>
     <string name="dominant_hand">Ręka dominująca</string>
     <string name="right_hand">Prawa</string>
     <string name="left_hand">Lewa</string>

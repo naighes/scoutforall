@@ -152,6 +152,7 @@ enum Go {
     /// the gyms, from the home or from the training of a team (back there)
     Venues(Option<String>),
     Team(String),
+    Player(String, String),
     /// the training of the team: what it opens on
     Training(String, training::screen::Open),
     Match(String, String),
@@ -498,6 +499,10 @@ impl App {
                 Screen::Venues(Box::new(screen))
             }),
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
+            Go::Player(team, player) => TeamScreen::new(core, team).map(|mut screen| {
+                screen.open_player_profile(&player);
+                Screen::Team(Box::new(screen))
+            }),
             Go::Training(team, open) => training::screen::TrainingScreen::new(core, team, open)
                 .map(|t| Screen::Training(Box::new(t))),
             Go::Match(team, m) => {
@@ -1752,6 +1757,7 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
         team::Outcome::OpenTeam(team) => Go::Team(team),
+        team::Outcome::OpenPlayer { team, player } => Go::Player(team, player),
         team::Outcome::Training(open) => Go::Training(team_id.to_string(), open),
         team::Outcome::Crop(bytes) => Go::CropFace(bytes),
     }
