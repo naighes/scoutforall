@@ -40,6 +40,7 @@ use scout4all_core::{
     match_form::{CompetitionInput, MatchForm, MatchFormError, RosterNumber},
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
     player_form::{self, PlayerForm, PlayerFormError, name_the_removed},
+    player_profile::PlayerSeasonStats,
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -54,11 +55,13 @@ use scout4all_core::{
             queue::SqliteQueue,
             sets::{SqliteSetReader, SqliteSetWriter},
             teams::{SqliteTeamReader, SqliteTeamWriter},
+            training::SqliteTraining,
             upload::SqliteUploads,
             video::SqliteVideoProfiles,
         },
         team_reader::TeamReader,
         team_writer::TeamWriter,
+        training_totals::TrainingTotals,
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     season::{self, SeasonError, SeasonMember},
@@ -93,6 +96,7 @@ use scout4all_core::{
     },
     team_form::{TeamForm, TeamFormError},
     touch_edit::TouchEdit,
+    training::totals::Scope as TrainingScope,
     trend::{Replay, Series, TrendPoint},
     video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place},
 };
@@ -811,6 +815,34 @@ pub struct TeamDetails {
     pub players: Vec<Player>,
     /// what the form starts from, to edit the team
     pub form: TeamForm,
+}
+
+/// A team in the same season that a player is active in.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ProfileTeam {
+    pub id: String,
+    pub name: String,
+    pub year: u16,
+    pub number: u8,
+    pub role: Option<RoleEnum>,
+}
+
+/// Season totals for the player in one team.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlayerProfileStats {
+    pub matches_played: u32,
+    pub matches_scouted: u32,
+    pub sets_played: u32,
+    pub points: u32,
+    pub attack_points: u32,
+    pub block_points: u32,
+    pub serve_points: u32,
+    pub training_sessions: u32,
+    /// completed sessions with attendance recorded
+    pub attendance_sessions: u32,
+    /// present includes late; absent sessions form the denominator
+    pub attendance_percent: Option<u8>,
+    pub other_teams: Vec<ProfileTeam>,
 }
 
 /// A team as the list shows it: one that can't be read keeps its folder.
@@ -3744,6 +3776,7 @@ pub struct Scout4All {
     match_writer: SqliteMatchWriter,
     competitions: SqliteCompetitions,
     persons: SqlitePersons,
+    training: SqliteTraining,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
     videos: SqliteVideoProfiles,
     /// for `config.json`
@@ -3794,6 +3827,7 @@ impl Scout4All {
             match_writer: SqliteMatchWriter::new(db.clone()),
             competitions: SqliteCompetitions::new(db.clone()),
             persons: SqlitePersons::new(db.clone()),
+            training: SqliteTraining::new(db.clone()),
             set_writer: Arc::new(SqliteSetWriter::new(db.clone(), language.clone())),
             match_reader: SqliteMatchReader::new(db.clone(), language.clone()),
             set_reader: SqliteSetReader::new(db.clone(), language.clone()),
@@ -3872,6 +3906,84 @@ impl Scout4All {
                     .or_else(|| self.default_country().map(|c| c.value)),
                 ..TeamForm::of(&team)
             },
+        })
+    }
+
+    /// The player's participation, points, training presence and other
+    /// teams in this season.
+    pub fn player_profile_stats(
+        &self,
+        team_id: String,
+        player_id: String,
+    ) -> Result<PlayerProfileStats, MobileError> {
+        let player_id = parse_id(&player_id)?;
+        let team = self.read_team(&team_id)?;
+        if !team
+            .find_player(player_id)
+            .is_some_and(|player| !player.deleted)
+        {
+            return Err(failed(format!(
+                "player {player_id} is not active in team {team_id}"
+            )));
+        }
+
+        let listed_matches = self.runtime.block_on(self.match_reader.read_all(&team))?;
+        let matches: Vec<MatchEntry> = listed_matches
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|m| !m.sets.is_empty())
+            .collect();
+        let summaries = self
+            .runtime
+            .block_on(self.match_reader.read_summaries(&team))?;
+        let matches_scouted = summaries
+            .iter()
+            .filter_map(|m| m.as_ref().ok())
+            .filter(|m| m.sets > 0)
+            .count();
+        let stats = PlayerSeasonStats::of(player_id, &matches, matches_scouted);
+
+        let totals = self
+            .runtime
+            .block_on(self.training.totals(&team.id, TrainingScope::All))?;
+        let attendance = self.runtime.block_on(
+            self.training
+                .attendance_report(&team.id, TrainingScope::All),
+        )?;
+        let attendance_percent = attendance
+            .players
+            .iter()
+            .find(|player| player.person_id == player_id)
+            .and_then(|player| player.percent());
+        let other_teams = self
+            .persons
+            .teams_of(&player_id)?
+            .into_iter()
+            .filter(|other| other.team != team.id && other.year == team.year)
+            .map(|other| ProfileTeam {
+                id: other.team.to_string(),
+                name: other.name,
+                year: other.year,
+                number: other.number,
+                role: other.role,
+            })
+            .collect();
+
+        Ok(PlayerProfileStats {
+            matches_played: stats.matches_played,
+            matches_scouted: stats.matches_scouted,
+            sets_played: stats.sets_played,
+            points: stats.points(),
+            attack_points: stats.attack_points,
+            block_points: stats.block_points,
+            serve_points: stats.serve_points,
+            training_sessions: totals
+                .planned
+                .saturating_add(totals.completed)
+                .saturating_add(totals.cancelled),
+            attendance_sessions: attendance.sessions,
+            attendance_percent,
+            other_teams,
         })
     }
 
@@ -6919,6 +7031,42 @@ mod tests {
             federation_id: String::new(),
             person: None,
         }
+    }
+
+    #[test]
+    fn a_player_profile_lists_only_other_teams_of_the_same_season() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let first = app.save_team(None, form("First")).unwrap();
+        let same_season = app.save_team(None, form("Second")).unwrap();
+        let mut next_year_form = form("Next year");
+        next_year_form.year = "2027".into();
+        let next_year = app.save_team(None, next_year_form).unwrap();
+
+        let player_id = app
+            .save_player(first.clone(), None, player("Alex Player", "7"), false)
+            .unwrap();
+        for team in [&same_season, &next_year] {
+            let mut form = player("Alex Player", "8");
+            form.person = Some(parse_id(&player_id).unwrap());
+            app.save_player(team.clone(), None, form, false).unwrap();
+        }
+
+        let profile = app.player_profile_stats(first, player_id).unwrap();
+        assert_eq!(profile.matches_played, 0);
+        assert_eq!(profile.matches_scouted, 0);
+        assert_eq!(profile.sets_played, 0);
+        assert_eq!(profile.points, 0);
+        assert_eq!(profile.training_sessions, 0);
+        assert_eq!(profile.attendance_percent, None);
+        assert_eq!(
+            profile
+                .other_teams
+                .iter()
+                .map(|team| team.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![same_season.as_str()]
+        );
     }
 
     /// A new player starts with the first number free in the team, from 1;

@@ -22,6 +22,7 @@ pub mod match_form;
 pub mod names;
 pub mod overview;
 pub mod player_form;
+pub mod player_profile;
 pub mod providers;
 pub mod rally;
 pub mod reporting;
