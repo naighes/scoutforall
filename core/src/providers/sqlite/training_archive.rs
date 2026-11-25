@@ -32,7 +32,7 @@ use crate::{
             agrees_person, columns, deleted, dump, ids, insert, invalid, json_of_ids, local,
             merge as merge_rows, select, text,
         },
-        not_found, sqlite,
+        archive_assets, not_found, sqlite,
         teams::read_team,
         training::{check_session, read_session},
         training_cycles::{check_cycle, check_microcycle, read_cycle},
@@ -110,7 +110,13 @@ pub(crate) fn tables(db: &Database, team: Uuid) -> Result<Vec<(&'static str, Vec
             })
             .collect::<Result<Vec<_>, _>>()
     })?;
-    Ok(freed(tables))
+    let mut tables = freed(tables);
+    // no images in the training
+    tables
+        .iter_mut()
+        .flat_map(|(_, rows)| rows.iter_mut())
+        .for_each(archive_assets::strip);
+    Ok(tables)
 }
 
 /// A cycle or a session whose parent isn't exported (removed) goes free:

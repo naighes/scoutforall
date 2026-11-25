@@ -23,7 +23,12 @@
 //! - not the video (paths of a computer), the upload queue (of a device),
 //!   the cache of the lists (derived).
 //!
-//! Importing, all in one transaction (D10):
+//! The manifest always says the schema of this version: the versions before
+//! don't read the archive, and ask to update. Every table is written, empty
+//! ones too.
+//!
+//! Importing (the archives of the versions before too), all in one
+//! transaction (D10):
 //! - the rows are first loaded in a database in memory, with the schema
 //!   of the archive (the manifest says which): its constraints check them,
 //!   its migrations bring them to this version; an archive of a newer
@@ -85,8 +90,8 @@ pub enum Kind {
     Match,
 }
 
-/// What an archive of a team holds besides the usual: the manifest of
-/// versions before it doesn't tell, and reads as an archive of the team.
+/// What an archive of a team holds besides the usual (absent in the
+/// manifest: the team).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Contents {
@@ -101,8 +106,8 @@ pub struct Manifest {
     /// the version of the schema of its rows
     pub schema: i64,
     pub kind: Kind,
-    /// what it holds, when not what `kind` says (absent: as before)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// what it holds, when not what `kind` says
+    #[serde(default)]
     pub contents: Option<Contents>,
     /// the team or the match
     pub id: Uuid,
@@ -253,13 +258,9 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
             Ok((tables, images))
         })?,
     };
-    // Rows are exported with every column of today's schema. Their manifest
-    // must therefore advertise that schema even when this archive contains
-    // no training or venues, so its importer applies all row migrations.
-    let schema = db::schema_version();
     let manifest = Manifest {
         format: FORMAT,
-        schema,
+        schema: db::schema_version(),
         kind,
         contents,
         id,
@@ -267,11 +268,7 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
         exported_at: Utc::now(),
     };
     let mut files = vec![(MANIFEST.to_string(), pretty(&manifest)?)];
-    // without gyms the archive is as it was before them
-    for (table, rows) in tables
-        .iter()
-        .filter(|(t, r)| *t != "venues" || !r.is_empty())
-    {
+    for (table, rows) in &tables {
         files.push((format!("{table}.json"), pretty(rows)?));
     }
     files.extend(images);
@@ -441,25 +438,28 @@ pub(crate) fn dump(
                 })
                 .collect())
         }
-        // a match without a gym is written as before the gyms, so that the
-        // versions that don't know them read it
-        "matches" => Ok(rows
-            .into_iter()
-            .map(|mut row| {
-                if row.get("venue_id") == Some(&Json::Null) {
-                    row.remove("venue_id");
-                }
-                row
-            })
-            .collect()),
         _ => Ok(rows),
     }
 }
 
+/// The details of a person: the columns, empty text or null when not given.
+const DETAILS: [(&str, Option<&str>); 6] = [
+    ("birth_date", None),
+    ("height_cm", None),
+    ("notes", Some("")),
+    ("nationality", None),
+    ("dominant_hand", None),
+    ("federation_id", Some("")),
+];
+
+fn empty_detail(empty: Option<&str>) -> Json {
+    empty.map_or(Json::Null, Json::from)
+}
+
 fn only_name(mut row: Row) -> Row {
-    row.insert("birth_date".into(), Json::Null);
-    row.insert("height_cm".into(), Json::Null);
-    row.insert("notes".into(), Json::from(""));
+    for (column, empty) in DETAILS {
+        row.insert(column.into(), empty_detail(empty));
+    }
     row.insert("photo_asset_id".into(), Json::Null);
     row
 }
@@ -800,8 +800,13 @@ fn load(
                 None => Ok(vec![]),
             }?;
             let known = columns(staging, table)?;
-            rows.iter()
-                .try_for_each(|row| insert(staging, table, &known, row))
+            // the images are only those of their index (`archive_assets`):
+            // v1.3.0 left pointers, to none, in the rows of the training
+            rows.into_iter()
+                .try_for_each(|mut row| {
+                    archive_assets::strip(&mut row);
+                    insert(staging, table, &known, &row)
+                })
                 .map_err(|e| invalid(labels, e))
         })
 }
@@ -847,10 +852,9 @@ pub(crate) fn deleted(row: &Row) -> bool {
 /// for the details it lacks (exported with only the name).
 pub(crate) fn agrees_person(local: &Row, row: &Row) -> bool {
     row.iter().all(|(column, value)| {
-        let lacking = matches!(
-            (column.as_str(), value),
-            ("birth_date" | "height_cm", Json::Null) | ("notes", Json::String(_))
-        ) && value.as_str().is_none_or(str::is_empty);
+        let lacking = DETAILS
+            .iter()
+            .any(|(detail, empty)| detail == column && *value == empty_detail(*empty));
         lacking || local.get(column) == Some(value)
     })
 }

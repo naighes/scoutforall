@@ -256,6 +256,8 @@ pub(crate) mod tests {
                 "sets.json",
                 "team_members.json",
                 "teams.json",
+                // no gym: written all the same
+                "venues.json",
             ]
         );
         let m: Manifest = manifest(&archive).unwrap();
@@ -263,8 +265,7 @@ pub(crate) mod tests {
             (m.format, m.schema, m.kind, m.id, m.app_version.as_str()),
             (
                 FORMAT,
-                // all columns in these rows use the current database schema
-                8,
+                crate::db::schema_version(),
                 Kind::Team,
                 id,
                 env!("CARGO_PKG_VERSION")
@@ -427,6 +428,108 @@ pub(crate) mod tests {
             .await
             .unwrap();
         Scouted { db, team, m, ids }
+    }
+
+    const DETAILED: &str = "aaaaaaaa-0000-4000-8000-00000000000a";
+    const DETAILED_TEAM: &str = "bbbbbbbb-0000-4000-8000-00000000000b";
+    const DETAILS: &str = "SELECT concat_ws('|', ifnull(nationality, '-'),
+        ifnull(dominant_hand, '-'), federation_id) FROM persons";
+
+    /// A team with one player with every detail; removed from it if asked.
+    fn detailed(removed: bool) -> Database {
+        let db = database();
+        execute(
+            &db,
+            &format!(
+                "INSERT INTO teams (id, name, year) VALUES ('{DETAILED_TEAM}', 'T', 2026);
+                 INSERT INTO persons (id, name, birth_date, height_cm, notes, nationality,
+                         dominant_hand, federation_id)
+                     VALUES ('{DETAILED}', 'p', '2004-03-01', 171, 'n', 'IT', 'left', '42');
+                 INSERT INTO team_members (team_id, person_id, position, number, role, deleted)
+                     VALUES ('{DETAILED_TEAM}', '{DETAILED}', 0, 7, 'setter', {});",
+                u8::from(removed)
+            ),
+        );
+        db
+    }
+
+    fn detailed_archive(db: &Database) -> Vec<u8> {
+        let team = Uuid::parse_str(DETAILED_TEAM).unwrap();
+        export(db, Subject::Team(team)).unwrap()
+    }
+
+    fn details(db: &Database) -> String {
+        db.read(|tx| {
+            tx.query_row(DETAILS, [], |r| r.get(0))
+                .map_err(crate::providers::sqlite::sqlite)
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn the_details_of_a_person_go_and_come_back() {
+        let there = database();
+        import(&there, &detailed_archive(&detailed(false)), &en()).unwrap();
+        assert_eq!(details(&there), "IT|left|42");
+    }
+
+    /// A player removed from the team, still told of by the training,
+    /// shows only the name.
+    #[test]
+    fn a_removed_player_shows_only_the_name() {
+        let db = detailed(true);
+        execute(
+            &db,
+            &format!(
+                "INSERT INTO training_sessions (id, team_id, start_local, duration_min, status)
+                     VALUES ('cccccccc-0000-4000-8000-00000000000c', '{DETAILED_TEAM}',
+                             '2026-11-10T18:00', 90, 'completed');
+                 INSERT INTO training_attendance (session_id, person_id, status)
+                     VALUES ('cccccccc-0000-4000-8000-00000000000c', '{DETAILED}', 'present');"
+            ),
+        );
+        let team = Uuid::parse_str(DETAILED_TEAM).unwrap();
+        let mut files = files(&export(&db, Subject::Training(team)).unwrap());
+        let person = &table(&mut files, "persons")[0];
+        let empty = [
+            ("birth_date", Json::Null),
+            ("height_cm", Json::Null),
+            ("notes", Json::from("")),
+            ("nationality", Json::Null),
+            ("dominant_hand", Json::Null),
+            ("federation_id", Json::from("")),
+        ];
+        assert_eq!(person["name"], "p");
+        empty
+            .iter()
+            .for_each(|(column, value)| assert_eq!(&person[*column], value, "{column}"));
+    }
+
+    /// A person here with the details agrees with an archive that lacks
+    /// them; with other details the local ones win.
+    #[test]
+    fn a_person_here_is_compared_by_the_details_too() {
+        let archive = detailed_archive(&detailed(false));
+        let changed = |change: &dyn Fn(&mut Json)| {
+            let mut files = files(&archive);
+            change(&mut table(&mut files, "persons")[0]);
+            zipped(&files)
+        };
+        let lacking = changed(&|p| {
+            p["nationality"] = Json::Null;
+            p["dominant_hand"] = Json::Null;
+            p["federation_id"] = Json::from("");
+        });
+        let other = changed(&|p| p["federation_id"] = Json::from("43"));
+        let merged = |archive: &[u8]| {
+            let here = detailed(false);
+            let persons = import(&here, archive, &en()).unwrap().persons;
+            assert_eq!(details(&here), "IT|left|42");
+            (persons.same, persons.kept_local)
+        };
+        assert_eq!(merged(&archive), (1, 0));
+        assert_eq!(merged(&lacking), (1, 0));
+        assert_eq!(merged(&other), (0, 1));
     }
 
     #[tokio::test]

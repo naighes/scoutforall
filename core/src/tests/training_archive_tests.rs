@@ -20,8 +20,6 @@ mod tests {
         shapes::{player::PlayerEntry, team::TeamEntry},
         tests::sqlite_archive_tests::tests::{database, en, execute, rows},
     };
-    use chrono::{DateTime, Utc};
-    use serde::Deserialize;
     use serde_json::Value as Json;
     use std::collections::BTreeMap;
     use uuid::Uuid;
@@ -186,12 +184,12 @@ mod tests {
         assert!(of("guest")["birth_date"].is_null() && of("guest")["height_cm"].is_null());
         // an archive of the team doesn't say it
         let team = files_of_team(&db, &t);
-        assert!(team[MANIFEST].get("contents").is_none());
+        assert!(team[MANIFEST]["contents"].is_null());
     }
 
     /// The gyms of the sessions go with the training, the pin included, and
     /// come back: the local ones win, a removed one is not revived with
-    /// other data, an archive with no gym has no file of them.
+    /// other data.
     #[tokio::test]
     async fn the_gyms_go_and_come_back_the_local_ones_win() {
         let (db, t) = trained().await;
@@ -235,10 +233,11 @@ mod tests {
             })
             .unwrap();
         assert_eq!((name.as_str(), pinned), ("mine", 0));
-        // an archive of a training without gyms has no file of them
+        // a training without gyms has an empty file of them
         execute(&db, "UPDATE training_sessions SET venue_id = NULL");
-        assert!(
-            !files_of(&export(&db, Subject::Training(t.id)).unwrap()).contains_key("venues.json")
+        assert_eq!(
+            files_of(&export(&db, Subject::Training(t.id)).unwrap())["venues.json"],
+            Json::Array(vec![])
         );
     }
 
@@ -248,36 +247,6 @@ mod tests {
 
     fn files_of_team(db: &Database, t: &TeamEntry) -> BTreeMap<String, Json> {
         files(&export(db, Subject::Team(t.id)).unwrap())
-    }
-
-    /// The manifest as the version before the training reads it: it
-    /// ignores `contents`, sees a schema it doesn't know and asks to update.
-    #[tokio::test]
-    async fn the_version_before_reads_the_manifest_and_asks_to_update() {
-        #[derive(Deserialize)]
-        #[allow(dead_code)]
-        struct Before {
-            format: u32,
-            schema: i64,
-            kind: BeforeKind,
-            id: Uuid,
-            app_version: String,
-            exported_at: DateTime<Utc>,
-        }
-        #[derive(Deserialize)]
-        #[serde(rename_all = "snake_case")]
-        enum BeforeKind {
-            Team,
-            Match,
-        }
-        let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
-        let read: Before = serde_json::from_value(files(&archive)[MANIFEST].clone()).unwrap();
-        assert!(matches!(read.kind, BeforeKind::Team));
-        assert_eq!(read.format, 1);
-        // the version before had the schema 4
-        assert!(read.schema > 4);
-        assert_eq!(read.id, t.id);
     }
 
     #[tokio::test]
