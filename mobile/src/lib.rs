@@ -697,6 +697,8 @@ pub struct Player {
     pub name: String,
     pub number: u8,
     pub role: Option<String>,
+    /// in place of a missing photo
+    pub initials: String,
     /// what the form starts from, to edit the player
     pub form: PlayerForm,
 }
@@ -6258,6 +6260,7 @@ fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
             name: p.name.clone(),
             number: p.number,
             role: p.role.map(|r| r.friendly_name(labels).to_string()),
+            initials: names::initials(&p.name),
             form: PlayerForm::of(p),
         })
         .collect();

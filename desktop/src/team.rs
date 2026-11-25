@@ -936,7 +936,7 @@ impl TeamScreen {
                 .form
                 .nationality
                 .map(|code| self.core.country_name(code)),
-            initials: initials(&player.name),
+            initials: player.initials.clone(),
         };
         ui::panel_with(
             s.player,
@@ -963,7 +963,7 @@ impl TeamScreen {
         let rows = self.details.players.iter().enumerate().map(|(i, p)| {
             ui::portrait_row(
                 self.photos.get(i).and_then(Option::as_ref),
-                initials(&p.name),
+                p.initials.clone(),
                 row![
                     ui::name(p.name.clone()),
                     text(p.role.clone().unwrap_or_default())

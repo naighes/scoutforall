@@ -725,6 +725,7 @@
     <string name="no_matches_played">No matches played</string>
     <string name="also_plays_in">Also plays in</string>
     <string name="player_statistics_coming">Player statistics will be available here.</string>
+    <string name="player_out_of">of %1$d</string>
     <string name="player_points_detail">Attack %1$d · Block %2$d · Serve %3$d</string>
     <string name="dominant_hand">Dominant hand</string>
     <string name="right_hand">Right</string>

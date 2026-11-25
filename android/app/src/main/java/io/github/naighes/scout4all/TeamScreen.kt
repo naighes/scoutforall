@@ -1,12 +1,16 @@
 package io.github.naighes.scout4all
 
 import java.time.LocalDate
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.material3.Surface
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.Image
 import io.github.naighes.scout4all.core.AgendaSpan
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -57,7 +61,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
-import androidx.compose.ui.graphics.Color
 import io.github.naighes.scout4all.core.MatchListing
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
@@ -353,28 +356,48 @@ fun matchDate(date: String): String = try {
     date
 }
 
+/** A box of the list: the square portrait at its head, as tall as the row
+ * (the initials without a photo), name and role, the number at its tail. */
 @Composable
-private fun PlayerRow(player: Player, onPlayer: (String) -> Unit) = ListItem(
-    modifier = Modifier.clickable { onPlayer(player.id) },
-    leadingContent = {
-        Box(
-            Modifier.size(40.dp)
-                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
-                .border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape),
-            contentAlignment = Alignment.Center,
-        ) {
-            Text(
-                player.number.toString(),
-                color = Color.White,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+private fun PlayerRow(player: Player, onPlayer: (String) -> Unit) = Surface(
+    onClick = { onPlayer(player.id) },
+    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+    shape = RoundedCornerShape(12.dp),
+    color = MaterialTheme.colorScheme.surfaceVariant,
+    // the grey is also the primary container: its content would be amber
+    contentColor = MaterialTheme.colorScheme.onSurface,
+) {
+    Row(Modifier.heightIn(min = PORTRAIT), verticalAlignment = Alignment.CenterVertically) {
+        Portrait(player)
+        Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 6.dp)) {
+            Text(player.name, style = MaterialTheme.typography.bodyLarge)
+            player.role?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
-    },
-    headlineContent = { Text(player.name) },
-    supportingContent = player.role?.let { { Text(it) } },
-    trailingContent = { PlayerPhoto(player.id, 40.dp) },
-)
+        Text(
+            player.number.toString(),
+            Modifier.padding(end = 16.dp),
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+            fontStyle = FontStyle.Italic,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+/** A transparent photo shows the grey of the box, an old one fills the
+ * square. */
+@Composable
+private fun Portrait(player: Player) = Box(Modifier.size(PORTRAIT), contentAlignment = Alignment.Center) {
+    when (val photo = photoOf(player.id)) {
+        null -> Text(player.initials, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        else -> Image(photo, contentDescription = null, Modifier.fillMaxSize().testTag(SHOWN_IMAGE), contentScale = ContentScale.Crop)
+    }
+}
+
+/** The height of a row of the players, and the side of its portrait. */
+private val PORTRAIT = 72.dp
 
 @Composable
 fun BackButton(onBack: () -> Unit) = IconButton(onClick = onBack) {

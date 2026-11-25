@@ -58,6 +58,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -159,7 +160,10 @@ class PlayerFormViewModel(
         viewModelScope.launch {
             mutableState.value = try {
                 app.core { core ->
-                    val player = playerId?.let { id -> core.team(teamId).players.first { it.id == id } }
+                    val player = playerId?.let { id -> core.team(teamId).players.firstOrNull { it.id == id } }
+                    if (playerId != null && player == null) {
+                        return@core PlayerFormState.Failed(app.getString(R.string.no_players))
+                    }
                     PlayerFormState.Editing(
                         // a new one: the first number free
                         form = player?.form ?: core.newPlayerForm(teamId),
@@ -173,8 +177,6 @@ class PlayerFormViewModel(
                 }
             } catch (e: MobileException) {
                 PlayerFormState.Failed(e.reason)
-            } catch (e: NoSuchElementException) {
-                PlayerFormState.Failed(e.message.orEmpty())
             }
         }
     }
@@ -313,7 +315,14 @@ fun PlayerFormScreen(teamId: String, playerId: String?, onBack: () -> Unit, onDo
             is PlayerFormState.Failed -> Centered(modifier) { Text(s.message) }
             is PlayerFormState.Editing -> {
                 PlayerFormContent(s, model, modifier)
-                if (s.confirmingRemoval) RemovalDialog(s, model)
+                if (s.confirmingRemoval) {
+                    PlayerRemovalDialog(
+                        s.savedName, s.savedNumber, s.otherTeams,
+                        onRemove = { model.remove() },
+                        onDelete = { model.deletePerson() },
+                        onDismiss = { model.confirmRemoval(false) },
+                    )
+                }
                 s.namesake?.let { NamesakeDialog(it, model) }
             }
         }
@@ -332,21 +341,6 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             PhotoPanel(state.shown, state.finding, model::pickPhoto, model::removePhoto)
-            val nationalityName by androidx.compose.runtime.produceState("", form.nationality) {
-                value = form.nationality?.let { code -> app.core { it.countryName(code) } }.orEmpty()
-            }
-            val nationality = form.nationality?.let { code ->
-                CountryChoice(code, nationalityName)
-            }
-            CountryField(stringResource(R.string.nationality), nationality, null) { choosingNationality = true }
-            if (choosingNationality) CountryDialog(
-                stringResource(R.string.nationality), form.nationality,
-                onPick = { choice ->
-                    model.change(null) { it.copy(nationality = choice.value) }
-                    choosingNationality = false
-                },
-                onDismiss = { choosingNationality = false },
-            )
             when (state.existing.isEmpty()) {
                 // the details are the person's, the same in every team
                 true -> OutlinedTextField(
@@ -413,6 +407,21 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 opensAt = today.minusYears(BIRTH_YEARS_SHOWN),
                 firstYear = FIRST_BIRTH_YEAR,
             )
+            val nationalityName by produceState("", form.nationality) {
+                value = form.nationality?.let { code -> app.core { it.countryName(code) } }.orEmpty()
+            }
+            val nationality = form.nationality?.let { code ->
+                CountryChoice(code, nationalityName)
+            }
+            CountryField(stringResource(R.string.nationality), nationality, null) { choosingNationality = true }
+            if (choosingNationality) CountryDialog(
+                stringResource(R.string.nationality), form.nationality,
+                onPick = { choice ->
+                    model.change(null) { it.copy(nationality = choice.value) }
+                    choosingNationality = false
+                },
+                onDismiss = { choosingNationality = false },
+            )
             OutlinedTextField(
                 value = form.heightCm,
                 onValueChange = { height -> model.change(PlayerField.HEIGHT) { it.copy(heightCm = height) } },
@@ -425,13 +434,6 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 supportingText = error(PlayerField.HEIGHT)?.let { { Text(it) } },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
             )
-            OutlinedTextField(
-                value = form.federationId,
-                onValueChange = { value -> model.change(null) { it.copy(federationId = value) } },
-                modifier = Modifier.fillMaxWidth(),
-                label = { Text(stringResource(R.string.federation_id)) },
-                singleLine = true,
-            )
             FieldTitle(stringResource(R.string.dominant_hand), null)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf(DominantHand.RIGHT to R.string.right_hand, DominantHand.LEFT to R.string.left_hand).forEach { (hand, label) ->
@@ -442,6 +444,13 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                     )
                 }
             }
+            OutlinedTextField(
+                value = form.federationId,
+                onValueChange = { value -> model.change(null) { it.copy(federationId = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.federation_id)) },
+                singleLine = true,
+            )
             NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
         }
         state.error?.let {
@@ -532,17 +541,25 @@ private fun playsAlsoIn(teams: List<String>): String? =
     teams.takeIf { it.isNotEmpty() }?.let { stringResource(R.string.plays_also_in, it.joinToString(", ")) }
 
 /** Out of the team (they stay in the registry), or out of the registry,
- * so of every team (D16): one question, two answers. */
+ * so of every team (D16): one question, two answers. Of the form and of the
+ * profile. */
 @Composable
-private fun RemovalDialog(state: PlayerFormState.Editing, model: PlayerFormViewModel) = DeletionDialog(
+fun PlayerRemovalDialog(
+    name: String,
+    number: Int,
+    otherTeams: List<String>,
+    onRemove: () -> Unit,
+    onDelete: () -> Unit,
+    onDismiss: () -> Unit,
+) = DeletionDialog(
     listOfNotNull(
-        stringResource(R.string.delete_player_text, state.savedName),
-        playsAlsoIn(state.otherTeams),
-    ).joinToString("\n") + "\n\n" + stringResource(R.string.delete_person_text, state.savedNumber),
-    onConfirm = { model.remove() },
-    onDismiss = { model.confirmRemoval(false) },
+        stringResource(R.string.delete_player_text, name),
+        playsAlsoIn(otherTeams),
+    ).joinToString("\n") + "\n\n" + stringResource(R.string.delete_person_text, number),
+    onConfirm = onRemove,
+    onDismiss = onDismiss,
     confirm = stringResource(R.string.remove_from_team),
-    also = stringResource(R.string.delete_person) to { model.deletePerson() },
+    also = stringResource(R.string.delete_person) to onDelete,
 )
 
 /** Another player of the team with the same name: saved all the same, or

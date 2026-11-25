@@ -1,11 +1,10 @@
 package io.github.naighes.scout4all
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -14,22 +13,63 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import io.github.naighes.scout4all.core.DominantHand
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
 import io.github.naighes.scout4all.core.PlayerProfile
+import io.github.naighes.scout4all.core.Scout4All
 import io.github.naighes.scout4all.core.TeamDetails
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 
-private data class ProfileData(val team: TeamDetails, val player: Player, val stats: PlayerProfile)
+private data class ProfileData(
+    val team: TeamDetails,
+    val player: Player,
+    val stats: PlayerProfile,
+    /** the nationality by name */
+    val country: String?,
+    /** the other teams the player plays in, by name */
+    val otherTeams: List<String>,
+)
+
+private sealed interface ProfileState {
+    data object Loading : ProfileState
+    data class Loaded(val data: ProfileData) : ProfileState
+    data class Failed(val message: String) : ProfileState
+}
+
+/** Null when the player isn't in the team any more. */
+private fun Scout4All.profileData(teamId: String, playerId: String): ProfileData? {
+    val team = team(teamId)
+    return team.players.firstOrNull { it.id == playerId }?.let { player ->
+        ProfileData(
+            team,
+            player,
+            playerProfile(teamId, playerId),
+            player.form.nationality?.let { countryName(it) },
+            otherTeams(teamId, playerId),
+        )
+    }
+}
+
+/** Tags of the band of the header and of the face on it (tests). */
+const val PROFILE_BAND = "profile_band"
+const val PROFILE_FACE = "profile_face"
+
+private val BAND = 220.dp
+private val FACE = 214.dp
+private val ITEM_COLUMNS = 2
 
 /** Read only profile for one player in one team season. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -43,36 +83,37 @@ fun PlayerProfileScreen(
     onDeleted: () -> Unit,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
-    var data by remember(teamId, playerId) { mutableStateOf<ProfileData?>(null) }
-    var error by remember { mutableStateOf<String?>(null) }
-    var loading by remember { mutableStateOf(true) }
+    var state by remember(teamId, playerId) { mutableStateOf<ProfileState>(ProfileState.Loading) }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var asking by rememberSaveable { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     LaunchedEffect(teamId, playerId) {
-        loading = true
-        try {
-            data = app.core { core ->
-                val team = core.team(teamId)
-                val player = team.players.first { it.id == playerId }
-                ProfileData(team, player, core.playerProfile(teamId, playerId))
-            }
-            error = null
-        } catch (e: MobileException) { error = e.reason }
-        catch (e: NoSuchElementException) { error = e.message }
-        loading = false
+        state = try {
+            app.core { it.profileData(teamId, playerId) }
+                ?.let { ProfileState.Loaded(it) }
+                ?: ProfileState.Failed(app.getString(R.string.no_players))
+        } catch (e: MobileException) {
+            ProfileState.Failed(e.reason)
+        }
     }
-    if (asking) {
-        val name = data?.player?.name.orEmpty()
-        DeletionDialog(
-            stringResource(R.string.delete_player_text, name),
-            onConfirm = {
-                asking = false
-                scope.launch {
-                    try { app.core { it.removePlayer(teamId, playerId) }; onDeleted() }
-                    catch (e: MobileException) { error = e.reason }
-                }
-            }, onDismiss = { asking = false }, confirm = stringResource(R.string.remove_player),
+    val data = (state as? ProfileState.Loaded)?.data
+    val remove: (Scout4All.() -> Unit) -> Unit = { removal ->
+        asking = false
+        scope.launch {
+            try {
+                app.core { it.removal() }
+                onDeleted()
+            } catch (e: MobileException) {
+                state = ProfileState.Failed(e.reason)
+            }
+        }
+    }
+    if (asking && data != null) {
+        PlayerRemovalDialog(
+            data.player.name, data.player.number.toInt(), data.otherTeams,
+            onRemove = { remove { removePlayer(teamId, playerId) } },
+            onDelete = { remove { deletePerson(playerId) } },
+            onDismiss = { asking = false },
         )
     }
     BackHandler(onBack = onBack)
@@ -89,34 +130,26 @@ fun PlayerProfileScreen(
         )
     }) { padding ->
         val modifier = Modifier.fillMaxSize().padding(padding)
-        when {
-            loading -> Centered(modifier) { CircularProgressIndicator() }
-            error != null -> Centered(modifier) { Text(error.orEmpty()) }
-            data == null -> Centered(modifier) { Text(stringResource(R.string.no_players)) }
-            else -> {
-                val d = data!!
-                Column(modifier) {
-                    Row(
-                        Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.primaryContainer).padding(20.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(18.dp),
-                    ) {
-                        ProfileAvatar(d.player.id, d.stats.initials, 104.dp)
-                        Column(Modifier.weight(1f)) {
-                            Text(d.player.number.toString().padStart(2, '0'), style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                            Text(d.player.name, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                            Text(listOfNotNull(d.player.role, "${d.team.name} ${d.team.year}").joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
-                        }
-                        TeamLogo(teamId, 44.dp)
-                    }
+        when (val s = state) {
+            ProfileState.Loading -> Centered(modifier) { CircularProgressIndicator() }
+            is ProfileState.Failed -> Centered(modifier) { Text(s.message) }
+            // the header scrolls too: a phone on its side is short
+            is ProfileState.Loaded -> LazyColumn(modifier) {
+                item { ProfileHeader(s.data) }
+                item {
                     PrimaryTabRow(selectedTabIndex = tab) {
                         Tab(tab == 0, { tab = 0 }, text = { Text(stringResource(R.string.profile)) })
                         Tab(tab == 1, { tab = 1 }, text = { Text(stringResource(R.string.statistics)) })
                     }
-                    if (tab == 0) ProfileDetails(d, onTeam, Modifier.fillMaxSize())
-                    else LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(20.dp)) {
-                        item { Text(stringResource(R.string.statistics), style = MaterialTheme.typography.titleLarge) }
-                        item { Text(stringResource(R.string.player_statistics_coming), Modifier.padding(top = 8.dp), color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                }
+                item {
+                    when (tab) {
+                        0 -> ProfileDetails(s.data, onTeam)
+                        else -> Text(
+                            stringResource(R.string.player_statistics_coming),
+                            Modifier.padding(20.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }
@@ -124,78 +157,164 @@ fun PlayerProfileScreen(
     }
 }
 
+/** The band with the logo and the face, which touches the right edge (the
+ * photo cuts the shoulders at its sides); under it, past the line of the
+ * accent, number, name, role and team. */
 @Composable
-private fun ProfileAvatar(playerId: String, initials: String, size: androidx.compose.ui.unit.Dp) {
-    val photo = photoOf(playerId)
-    Box(
-        Modifier.size(size).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceVariant),
-        contentAlignment = Alignment.Center,
-    ) {
-        if (photo != null) Image(photo, contentDescription = null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-        else Text(initials, style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
-    }
-}
-
-@Composable
-private fun ProfileDetails(d: ProfileData, onTeam: (String) -> Unit, modifier: Modifier) {
-    val f = d.player.form
-    val s = d.stats
-    LazyColumn(modifier, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                if (s.matchesPlayed == 0u) {
-                    Text(stringResource(R.string.no_matches_played), Modifier.weight(3f).align(Alignment.CenterVertically), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                } else {
-                    ProfileMetric(stringResource(R.string.matches), "${s.matchesPlayed} / ${s.matchesScouted}", Modifier.weight(1f))
-                    ProfileMetric(stringResource(R.string.sets), s.setsPlayed.toString(), Modifier.weight(1f))
-                    ProfileMetric(
-                        stringResource(R.string.points), s.points.toString(), Modifier.weight(1f),
-                        stringResource(R.string.player_points_detail, s.attackPoints.toInt(), s.blockPoints.toInt(), s.servePoints.toInt()),
+private fun ProfileHeader(d: ProfileData) {
+    val accent = MaterialTheme.colorScheme.primary
+    val photo = photoOf(d.player.id)
+    Column(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant)) {
+        Box(Modifier.fillMaxWidth().height(BAND).testTag(PROFILE_BAND)) {
+            TeamLogo(d.team.id, 54.dp, Modifier.align(Alignment.TopStart).padding(16.dp))
+            Box(Modifier.align(Alignment.BottomEnd).size(FACE).testTag(PROFILE_FACE), contentAlignment = Alignment.Center) {
+                when (photo) {
+                    null -> Text(
+                        d.player.initials,
+                        style = MaterialTheme.typography.displayLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                    else -> Image(photo, contentDescription = null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
                 }
-                if (s.hasTraining) ProfileMetric(stringResource(R.string.attendance), s.attendancePercent?.let { "$it%" } ?: "—", Modifier.weight(1f))
             }
         }
-        item {
-            val birth = runCatching { LocalDate.parse(f.birthDate) }.getOrNull()
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                birth?.let { ProfileField(stringResource(R.string.birth_date), "${it.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))}${s.age?.let { " ($it)" }.orEmpty()}") }
-                f.nationality?.let { code ->
-                    var country by remember(code) { mutableStateOf("") }
-                    val app = LocalContext.current.applicationContext as Scout4AllApplication
-                    LaunchedEffect(code) { country = runCatching { app.core { it.countryName(code) } }.getOrDefault("") }
-                    if (country.isNotEmpty()) ProfileField(stringResource(R.string.nationality), country)
-                }
-                f.heightCm.takeIf { it.isNotBlank() }?.let { ProfileField(stringResource(R.string.height), "$it ${stringResource(R.string.centimetres)}") }
-                f.dominantHand?.let { ProfileField(stringResource(R.string.dominant_hand), stringResource(if (it.name == "RIGHT") R.string.right_hand else R.string.left_hand)) }
-                f.federationId.takeIf { it.isNotBlank() }?.let { ProfileField(stringResource(R.string.federation_id), it) }
+        HorizontalDivider(thickness = 4.dp, color = accent)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+        ) {
+            Text(
+                d.player.number.toString().padStart(2, '0'),
+                style = MaterialTheme.typography.displayLarge,
+                fontWeight = FontWeight.Bold,
+                color = accent,
+            )
+            Column(Modifier.weight(1f)) {
+                Text(
+                    d.player.name.uppercase(),
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    fontStyle = FontStyle.Italic,
+                )
+                Text(
+                    listOfNotNull(d.player.role, "${d.team.name} ${d.team.year}").joinToString(" · "),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
         }
-        if (f.notes.isNotBlank()) item { ProfileField(stringResource(R.string.notes), f.notes) }
-        if (s.otherTeams.isNotEmpty()) item {
+    }
+}
+
+/** A value under its small label. */
+private data class ProfileItem(val label: String, val value: String, val detail: String? = null)
+
+/** Matches, sets and points once the player has been on court, and the
+ * attendance when the team trains. */
+@Composable
+private fun numbers(s: PlayerProfile): List<ProfileItem> {
+    val played = when (s.matchesPlayed) {
+        0u -> emptyList()
+        else -> listOf(
+            ProfileItem(
+                stringResource(R.string.matches),
+                s.matchesPlayed.toString(),
+                stringResource(R.string.player_out_of, s.matchesScouted.toInt()),
+            ),
+            ProfileItem(stringResource(R.string.sets), s.setsPlayed.toString()),
+            ProfileItem(
+                stringResource(R.string.points),
+                s.points.toString(),
+                stringResource(R.string.player_points_detail, s.attackPoints.toInt(), s.blockPoints.toInt(), s.servePoints.toInt()),
+            ),
+        )
+    }
+    val attendance = ProfileItem(stringResource(R.string.attendance), s.attendancePercent?.let { "$it%" } ?: "—")
+    return played + listOfNotNull(attendance.takeIf { s.hasTraining })
+}
+
+/** What's known of the person, the empty ones left out. */
+@Composable
+private fun fields(d: ProfileData): List<ProfileItem> {
+    val form = d.player.form
+    val birth = runCatching { LocalDate.parse(form.birthDate) }.getOrNull()?.let { day ->
+        val shown = day.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM))
+        shown + d.stats.age?.let { " ($it)" }.orEmpty()
+    }
+    val hand = form.dominantHand?.let {
+        stringResource(
+            when (it) {
+                DominantHand.RIGHT -> R.string.right_hand
+                DominantHand.LEFT -> R.string.left_hand
+            },
+        )
+    }
+    val centimetres = stringResource(R.string.centimetres)
+    return listOf(
+        R.string.birth_date to birth,
+        R.string.nationality to d.country,
+        R.string.height to form.heightCm.takeIf { it.isNotBlank() }?.let { "$it $centimetres" },
+        R.string.dominant_hand to hand,
+        R.string.federation_id to form.federationId.takeIf { it.isNotBlank() },
+    ).mapNotNull { (label, value) -> value?.let { ProfileItem(stringResource(label), it) } }
+}
+
+@Composable
+private fun ProfileDetails(d: ProfileData, onTeam: (String) -> Unit) {
+    val s = d.stats
+    val numbers = numbers(s)
+    val fields = fields(d)
+    val notes = d.player.form.notes.takeIf { it.isNotBlank() }
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        if (s.matchesPlayed == 0u) {
+            Text(stringResource(R.string.no_matches_played), color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        ProfileGrid(numbers, 30.sp)
+        if (fields.isNotEmpty() || notes != null || s.otherTeams.isNotEmpty()) HorizontalDivider()
+        ProfileGrid(fields, 18.sp)
+        notes?.let { ProfileValue(ProfileItem(stringResource(R.string.notes), it), 18.sp) }
+        if (s.otherTeams.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(stringResource(R.string.also_plays_in), style = MaterialTheme.typography.titleMedium)
+                ProfileLabel(stringResource(R.string.also_plays_in))
                 s.otherTeams.forEach { team ->
-                    TextButton(onClick = { onTeam(team.id) }) { Text("${team.number} · ${team.name} ${team.year}") }
+                    OutlinedButton(onClick = { onTeam(team.id) }) { Text("${team.number} · ${team.name} ${team.year}") }
                 }
             }
         }
     }
 }
 
+/** The items in columns of the same width, row by row. */
 @Composable
-private fun ProfileMetric(label: String, value: String, modifier: Modifier = Modifier, detail: String? = null) {
-    Column(modifier.background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(14.dp)).padding(12.dp)) {
-        Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        Text(value, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        detail?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+private fun ProfileGrid(items: List<ProfileItem>, size: androidx.compose.ui.unit.TextUnit) {
+    if (items.isEmpty()) return
+    Column(verticalArrangement = Arrangement.spacedBy(18.dp)) {
+        items.chunked(ITEM_COLUMNS).forEach { row ->
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                row.forEach { ProfileValue(it, size, Modifier.weight(1f)) }
+                repeat(ITEM_COLUMNS - row.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
     }
 }
 
 @Composable
-private fun ProfileField(label: String, value: String) {
-    Column {
-        Text(label.uppercase(), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
-        Text(value, style = MaterialTheme.typography.bodyLarge)
+private fun ProfileLabel(label: String) = Text(
+    label.uppercase(),
+    style = MaterialTheme.typography.labelMedium,
+    fontWeight = FontWeight.Bold,
+    fontStyle = FontStyle.Italic,
+    color = MaterialTheme.colorScheme.primary,
+)
+
+@Composable
+private fun ProfileValue(item: ProfileItem, size: androidx.compose.ui.unit.TextUnit, modifier: Modifier = Modifier) =
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        ProfileLabel(item.label)
+        Text(item.value, fontSize = size, lineHeight = size * 1.2f, fontWeight = FontWeight.Bold)
+        item.detail?.let {
+            Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
     }
-}
