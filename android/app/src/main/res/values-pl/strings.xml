@@ -728,4 +728,9 @@
     <string name="no_photo">Brak zdjęcia</string>
     <string name="no_face">Nie znaleziono twarzy na zdjęciu: wybierz takie, na którym twarz jest wyraźna.</string>
     <string name="many_faces">Znaleziono %1$d twarzy na zdjęciu: wybierz takie z jedną osobą.</string>
+    <string name="nationality">Narodowość</string>
+    <string name="dominant_hand">Ręka dominująca</string>
+    <string name="right_hand">Prawa</string>
+    <string name="left_hand">Lewa</string>
+    <string name="federation_id">Numer federacyjny</string>
 </resources>

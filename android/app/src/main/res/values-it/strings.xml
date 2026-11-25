@@ -716,4 +716,9 @@
     <string name="no_photo">Nessuna foto</string>
     <string name="no_face">Nessun volto trovato nella foto: scegline una in cui il volto sia ben visibile.</string>
     <string name="many_faces">Trovati %1$d volti nella foto: scegline una con una sola persona.</string>
+    <string name="nationality">Nazionalità</string>
+    <string name="dominant_hand">Mano dominante</string>
+    <string name="right_hand">Destra</string>
+    <string name="left_hand">Sinistra</string>
+    <string name="federation_id">Matricola federale</string>
 </resources>

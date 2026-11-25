@@ -710,4 +710,9 @@
     <string name="no_photo">写真なし</string>
     <string name="no_face">写真に顔が見つかりません。顔がはっきり写っている写真を選んでください。</string>
     <string name="many_faces">写真に%1$d人の顔が見つかりました。1人だけ写っている写真を選んでください。</string>
+    <string name="nationality">国籍</string>
+    <string name="dominant_hand">利き手</string>
+    <string name="right_hand">右</string>
+    <string name="left_hand">左</string>
+    <string name="federation_id">連盟登録番号</string>
 </resources>

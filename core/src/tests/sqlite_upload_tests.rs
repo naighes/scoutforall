@@ -647,6 +647,9 @@ mod tests {
                         birth_date: None,
                         height_cm: None,
                         notes: String::new(),
+                        nationality: None,
+                        dominant_hand: None,
+                        federation_id: String::new(),
                     })
                     .collect(),
             })

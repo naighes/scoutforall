@@ -193,6 +193,7 @@ mod tests {
                 birth_date: NaiveDate::from_ymd_opt(2005, 3, 14),
                 height_cm: Some(185),
                 notes: "ankle, left".into(),
+                ..PlayerDetails::default()
             }
         );
     }

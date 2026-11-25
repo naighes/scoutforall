@@ -115,7 +115,8 @@ fn team_rows_where(
     };
     let sql = format!(
         "SELECT tm.person_id, tm.position, tm.number, tm.role, tm.deleted,
-                p.name, p.birth_date, p.height_cm, p.notes, p.deleted
+                p.name, p.birth_date, p.height_cm, p.notes, p.deleted,
+                p.nationality, p.dominant_hand, p.federation_id
          FROM team_members tm JOIN persons p ON p.id = tm.person_id
          WHERE tm.team_id = ?1 AND ({members})
          ORDER BY tm.position"
@@ -134,6 +135,9 @@ fn team_rows_where(
                             height_cm: r.get(7)?,
                             notes: r.get(8)?,
                             deleted: r.get(9)?,
+                            nationality: r.get(10)?,
+                            dominant_hand: r.get(11)?,
+                            federation_id: r.get(12)?,
                         },
                         Membership {
                             team_id: team,
@@ -191,20 +195,24 @@ pub(crate) fn write_team(tx: &Transaction, team: &TeamEntry) -> Result<(), AppEr
             player.name,
             player.birth_date.map(Sql),
             player.height_cm,
-            player.notes
+            player.notes,
+            player.nationality,
+            player.dominant_hand,
+            player.federation_id
         ];
         let sql = match player.deleted {
             false => {
-                "INSERT INTO persons (id, name, birth_date, height_cm, notes)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO persons (id, name, birth_date, height_cm, notes, nationality, dominant_hand, federation_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
                  ON CONFLICT (id) DO UPDATE SET name = excluded.name,
                      birth_date = excluded.birth_date, height_cm = excluded.height_cm,
-                     notes = excluded.notes
+                     notes = excluded.notes, nationality = excluded.nationality,
+                     dominant_hand = excluded.dominant_hand, federation_id = excluded.federation_id
                  WHERE persons.deleted = 0"
             }
             true => {
-                "INSERT INTO persons (id, name, birth_date, height_cm, notes)
-                 VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (id) DO NOTHING"
+                "INSERT INTO persons (id, name, birth_date, height_cm, notes, nationality, dominant_hand, federation_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT (id) DO NOTHING"
             }
         };
         tx.execute(sql, person).map_err(sqlite)?;

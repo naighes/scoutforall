@@ -846,6 +846,9 @@ mod tests {
                 birth_date: NaiveDate::from_ymd_opt(2008, 2, n),
                 height_cm: Some(180),
                 notes: format!("notes {n}"),
+                nationality: None,
+                dominant_hand: None,
+                federation_id: String::new(),
                 deleted: false,
             })
             .collect();

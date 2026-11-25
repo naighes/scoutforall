@@ -39,6 +39,9 @@ pub struct Person {
     /// in centimetres
     pub height_cm: Option<u16>,
     pub notes: String,
+    pub nationality: Option<CountryCode>,
+    pub dominant_hand: Option<crate::shapes::player::DominantHand>,
+    pub federation_id: String,
     pub deleted: bool,
 }
 

@@ -136,6 +136,9 @@ impl TeamWriter for SqliteTeamWriter {
                 birth_date: details.birth_date,
                 height_cm: details.height_cm,
                 notes: details.notes,
+                nationality: details.nationality,
+                dominant_hand: details.dominant_hand,
+                federation_id: details.federation_id,
                 ..Default::default()
             },
             PlayerInput::Existing(existing) => existing,

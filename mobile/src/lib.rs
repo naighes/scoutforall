@@ -76,7 +76,7 @@ use scout4all_core::{
         },
         flags::{BlockersEnum, ReceptionSchemeEnum},
         r#match::{MatchEntry, MatchSummary, PlayedMatch},
-        player::PlayerEntry,
+        player::{DominantHand, PlayerEntry},
         set::SetEntry,
         snapshot::{EventEntry, Formation},
         stats::{
@@ -336,6 +336,12 @@ pub struct PlayerForm {
     #[uniffi(default = "")]
     pub notes: String,
     #[uniffi(default = None)]
+    pub nationality: Option<CountryCode>,
+    #[uniffi(default = None)]
+    pub dominant_hand: Option<DominantHand>,
+    #[uniffi(default = "")]
+    pub federation_id: String,
+    #[uniffi(default = None)]
     pub person: Option<Uuid>,
 }
 
@@ -584,6 +590,12 @@ pub enum PlayerField {
     Number,
     BirthDate,
     Height,
+}
+
+#[uniffi::remote(Enum)]
+pub enum DominantHand {
+    Right,
+    Left,
 }
 
 impl From<PlayerFormError> for PlayerField {
@@ -4757,6 +4769,9 @@ impl Scout4All {
                             .map(|h| h.to_string())
                             .unwrap_or_default(),
                         notes: c.person.notes,
+                        nationality: c.person.nationality,
+                        dominant_hand: c.person.dominant_hand,
+                        federation_id: c.person.federation_id,
                         person: Some(c.person.id),
                     },
                 }
@@ -6899,6 +6914,9 @@ mod tests {
             birth_date: String::new(),
             height_cm: String::new(),
             notes: String::new(),
+            nationality: None,
+            dominant_hand: None,
+            federation_id: String::new(),
             person: None,
         }
     }

@@ -3,7 +3,7 @@ use crate::{
     shapes::{
         country::CountryCode,
         enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
-        player::PlayerEntry,
+        player::{DominantHand, PlayerEntry},
         team::TeamEntry,
     },
 };
@@ -31,6 +31,9 @@ pub struct PlayerDetails {
     /// in centimetres
     pub height_cm: Option<u16>,
     pub notes: String,
+    pub nationality: Option<CountryCode>,
+    pub dominant_hand: Option<DominantHand>,
+    pub federation_id: String,
 }
 
 pub enum PlayerInput {

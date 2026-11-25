@@ -22,6 +22,7 @@
 use crate::{
     domain::{CompetitionFormat, Home, ScoutingMode, Side, Stage, TeamRef},
     errors::{AppError, IOError},
+    shapes::player::DominantHand,
     shapes::{
         country::CountryCode,
         enums::{
@@ -100,6 +101,12 @@ db_text!(RoleEnum, "role", RoleEnum::ALL, {
     RoleEnum::Setter => "setter",
     RoleEnum::OutsideHitter => "outside_hitter",
     RoleEnum::MiddleBlocker => "middle_blocker",
+});
+
+const DOMINANT_HANDS: [DominantHand; 2] = [DominantHand::Right, DominantHand::Left];
+db_text!(DominantHand, "dominant hand", DOMINANT_HANDS, {
+    DominantHand::Right => "right",
+    DominantHand::Left => "left",
 });
 
 db_text!(TeamClassificationEnum, "classification", TeamClassificationEnum::ALL, {

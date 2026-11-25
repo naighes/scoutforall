@@ -6,7 +6,12 @@ use crate::{
     dvw::import::normalized,
     localization::Labels,
     providers::team_writer::{PlayerDetails, PlayerInput},
-    shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
+    shapes::{
+        country::CountryCode,
+        enums::RoleEnum,
+        player::{DominantHand, PlayerEntry},
+        team::TeamEntry,
+    },
 };
 use chrono::{Datelike, NaiveDate};
 use uuid::Uuid;
@@ -23,6 +28,9 @@ pub struct PlayerForm {
     pub birth_date: String,
     pub height_cm: String,
     pub notes: String,
+    pub nationality: Option<CountryCode>,
+    pub dominant_hand: Option<DominantHand>,
+    pub federation_id: String,
     /// the person of the registry the new player is, chosen by name
     pub person: Option<Uuid>,
 }
@@ -69,6 +77,9 @@ impl PlayerForm {
                 .unwrap_or_default(),
             height_cm: player.height_cm.map(|h| h.to_string()).unwrap_or_default(),
             notes: player.notes.clone(),
+            nationality: player.nationality,
+            dominant_hand: player.dominant_hand,
+            federation_id: player.federation_id.clone(),
             person: None,
         }
     }
@@ -107,6 +118,9 @@ impl PlayerForm {
                     birth_date,
                     height_cm,
                     notes: self.notes.trim().to_string(),
+                    nationality: self.nationality,
+                    dominant_hand: self.dominant_hand,
+                    federation_id: self.federation_id.trim().to_string(),
                 };
                 Ok(match (existing, self.person) {
                     (Some(player), _) => PlayerInput::Existing(PlayerEntry {
@@ -116,6 +130,9 @@ impl PlayerForm {
                         birth_date: details.birth_date,
                         height_cm: details.height_cm,
                         notes: details.notes,
+                        nationality: details.nationality,
+                        dominant_hand: details.dominant_hand,
+                        federation_id: details.federation_id,
                         // a player removed from the team comes back
                         deleted: false,
                         ..player.clone()
@@ -129,6 +146,9 @@ impl PlayerForm {
                         birth_date: details.birth_date,
                         height_cm: details.height_cm,
                         notes: details.notes,
+                        nationality: details.nationality,
+                        dominant_hand: details.dominant_hand,
+                        federation_id: details.federation_id,
                     }),
                     (None, None) => PlayerInput::New {
                         name,
@@ -216,6 +236,9 @@ pub fn removed(player: &PlayerEntry) -> PlayerEntry {
         birth_date: None,
         height_cm: None,
         notes: String::new(),
+        nationality: None,
+        dominant_hand: None,
+        federation_id: String::new(),
         ..player.clone()
     }
 }

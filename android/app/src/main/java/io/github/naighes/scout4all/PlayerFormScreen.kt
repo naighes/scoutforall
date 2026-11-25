@@ -72,6 +72,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.ExistingPlayer
+import io.github.naighes.scout4all.core.DominantHand
+import io.github.naighes.scout4all.core.CountryChoice
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.PlayerField
 import io.github.naighes.scout4all.core.PlayerForm
@@ -322,12 +324,29 @@ fun PlayerFormScreen(teamId: String, playerId: String?, onBack: () -> Unit, onDo
 private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormViewModel, modifier: Modifier) =
     Column(modifier) {
         val form = state.form
+        val app = LocalContext.current.applicationContext as Scout4AllApplication
+        var choosingNationality by rememberSaveable { mutableStateOf(false) }
         val error = { field: PlayerField -> state.invalid?.takeIf { it.first == field }?.second }
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             PhotoPanel(state.shown, state.finding, model::pickPhoto, model::removePhoto)
+            val nationalityName by androidx.compose.runtime.produceState("", form.nationality) {
+                value = form.nationality?.let { code -> app.core { it.countryName(code) } }.orEmpty()
+            }
+            val nationality = form.nationality?.let { code ->
+                CountryChoice(code, nationalityName)
+            }
+            CountryField(stringResource(R.string.nationality), nationality, null) { choosingNationality = true }
+            if (choosingNationality) CountryDialog(
+                stringResource(R.string.nationality), form.nationality,
+                onPick = { choice ->
+                    model.change(null) { it.copy(nationality = choice.value) }
+                    choosingNationality = false
+                },
+                onDismiss = { choosingNationality = false },
+            )
             when (state.existing.isEmpty()) {
                 // the details are the person's, the same in every team
                 true -> OutlinedTextField(
@@ -406,6 +425,23 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 supportingText = error(PlayerField.HEIGHT)?.let { { Text(it) } },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
             )
+            OutlinedTextField(
+                value = form.federationId,
+                onValueChange = { value -> model.change(null) { it.copy(federationId = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.federation_id)) },
+                singleLine = true,
+            )
+            FieldTitle(stringResource(R.string.dominant_hand), null)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(DominantHand.RIGHT to R.string.right_hand, DominantHand.LEFT to R.string.left_hand).forEach { (hand, label) ->
+                    FilterChip(
+                        selected = form.dominantHand == hand,
+                        onClick = { model.change(null) { it.copy(dominantHand = if (form.dominantHand == hand) null else hand) } },
+                        label = { Text(stringResource(label)) },
+                    )
+                }
+            }
             NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
         }
         state.error?.let {

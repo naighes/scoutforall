@@ -175,6 +175,9 @@ const PLAYER_ROLE: usize = 2;
 const PLAYER_BIRTH: usize = 3;
 const PLAYER_HEIGHT: usize = 4;
 const PLAYER_NOTES: usize = 5;
+const PLAYER_NATIONALITY: usize = 6;
+const PLAYER_HAND: usize = 7;
+const PLAYER_FEDERATION_ID: usize = 8;
 
 pub struct MatchEditor {
     /// team A: chosen among `teams` for a new match, then fixed
@@ -642,6 +645,23 @@ impl Editor {
             ),
             Field::text(s.height, start.height_cm.clone()).placeholder(s.height_placeholder),
             Field::lines(s.notes, start.notes.clone()),
+            Field::text(
+                s.nationality,
+                start
+                    .nationality
+                    .map(|c| core.country_name(c))
+                    .unwrap_or_default(),
+            ),
+            Field::choice(
+                s.dominant_hand,
+                with_empty([s.right.to_string(), s.left.to_string()].into_iter()),
+                match start.dominant_hand {
+                    Some(scout4all_core::shapes::player::DominantHand::Right) => 1,
+                    Some(scout4all_core::shapes::player::DominantHand::Left) => 2,
+                    None => 0,
+                },
+            ),
+            Field::text(s.federation_id, start.federation_id.clone()),
         ];
         let title = match id {
             Some(_) => s.edit_player,
@@ -811,6 +831,32 @@ impl Editor {
                 Field::text("", start.height_cm.clone()).value,
             ),
             (PLAYER_NOTES, Field::lines("", start.notes.clone()).value),
+            (
+                PLAYER_NATIONALITY,
+                Field::text(
+                    "",
+                    start
+                        .nationality
+                        .map(|c| core.country_name(c))
+                        .unwrap_or_default(),
+                )
+                .value,
+            ),
+            (
+                PLAYER_HAND,
+                form::Value::Choice {
+                    options: with_empty([s.right.to_string(), s.left.to_string()].into_iter()),
+                    index: match start.dominant_hand {
+                        Some(scout4all_core::shapes::player::DominantHand::Right) => 1,
+                        Some(scout4all_core::shapes::player::DominantHand::Left) => 2,
+                        None => 0,
+                    },
+                },
+            ),
+            (
+                PLAYER_FEDERATION_ID,
+                Field::text("", start.federation_id.clone()).value,
+            ),
         ];
         for (field, value) in values {
             if let Some(f) = self.form.fields.get_mut(field) {
@@ -1485,6 +1531,14 @@ impl Editor {
     fn changed(&mut self, core: &Scout4All, s: &Strings, field: usize) {
         match (&mut self.kind, field) {
             (Kind::Player(p), PLAYER_NAME) if p.id.is_none() => self.offer_persons(s),
+            (Kind::Player(_), PLAYER_NATIONALITY) => {
+                let (written, all) = (
+                    self.form.text(PLAYER_NATIONALITY),
+                    self.form.browsing(PLAYER_NATIONALITY),
+                );
+                self.form
+                    .suggest(PLAYER_NATIONALITY, countries::offered(core, &written, all));
+            }
             // a player taken to the new season, or left
             (Kind::Season(t), f) if f >= SEASON_PLAYERS => {
                 let mut players = t.players.clone();
@@ -1627,6 +1681,12 @@ impl Editor {
                 core.save_competition(c.id, form).map(|()| c.id.to_string())
             }
             Kind::Player(p) => {
+                let nationality =
+                    countries::chosen(core, &f.text(PLAYER_NATIONALITY)).map_err(|()| {
+                        MobileError::Failed {
+                            reason: s.no_country_found.to_string(),
+                        }
+                    })?;
                 let form = PlayerForm {
                     name: f.text(PLAYER_NAME),
                     number: f.text(PLAYER_NUMBER),
@@ -1638,6 +1698,13 @@ impl Editor {
                     birth_date: f.text(PLAYER_BIRTH),
                     height_cm: f.text(PLAYER_HEIGHT),
                     notes: f.text(PLAYER_NOTES),
+                    nationality,
+                    dominant_hand: match f.index(PLAYER_HAND) {
+                        1 => Some(scout4all_core::shapes::player::DominantHand::Right),
+                        2 => Some(scout4all_core::shapes::player::DominantHand::Left),
+                        _ => None,
+                    },
+                    federation_id: f.text(PLAYER_FEDERATION_ID),
                     person: p.person.as_ref().map(|person| person.id),
                 };
                 let id =

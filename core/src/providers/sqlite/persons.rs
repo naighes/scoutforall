@@ -42,7 +42,7 @@ impl SqlitePersons {
         self.0.read(|tx| {
             let persons: Vec<Person> = tx
                 .prepare(
-                    "SELECT id, name, birth_date, height_cm, notes FROM persons p
+                    "SELECT id, name, birth_date, height_cm, notes, nationality, dominant_hand, federation_id FROM persons p
                      WHERE deleted = 0 AND NOT EXISTS (
                          SELECT 1 FROM team_members
                          WHERE team_id = ?1 AND person_id = p.id AND deleted = 0)
@@ -57,6 +57,9 @@ impl SqlitePersons {
                                 birth_date: r.get::<_, Option<Sql<NaiveDate>>>(2)?.map(|d| d.0),
                                 height_cm: r.get(3)?,
                                 notes: r.get(4)?,
+                                nationality: r.get(5)?,
+                                dominant_hand: r.get(6)?,
+                                federation_id: r.get(7)?,
                                 deleted: false,
                             })
                         })?
@@ -100,6 +103,9 @@ impl SqlitePersons {
                     birth_date: None,
                     height_cm: None,
                     notes: String::new(),
+                    nationality: None,
+                    dominant_hand: None,
+                    federation_id: String::new(),
                     deleted: false,
                 };
                 tx.execute(
@@ -118,7 +124,8 @@ impl SqlitePersons {
             let found = tx
                 .execute(
                     "UPDATE persons SET deleted = 1, name = '', birth_date = NULL,
-                         height_cm = NULL, notes = ''
+                         height_cm = NULL, notes = '', nationality = NULL,
+                         dominant_hand = NULL, federation_id = ''
                      WHERE id = ?1",
                     [id],
                 )

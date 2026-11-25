@@ -1033,14 +1033,14 @@ mod tests {
             .unwrap();
         let text = String::from_utf8(matches.1.clone()).unwrap();
         assert!(!text.contains("venue_id"), "{text}");
-        // and with the schema of the version before (v1.1.0: 4), or it
-        // would refuse it as newer
+        // and with today's schema, because all person columns are exported
+        // even when there is no training or venue
         let manifest = files
             .iter()
             .find(|(name, _)| name == "manifest.json")
             .unwrap();
         let manifest: serde_json::Value = serde_json::from_slice(&manifest.1).unwrap();
-        assert_eq!(manifest["schema"], 4);
+        assert_eq!(manifest["schema"], 8);
     }
 
     /// A match in a gym needs the schema of the gyms: the versions before

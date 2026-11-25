@@ -263,8 +263,8 @@ pub(crate) mod tests {
             (m.format, m.schema, m.kind, m.id, m.app_version.as_str()),
             (
                 FORMAT,
-                // no gyms nor training: the schema of v1.1.0, which reads it
-                4,
+                // all columns in these rows use the current database schema
+                8,
                 Kind::Team,
                 id,
                 env!("CARGO_PKG_VERSION")
@@ -318,6 +318,9 @@ pub(crate) mod tests {
             birth_date: chrono::NaiveDate::from_ymd_opt(2000, 1, n.into()),
             height_cm: Some(180),
             notes: format!("notes {n}"),
+            nationality: None,
+            dominant_hand: None,
+            federation_id: String::new(),
         })
         .collect()
     }

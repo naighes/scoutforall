@@ -97,6 +97,9 @@ mod tests {
             birth_date: chrono::NaiveDate::from_ymd_opt(2008, 3, n.into()),
             height_cm: Some(180),
             notes: "notes".into(),
+            nationality: None,
+            dominant_hand: None,
+            federation_id: String::new(),
         })
         .collect()
     }

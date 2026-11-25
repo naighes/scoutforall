@@ -232,12 +232,6 @@ pub(crate) fn invalid(labels: &Labels, why: impl std::fmt::Display) -> AppError 
     AppError::IO(IOError::Msg(format!("{}: {why}", labels.invalid_archive)))
 }
 
-/// The schema of the versions before the training and the gyms (v1.1.0):
-/// an archive with neither has rows as they were then (`venue_id` empty is
-/// left out), so it says this one and those versions read it instead of
-/// asking to update.
-const SCHEMA_BEFORE_TRAINING: i64 = 4;
-
 /// The archive of `subject`, as zip bytes.
 pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
     let (kind, id, contents) = match subject {
@@ -259,13 +253,10 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
             Ok((tables, images))
         })?,
     };
-    let gyms = tables
-        .iter()
-        .any(|(t, rows)| *t == "venues" && !rows.is_empty());
-    let schema = match (contents, gyms) {
-        (None, false) => SCHEMA_BEFORE_TRAINING,
-        _ => db::schema_version(),
-    };
+    // Rows are exported with every column of today's schema. Their manifest
+    // must therefore advertise that schema even when this archive contains
+    // no training or venues, so its importer applies all row migrations.
+    let schema = db::schema_version();
     let manifest = Manifest {
         format: FORMAT,
         schema,

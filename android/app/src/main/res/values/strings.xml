@@ -718,4 +718,9 @@
     <string name="no_photo">No photo</string>
     <string name="no_face">No face found in the photo: choose one where the face is clear.</string>
     <string name="many_faces">%1$d faces found in the photo: choose one with a single person.</string>
+    <string name="nationality">Nationality</string>
+    <string name="dominant_hand">Dominant hand</string>
+    <string name="right_hand">Right</string>
+    <string name="left_hand">Left</string>
+    <string name="federation_id">Federation ID</string>
 </resources>
