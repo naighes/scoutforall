@@ -10,7 +10,7 @@ use {
         ui,
     },
     iced::{
-        Alignment, ContentFit, Element, Length,
+        Alignment, ContentFit, Element, Length, padding,
         widget::{
             Column, Row, button, column, container, image, image::Handle, row, scrollable, space,
             text,
@@ -126,7 +126,8 @@ pub fn view<'a>(
 }
 
 /// The band: from the left the number, the name over role and team, the
-/// face and the logo; the line of the accent under it.
+/// logo and the face; the line of the accent under it. The face touches
+/// the right edge: the photo cuts the shoulders at its sides.
 fn header<'a>(shown: &Shown<'a>, c: Colors) -> Element<'a, Message> {
     let Shown {
         team,
@@ -158,7 +159,12 @@ fn header<'a>(shown: &Shown<'a>, c: Colors) -> Element<'a, Message> {
         .center_y(Length::Fixed(FACE))
         .into(),
     };
-    let band = row![
+    let logo = logo.map(|logo| {
+        container(ui::logo(logo, LOGO))
+            .height(Length::Fill)
+            .padding([16, 0])
+    });
+    let who = row![
         text(format!("{:02}", player.number))
             .size(NUMBER_SIZE)
             .font(theme::fonts().bold)
@@ -171,14 +177,16 @@ fn header<'a>(shown: &Shown<'a>, c: Colors) -> Element<'a, Message> {
         ]
         .spacing(6)
         .width(Length::Fill),
-        container(face).height(Length::Fill).align_y(Alignment::End),
-        container(ui::logo_slot(logo, LOGO))
-            .height(Length::Fill)
-            .padding([16, 0]),
     ]
     .spacing(24)
-    .align_y(Alignment::Center)
-    .height(Length::Fill);
+    .align_y(Alignment::Center);
+    let band = Row::new()
+        .push(who.width(Length::Fill))
+        .push(logo)
+        .push(container(face).height(Length::Fill).align_y(Alignment::End))
+        .spacing(24)
+        .align_y(Alignment::Center)
+        .height(Length::Fill);
     let line = container(space::horizontal())
         .width(Length::Fill)
         .height(Length::Fixed(4.0))
@@ -188,7 +196,7 @@ fn header<'a>(shown: &Shown<'a>, c: Colors) -> Element<'a, Message> {
         });
     column![
         container(band)
-            .padding([0, 24])
+            .padding(padding::left(24))
             .width(Length::Fill)
             .height(Length::Fixed(BAND))
             .style(move |_| container::Style {
