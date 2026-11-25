@@ -25,6 +25,7 @@ mod home;
 mod keymap;
 mod live;
 mod paths;
+mod profile;
 mod scouting;
 mod settings;
 mod share;
@@ -152,7 +153,10 @@ enum Go {
     /// the gyms, from the home or from the training of a team (back there)
     Venues(Option<String>),
     Team(String),
+    /// the profile of a player (the second) of a team
     Player(String, String),
+    /// the numbers of that profile, worked out off the thread of the screen
+    LoadProfile(String, String),
     /// the training of the team: what it opens on
     Training(String, training::screen::Open),
     Match(String, String),
@@ -470,15 +474,16 @@ impl App {
     /// Opens the screen `go` leads to; an error stays on the one shown.
     fn go(&mut self, go: Go) -> Task<Message> {
         let core = self.core.clone();
+        // what the screen opened asks for next
+        let mut then = None;
         let opened = match go {
             Go::Stay => return Task::none(),
             Go::CropFace(bytes) => {
                 // the executor of iced is a pool of threads: not the thread
                 // of the screen, and no runtime of tokio on it
-                return Task::perform(
-                    async move { form::crop(&bytes) },
-                    |face| Message::Team(team::Message::Form(form::Message::Cropped(face))),
-                );
+                return Task::perform(async move { form::crop(&bytes) }, |face| {
+                    Message::Team(team::Message::Form(form::Message::Cropped(face)))
+                });
             }
             Go::Export(export) => return self.export(export),
             Go::Import(team) => {
@@ -497,10 +502,17 @@ impl App {
                 Screen::Venues(Box::new(screen))
             }),
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
-            Go::Player(team, player) => TeamScreen::new(core, team).map(|mut screen| {
-                screen.open_player_profile(&player);
+            Go::Player(team, player) => TeamScreen::new(core, team.clone()).map(|mut screen| {
+                if screen.show_profile(&player) {
+                    then = Some(Go::LoadProfile(team, player));
+                }
                 Screen::Team(Box::new(screen))
             }),
+            Go::LoadProfile(team, player) => {
+                return Task::perform(team::load_profile(core, team, player), |loaded| {
+                    Message::Team(loaded)
+                });
+            }
             Go::Training(team, open) => training::screen::TrainingScreen::new(core, team, open)
                 .map(|t| Screen::Training(Box::new(t))),
             Go::Match(team, m) => {
@@ -634,7 +646,10 @@ impl App {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
-        Task::none()
+        match then {
+            Some(go) => self.go(go),
+            None => Task::none(),
+        }
     }
 
     /// The actions picked in the statistics, in the video: the statistics
@@ -1756,6 +1771,7 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
         team::Outcome::OpenTeam(team) => Go::Team(team),
         team::Outcome::OpenPlayer { team, player } => Go::Player(team, player),
+        team::Outcome::LoadProfile(player) => Go::LoadProfile(team_id.to_string(), player),
         team::Outcome::Training(open) => Go::Training(team_id.to_string(), open),
         team::Outcome::Crop(bytes) => Go::CropFace(bytes),
     }
@@ -2185,6 +2201,7 @@ fn main() -> iced::Result {
         .title(Main::title)
         .font(fonts.bytes[0])
         .font(fonts.bytes[1])
+        .font(fonts.bytes[2])
         .default_font(fonts.regular)
         .theme(Main::theme)
         .subscription(Main::subscription)

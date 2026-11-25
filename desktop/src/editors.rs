@@ -21,7 +21,10 @@ use {
         },
     },
     scout4all_core::{
-        competition_form::CompetitionForm, match_form::MatchForm, player_form::PlayerForm,
+        competition_form::CompetitionForm,
+        match_form::MatchForm,
+        player_form::PlayerForm,
+        shapes::{country::CountryCode, player::DominantHand},
         team_form::TeamForm,
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
@@ -173,11 +176,30 @@ const PLAYER_NAME: usize = 0;
 const PLAYER_NUMBER: usize = 1;
 const PLAYER_ROLE: usize = 2;
 const PLAYER_BIRTH: usize = 3;
-const PLAYER_HEIGHT: usize = 4;
-const PLAYER_NOTES: usize = 5;
-const PLAYER_NATIONALITY: usize = 6;
-const PLAYER_HAND: usize = 7;
-const PLAYER_FEDERATION_ID: usize = 8;
+const PLAYER_NATIONALITY: usize = 4;
+const PLAYER_HEIGHT: usize = 5;
+const PLAYER_HAND: usize = 6;
+const PLAYER_FEDERATION_ID: usize = 7;
+const PLAYER_NOTES: usize = 8;
+
+const HANDS: [DominantHand; 2] = [DominantHand::Right, DominantHand::Left];
+
+fn nationality_field(core: &Scout4All, s: &Strings, code: Option<CountryCode>) -> Field {
+    let name = code.map(|c| core.country_name(c)).unwrap_or_default();
+    Field::search(s.nationality, name)
+}
+
+fn hand_field(s: &Strings, hand: Option<DominantHand>) -> Field {
+    let names = HANDS.iter().map(|hand| match hand {
+        DominantHand::Right => s.right.to_string(),
+        DominantHand::Left => s.left.to_string(),
+    });
+    Field::choice(
+        s.dominant_hand,
+        with_empty(names),
+        option_of(HANDS.into_iter(), hand),
+    )
+}
 
 pub struct MatchEditor {
     /// team A: chosen among `teams` for a new match, then fixed
@@ -643,25 +665,11 @@ impl Editor {
                 Mask::Date,
                 s.date_placeholder,
             ),
+            nationality_field(core, s, start.nationality),
             Field::text(s.height, start.height_cm.clone()).placeholder(s.height_placeholder),
-            Field::lines(s.notes, start.notes.clone()),
-            Field::text(
-                s.nationality,
-                start
-                    .nationality
-                    .map(|c| core.country_name(c))
-                    .unwrap_or_default(),
-            ),
-            Field::choice(
-                s.dominant_hand,
-                with_empty([s.right.to_string(), s.left.to_string()].into_iter()),
-                match start.dominant_hand {
-                    Some(scout4all_core::shapes::player::DominantHand::Right) => 1,
-                    Some(scout4all_core::shapes::player::DominantHand::Left) => 2,
-                    None => 0,
-                },
-            ),
+            hand_field(s, start.dominant_hand),
             Field::text(s.federation_id, start.federation_id.clone()),
+            Field::lines(s.notes, start.notes.clone()),
         ];
         let title = match id {
             Some(_) => s.edit_player,
@@ -827,36 +835,19 @@ impl Editor {
                 Field::masked("", &start.birth_date, Mask::Date, "").value,
             ),
             (
+                PLAYER_NATIONALITY,
+                nationality_field(core, s, start.nationality).value,
+            ),
+            (
                 PLAYER_HEIGHT,
                 Field::text("", start.height_cm.clone()).value,
             ),
-            (PLAYER_NOTES, Field::lines("", start.notes.clone()).value),
-            (
-                PLAYER_NATIONALITY,
-                Field::text(
-                    "",
-                    start
-                        .nationality
-                        .map(|c| core.country_name(c))
-                        .unwrap_or_default(),
-                )
-                .value,
-            ),
-            (
-                PLAYER_HAND,
-                form::Value::Choice {
-                    options: with_empty([s.right.to_string(), s.left.to_string()].into_iter()),
-                    index: match start.dominant_hand {
-                        Some(scout4all_core::shapes::player::DominantHand::Right) => 1,
-                        Some(scout4all_core::shapes::player::DominantHand::Left) => 2,
-                        None => 0,
-                    },
-                },
-            ),
+            (PLAYER_HAND, hand_field(s, start.dominant_hand).value),
             (
                 PLAYER_FEDERATION_ID,
                 Field::text("", start.federation_id.clone()).value,
             ),
+            (PLAYER_NOTES, Field::lines("", start.notes.clone()).value),
         ];
         for (field, value) in values {
             if let Some(f) = self.form.fields.get_mut(field) {
@@ -1699,11 +1690,11 @@ impl Editor {
                     height_cm: f.text(PLAYER_HEIGHT),
                     notes: f.text(PLAYER_NOTES),
                     nationality,
-                    dominant_hand: match f.index(PLAYER_HAND) {
-                        1 => Some(scout4all_core::shapes::player::DominantHand::Right),
-                        2 => Some(scout4all_core::shapes::player::DominantHand::Left),
-                        _ => None,
-                    },
+                    dominant_hand: f
+                        .index(PLAYER_HAND)
+                        .checked_sub(1)
+                        .and_then(|i| HANDS.get(i))
+                        .copied(),
                     federation_id: f.text(PLAYER_FEDERATION_ID),
                     person: p.person.as_ref().map(|person| person.id),
                 };

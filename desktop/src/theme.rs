@@ -4,7 +4,7 @@
 
 use iced::{
     Color, Font, Theme,
-    font::{Family, Weight},
+    font::{Family, Style, Weight},
     theme::Palette,
 };
 
@@ -35,7 +35,9 @@ pub const TEAM_THEM: Color = rgb(0xE394B4);
 pub struct Fonts {
     pub regular: Font,
     pub bold: Font,
-    pub bytes: [&'static [u8]; 2],
+    /// bold and italic
+    pub italic: Font,
+    pub bytes: [&'static [u8]; 3],
 }
 
 const PLEX: Fonts = Fonts {
@@ -45,9 +47,16 @@ const PLEX: Fonts = Fonts {
         weight: Weight::Semibold,
         ..Font::DEFAULT
     },
+    italic: Font {
+        family: Family::Name("IBM Plex Mono"),
+        weight: Weight::Semibold,
+        style: Style::Italic,
+        ..Font::DEFAULT
+    },
     bytes: [
         include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
         include_bytes!("../assets/fonts/IBMPlexMono-SemiBold.ttf"),
+        include_bytes!("../assets/fonts/IBMPlexMono-SemiBoldItalic.ttf"),
     ],
 };
 

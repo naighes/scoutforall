@@ -310,7 +310,7 @@ struct Fonts {
 
 impl Fonts {
     fn new() -> Result<Fonts, String> {
-        let [regular, bold] = theme::fonts().bytes;
+        let [regular, bold, _] = theme::fonts().bytes;
         Ok(Fonts {
             regular: FontRef::try_from_slice(regular).map_err(|e| e.to_string())?,
             bold: FontRef::try_from_slice(bold).map_err(|e| e.to_string())?,

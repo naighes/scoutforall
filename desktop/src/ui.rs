@@ -263,6 +263,85 @@ pub fn choice<'a, M: Clone + 'a>(
     list_row(body, chosen, message, c)
 }
 
+/// The height of a row with a portrait.
+const PORTRAIT: f32 = 48.0;
+
+/// A box of a list of persons: the square portrait at its head, as tall as
+/// the row (the initials without a photo), then `content`.
+pub fn portrait_row<'a, M: Clone + 'a>(
+    photo: Option<&iced::widget::image::Handle>,
+    initials: String,
+    content: impl Into<Element<'a, M>>,
+    chosen: bool,
+    message: M,
+    c: Colors,
+) -> Element<'a, M> {
+    const RADIUS: f32 = 8.0;
+    let corners = iced::border::Radius::default().left(RADIUS);
+    let picture: Element<'a, M> = match photo {
+        // a transparent one shows the grey, an old one fills the square
+        Some(photo) => iced::widget::image(photo.clone())
+            .width(Length::Fixed(PORTRAIT))
+            .height(Length::Fixed(PORTRAIT))
+            .content_fit(iced::ContentFit::Cover)
+            .border_radius(corners)
+            .into(),
+        None => container(text(initials).size(SIZE_SMALL).color(c.muted))
+            .center_x(Length::Fixed(PORTRAIT))
+            .center_y(Length::Fixed(PORTRAIT))
+            .into(),
+    };
+    let head = container(picture).style(move |_| container::Style {
+        background: Some(c.button.into()),
+        border: iced::Border {
+            radius: corners,
+            ..iced::Border::default()
+        },
+        ..container::Style::default()
+    });
+    let body = row![
+        head,
+        container(content.into())
+            .width(Length::Fill)
+            .padding(Padding::from([0, 12])),
+    ]
+    .align_y(Alignment::Center);
+    button(body)
+        .width(Length::Fill)
+        // the border of the chosen one around the portrait
+        .padding(1)
+        .on_press(message)
+        .style(move |_, status| {
+            let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+            button::Style {
+                background: Some(match (chosen, hovered) {
+                    (true, _) => Color {
+                        a: 0.14,
+                        ..c.accent
+                    }
+                    .into(),
+                    (false, true) => Color { a: 0.7, ..c.button }.into(),
+                    (false, false) => Color {
+                        a: 0.35,
+                        ..c.button
+                    }
+                    .into(),
+                }),
+                text_color: c.text,
+                border: border(
+                    match chosen {
+                        true => c.accent,
+                        false => Color::TRANSPARENT,
+                    },
+                    1.0,
+                    RADIUS,
+                ),
+                ..button::Style::default()
+            }
+        })
+        .into()
+}
+
 /// A row of a list, the mouse lighting it.
 pub fn list_row<'a, M: Clone + 'a>(
     content: impl Into<Element<'a, M>>,
