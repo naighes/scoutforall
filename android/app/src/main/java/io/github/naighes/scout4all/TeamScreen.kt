@@ -4,6 +4,9 @@ import java.time.LocalDate
 import io.github.naighes.scout4all.core.AgendaSpan
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +56,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.graphics.Color
 import io.github.naighes.scout4all.core.MatchListing
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
@@ -352,21 +357,23 @@ fun matchDate(date: String): String = try {
 private fun PlayerRow(player: Player, onPlayer: (String) -> Unit) = ListItem(
     modifier = Modifier.clickable { onPlayer(player.id) },
     leadingContent = {
-        // the number first: it's what the scout looks for
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(40.dp), contentAlignment = Alignment.CenterEnd) {
-                Text(
-                    player.number.toString(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            PlayerPhoto(player.id, 40.dp)
+        Box(
+            Modifier.size(40.dp)
+                .background(MaterialTheme.colorScheme.surfaceVariant, CircleShape)
+                .border(1.5.dp, MaterialTheme.colorScheme.primary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                player.number.toString(),
+                color = Color.White,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
         }
     },
     headlineContent = { Text(player.name) },
     supportingContent = player.role?.let { { Text(it) } },
+    trailingContent = { PlayerPhoto(player.id, 40.dp) },
 )
 
 @Composable
