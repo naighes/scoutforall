@@ -96,7 +96,10 @@ mod tests {
         let logo = assets::team_logo(&there, TEAM).unwrap().unwrap();
         assert_eq!((logo.width, logo.height, logo.mime), (40, 30, "image/png"));
         let photo = assets::person_photo(&there, PERSON).unwrap().unwrap();
-        assert_eq!((photo.width, photo.height), (256, 256));
+        assert_eq!(
+            (photo.width, photo.height),
+            (assets::PHOTO_SIDE, assets::PHOTO_SIDE)
+        );
         assert!(assets::person_photo(&there, REMOVED).unwrap().is_none());
         // again: nothing doubles
         import(&there, &archive, &en()).unwrap();

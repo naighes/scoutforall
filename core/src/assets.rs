@@ -19,7 +19,7 @@ use uuid::Uuid;
 /// The longest side of a logo, in pixels.
 pub const LOGO_MAX_SIDE: u32 = 256;
 /// The side of a photo, in pixels.
-pub const PHOTO_SIDE: u32 = 256;
+pub const PHOTO_SIDE: u32 = 512;
 /// The largest file taken in, before decoding: a bigger one is refused
 /// instead of filling the memory.
 pub const MAX_INPUT_BYTES: usize = 25 * 1024 * 1024;
