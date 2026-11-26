@@ -290,6 +290,11 @@ afterEvaluate {
             testClassesDirs = base.testClassesDirs
             classpath = base.classpath
             javaLauncher.set(base.javaLauncher)
+            // what AGP gives its own task (--add-opens java.io, headless):
+            // Robolectric needs it to close the file descriptors
+            jvmArgs = (jvmArgs.orEmpty() + base.jvmArgs.orEmpty()).distinct()
+            jvmArgumentProviders.addAll(base.jvmArgumentProviders)
+            systemProperties(base.systemProperties)
             systemProperty("robolectric.enabledSdks", sdk)
             reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/testDebugUnitTest/sdk$sdk"))
             reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/testDebugUnitTest/sdk$sdk"))
@@ -302,6 +307,15 @@ afterEvaluate {
     // Gradle that changes it breaks the build here, loudly
     gradle.taskGraph.whenReady {
         val asked = all.get().filter as org.gradle.api.internal.tasks.testing.filter.DefaultTestFilter
+        // a JVM of an SDK without an argument of the task of AGP fails
+        // tests far from the cause (the --add-opens of java.io did)
+        val expected = all.get().allJvmArgs
+        perSdk.forEach { task ->
+            val missing = expected - task.get().allJvmArgs.toSet()
+            if (missing.isNotEmpty()) {
+                throw GradleException("${task.name} lacks the JVM arguments $missing of testDebugUnitTest")
+            }
+        }
         perSdk.forEach { task ->
             task.get().filter.apply {
                 (asked.includePatterns + asked.commandLineIncludePatterns).forEach { includeTestsMatching(it) }
