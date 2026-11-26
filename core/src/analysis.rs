@@ -202,10 +202,12 @@ impl<'a> Analysis<'a> {
 
     /// The figure in each match, `None` in a match with no touches.
     pub fn series(&self, series: Series, filter: &StatsFilter) -> Vec<Option<f64>> {
-        self.matches
-            .iter()
-            .map(|m| series.value_in(&m.stats, filter))
-            .collect()
+        self.series_of(|stats| series.value_in(stats, filter))
+    }
+
+    /// Any figure in each match.
+    pub fn series_of(&self, value: impl Fn(&Stats) -> Option<f64>) -> Vec<Option<f64>> {
+        self.matches.iter().map(|m| value(&m.stats)).collect()
     }
 
     /// The touches of the figure in each match.
@@ -220,6 +222,15 @@ impl<'a> Analysis<'a> {
     /// `window` matches: the touches of all of them counted together (a
     /// match with few touches weighs little), `None` with none.
     pub fn moving(&self, series: Series, filter: &StatsFilter, window: usize) -> Vec<Option<f64>> {
+        self.moving_of(|stats| series.value_in(stats, filter), window)
+    }
+
+    /// `moving` of any figure.
+    pub fn moving_of(
+        &self,
+        value: impl Fn(&Stats) -> Option<f64>,
+        window: usize,
+    ) -> Vec<Option<f64>> {
         (0..self.matches.len())
             .map(|i| {
                 let from = (i + 1).saturating_sub(window.max(1));
@@ -230,7 +241,7 @@ impl<'a> Analysis<'a> {
                         all
                     },
                 );
-                series.value_in(&together, filter)
+                value(&together)
             })
             .collect()
     }

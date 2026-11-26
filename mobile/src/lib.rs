@@ -11395,7 +11395,7 @@ mod tests {
         assert_eq!(all.matches.len(), 1);
         let from_a = app
             .opponent_analysis(
-                team,
+                team.clone(),
                 b,
                 AnalysisPeriod::Season,
                 None,
@@ -11426,9 +11426,41 @@ mod tests {
             .iter()
             .find(|t| t.series == Series::Serve)
             .unwrap();
-        assert_eq!(stats.trend.first(), Some(trend));
+        assert_eq!(stats.trend.first().map(|t| &t.line), Some(trend));
         assert_eq!(stats.matches, narrowed.matches);
         assert!(stats.fundamentals.iter().all(|f| f.total > 0));
+        let receiver = app
+            .team_analysis(
+                team.clone(),
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::P,
+                DetailFilter::default(),
+            )
+            .unwrap()
+            .detail
+            .players[0]
+            .id
+            .clone();
+        let stats = app
+            .player_statistics(team, receiver, AnalysisPeriod::Season, None)
+            .unwrap();
+        let reception = stats
+            .fundamentals
+            .iter()
+            .find(|f| f.event == EventTypeEnum::P)
+            .unwrap();
+        let trend = stats
+            .trend
+            .iter()
+            .find(|t| t.line.series == Series::Reception)
+            .unwrap();
+        assert_eq!(trend.measure, PlayerMeasure::Positivity);
+        // one match: the box, the match and the overall are the same
+        assert_eq!(trend.line.values, [reception.value]);
+        assert_eq!(trend.line.moving, [reception.value]);
+        assert_eq!(trend.line.overall, reception.value);
+        assert_eq!(trend.line.band, None);
     }
 
     fn analysis_of(

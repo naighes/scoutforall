@@ -292,18 +292,18 @@ fn figures<'a>(
     });
     let days: Vec<String> = r.matches.iter().map(|m| short_day(s, &m.day)).collect();
     let opponents: Vec<String> = r.matches.iter().map(|m| m.opponent.clone()).collect();
-    let trends = r.trend.iter().map(|line| {
+    let trends = r.trend.iter().map(|player_trend| {
+        let line = &player_trend.line;
         let trend = MatchesTrend::of(line, days.clone(), opponents.clone(), s.touches);
         let chart: Element<'a, Message> = match trend.is_empty() {
             true => text(s.no_rallies).size(SIZE_SMALL).color(c.muted).into(),
             false => charts::matches_view(trend, c),
         };
-        // the trends are of the efficiency, whatever the box shows
         ui::panel(
             Some(&format!(
                 "{} · {}",
                 ui::capitalized(&line.name),
-                s.efficiency
+                measure_name(player_trend.measure, s)
             )),
             column![
                 matches_legend(r.matches.len(), line.overall, s, c),
@@ -321,13 +321,17 @@ fn figures<'a>(
     .into()
 }
 
+fn measure_name(measure: PlayerMeasure, s: &'static Strings) -> &'static str {
+    match measure {
+        PlayerMeasure::Efficiency => s.efficiency,
+        PlayerMeasure::Positivity => s.positiveness,
+    }
+}
+
 /// A fundamental: its figure large, the touches, the points (the aces of
 /// the serve) and the errors.
 fn figure<'a>(f: &PlayerFundamental, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-    let measure = match f.measure {
-        PlayerMeasure::Efficiency => s.efficiency,
-        PlayerMeasure::Positivity => s.positiveness,
-    };
+    let measure = measure_name(f.measure, s);
     let points = f.points.map(|points| {
         let name = match f.event {
             EventTypeEnum::S => s.aces,

@@ -17,7 +17,7 @@ use scout4all_core::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
         flags::ReceptionSchemeEnum,
         r#match::{MatchEntry, MatchSummary},
-        stats::{EvalSet, Stats, StatsFilter},
+        stats::{EvalSet, Metric, Stats, StatsFilter},
         team::TeamEntry,
         technique::{SetTypeEnum, TechniqueEnum},
     },
@@ -196,7 +196,17 @@ pub struct PlayerStatistics {
     pub fundamentals: Vec<PlayerFundamental>,
     /// match by match, of the fundamentals touched that have a trend:
     /// attack, reception, serve
-    pub trend: Vec<MatchTrend>,
+    pub trend: Vec<PlayerTrend>,
+}
+
+/// The figure of a fundamental of a player match by match: the same of its
+/// box.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlayerTrend {
+    pub measure: PlayerMeasure,
+    /// with a positivity there's no band nor grade: the levels are of the
+    /// efficiencies
+    pub line: MatchTrend,
 }
 
 /// The fundamentals of a player, in the order they're shown, with the
@@ -324,9 +334,16 @@ impl Scout4All {
                 points: d.points,
                 errors: d.errors,
             });
-            trend.extend(
-                series.map(|s| match_trend(s, &analysis, &total, &narrowed, &team, labels)),
-            );
+            trend.extend(series.map(|series| {
+                let line = match_trend(series, &analysis, &total, &narrowed, &team, labels);
+                let line = match measure {
+                    PlayerMeasure::Efficiency => line,
+                    PlayerMeasure::Positivity => {
+                        positivity_trend(line, event, &analysis, &total, &narrowed)
+                    }
+                };
+                PlayerTrend { measure, line }
+            }));
         }
         Ok(PlayerStatistics {
             period,
@@ -738,6 +755,25 @@ pub(crate) fn match_trend(
         overall,
         overall_grade: overall
             .and_then(|v| grade(team.classification, team.gender, series.measure(), v)),
+    }
+}
+
+/// The line with the positivity of the fundamental in place of its figure.
+fn positivity_trend(
+    line: MatchTrend,
+    event: EventTypeEnum,
+    analysis: &Analysis,
+    total: &Stats,
+    narrowed: &StatsFilter,
+) -> MatchTrend {
+    let value = |stats: &Stats| stats.metric_percentage(event, Metric::Positive, narrowed);
+    MatchTrend {
+        band: None,
+        values: analysis.series_of(value),
+        moving: analysis.moving_of(value, MOVING_WINDOW),
+        overall: value(total),
+        overall_grade: None,
+        ..line
     }
 }
 

@@ -102,9 +102,15 @@ private fun Figures(r: PlayerStatistics, onDetail: () -> Unit) {
         }
     }
     if (r.trend.isNotEmpty()) TrendLegend(r.matches.size)
-    // the trends are of the efficiency, whatever the box shows
-    val efficiency = stringResource(R.string.efficiency)
-    r.trend.forEach { MatchTrendChart(it.copy(name = "${it.name} · $efficiency"), r.matches) }
+    r.trend.forEach {
+        val measure = stringResource(measureName(it.measure))
+        MatchTrendChart(it.line.copy(name = "${it.line.name} · $measure"), r.matches)
+    }
+}
+
+private fun measureName(measure: PlayerMeasure) = when (measure) {
+    PlayerMeasure.EFFICIENCY -> R.string.efficiency
+    PlayerMeasure.POSITIVITY -> R.string.positiveness
 }
 
 /** A fundamental: its figure large, the touches, the points (the aces of
@@ -121,12 +127,7 @@ private fun Figure(f: PlayerFundamental, modifier: Modifier) = OutlinedCard(modi
             color = f.grade?.let { gradeColor(it) } ?: MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            stringResource(
-                when (f.measure) {
-                    PlayerMeasure.EFFICIENCY -> R.string.efficiency
-                    PlayerMeasure.POSITIVITY -> R.string.positiveness
-                },
-            ),
+            stringResource(measureName(f.measure)),
             style = MaterialTheme.typography.labelMedium,
             color = muted,
         )
