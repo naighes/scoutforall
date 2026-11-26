@@ -263,7 +263,7 @@ private fun LogoPanel(shown: ByteArray?, onPick: (ByteArray) -> Unit, onRemove: 
             if (shown == null) {
                 Text(stringResource(R.string.no_logo), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
             } else {
-                LogoBox(shown, 96.dp)
+                TeamLogoBox(shown, 96.dp)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

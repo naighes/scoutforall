@@ -34,6 +34,11 @@ val Fair = Color(0xFFFACC15)
 val SideOut = Color(0xFF38BDF8)
 val BreakPoint = Color(0xFFFB923C)
 
+/** Behind a logo that would vanish on the theme, the background of the
+ * other theme, as on the desktop (`theme::LIGHT` / `theme::DARK`). */
+val LogoBackdropLight = Color(0xFFF4F4F5)
+val LogoBackdropDark = Surface0
+
 internal val Scout4AllColors = darkColorScheme(
     primary = Amber,
     onPrimary = Color.Black,

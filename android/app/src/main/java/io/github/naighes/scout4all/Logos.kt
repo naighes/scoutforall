@@ -2,24 +2,40 @@ package io.github.naighes.scout4all
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.LogoBackdrop
+import io.github.naighes.scout4all.core.LogoTone
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.logoBackdrop
+import io.github.naighes.scout4all.core.logoTone
 
 /** Tag of the image shown by [LogoBox], for the tests. */
 const val SHOWN_IMAGE = "shown-image"
+
+/** Tags of a logo once its tone is read: on a backdrop (it would vanish
+ * on the theme) or as it is, for the tests. */
+const val LOGO_BACKDROP = "logo-backdrop"
+const val LOGO_AS_IT_IS = "logo-as-it-is"
 
 /** The image the bytes hold, null when they are none or no image. */
 fun decodeImage(bytes: ByteArray?): ImageBitmap? =
@@ -37,7 +53,35 @@ fun TeamLogo(teamId: String, size: Dp = 40.dp, modifier: Modifier = Modifier) {
             null
         }
     }
-    LogoBox(bytes, size, modifier)
+    TeamLogoBox(bytes, size, modifier)
+}
+
+/** The color behind a logo, none when it shows on the theme. */
+fun backdropColor(backdrop: LogoBackdrop): Color? = when (backdrop) {
+    LogoBackdrop.NONE -> null
+    LogoBackdrop.DARK -> LogoBackdropDark
+    LogoBackdrop.LIGHT -> LogoBackdropLight
+}
+
+/** The logo `bytes` in a square: on the background of the other theme, a
+ * bit smaller, when it would vanish on this one (TODO/011 R8.6). Its tone
+ * is read once, away from the main thread. */
+@Composable
+fun TeamLogoBox(bytes: ByteArray?, size: Dp, modifier: Modifier = Modifier) {
+    val tone by produceState<LogoTone?>(null, bytes) {
+        value = bytes?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { logoTone(it) } }
+    }
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val backdrop = tone?.let { logoBackdrop(it, dark) }
+    when (val color = backdrop?.let(::backdropColor)) {
+        null -> LogoBox(bytes, size, backdrop?.let { modifier.testTag(LOGO_AS_IT_IS) } ?: modifier)
+        else -> Box(
+            modifier.size(size).clip(RoundedCornerShape(size * 0.15f)).background(color).testTag(LOGO_BACKDROP),
+            contentAlignment = Alignment.Center,
+        ) {
+            LogoBox(bytes, size * 0.8f)
+        }
+    }
 }
 
 /** The photo of the player (the id of the player is the one of the person)
