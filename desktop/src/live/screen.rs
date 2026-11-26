@@ -121,7 +121,10 @@ pub struct LiveScreen {
     capture: Option<Capture>,
     status: Option<Status>,
     preview: Preview,
+    /// what went wrong saving something: told over the screen
     error: Option<String>,
+    /// why the cameras couldn't be listed: said in the preview
+    unlisted: Option<String>,
     /// the address, name, user and password of the source on the
     /// network; the port and the key of the app sending
     form: Form,
@@ -240,6 +243,7 @@ impl LiveScreen {
             status: None,
             preview: Preview::default(),
             error: None,
+            unlisted: None,
             form: Form::new("", vec![]),
             network_row: 0,
             chosen: None,
@@ -448,6 +452,15 @@ impl LiveScreen {
         format!("{} – {}", s.video_source, self.opponent)
     }
 
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     /// Whether the preview wants the frames of the window.
     pub fn awake(&self) -> bool {
         self.capture.is_some() || self.searching.is_some()
@@ -584,10 +597,10 @@ impl LiveScreen {
                     .and_then(|name| cameras.iter().position(|c| &c.name == name))
                     .unwrap_or(0);
                 self.cameras = cameras;
-                self.error = None;
+                self.unlisted = None;
                 self.open(preferred);
             }
-            Err(e) => self.error = Some(e),
+            Err(e) => self.unlisted = Some(e),
         }
     }
 
@@ -963,17 +976,9 @@ impl LiveScreen {
         )
         .spacing(8)
         .width(Length::Fixed(620.0));
-        let notice: Element<'a, Message> = match &self.error {
-            Some(e) => text(e.clone()).size(SIZE_SMALL).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         container(ui::panel(
             Some(s.saved_sources),
-            column![
-                iced::widget::scrollable(rows).height(Length::Shrink),
-                notice
-            ]
-            .spacing(8),
+            iced::widget::scrollable(rows).height(Length::Shrink),
             c,
         ))
         .center(Length::Fill)
@@ -992,15 +997,11 @@ impl LiveScreen {
 
     /// What's wrong with the source on the network, if anything.
     fn notice(&self, s: &Strings) -> Option<String> {
-        match (&self.error, self.status.as_ref()) {
-            (Some(e), _) => Some(e.clone()),
-            (
-                None,
-                Some(Status {
-                    problem: Some(p), ..
-                }),
-            ) => Some(problem_text(p, s)),
-            (None, Some(Status { error: Some(e), .. })) => Some(e.clone()),
+        match self.status.as_ref() {
+            Some(Status {
+                problem: Some(p), ..
+            }) => Some(problem_text(p, s)),
+            Some(Status { error: Some(e), .. }) => Some(e.clone()),
             _ => None,
         }
     }
@@ -1184,7 +1185,7 @@ impl LiveScreen {
     }
 
     fn camera_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let notice: Option<String> = match (&self.permission, &self.error, &self.status) {
+        let notice: Option<String> = match (&self.permission, &self.unlisted, &self.status) {
             (Some(false), _, _) => Some(s.camera_denied.to_string()),
             (_, Some(e), _) => Some(e.clone()),
             (_, None, Some(Status { error: Some(e), .. })) => Some(e.clone()),
@@ -1280,6 +1281,14 @@ mod tests {
             dir.path().to_path_buf(),
             Arc::new(TestClock::new()),
         )
+    }
+
+    #[test]
+    fn a_failure_of_the_page_is_told_over_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut screen = screen(&dir);
+        screen.error = Some("not saved".into());
+        crate::assert_told_over(crate::Screen::Live(Box::new(screen)), "not saved");
     }
 
     /// The camera asks for the permission; Esc goes back a step, then
