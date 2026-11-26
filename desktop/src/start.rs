@@ -796,16 +796,9 @@ mod tests {
             Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = new_match(&app);
         let start = app.set_start(team.clone(), m.clone()).unwrap();
-        let mut screen = crate::Screen::Start(Box::new(StartScreen::new(start, None, team, m)));
-        assert_eq!(screen.failure(), None);
-        if let crate::Screen::Start(start) = &mut screen {
-            start.failed("no set".into());
-        }
-        assert_eq!(screen.failure().map(String::as_str), Some("no set"));
-        if let Some(failure) = screen.failure_mut() {
-            *failure = None;
-        }
-        assert_eq!(screen.failure(), None);
+        let mut screen = StartScreen::new(start, None, team, m);
+        screen.failed("no set".into());
+        crate::assert_told_over(crate::Screen::Start(Box::new(screen)), "no set");
     }
 
     fn press(screen: &mut StartScreen, ck: KeyCombination) -> Outcome {

@@ -656,12 +656,7 @@ mod tests {
         let (core, team_id, match_id) = imported(&dir);
         let mut events = EventsScreen::new(core, team_id, match_id, 1).unwrap();
         events.error = Some("not saved".into());
-        let mut screen = crate::Screen::Events(Box::new(events));
-        assert_eq!(screen.failure().map(String::as_str), Some("not saved"));
-        if let Some(failure) = screen.failure_mut() {
-            *failure = None;
-        }
-        assert_eq!(screen.failure(), None);
+        crate::assert_told_over(crate::Screen::Events(Box::new(events)), "not saved");
     }
 
     /// B serving, its point lost without a cause (`PL`, as ⇧W does for B):

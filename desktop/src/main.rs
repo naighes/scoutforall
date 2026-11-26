@@ -147,6 +147,7 @@ impl Screen {
             Screen::Team(screen) => screen.failure().as_ref(),
             Screen::Start(screen) => screen.failure().as_ref(),
             Screen::Events(screen) => screen.failure().as_ref(),
+            Screen::Match(screen) => screen.failure().as_ref(),
             _ => None,
         }
     }
@@ -157,9 +158,21 @@ impl Screen {
             Screen::Team(screen) => Some(screen.failure_mut()),
             Screen::Start(screen) => Some(screen.failure_mut()),
             Screen::Events(screen) => Some(screen.failure_mut()),
+            Screen::Match(screen) => Some(screen.failure_mut()),
             _ => None,
         }
     }
+}
+
+/// What went wrong on `screen` is told by the app in its dialog, and gone
+/// once closed.
+#[cfg(test)]
+fn assert_told_over(mut screen: Screen, why: &str) {
+    assert_eq!(screen.failure().map(String::as_str), Some(why));
+    if let Some(failure) = screen.failure_mut() {
+        *failure = None;
+    }
+    assert_eq!(screen.failure(), None);
 }
 
 /// Where a key or a click leads.

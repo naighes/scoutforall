@@ -86,6 +86,15 @@ pub struct MatchScreen {
 }
 
 impl MatchScreen {
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     pub fn new(
         core: Arc<Scout4All>,
         team_id: String,
@@ -516,12 +525,7 @@ impl MatchScreen {
                 .height(Length::Fill)
                 .into(),
         };
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         column![
-            error,
             row![
                 container(summary).width(Length::FillPortion(3)),
                 container(ui::panel(
@@ -545,4 +549,23 @@ fn venue_of(core: &Scout4All, details: &MatchDetails) -> Option<VenueRecord> {
         .venue_id
         .as_ref()
         .and_then(|id| core.venue(id.clone()).ok())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_failure_of_the_match_is_told_over_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = scout4all_mobile::Scout4All::for_tests(
+            dir.path().to_string_lossy().into_owned(),
+            "en".into(),
+        )
+        .unwrap();
+        let (team, m) = crate::scouting::tests::both_sides_started(&core);
+        let mut screen = MatchScreen::new(core, team, m).unwrap();
+        screen.error = Some("not saved".into());
+        crate::assert_told_over(crate::Screen::Match(Box::new(screen)), "not saved");
+    }
 }
