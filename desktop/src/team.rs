@@ -147,7 +147,7 @@ pub struct TeamScreen {
     game: usize,
     mode: Mode,
     error: Option<String>,
-    logo: Option<iced::widget::image::Handle>,
+    logo: Option<ui::TeamLogo>,
     /// the photos of the players of the list, in its order
     photos: Vec<Option<iced::widget::image::Handle>>,
     /// the profile open: also under its form and its deletion
@@ -197,11 +197,11 @@ impl TeamScreen {
         })
     }
 
-    fn logo_of(core: &Scout4All, team_id: &str) -> Option<iced::widget::image::Handle> {
+    fn logo_of(core: &Scout4All, team_id: &str) -> Option<ui::TeamLogo> {
         core.team_logo(team_id.to_string())
             .ok()
             .flatten()
-            .and_then(|png| crate::editors::logo_handle(&png))
+            .and_then(|png| ui::TeamLogo::from_png(&png))
     }
 
     fn photos_of(
@@ -953,7 +953,7 @@ impl TeamScreen {
                     Row::with_children(
                         self.logo
                             .as_ref()
-                            .map(|h| ui::logo(h, 48.0))
+                            .map(|l| ui::team_logo(l, 48.0, c))
                             .into_iter()
                             .chain([text(d.name.clone())
                                 .size(22)

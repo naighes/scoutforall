@@ -75,7 +75,7 @@ pub struct TeamEditor {
     /// what the logo of the team becomes when it's saved
     logo: LogoEdit,
     /// the logo being shown: the saved one or the chosen one
-    shown: Option<iced::widget::image::Handle>,
+    shown: Option<ui::TeamLogo>,
 }
 
 /// What is done to the logo of a team on saving.
@@ -570,7 +570,7 @@ impl Editor {
                 shown: id
                     .as_ref()
                     .and_then(|id| core.team_logo(id.clone()).ok().flatten())
-                    .and_then(|png| logo_handle(&png)),
+                    .and_then(|png| ui::TeamLogo::from_png(&png)),
                 id,
                 classifications,
                 genders,
@@ -1990,7 +1990,7 @@ impl Editor {
         };
         match scout4all_core::assets::normalize_logo(&bytes) {
             Ok(image) => {
-                t.shown = logo_handle(&image.data);
+                t.shown = ui::TeamLogo::from_png(&image.data);
                 t.logo = LogoEdit::Replace(bytes);
                 self.form.error = None;
             }
@@ -2087,11 +2087,7 @@ impl Editor {
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
         let picture: Element<'a, M> = match &t.shown {
-            Some(handle) => iced::widget::image(handle.clone())
-                .width(Length::Fixed(LOGO_BOX))
-                .height(Length::Fixed(LOGO_BOX))
-                .content_fit(iced::ContentFit::Contain)
-                .into(),
+            Some(logo) => ui::team_logo(logo, LOGO_BOX, c),
             None => container(text(s.no_logo).size(SIZE_SMALL).color(c.muted))
                 .center_x(Length::Fixed(LOGO_BOX))
                 .center_y(Length::Fixed(LOGO_BOX))

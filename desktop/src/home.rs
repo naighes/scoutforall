@@ -93,7 +93,7 @@ pub struct HomeScreen {
     /// a new team, being written
     editor: Option<Box<Editor>>,
     /// the logos of the teams of the list, in its order
-    logos: Vec<Option<iced::widget::image::Handle>>,
+    logos: Vec<Option<ui::TeamLogo>>,
 }
 
 fn team_id(t: &TeamListing) -> Option<String> {
@@ -113,7 +113,7 @@ impl HomeScreen {
                     .team_logo(id.clone())
                     .ok()
                     .flatten()
-                    .and_then(|png| crate::editors::logo_handle(&png)),
+                    .and_then(|png| ui::TeamLogo::from_png(&png)),
                 TeamListing::Unreadable { .. } => None,
             })
             .collect();
@@ -378,7 +378,7 @@ impl HomeScreen {
                             false => c.muted,
                         })
                         .width(Length::Fixed(22.0)),
-                        ui::logo_slot(self.logos.get(i).and_then(Option::as_ref), 28.0),
+                        ui::team_logo_slot(self.logos.get(i).and_then(Option::as_ref), 28.0, c),
                         text(name.clone())
                             .size(SIZE_BODY)
                             .font(theme::fonts().bold)

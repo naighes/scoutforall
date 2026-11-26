@@ -60,7 +60,7 @@ pub struct Shown<'a> {
     pub team: &'a TeamDetails,
     pub player: &'a Player,
     pub photo: Option<&'a Handle>,
-    pub logo: Option<&'a Handle>,
+    pub logo: Option<&'a ui::TeamLogo>,
     /// the nationality, by name
     pub country: Option<String>,
     pub initials: String,
@@ -192,7 +192,7 @@ fn header<'a>(shown: &Shown<'a>, c: Colors) -> Element<'a, Message> {
         .into(),
     };
     let logo = logo.map(|logo| {
-        container(ui::logo(logo, LOGO))
+        container(ui::team_logo(logo, LOGO, c))
             .height(Length::Fill)
             .padding([16, 0])
     });

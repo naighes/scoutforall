@@ -652,6 +652,63 @@ pub fn logo<'a, M: 'a>(handle: &iced::widget::image::Handle, size: f32) -> Eleme
         .into()
 }
 
+/// The logo of a team ready to draw, with its tone: a backdrop goes behind
+/// it when it would vanish on the theme (TODO/011 R8.6).
+#[derive(Debug, Clone)]
+pub struct TeamLogo {
+    pub handle: iced::widget::image::Handle,
+    pub tone: scout4all_core::assets::LogoTone,
+}
+
+impl TeamLogo {
+    /// The logo the PNG holds, `None` when it can't be read.
+    pub fn from_png(png: &[u8]) -> Option<TeamLogo> {
+        crate::editors::logo_handle(png).map(|handle| TeamLogo {
+            handle,
+            tone: scout4all_core::assets::logo_tone(png),
+        })
+    }
+}
+
+/// The backdrop the logo has on the theme, if any: the colors of the
+/// background of the other theme.
+pub fn backdrop_color(logo: &TeamLogo, c: Colors) -> Option<Color> {
+    use scout4all_core::assets::LogoBackdrop;
+    match logo.tone.backdrop(c.dark) {
+        LogoBackdrop::None => None,
+        LogoBackdrop::Dark => Some(theme::DARK.background),
+        LogoBackdrop::Light => Some(theme::LIGHT.background),
+    }
+}
+
+/// The logo of a team in a square of `size`: on a backdrop, a bit smaller,
+/// when it would vanish on the theme.
+pub fn team_logo<'a, M: 'a>(logo: &TeamLogo, size: f32, c: Colors) -> Element<'a, M> {
+    match backdrop_color(logo, c) {
+        None => self::logo(&logo.handle, size),
+        Some(color) => container(self::logo(&logo.handle, size * 0.8))
+            .center_x(Length::Fixed(size))
+            .center_y(Length::Fixed(size))
+            .style(move |_| container::Style {
+                background: Some(color.into()),
+                border: border(color, 0.0, size * 0.15),
+                ..container::Style::default()
+            })
+            .into(),
+    }
+}
+
+/// `team_logo`, an empty box when the team has none: the names line up.
+pub fn team_logo_slot<'a, M: 'a>(logo: Option<&TeamLogo>, size: f32, c: Colors) -> Element<'a, M> {
+    match logo {
+        Some(l) => team_logo(l, size, c),
+        None => space::horizontal()
+            .width(Length::Fixed(size))
+            .height(Length::Fixed(size))
+            .into(),
+    }
+}
+
 /// The box of the logo of a team, empty when it has none: the names line up.
 pub fn logo_slot<'a, M: 'a>(
     handle: Option<&iced::widget::image::Handle>,
@@ -1117,4 +1174,35 @@ pub fn io_error(
     language: scout4all_core::shapes::enums::LanguageEnum,
 ) -> String {
     scout4all_core::errors::io_message(e, scout4all_core::localization::labels(language))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{TeamLogo, backdrop_color};
+    use crate::theme::{DARK, LIGHT};
+
+    /// A `color` square, half transparent, as PNG.
+    fn logo(color: [u8; 3]) -> Vec<u8> {
+        let [r, g, b] = color;
+        let image = image::RgbaImage::from_fn(8, 8, |x, _| match x < 4 {
+            true => image::Rgba([r, g, b, 255]),
+            false => image::Rgba([0, 0, 0, 0]),
+        });
+        let mut out = std::io::Cursor::new(Vec::new());
+        image.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn a_logo_that_would_vanish_on_the_theme_gets_the_other_background() {
+        let white = TeamLogo::from_png(&logo([255, 255, 255])).unwrap();
+        let black = TeamLogo::from_png(&logo([0, 0, 0])).unwrap();
+        let red = TeamLogo::from_png(&logo([200, 20, 20])).unwrap();
+        assert_eq!(backdrop_color(&white, LIGHT), Some(DARK.background));
+        assert_eq!(backdrop_color(&white, DARK), None);
+        assert_eq!(backdrop_color(&black, DARK), Some(LIGHT.background));
+        assert_eq!(backdrop_color(&black, LIGHT), None);
+        assert_eq!(backdrop_color(&red, LIGHT), None);
+        assert_eq!(backdrop_color(&red, DARK), None);
+    }
 }
