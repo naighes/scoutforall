@@ -4,4 +4,6 @@
 # and the Android SDK. Arguments go to Gradle (e.g. --tests '*PlayerFormTest').
 set -euo pipefail
 cd "$(dirname "$0")/../android"
-./gradlew testDebugUnitTest "$@"
+# --continue: the SDKs run in tasks of their own, a failure on one still
+# runs the other
+./gradlew --continue testDebugUnitTest "$@"

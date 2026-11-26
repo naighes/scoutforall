@@ -268,6 +268,54 @@ tasks.withType<Test>().configureEach {
     jvmArgs("--add-exports=java.base/jdk.internal.access=ALL-UNNAMED", "--enable-native-access=ALL-UNNAMED")
 }
 
+// One JVM per SDK of robolectric.properties. Robolectric runs each SDK in
+// its own classloader, but the native core and the vtables of its foreign
+// callbacks (the Clock) are one per process: with two SDKs in one JVM the
+// calls of a sandbox land in the objects of the other, and tests fail at
+// random. testDebugUnitTest only runs these tasks, passing its --tests on.
+val robolectricSdks = file("src/test/resources/robolectric.properties").readLines()
+    .firstOrNull { it.startsWith("sdk=") }
+    ?.substringAfter('=')?.split(',')?.map { it.trim() }?.filter { it.isNotEmpty() }
+    .orEmpty()
+if (robolectricSdks.isEmpty()) {
+    throw GradleException("no sdk= in src/test/resources/robolectric.properties")
+}
+afterEvaluate {
+    val all = tasks.named<Test>("testDebugUnitTest")
+    val perSdk = robolectricSdks.map { sdk ->
+        tasks.register<Test>("testDebugUnitTestSdk$sdk") {
+            group = "verification"
+            description = "The unit tests of debug on the SDK $sdk of Robolectric, in a JVM of their own."
+            val base = all.get()
+            testClassesDirs = base.testClassesDirs
+            classpath = base.classpath
+            javaLauncher.set(base.javaLauncher)
+            systemProperty("robolectric.enabledSdks", sdk)
+            reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/testDebugUnitTest/sdk$sdk"))
+            reports.junitXml.outputLocation.set(layout.buildDirectory.dir("test-results/testDebugUnitTest/sdk$sdk"))
+            binaryResultsDirectory.set(layout.buildDirectory.dir("test-results/testDebugUnitTest/sdk$sdk/binary"))
+        }
+    }
+    // the --tests of testDebugUnitTest, known once the command line is read:
+    // set before the up-to-date check, so another filter runs again. The
+    // patterns of --tests are only in the internal DefaultTestFilter: a
+    // Gradle that changes it breaks the build here, loudly
+    gradle.taskGraph.whenReady {
+        val asked = all.get().filter as org.gradle.api.internal.tasks.testing.filter.DefaultTestFilter
+        perSdk.forEach { task ->
+            task.get().filter.apply {
+                (asked.includePatterns + asked.commandLineIncludePatterns).forEach { includeTestsMatching(it) }
+                asked.excludePatterns.forEach { excludeTestsMatching(it) }
+                isFailOnNoMatchingTests = asked.isFailOnNoMatchingTests
+            }
+        }
+    }
+    all.configure {
+        dependsOn(perSdk)
+        onlyIf("the tests run per SDK, in testDebugUnitTestSdk*") { false }
+    }
+}
+
 androidComponents {
     onVariants { variant ->
         variant.sources.jniLibs?.addGeneratedSourceDirectory(cargoNdk, CargoTask::outputDir)
