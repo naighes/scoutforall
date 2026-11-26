@@ -662,6 +662,7 @@ pub(crate) fn team_analysis(
         .collect();
     let trend = Series::ALL
         .iter()
+        .filter(|series| of_the_players(**series, &narrowed))
         .map(|series| match_trend(*series, &analysis, &total, &narrowed, team, labels))
         .collect();
     let played_days = played_days(all);
@@ -725,6 +726,15 @@ pub(crate) fn played_days(all: &[MatchSummary]) -> Vec<String> {
     days.sort();
     days.dedup();
     days
+}
+
+/// Whether the figure is shown with the filter: side out and break point
+/// are of the team, its rallies, not with players chosen.
+fn of_the_players(series: Series, filter: &StatsFilter) -> bool {
+    !matches!(
+        (series, filter.of_players()),
+        (Series::SideOut | Series::BreakPoint, true)
+    )
 }
 
 /// A figure match by match, narrowed by the filter, graded for the level

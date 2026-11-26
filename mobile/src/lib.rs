@@ -1859,6 +1859,10 @@ pub struct LiveStats {
     pub sets: Vec<u8>,
     /// reception, attack, serve, block, dig
     pub fundamentals: Vec<FundamentalStats>,
+    /// whether the figures of the team, of its rallies (side out, break
+    /// point, by possession, the rotations, their errors and points), are
+    /// shown: not with players chosen, a rally has none
+    pub team_figures: bool,
     pub side_out: Option<PhaseStats>,
     /// the first, second and later possessions of the side outs
     pub side_out_possessions: Vec<PossessionStats>,
@@ -2812,6 +2816,7 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
             fundamental(EventTypeEnum::B, o.block),
             fundamental(EventTypeEnum::D, o.dig),
         ],
+        team_figures: !filter.of_players(),
         side_out: phase(o.side_out, Some(Measure::SideOut)),
         side_out_possessions: o
             .side_out_possessions
@@ -11534,6 +11539,62 @@ mod tests {
             .unwrap();
         touch(&scouting, EventTypeEnum::P, &libero, EvalEnum::Positive);
         scouting.choose_event(EventTypeEnum::OE).unwrap();
+    }
+
+    /// With players chosen, the figures of the team (its rallies) aren't
+    /// shown, in the analysis and in the statistics of a match: they'd be
+    /// empty, a rally has no player.
+    #[test]
+    fn the_figures_of_the_team_are_not_of_a_player() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None))
+            .unwrap();
+        let team = imported.team_id.clone();
+        let season = |filter| {
+            app.team_analysis(
+                team.clone(),
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::S,
+                filter,
+            )
+            .unwrap()
+        };
+        let series = |a: &TeamAnalysis| a.trend.iter().map(|t| t.series).collect::<Vec<_>>();
+        let all = season(DetailFilter::default());
+        assert!(all.summary.team_figures);
+        assert!(all.summary.side_out.is_some());
+        assert_eq!(series(&all), Series::ALL.to_vec());
+        let server = all.detail.players[0].id.clone();
+        let of_player = DetailFilter {
+            players: vec![server],
+            ..DetailFilter::default()
+        };
+        let narrowed = season(of_player.clone());
+        assert!(!narrowed.summary.team_figures);
+        // what they would show
+        assert_eq!(narrowed.summary.side_out, None);
+        assert_eq!(
+            series(&narrowed),
+            [
+                Series::Reception,
+                Series::Attack,
+                Series::CounterAttack,
+                Series::Serve
+            ]
+        );
+        let m = imported.match_id;
+        let of_match = |filter| {
+            app.match_stats(team.clone(), m.clone(), MatchSide::A, StatsScope::Match, filter)
+                .unwrap()
+        };
+        assert!(of_match(DetailFilter::default()).team_figures);
+        let narrowed = of_match(of_player);
+        assert!(!narrowed.team_figures);
+        // the trend of a match is of every rally, whatever the filter
+        assert_eq!(narrowed.trend.len(), Series::ALL.len());
     }
 
     /// A team that was only B of a match scouted on both sides has it in
