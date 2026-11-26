@@ -152,6 +152,7 @@ impl Screen {
             Screen::Competitions(screen) => screen.failure().as_ref(),
             Screen::Video(screen) => screen.failure().as_ref(),
             Screen::Live(screen) => screen.failure().as_ref(),
+            Screen::Training(screen) => screen.failure().as_ref(),
             _ => None,
         }
     }
@@ -167,6 +168,7 @@ impl Screen {
             Screen::Competitions(screen) => Some(screen.failure_mut()),
             Screen::Video(screen) => Some(screen.failure_mut()),
             Screen::Live(screen) => Some(screen.failure_mut()),
+            Screen::Training(screen) => Some(screen.failure_mut()),
             _ => None,
         }
     }

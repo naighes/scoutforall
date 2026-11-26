@@ -421,20 +421,24 @@ impl SessionEditor {
         match saved {
             Ok(saved) => Edited::Saved(saved.id),
             Err(e) => {
-                self.focus_error(&e);
-                self.form.fail(e.to_string());
+                self.refused(&e);
                 Edited::Stay
             }
         }
     }
 
-    fn focus_error(&mut self, e: &MobileError) {
-        if let MobileError::InvalidTraining { field, .. } = e {
-            self.form.focused = match field {
-                TrainingField::Duration => DURATION,
-                TrainingField::ActualDuration => ACTUAL,
-                _ => DATE,
-            };
+    /// The session not written: why under the wrong field, or in a dialog.
+    fn refused(&mut self, e: &MobileError) {
+        match e {
+            MobileError::InvalidTraining { field, .. } => self.form.reject(
+                match field {
+                    TrainingField::Duration => DURATION,
+                    TrainingField::ActualDuration => ACTUAL,
+                    _ => DATE,
+                },
+                e.to_string(),
+            ),
+            _ => self.form.fail(e.to_string()),
         }
     }
 
@@ -471,8 +475,7 @@ impl SessionEditor {
         match self.entry() {
             Ok(entry) => Some(entry),
             Err(field) => {
-                self.form.focused = field;
-                self.form.fail(self.s.entry_invalid.to_string());
+                self.form.reject(field, self.s.entry_invalid);
                 None
             }
         }
@@ -837,14 +840,17 @@ impl ActivityEditor {
         match core.save_activity(self.session_id.clone(), self.id.clone(), draft) {
             Ok(saved) => Edited::Saved(saved.id),
             Err(e) => {
-                if let MobileError::InvalidTraining { field, .. } = &e {
-                    self.form.focused = match field {
-                        TrainingField::Planned => PLANNED,
-                        TrainingField::Actual => ACTIVITY_ACTUAL,
-                        _ => NAME,
-                    };
+                match &e {
+                    MobileError::InvalidTraining { field, .. } => self.form.reject(
+                        match field {
+                            TrainingField::Planned => PLANNED,
+                            TrainingField::Actual => ACTIVITY_ACTUAL,
+                            _ => NAME,
+                        },
+                        e.to_string(),
+                    ),
+                    _ => self.form.fail(e.to_string()),
                 }
-                self.form.fail(e.to_string());
                 Edited::Stay
             }
         }
@@ -1098,5 +1104,24 @@ mod tests {
             editor.update(&core, Message::Save),
             Edited::Saved(_)
         ));
+    }
+
+    /// A wrong field of the session is told under it, not in a dialog.
+    #[test]
+    fn a_wrong_duration_is_told_under_its_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = core.tutorial_team().unwrap();
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let mut editor = SessionEditor::new(&core, s, team, None, None).unwrap();
+        editor.update(&core, Message::Input(DATE, "2026-03-02".into()));
+        editor.update(&core, Message::Input(TIME, "18:00".into()));
+        editor.update(&core, Message::Input(DURATION, "0".into()));
+        editor.key(&core, scout4all_keys::key!(enter));
+        assert_eq!(
+            editor.form.invalid.as_ref().map(|(at, _)| *at),
+            Some(DURATION)
+        );
     }
 }

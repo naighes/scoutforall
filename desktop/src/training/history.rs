@@ -5,7 +5,7 @@
 //! own team.
 
 use {
-    crate::{strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
+    crate::{notice, strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
     iced::{
         Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
@@ -89,7 +89,7 @@ impl HistoryTab {
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         if let Some(e) = &self.error {
-            return ui::body(e.clone()).color(c.danger).into();
+            return notice::banner(notice::Level::Error, e, c);
         }
         if self.seasons.is_empty() {
             // alone on the page: a capital, as on Android

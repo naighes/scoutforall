@@ -188,6 +188,15 @@ impl Roll {
             .collect()
     }
 
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     fn toggle_makeup(&mut self, i: usize) {
         if let Some(row) = self.rows.get_mut(i).filter(|r| r.guest) {
             row.makeup = !row.makeup;
@@ -494,10 +503,6 @@ impl Roll {
                 ui::list_row(line, i == self.selected, Some(Message::Row(i)), c)
             })
             .collect();
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         let buttons = ui::answers(
             Some((theme::icons::CLOSE, s.cancel, Message::Cancel)),
             theme::icons::CHECK,
@@ -516,7 +521,6 @@ impl Roll {
             actions,
             column![
                 scrollable(Column::with_children(rows).spacing(3)).height(Length::Fill),
-                error,
                 buttons
             ]
             .spacing(10),

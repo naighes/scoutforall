@@ -183,6 +183,21 @@ impl SessionPage {
         }
     }
 
+    /// What went wrong, in the roll or in the sheet: told over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        match &self.mode {
+            Mode::Roll(roll) if roll.failure().is_some() => roll.failure(),
+            _ => &self.error,
+        }
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        match &mut self.mode {
+            Mode::Roll(roll) if roll.failure().is_some() => roll.failure_mut(),
+            _ => &mut self.error,
+        }
+    }
+
     /// Everything read again after a change.
     fn reload(&mut self) {
         let read = (
@@ -713,11 +728,7 @@ impl SessionPage {
             .height(Length::Fill)
             .into(),
         };
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![error, body].spacing(10).into()
+        body
     }
 
     fn completion<'a>(

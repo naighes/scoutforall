@@ -7,7 +7,7 @@
 use scout4all_mobile::clock::ClockExt;
 use {
     super::screen::{Period, period_name},
-    crate::{calendar::text_of, strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
+    crate::{calendar::text_of, notice, strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
     chrono::NaiveDate,
     iced::{
         Alignment, Element, Length,
@@ -216,7 +216,7 @@ impl PresenceTab {
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         if let Some(e) = &self.error {
-            return ui::body(e.clone()).color(c.danger).into();
+            return notice::banner(notice::Level::Error, e, c);
         }
         let header = row![
             ui::pill("‹", false, Some(Message::Previous), c),

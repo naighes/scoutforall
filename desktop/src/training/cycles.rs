@@ -12,6 +12,7 @@ use {
     crate::{
         calendar::text_of,
         form::{self, Field, Form, Mask, Outcome, Value},
+        notice,
         strings::Strings,
         theme::{self, Colors, SIZE_SMALL},
         ui,
@@ -490,6 +491,28 @@ impl CyclesTab {
                 Some((Id::new(LIST), self.selected as f32 / last as f32))
             }
             _ => None,
+        }
+    }
+
+    /// What went wrong, here or in the week of the sheet: told over the
+    /// screen.
+    pub fn failure(&self) -> &Option<String> {
+        match (
+            &self.error,
+            self.card.as_ref().and_then(|k| k.week.as_ref()),
+        ) {
+            (None, Some(week)) => week.failure(),
+            _ => &self.error,
+        }
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        match (
+            self.error.is_some(),
+            self.card.as_mut().and_then(|k| k.week.as_mut()),
+        ) {
+            (false, Some(week)) => week.failure_mut(),
+            _ => &mut self.error,
         }
     }
 
@@ -1166,10 +1189,9 @@ impl CyclesTab {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let notice: Element<'a, Message> = match (&self.error, &self.notice) {
-            (Some(e), _) => ui::body(e.clone()).color(c.danger).into(),
-            (None, Some(n)) => ui::body(n.clone()).color(c.accent).into(),
-            (None, None) => space::vertical().height(0).into(),
+        let notice: Element<'a, Message> = match &self.notice {
+            Some(n) => notice::banner(notice::Level::Info, n, c),
+            None => space::vertical().height(0).into(),
         };
         let centered = |form: Element<'a, Message>| -> Element<'a, Message> {
             container(container(form).max_width(720))

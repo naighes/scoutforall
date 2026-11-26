@@ -227,6 +227,31 @@ impl TrainingScreen {
         }
     }
 
+    /// What went wrong doing something, here or in a part of the screen:
+    /// the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        let page = match &self.mode {
+            Mode::Page(page) => Some(page.failure()),
+            _ => None,
+        };
+        [Some(&self.error), page, Some(self.cycles.failure())]
+            .into_iter()
+            .flatten()
+            .find(|f| f.is_some())
+            .unwrap_or_else(|| self.calendar.failure())
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        let own = self.error.is_some();
+        let cycles = self.cycles.failure().is_some();
+        match (own, &mut self.mode) {
+            (true, _) => &mut self.error,
+            (false, Mode::Page(page)) if page.failure().is_some() => page.failure_mut(),
+            _ if cycles => self.cycles.failure_mut(),
+            _ => self.calendar.failure_mut(),
+        }
+    }
+
     pub fn focus_id(&self) -> Option<Id> {
         match &self.mode {
             Mode::Page(page) => page.focus_id(),
@@ -554,10 +579,6 @@ impl TrainingScreen {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         let body: Element<'a, Message> = match &self.mode {
             Mode::Page(page) => page.view(s, c).map(Message::Page),
             Mode::New(editor) => editor.view(s, c, Message::Form),
@@ -606,7 +627,7 @@ impl TrainingScreen {
             .height(Length::Fill)
             .into(),
         };
-        column![error, body].spacing(10).into()
+        body
     }
 }
 
@@ -655,6 +676,30 @@ mod tests {
     /// The ids of the sessions the calendar shows, in its order.
     fn shown(screen: &TrainingScreen) -> Vec<String> {
         screen.calendar.shown_sessions()
+    }
+
+    /// A failure of the screen or of any of its parts is told over it.
+    #[test]
+    fn a_failure_of_a_part_is_told_over_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let id = session(&core, &team, "2026-03-02T18:00", "Prima");
+        let parts: [fn(&mut TrainingScreen) -> &mut Option<String>; 4] = [
+            |s| &mut s.error,
+            |s| s.cycles.failure_mut(),
+            |s| s.calendar.failure_mut(),
+            |s| match &mut s.mode {
+                Mode::Page(page) => page.failure_mut(),
+                _ => &mut s.error,
+            },
+        ];
+        for part in parts {
+            let mut screen =
+                TrainingScreen::new(core.clone(), team.clone(), Open::Session(id.clone())).unwrap();
+            *part(&mut screen) = Some("not saved".into());
+            crate::assert_told_over(crate::Screen::Training(Box::new(screen)), "not saved");
+        }
     }
 
     /// The list of the calendar holds the sessions in time order; the
@@ -790,6 +835,7 @@ mod tests {
             panic!("still the form")
         };
         assert!(editor.form.told().is_some());
+        assert!(editor.form.invalid.is_none());
         assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 1);
         screen.key(s, key!(enter));
         type_in(&mut screen, 2, "20:00");

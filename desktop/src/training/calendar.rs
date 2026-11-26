@@ -425,6 +425,15 @@ impl CalendarTab {
         self.marked.len()
     }
 
+    /// What went wrong doing something: told over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     /// Read again, after a change or a move.
     pub fn reload(&mut self) {
         if let Some(w) = &self.window {
@@ -1045,10 +1054,7 @@ impl CalendarTab {
     /// The sheet's calendar: the week of the window, with the arrows
     /// between its weeks when it holds more than one.
     pub fn window_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let body: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => self.week(s, c),
-        };
+        let body = self.week(s, c);
         match self.window_weeks() {
             false => body,
             true => {
@@ -1243,16 +1249,13 @@ impl CalendarTab {
                 c,
             ));
         }
-        let body: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => match self.view {
-                View::Week => self.week(s, c),
-                View::Month => scrollable(self.month(s, c))
-                    .id(Id::new(MONTH))
-                    .height(Length::Fill)
-                    .into(),
-                View::List => self.list(s, c),
-            },
+        let body: Element<'a, Message> = match self.view {
+            View::Week => self.week(s, c),
+            View::Month => scrollable(self.month(s, c))
+                .id(Id::new(MONTH))
+                .height(Length::Fill)
+                .into(),
+            View::List => self.list(s, c),
         };
         column![
             Row::with_children(controls)
