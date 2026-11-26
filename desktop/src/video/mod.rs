@@ -2579,7 +2579,7 @@ pub(crate) mod screen_tests {
         };
         let refs = core.match_clips_of(&team, &m, MatchSide::B, &pick).unwrap();
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
-        let matches = core.team_clips(&team_b, &period, None, &pick).unwrap();
+        let matches = core.team_clips(&team_b, &period, None, None, &pick).unwrap();
         assert_eq!(
             matches
                 .iter()
@@ -2588,6 +2588,13 @@ pub(crate) mod screen_tests {
             [(m.as_str(), team.as_str(), MatchSide::B, true)]
         );
         assert_eq!(matches[0].events, refs);
+        // the same, from team A with B the opponent chosen
+        let b = core.analysis_opponents(team.clone()).unwrap()[0].id;
+        assert_eq!(
+            core.team_clips(&team, &period, None, Some(b), &pick)
+                .unwrap(),
+            matches
+        );
         let screen = VideoScreen::with_tour(
             core,
             dir.path().to_path_buf(),
@@ -3377,7 +3384,7 @@ pub(crate) mod screen_tests {
             target: None,
         };
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
-        let matches = core.team_clips(&team, &period, None, &pick).unwrap();
+        let matches = core.team_clips(&team, &period, None, None, &pick).unwrap();
         assert_eq!(matches.len(), 2);
         let mut screen = VideoScreen::with_tour(
             core,
@@ -3471,7 +3478,7 @@ pub(crate) mod screen_tests {
         };
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
         let summed = |core: &Arc<Scout4All>| {
-            let matches = core.team_clips(&team, &period, None, &pick).unwrap();
+            let matches = core.team_clips(&team, &period, None, None, &pick).unwrap();
             let mut screen = VideoScreen::with_tour(
                 core.clone(),
                 dir.path().to_path_buf(),

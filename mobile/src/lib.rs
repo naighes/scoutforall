@@ -8114,6 +8114,7 @@ mod tests {
                 team.clone(),
                 AnalysisPeriod::LastMatches { count: 2 },
                 competition,
+                None,
                 ClipPick {
                     scope: StatsScope::Match,
                     event: EventTypeEnum::S,

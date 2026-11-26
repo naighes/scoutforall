@@ -970,14 +970,16 @@ impl StatsScreen {
                 .ok()
                 .map(|clips| clips.len()),
             Source::Team => {
-                // the actions are in the video of our side: none of an opponent
-                self.tour = match self.opponent {
-                    Some(_) => vec![],
-                    None => self
-                        .core
-                        .team_clips(&self.team_id, &self.period, self.competition, &self.pick())
-                        .unwrap_or_default(),
-                };
+                self.tour = self
+                    .core
+                    .team_clips(
+                        &self.team_id,
+                        &self.period,
+                        self.competition,
+                        self.opponent,
+                        &self.pick(),
+                    )
+                    .unwrap_or_default();
                 self.has_video = self.tour.iter().any(|m| m.has_video);
                 Some(self.watched().map(|m| m.events.len()).sum())
             }
@@ -3826,8 +3828,12 @@ pub(crate) mod tests {
         );
         screen.update(Message::Opponent(opponent));
         assert_eq!(aces(&screen), b.aces);
+        // its actions to watch: of its side, in the video of the match
+        assert!(!screen.tour.is_empty());
+        assert!(screen.tour.iter().all(|m| m.side == MatchSide::B));
         screen.update(Message::Opponent(None));
         assert_eq!(aces(&screen), ours);
+        assert!(screen.tour.iter().all(|m| m.side == MatchSide::A));
         // the comparison with the opponent: its matches, side by side, only
         // in the summary; → goes from the opponent to it
         screen.update(Message::Opponent(opponent));

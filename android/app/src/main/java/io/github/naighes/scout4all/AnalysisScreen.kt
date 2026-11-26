@@ -267,7 +267,7 @@ internal fun AnalysisScreen(
                                 TrendLegend(a.matches.size)
                                 a.trend.forEach { MatchTrendChart(it, a.matches) }
                             }
-                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = if (opponent == null) teamWatch(teamId, period, competition, onWatch) else null) { ask(it) }
+                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = teamWatch(teamId, period, competition, opponent, onWatch)) { ask(it) }
                         }
                     }
                 }

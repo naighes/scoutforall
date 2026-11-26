@@ -68,7 +68,7 @@ private fun aceClips(team: String, match: String): VideoRequest.Clips {
         review.correctHere(1u, 120_000u)
         review.correctHere(2u, 180_000u)
     }
-    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, pick) }
+    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, null, pick) }
     return VideoRequest.Clips(team, pick, "Serve · #", matches)
 }
 
@@ -108,7 +108,7 @@ private fun acesOfFiveMatches(): VideoRequest.Clips {
             "Pisa" -> videoOf(team, match, "pisa.mp4", readable = true)
         }
     }
-    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(10u), null, pick) }
+    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(10u), null, null, pick) }
     return VideoRequest.Clips(team, pick, "Serve · #", matches.filter { it.hasVideo }, matches.filter { !it.hasVideo })
 }
 
@@ -236,7 +236,7 @@ class VideoTest {
         val (team, match) = servedMatch()
         linkVideo(team, match)
         val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, listOf(EvalEnum.PERFECT), null, null)
-        val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, pick) }
+        val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, null, pick) }
         assertEquals(listOf(match), matches.map { it.matchId })
         val request = VideoRequest.Clips(team, pick, "Serve · #", matches)
         rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
@@ -317,10 +317,12 @@ class VideoTest {
         core { c -> c.videoReview(home, match, MatchSide.A, null).addFiles(listOf(NewVideoFile(path, "a.mp4")), 7200) }
         ShadowMediaMetadataRetriever.addMetadata(DataSource.toDataSource(app, Uri.parse(path)), MediaMetadataRetriever.METADATA_KEY_DURATION, "600000")
         val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, emptyList(), null, null)
-        val matches = core { it.teamClipMatches(b, AnalysisPeriod.LastMatches(4u), null, pick) }
+        val matches = core { it.teamClipMatches(b, AnalysisPeriod.LastMatches(4u), null, null, pick) }
         // in the analysis of B: its match scouted on both sides, A's video
         assertEquals(listOf(Triple(match, home, MatchSide.B)), matches.map { Triple(it.matchId, it.teamId, it.side) })
         assertTrue(matches.single().hasVideo)
+        // the same, from the team of A with B the opponent chosen
+        assertEquals(matches, core { it.teamClipMatches(home, AnalysisPeriod.LastMatches(4u), null, b, pick) })
         val serves = core { it.matchClipCount(home, match, MatchSide.B, pick) }
         assertEquals(serves, matches.single().actions)
         val request = VideoRequest.Clips(b, pick, "Serve", matches)

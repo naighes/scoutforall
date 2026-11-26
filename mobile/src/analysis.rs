@@ -476,16 +476,22 @@ pub struct MatchClips {
 impl Scout4All {
     /// The actions picked of each match of the period with some, in the
     /// order of the analysis (the scope of the pick left aside: every set).
+    /// With `opponent`, of the opponent in the matches scouted on both
+    /// sides, as `opponent_analysis` counts them.
     pub fn team_clips(
         &self,
         team_id: &str,
         period: &AnalysisPeriod,
         competition: Option<Uuid>,
+        opponent: Option<Uuid>,
         pick: &ClipPick,
     ) -> Result<Vec<MatchClips>, MobileError> {
         let team = self.read_team(team_id)?;
-        let (_, chosen) =
-            self.chosen_matches(&team, period, competition, Local::now().date_naive())?;
+        let today = Local::now().date_naive();
+        let (_, chosen) = match opponent {
+            Some(o) => self.chosen_matches_of_b(&team, &o, period, competition, today)?,
+            None => self.chosen_matches(&team, period, competition, today)?,
+        };
         let videos: HashMap<&str, (Uuid, MatchSide)> = chosen
             .iter()
             .map(|c| (c.entry.id.as_str(), (c.team_a, c.side)))

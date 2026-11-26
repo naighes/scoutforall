@@ -266,16 +266,18 @@ impl Scout4All {
     }
 
     /// The matches of the period with actions the pick keeps (every set),
-    /// in the order of the analysis.
+    /// in the order of the analysis; with `opponent`, its actions in the
+    /// matches scouted on both sides (`opponent_analysis`).
     pub fn team_clip_matches(
         &self,
         team_id: String,
         period: AnalysisPeriod,
         competition: Option<Uuid>,
+        opponent: Option<Uuid>,
         pick: ClipPick,
     ) -> Result<Vec<TeamClipMatch>, MobileError> {
         Ok(self
-            .team_clips(&team_id, &period, competition, &pick)?
+            .team_clips(&team_id, &period, competition, opponent, &pick)?
             .into_iter()
             .map(|m| TeamClipMatch {
                 actions: count_of(m.events.len()),
@@ -1510,7 +1512,7 @@ mod tests {
             .unwrap();
         let period = AnalysisPeriod::LastMatches { count: 4 };
         let matches = app
-            .team_clip_matches(team.clone(), period, None, pick.clone())
+            .team_clip_matches(team.clone(), period, None, None, pick.clone())
             .unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!((matches[0].actions, matches[0].has_video), (count, true));
