@@ -471,7 +471,7 @@ private fun TypedDayField(label: String, digits: String, modifier: Modifier, onD
         placeholder = { Text(stringResource(R.string.date_placeholder)) },
         singleLine = true,
         isError = wrong,
-        supportingText = if (wrong) ({ Text(stringResource(R.string.not_a_day)) }) else null,
+        supportingText = noteOf(if (wrong) stringResource(R.string.not_a_day) else null),
         visualTransformation = DayMask,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
     )

@@ -101,6 +101,9 @@ pub struct Colors {
     pub court: Color,
     pub court_lines: Color,
     pub danger: Color,
+    /// what to know before going on, and what is only told
+    pub warning: Color,
+    pub info: Color,
     /// the score of a match won, of one lost
     pub won: Color,
     pub lost: Color,
@@ -124,6 +127,8 @@ pub const DARK: Colors = Colors {
     court: rgb(0x1B2A44),
     court_lines: rgb(0xCBD5E1),
     danger: LOST,
+    warning: rgb(0xFB923C),
+    info: rgb(0x38BDF8),
     won: WON,
     lost: LOST,
     side_out: rgb(0x38BDF8),
@@ -145,6 +150,8 @@ pub const LIGHT: Colors = Colors {
     court: rgb(0xE6EEF8),
     court_lines: rgb(0x334155),
     danger: rgb(0xB91C1C),
+    warning: rgb(0xC2410C),
+    info: rgb(0x0369A1),
     // darker, to read on white
     won: rgb(0x15803D),
     lost: rgb(0xB91C1C),
@@ -255,4 +262,8 @@ pub mod icons {
     pub const SAVE: &[u8] = include_bytes!("../assets/icons/save.svg");
     pub const DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
     pub const WARNING: &[u8] = include_bytes!("../assets/icons/warning.svg");
+    /// the levels of a notice, outlined
+    pub const ERROR_OUTLINE: &[u8] = include_bytes!("../assets/icons/error_outline.svg");
+    pub const WARNING_OUTLINE: &[u8] = include_bytes!("../assets/icons/warning_amber.svg");
+    pub const INFO: &[u8] = include_bytes!("../assets/icons/info.svg");
 }

@@ -102,7 +102,7 @@ impl DuplicateEditor {
             );
             self.warned = warning.is_some();
             if warning.is_some() {
-                self.form.error = warning;
+                self.form.notice = warning.map(crate::notice::Notice::warning);
                 return Edited::Stay;
             }
         }
@@ -110,7 +110,7 @@ impl DuplicateEditor {
             Ok(saved) => Edited::Saved(saved.id),
             Err(e) => {
                 self.form.focused = DATE;
-                self.form.error = Some(e.to_string());
+                self.form.fail(e.to_string());
                 Edited::Stay
             }
         }

@@ -397,6 +397,9 @@ class MatchFormViewModel(
 
     fun dismissClashes() = update { it.copy(clashes = null) }
 
+    /** The dialog of what went wrong closed. */
+    fun dismissError() = update { it.copy(error = null) }
+
     /** The gym held by another team at that time asks first, unless
      * `confirmed`. */
     fun save(confirmed: Boolean) {
@@ -691,14 +694,12 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 label = { Text(stringResource(R.string.max_substitutions)) },
                 singleLine = true,
                 isError = error(MatchField.MAX_SUBSTITUTIONS) != null,
-                supportingText = error(MatchField.MAX_SUBSTITUTIONS)?.let { { Text(it) } },
+                supportingText = noteOf(error(MatchField.MAX_SUBSTITUTIONS)),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
             NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
         }
-        state.error?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         // big and at the bottom, where the thumb is
         Button(
             onClick = model::next,
@@ -782,9 +783,7 @@ private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewMod
                 ) { model.toggle(player.id) }
             }
         }
-        state.error?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         // the players of B may not be on its team yet
         if (b != null) {
             OutlinedButton(

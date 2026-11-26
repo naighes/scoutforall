@@ -248,18 +248,19 @@ impl CycleEditor {
         match saved {
             Ok(cycle) => Edited::Saved(cycle.id),
             Err(e) => {
-                self.form.focused = match &e {
-                    MobileError::InvalidTraining { field, .. } => match field {
-                        TrainingField::Start => START,
-                        _ => SPAN,
-                    },
-                    _ => START,
-                };
                 self.detach = matches!(e, MobileError::ChildrenOutside { .. });
-                self.form.error = Some(match self.detach {
-                    true => format!("{}\n{}", e, s.detach_hint),
-                    false => e.to_string(),
-                });
+                match (&e, self.detach) {
+                    (MobileError::InvalidTraining { field, .. }, _) => self.form.reject(
+                        match field {
+                            TrainingField::Start => START,
+                            _ => SPAN,
+                        },
+                        e.to_string(),
+                    ),
+                    // saved again, the children detached: to know first
+                    (_, true) => self.form.warn(format!("{}\n{}", e, s.detach_hint)),
+                    (_, false) => self.form.fail(e.to_string()),
+                }
                 Edited::Stay
             }
         }
@@ -458,8 +459,8 @@ impl CyclesTab {
     #[cfg(test)]
     pub fn form_error(&self) -> Option<String> {
         match &self.mode {
-            Mode::Editor(e) => e.form.error.clone(),
-            Mode::Overlay(o) => o.form.error.clone(),
+            Mode::Editor(e) => e.form.told(),
+            Mode::Overlay(o) => o.form.told(),
             _ => None,
         }
     }
@@ -896,7 +897,7 @@ impl CyclesTab {
                     );
                     overlay.warned = warning.is_some();
                     if warning.is_some() {
-                        overlay.form.error = warning;
+                        overlay.form.notice = warning.map(crate::notice::Notice::warning);
                         return;
                     }
                 }
@@ -915,7 +916,7 @@ impl CyclesTab {
                 self.mode = Mode::Card;
                 self.refresh();
             }
-            Err(e) => overlay.form.error = Some(e.to_string()),
+            Err(e) => overlay.form.fail(e.to_string()),
         }
     }
 
@@ -1111,8 +1112,8 @@ impl CyclesTab {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
-            Mode::Editor(e) => e.form.on_field(Form::hints(s)),
-            Mode::Overlay(_) => Form::hints(s),
+            Mode::Editor(e) => e.form.on_field(s, Form::hints(s)),
+            Mode::Overlay(o) => o.form.on_field(s, Form::hints(s)),
             Mode::Delete(deletion) => {
                 let mut hints = vec![("Enter".to_string(), s.delete.to_string())];
                 if deletion.children {

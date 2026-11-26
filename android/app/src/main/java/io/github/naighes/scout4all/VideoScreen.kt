@@ -870,13 +870,12 @@ private fun TimeDialog(model: VideoModel, initial: String, onDismiss: () -> Unit
                 modifier = Modifier.focusRequester(focus),
                 singleLine = true,
                 isError = invalid,
-                supportingText = {
+                supportingText = noteOf(if (invalid) stringResource(R.string.video_invalid_time) else null) ?: {
                     Text(
                         stringResource(
-                            when {
-                                invalid -> R.string.video_invalid_time
-                                onlyThis -> R.string.video_time_only_this
-                                else -> R.string.video_time_aligns_all
+                            when (onlyThis) {
+                                true -> R.string.video_time_only_this
+                                false -> R.string.video_time_aligns_all
                             },
                         ),
                     )

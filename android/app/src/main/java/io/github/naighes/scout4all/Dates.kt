@@ -99,7 +99,7 @@ internal fun DayField(
         },
         singleLine = true,
         isError = error != null,
-        supportingText = error?.let { { Text(it) } },
+        supportingText = noteOf(error),
         interactionSource = presses,
     )
     if (picking) {
@@ -198,7 +198,7 @@ internal fun TimeField(
         },
         singleLine = true,
         isError = error != null,
-        supportingText = error?.let { { Text(it) } },
+        supportingText = noteOf(error),
         interactionSource = presses,
     )
     if (picking) {

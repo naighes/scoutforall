@@ -409,7 +409,7 @@ impl Roll {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.over {
-            Some(_) => Form::hints(s),
+            Some(Over::Note(form) | Over::Guest { form, .. }) => form.on_field(s, Form::hints(s)),
             None => vec![
                 ("↑ ↓".to_string(), String::new()),
                 (format!("← → {}", s.space), s.change.to_string()),

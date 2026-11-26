@@ -725,4 +725,7 @@
     <string name="right_hand">右</string>
     <string name="left_hand">左</string>
     <string name="federation_id">連盟登録番号</string>
+    <string name="notice_error">問題が発生しました</string>
+    <string name="notice_warning">ご注意ください</string>
+    <string name="notice_info">完了</string>
 </resources>

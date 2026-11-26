@@ -406,10 +406,11 @@ impl LiveScreen {
     /// for next time, the password in the keychain.
     fn try_written(&mut self, s: &Strings) {
         let Some(source) = self.written() else {
-            self.form.error = Some(format!("{}: 1–65535", s.receiver_port));
+            self.form
+                .reject(PORT, format!("{}: 1–65535", s.receiver_port));
             return;
         };
-        self.form.error = None;
+        self.form.clear();
         self.capture = None;
         self.preview.clear();
         self.status = None;
@@ -1667,7 +1668,7 @@ mod tests {
             s(),
         );
         screen.key(key!(enter), s());
-        assert!(screen.form.error.is_some());
+        assert!(screen.form.told().is_some());
         assert!(matches!(screen.key(BACK_KEY, s()), Outcome::Stay));
         assert_eq!(screen.step, Step::Source);
         // round: from the last kind to the first

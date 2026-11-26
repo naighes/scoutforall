@@ -332,7 +332,7 @@ impl SessionEditor {
             Outcome::Stay => Edited::Stay,
             Outcome::Cancel => Edited::Cancel,
             Outcome::Changed(KIND) => {
-                self.form.error = None;
+                self.form.clear();
                 self.shape();
                 Edited::Stay
             }
@@ -390,7 +390,7 @@ impl SessionEditor {
 
     fn save(&mut self, core: &Scout4All) -> Edited {
         if let Some(warning) = self.warning(core) {
-            self.form.error = Some(warning);
+            self.form.warn(warning);
             return Edited::Stay;
         }
         // a session of a series whose time, duration or gym changed: where
@@ -422,7 +422,7 @@ impl SessionEditor {
             Ok(saved) => Edited::Saved(saved.id),
             Err(e) => {
                 self.focus_error(&e);
-                self.form.error = Some(e.to_string());
+                self.form.fail(e.to_string());
                 Edited::Stay
             }
         }
@@ -472,7 +472,7 @@ impl SessionEditor {
             Ok(entry) => Some(entry),
             Err(field) => {
                 self.form.focused = field;
-                self.form.error = Some(self.s.entry_invalid.to_string());
+                self.form.fail(self.s.entry_invalid.to_string());
                 None
             }
         }
@@ -489,7 +489,7 @@ impl SessionEditor {
             self.entries.push(entry);
             self.form.update(form::Message::Input(DATE, next));
             self.form.focused = DATE;
-            self.form.error = None;
+            self.form.clear();
             self.warned = false;
             self.shape();
         }
@@ -518,7 +518,7 @@ impl SessionEditor {
             );
             self.warned = warning.is_some();
             if warning.is_some() {
-                self.form.error = warning;
+                self.form.notice = warning.map(crate::notice::Notice::warning);
                 return Edited::Stay;
             }
         }
@@ -546,13 +546,13 @@ impl SessionEditor {
                     Edited::Stay
                 }
                 (true, true) => {
-                    self.form.error = Some(self.s.no_sessions.to_string());
+                    self.form.fail(self.s.no_sessions.to_string());
                     Edited::Stay
                 }
             },
             Err(e) => {
                 self.conflicts.clear();
-                self.form.error = Some(e.to_string());
+                self.form.fail(e.to_string());
                 Edited::Stay
             }
         }
@@ -625,7 +625,7 @@ impl SessionEditor {
             ],
             (None, true, true) => self
                 .form
-                .on_field(Form::hints(s))
+                .on_field(s, Form::hints(s))
                 .into_iter()
                 .map(|(k, what)| match k.as_str() {
                     "Enter" | "⌘Enter" | "⌃Enter" => (k, s.finish.to_string()),
@@ -633,7 +633,7 @@ impl SessionEditor {
                 })
                 .chain([(CONTINUE_HINT.to_string(), s.continue_entry.to_string())])
                 .collect(),
-            (None, true, false) => self.form.on_field(Form::hints(s)),
+            (None, true, false) => self.form.on_field(s, Form::hints(s)),
         }
     }
 
@@ -844,7 +844,7 @@ impl ActivityEditor {
                         _ => NAME,
                     };
                 }
-                self.form.error = Some(e.to_string());
+                self.form.fail(e.to_string());
                 Edited::Stay
             }
         }
@@ -943,7 +943,7 @@ impl CopyEditor {
                     None => Edited::Stay,
                 },
                 None => {
-                    self.form.error = Some(s.no_activities.to_string());
+                    self.form.fail(s.no_activities.to_string());
                     Edited::Stay
                 }
             },
@@ -1069,7 +1069,7 @@ mod tests {
         }
         editor.update(&core, Message::Choose(LOCATION, 1));
         assert!(matches!(editor.update(&core, Message::Save), Edited::Stay));
-        let told = editor.form.error.clone().unwrap();
+        let told = editor.form.told().unwrap();
         assert!(told.contains("Terontola") && told.contains(s.save_anyway_hint));
         assert!(core.training_sessions(b.clone()).unwrap().is_empty());
         // another time: asked again

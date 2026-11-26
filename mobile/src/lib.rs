@@ -600,6 +600,9 @@ pub enum PlayerField {
     Number,
     BirthDate,
     Height,
+    /// a country the app couldn't find among the ones it offers (the core
+    /// takes it chosen)
+    Nationality,
 }
 
 #[uniffi::remote(Enum)]

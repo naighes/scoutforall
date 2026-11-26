@@ -125,7 +125,7 @@ impl VenueEditor {
                 Ok(None) => {}
                 Err(e) => {
                     self.form.focused = LINK;
-                    self.form.error = Some(e.to_string());
+                    self.form.fail(e.to_string());
                     return None;
                 }
             }
@@ -141,7 +141,7 @@ impl VenueEditor {
                     },
                     _ => NAME,
                 };
-                self.form.error = Some(e.to_string());
+                self.form.fail(e.to_string());
                 None
             }
         }
@@ -425,7 +425,7 @@ impl VenuesScreen {
             false => s.pin_venue,
         };
         match &self.mode {
-            Mode::Edit(editor) => editor.form.on_field(Form::hints(s)),
+            Mode::Edit(editor) => editor.form.on_field(s, Form::hints(s)),
             Mode::Delete(_) => vec![
                 ("Enter".to_string(), s.delete_venue.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
@@ -730,7 +730,7 @@ mod tests {
         assert!(matches!(screen.mode, Mode::Edit(_)));
         // no name: told, nothing made
         screen.update(s, Message::Form(form::Message::Save));
-        assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.error.is_some()));
+        assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.told().is_some()));
         screen.update(
             s,
             Message::Form(form::Message::Input(NAME, "Terontola".into())),
@@ -795,7 +795,7 @@ mod tests {
         form_of(&mut screen, NAME, "Cortona");
         form_of(&mut screen, LINK, "https://maps.app.goo.gl/abc");
         screen.update(s, Message::Form(form::Message::Save));
-        assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.error.is_some()));
+        assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.told().is_some()));
         form_of(
             &mut screen,
             LINK,

@@ -731,4 +731,7 @@
     <string name="right_hand">Destra</string>
     <string name="left_hand">Sinistra</string>
     <string name="federation_id">Matricola federale</string>
+    <string name="notice_error">Qualcosa non ha funzionato</string>
+    <string name="notice_warning">Attenzione</string>
+    <string name="notice_info">Fatto</string>
 </resources>

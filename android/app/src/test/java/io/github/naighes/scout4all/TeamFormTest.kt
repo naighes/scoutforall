@@ -78,11 +78,11 @@ class TeamFormTest {
         show()
         fill("Italia")
         rule.save()
-        rule.waitForText("country is required")
+        rule.waitForText("Country is required")
         assertEquals(0, saved)
         // chosen, the error goes and the team is saved
         chooseCountry("ital", "Italy")
-        rule.onAllNodesWithText("country is required").assertCountEquals(0)
+        rule.onAllNodesWithText("Country is required").assertCountEquals(0)
         rule.save()
         rule.waitFor { saved == 1 }
         assertEquals("IT", core { it.team(teams().single().id) }.form.country)

@@ -5,6 +5,7 @@
 use {
     crate::{
         field,
+        notice::{self, Notice},
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
@@ -380,6 +381,8 @@ pub enum Message {
     RemovePhoto,
     Save,
     Cancel,
+    /// the dialog over the form closed
+    Dismiss,
 }
 
 #[derive(Debug, PartialEq)]
@@ -399,8 +402,11 @@ pub struct Form {
     pub title: String,
     pub fields: Vec<Field>,
     pub focused: usize,
-    /// why it can't be saved, as the core says
-    pub error: Option<String>,
+    /// why it can't be saved, as the core says, when it's not about a
+    /// field (or what to know before saving again): in a dialog over it
+    pub notice: Option<Notice>,
+    /// the field to correct and why, told under it until it changes
+    pub invalid: Option<(usize, String)>,
     /// a title before the field, for a group of them
     pub sections: Vec<(usize, String)>,
     /// the buttons, when not to cancel and to save: Esc's, then Enter's,
@@ -558,7 +564,8 @@ impl Form {
             title: title.to_string(),
             fields,
             focused: 0,
-            error: None,
+            notice: None,
+            invalid: None,
             sections: vec![],
             actions: None,
             another: None,
@@ -627,6 +634,7 @@ impl Form {
     /// As `write`; `alone`, the change is undone by itself (a suggestion
     /// taken), not with the word written before.
     fn write_as(&mut self, field: usize, text: String, alone: bool) -> Outcome {
+        self.corrected(field);
         let Some(f) = self.fields.get_mut(field) else {
             return Outcome::Stay;
         };
@@ -865,6 +873,7 @@ impl Form {
     }
 
     fn change(&mut self, field: usize, step: isize) -> Outcome {
+        self.corrected(field);
         match self.fields.get_mut(field).map(|f| &mut f.value) {
             Some(Value::Choice { options, index } | Value::Segments { options, index })
                 if !options.is_empty() =>
@@ -903,6 +912,7 @@ impl Form {
             }
             Message::Choose(field, chosen) => {
                 self.focused = field;
+                self.corrected(field);
                 match self.fields.get_mut(field).map(|f| &mut f.value) {
                     Some(Value::Choice { index, options } | Value::Segments { index, options })
                         if chosen < options.len() =>
@@ -948,6 +958,64 @@ impl Form {
             | Message::RemovePhoto => Outcome::Stay,
             Message::Save => Outcome::Save,
             Message::Cancel => Outcome::Cancel,
+            Message::Dismiss => {
+                self.notice = None;
+                Outcome::Stay
+            }
+        }
+    }
+
+    /// What went wrong, in a dialog over the form.
+    pub fn fail(&mut self, why: impl Into<String>) {
+        self.notice = Some(Notice::error(why));
+    }
+
+    /// What to know before saving again, in a dialog over the form.
+    pub fn warn(&mut self, what: impl Into<String>) {
+        self.notice = Some(Notice::warning(what));
+    }
+
+    /// The field to correct: the keys go there, why under it.
+    pub fn reject(&mut self, field: usize, why: impl Into<String>) {
+        let field = field.min(self.fields.len().saturating_sub(1));
+        self.focused = field;
+        self.invalid = Some((field, why.into()));
+    }
+
+    /// Nothing to tell any more: the form as it is, to save again.
+    pub fn clear(&mut self) {
+        self.notice = None;
+        self.invalid = None;
+    }
+
+    /// What the form tells, in a dialog or under a field.
+    #[cfg(test)]
+    pub fn told(&self) -> Option<String> {
+        self.notice
+            .as_ref()
+            .map(|n| n.text.clone())
+            .or_else(|| self.invalid.as_ref().map(|(_, why)| why.clone()))
+    }
+
+    /// The view of the form (or one of its own, e.g. a score sheet), with
+    /// the dialog over it while there is one.
+    pub fn over<'a, M: Clone + 'a>(
+        &self,
+        under: Element<'a, M>,
+        s: &Strings,
+        c: Colors,
+        on: impl Fn(Message) -> M,
+    ) -> Element<'a, M> {
+        match &self.notice {
+            Some(n) => notice::dialog(under, n, s, on(Message::Dismiss), c),
+            None => under,
+        }
+    }
+
+    /// The field changed: what was wrong with it is no longer told.
+    fn corrected(&mut self, field: usize) {
+        if self.invalid.as_ref().is_some_and(|(at, _)| *at == field) {
+            self.invalid = None;
         }
     }
 
@@ -994,6 +1062,13 @@ impl Form {
     pub fn key(&mut self, ck: KeyCombination) -> Outcome {
         let (offering, lit) = (self.offering(), self.lit());
         match (ck, offering, lit) {
+            // a dialog over the form: it takes the keys until closed
+            (k, _, _) if self.notice.is_some() => {
+                if notice::closes(k) {
+                    self.notice = None;
+                }
+                Outcome::Stay
+            }
             (k, _, _) if is_undo(k) => self.undo(true),
             // Alt ↓ opens a drop-down, as a select of the web
             (k, _, _) if k == key!(alt - down) && self.has_calendar(self.focused) => {
@@ -1074,7 +1149,11 @@ impl Form {
     /// The hints as they are on the field the keys are on: in a text of
     /// more lines Enter starts a line, ⌘Enter does what Enter does
     /// elsewhere.
-    pub fn on_field(&self, hints: Vec<(String, String)>) -> Vec<(String, String)> {
+    pub fn on_field(&self, s: &Strings, hints: Vec<(String, String)>) -> Vec<(String, String)> {
+        // a dialog over the form: only its keys
+        if self.notice.is_some() {
+            return notice::hints(s);
+        }
         let lines = matches!(
             self.fields.get(self.focused).map(|f| &f.value),
             Some(Value::Lines { .. })
@@ -1114,10 +1193,6 @@ impl Form {
                     None => field,
                 }
             });
-        let error: Element<'a, M> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => iced::widget::space::vertical().height(0).into(),
-        };
         let ((no_icon, no), (yes_icon, yes)) = self.actions.clone().unwrap_or_else(|| {
             (
                 (theme::icons::CLOSE, s.cancel.to_string()),
@@ -1139,7 +1214,6 @@ impl Form {
             Some(&self.title),
             column![
                 Column::with_children(fields).spacing(14),
-                error,
                 match self.plain {
                     true => Element::from(iced::widget::space::vertical().height(0)),
                     false => buttons,
@@ -1163,7 +1237,12 @@ impl Form {
             ]
             .into(),
         };
-        iced::widget::scrollable(body).height(Length::Fill).into()
+        self.over(
+            iced::widget::scrollable(body).height(Length::Fill).into(),
+            s,
+            c,
+            on,
+        )
     }
 
     /// A month of days to choose from: the arrows on its name, the weeks
@@ -1293,17 +1372,26 @@ impl Form {
         on: impl Fn(Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
         let focused = i == self.focused;
+        let invalid = self
+            .invalid
+            .as_ref()
+            .filter(|(at, _)| *at == i)
+            .map(|(_, why)| why.as_str());
+        let wrong = invalid.is_some();
         let label = text(f.label.clone())
             .size(SIZE_SMALL)
             .font(theme::fonts().bold)
-            .color(match focused {
-                true => c.accent,
-                false => c.muted,
+            .color(match (wrong, focused) {
+                (true, _) => c.danger,
+                (false, true) => c.accent,
+                (false, false) => c.muted,
             });
+        // the field to correct in the color of the error, even with the keys
         let edge = move |active: bool| iced::Border {
-            color: match active {
-                true => c.accent,
-                false => c.border,
+            color: match (wrong, active) {
+                (true, _) => c.danger,
+                (false, true) => c.accent,
+                (false, false) => c.border,
             },
             width: 1.0,
             radius: 8.0.into(),
@@ -1643,9 +1731,11 @@ impl Form {
             })
             .into(),
         };
-        let hint: Element<'a, M> = match &f.hint {
-            Some(h) => text(h.clone()).size(SIZE_SMALL).color(c.muted).into(),
-            None => iced::widget::space::vertical().height(0).into(),
+        // what to correct takes the place of the hint, while it's there
+        let hint: Element<'a, M> = match (invalid, &f.hint) {
+            (Some(why), _) => notice::field_note(why, c),
+            (None, Some(h)) => text(h.clone()).size(SIZE_SMALL).color(c.muted).into(),
+            (None, None) => iced::widget::space::vertical().height(0).into(),
         };
         let body: Element<'a, M> = match &f.value {
             // a check is one line: the box, then what it is
@@ -1727,6 +1817,60 @@ mod tests {
         )
     }
 
+    /// The field to correct: the keys on it, why told until it changes;
+    /// another field changing leaves it told.
+    #[test]
+    fn a_field_to_correct_is_told_until_it_changes() {
+        let mut form = form();
+        form.reject(2, "taken");
+        assert_eq!(form.focused, 2);
+        assert_eq!(form.invalid, Some((2, "taken".to_string())));
+        assert_eq!(form.told().as_deref(), Some("taken"));
+        // no dialog: the keys still move and save
+        assert_eq!(form.key(key!(enter)), Outcome::Save);
+        form.update(Message::Input(0, "Bea".into()));
+        assert!(form.invalid.is_some());
+        form.update(Message::Choose(1, 2));
+        assert!(form.invalid.is_some());
+        form.update(Message::Input(2, "10".into()));
+        assert_eq!(form.invalid, None);
+        // a choice corrected by the arrows, too
+        form.reject(1, "missing");
+        form.key(key!(right));
+        assert_eq!(form.invalid, None);
+    }
+
+    /// What went wrong saving, in a dialog: it takes the keys until Enter
+    /// or Esc closes it, then they're the form's again.
+    #[test]
+    fn a_dialog_over_the_form_takes_the_keys_until_closed() {
+        let mut form = form();
+        form.fail("disk full");
+        assert_eq!(form.notice, Some(Notice::error("disk full")));
+        for k in [key!(down), key!(a), key!(enter)] {
+            let before = form.focused;
+            match k == key!(enter) {
+                true => {
+                    assert_eq!(form.key(k), Outcome::Stay);
+                    assert_eq!(form.notice, None);
+                }
+                false => {
+                    assert_eq!(form.key(k), Outcome::Stay);
+                    assert_eq!(form.focused, before);
+                    assert!(form.notice.is_some());
+                }
+            }
+        }
+        assert_eq!(form.key(key!(enter)), Outcome::Save);
+        form.warn("gym taken");
+        assert_eq!(form.key(BACK_KEY), Outcome::Stay);
+        assert_eq!(form.notice, None);
+        // closed by its button, too
+        form.fail("again");
+        form.update(Message::Dismiss);
+        assert_eq!(form.notice, None);
+    }
+
     /// A text of more lines: what the editor writes is the text, Enter in
     /// it a new line (not a save), ⌘Enter saves, the change is undone.
     #[test]
@@ -1758,7 +1902,7 @@ mod tests {
         // the footer says it there, Enter elsewhere
         let saves = |form: &Form| -> String {
             let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
-            form.on_field(Form::hints(s))
+            form.on_field(s, Form::hints(s))
                 .into_iter()
                 .find(|(_, what)| what == s.save)
                 .map(|(k, _)| k)

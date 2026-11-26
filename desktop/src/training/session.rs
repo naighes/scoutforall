@@ -606,8 +606,10 @@ impl SessionPage {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
             Mode::Session(e) => e.hints(s),
-            Mode::Activity(e) => e.form.on_field(Form::hints(s)),
-            Mode::Copy(_) | Mode::Duplicate(_) | Mode::Pdf(_) => Form::hints(s),
+            Mode::Activity(e) => e.form.on_field(s, Form::hints(s)),
+            Mode::Copy(e) => e.form.on_field(s, Form::hints(s)),
+            Mode::Duplicate(e) => e.form.on_field(s, Form::hints(s)),
+            Mode::Pdf(f) => f.on_field(s, Form::hints(s)),
             Mode::Roll(r) => r.hints(s),
             Mode::Complete(_) => vec![
                 ("↑ ↓".to_string(), String::new()),

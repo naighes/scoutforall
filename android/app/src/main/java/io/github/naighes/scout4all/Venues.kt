@@ -196,7 +196,7 @@ private fun VenueChoiceDialog(teamId: String, onDismiss: () -> Unit, onPick: (St
                         label = { Text(stringResource(R.string.venue_name)) },
                         singleLine = true,
                         isError = failure != null,
-                        supportingText = failure?.let { { Text(it) } },
+                        supportingText = noteOf(failure),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                     )
                 }
@@ -581,6 +581,6 @@ private fun VenueText(label: Int, value: String, error: String?, capitalization:
         label = { Text(stringResource(label)) },
         singleLine = true,
         isError = error != null,
-        supportingText = error?.let { { Text(it) } },
+        supportingText = noteOf(error),
         keyboardOptions = KeyboardOptions(capitalization = capitalization, imeAction = ImeAction.Next),
     )

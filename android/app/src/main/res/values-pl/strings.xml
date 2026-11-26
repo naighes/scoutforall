@@ -743,4 +743,7 @@
     <string name="right_hand">Prawa</string>
     <string name="left_hand">Lewa</string>
     <string name="federation_id">Numer federacyjny</string>
+    <string name="notice_error">Coś poszło nie tak</string>
+    <string name="notice_warning">Uwaga</string>
+    <string name="notice_info">Gotowe</string>
 </resources>

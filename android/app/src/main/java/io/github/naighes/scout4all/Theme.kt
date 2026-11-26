@@ -61,6 +61,9 @@ internal val Scout4AllColors = darkColorScheme(
     surfaceContainerHighest = Surface3,
     outline = ForegroundDark,
     outlineVariant = Surface3,
+    // the red of the errors, as on the desktop
+    error = Lost,
+    onError = Color.Black,
 )
 
 /** Roboto, the font of the system. */

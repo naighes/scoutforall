@@ -927,11 +927,16 @@ impl TeamScreen {
             .into(),
             Mode::Browse => self.profile(s, c),
         };
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![error, body].spacing(10).into()
+        body
+    }
+
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
     }
 
     fn info<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -1584,7 +1589,7 @@ mod tests {
         let Mode::Edit(editor) = &team.mode else {
             unreachable!("the form")
         };
-        assert!(editor.form.error.is_some());
+        assert!(editor.form.told().is_some());
         team.update(s, Message::Form(Save));
         assert!(core.team_logo(team_id.clone()).unwrap().is_some());
         // removed
@@ -1625,7 +1630,7 @@ mod tests {
             unreachable!("the form")
         };
         assert_eq!(
-            editor.form.error.as_deref(),
+            editor.form.told().as_deref(),
             Some(ui::fill(s.many_faces, &["3".to_string()]).as_str())
         );
         // not an image: refused too
@@ -1635,7 +1640,7 @@ mod tests {
         let Mode::Edit(editor) = &team.mode else {
             unreachable!("the form")
         };
-        assert!(editor.form.error.is_none());
+        assert!(editor.form.told().is_none());
         assert!(core.person_photo(anna.clone()).unwrap().is_none());
         team.update(s, Message::Form(Save));
         let saved = core.person_photo(anna.clone()).unwrap().unwrap();
@@ -2129,6 +2134,13 @@ mod tests {
         let Mode::Edit(editor) = &team.mode else {
             unreachable!("still the correction")
         };
+        // told in a dialog over the correction: only its keys
+        assert_eq!(editor.hints(s), crate::notice::hints(s));
+        // the dialog closed, the correction's keys again
+        team.key(s, key!(enter));
+        let Mode::Edit(editor) = &team.mode else {
+            unreachable!("still the correction")
+        };
         assert!(
             editor
                 .hints(s)
@@ -2144,7 +2156,7 @@ mod tests {
             unreachable!("still the players")
         };
         assert_eq!(editor.form.focused, 5);
-        assert!(editor.form.error.is_some());
+        assert!(editor.form.told().is_some());
         team.update(s, Message::Form(Choose(5, 0)));
         // Esc goes back to the team, Enter on again
         team.key(s, BACK_KEY);

@@ -24,6 +24,7 @@ mod general;
 mod home;
 mod keymap;
 mod live;
+mod notice;
 mod paths;
 mod period;
 mod player_stats;
@@ -138,6 +139,25 @@ enum Screen {
     Training(Box<training::screen::TrainingScreen>),
 }
 
+impl Screen {
+    /// What went wrong doing something on the screen: told in a dialog
+    /// over it, until closed.
+    fn failure(&self) -> Option<&String> {
+        match self {
+            Screen::Team(screen) => screen.failure().as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The failure of the screen, to close.
+    fn failure_mut(&mut self) -> Option<&mut Option<String>> {
+        match self {
+            Screen::Team(screen) => Some(screen.failure_mut()),
+            _ => None,
+        }
+    }
+}
+
 /// Where a key or a click leads.
 enum Go {
     Stay,
@@ -219,8 +239,10 @@ struct App {
     /// the system's theme is dark (until it's known, and with none)
     system_dark: bool,
     screen: Screen,
+    /// what went wrong, whatever the screen: in a dialog over it
     error: Option<String>,
-    /// what went well: a file saved, imported
+    /// what went well: a file saved, imported; told until the next key or
+    /// click, not stopping anything
     notice: Option<String>,
     /// an archive chosen, to confirm, over the screen
     importing: Option<transfer::Importing>,
@@ -262,6 +284,8 @@ enum Update {
 #[derive(Debug, Clone)]
 enum Message {
     Key(KeyCombination),
+    /// the dialog of a failure closed
+    Dismiss,
     ToggleTheme,
     /// the theme of the system, at the start and as it changes
     SystemTheme(iced::theme::Mode),
@@ -1305,6 +1329,14 @@ impl App {
         }
     }
 
+    /// The failure told closed: the app's first, then the screen's.
+    fn dismiss(&mut self) {
+        match (self.error.take(), self.screen.failure_mut()) {
+            (Some(_), _) | (None, None) => {}
+            (None, Some(failure)) => *failure = None,
+        }
+    }
+
     fn handle(&mut self, message: Message) -> Task<Message> {
         let s = self.strings;
         if let Some(task) = self.on_update(&message) {
@@ -1316,6 +1348,21 @@ impl App {
             Message::Frame(_) | Message::Loaded(_) | Message::Exported(..) | Message::Picked(..)
         ) {
             self.notice = None;
+        }
+        // a failure told over the screen: it takes the keys until closed
+        let failed = self.error.is_some() || self.screen.failure().is_some();
+        match (&message, failed) {
+            (Message::Dismiss, _) => {
+                self.dismiss();
+                return Task::none();
+            }
+            (Message::Key(ck), true) => {
+                if notice::closes(*ck) {
+                    self.dismiss();
+                }
+                return Task::none();
+            }
+            _ => {}
         }
         // the files: chosen or saved, whatever the screen
         let message = match message {
@@ -1660,15 +1707,31 @@ impl App {
             .concat(),
             _ => hints,
         };
-        let error: Element<'_, Message> = match (&self.error, &self.notice) {
-            (Some(e), _) => ui::body(e.clone()).color(c.danger).into(),
-            (None, Some(notice)) => ui::body(notice.clone()).color(c.accent).into(),
-            (None, None) => space::vertical().height(0).into(),
+        // a failure told: only its keys
+        let hints = match self.error.is_some() || self.screen.failure().is_some() {
+            true => notice::hints(s),
+            false => hints,
         };
-        let content = container(column![error, screen].spacing(10))
+        let told: Element<'_, Message> = match &self.notice {
+            Some(notice) => notice::banner(notice::Level::Info, notice, c),
+            None => space::vertical().height(0).into(),
+        };
+        let content: Element<'_, Message> = container(column![told, screen].spacing(10))
             .padding(16)
             .width(Length::Fill)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .into();
+        // the failure over the page, the bars around it still there
+        let content = match self.error.as_ref().or(self.screen.failure()) {
+            Some(why) => notice::dialog(
+                content,
+                &notice::Notice::error(why.clone()),
+                s,
+                Message::Dismiss,
+                c,
+            ),
+            None => content,
+        };
         container(column![top, content, ui::bottom_bar(hints, c)])
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1928,9 +1991,7 @@ fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -
             ),
             None => Go::Stay,
         },
-        stats::Outcome::WatchTour(matches) => {
-            Go::TeamClips(matches, screen.clips_title(s))
-        }
+        stats::Outcome::WatchTour(matches) => Go::TeamClips(matches, screen.clips_title(s)),
         stats::Outcome::Back => match (screen.match_id(), screen.player_filters()) {
             (Some(m), _) => Go::Match(screen.of_b.clone().unwrap_or(screen.team_id.clone()), m),
             (None, Some((player, filters))) => {

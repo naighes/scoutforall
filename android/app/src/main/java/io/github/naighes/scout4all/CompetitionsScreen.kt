@@ -188,6 +188,9 @@ class CompetitionFormViewModel(private val app: Scout4AllApplication, private va
         }
     }
 
+    /** The dialog of what went wrong closed. */
+    fun dismissError() = update { it.copy(error = null) }
+
     fun change(field: CompetitionField?, edit: (CompetitionForm) -> CompetitionForm) = update { s ->
         s.copy(form = edit(s.form), invalid = s.invalid?.takeIf { it.first != field }, error = null)
     }
@@ -273,7 +276,7 @@ private fun CompetitionFormContent(state: CompetitionFormState.Editing, model: C
                 label = { Text(stringResource(R.string.name)) },
                 singleLine = true,
                 isError = error(CompetitionField.NAME) != null,
-                supportingText = error(CompetitionField.NAME)?.let { { Text(it) } },
+                supportingText = noteOf(error(CompetitionField.NAME)),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
             )
             OutlinedTextField(
@@ -305,7 +308,7 @@ private fun CompetitionFormContent(state: CompetitionFormState.Editing, model: C
                 model.change(null) { it.copy(friendly = friendly) }
             })
         }
-        state.error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         Button(
             onClick = model::save,
             enabled = !state.busy,

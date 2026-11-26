@@ -360,7 +360,7 @@ private fun GuestDialog(teamId: String, taken: Set<String>, onDismiss: () -> Uni
                     leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null) },
                     singleLine = true,
                     isError = error != null,
-                    supportingText = error?.let { { Text(it) } },
+                    supportingText = noteOf(error),
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Words,
                         imeAction = ImeAction.Search,

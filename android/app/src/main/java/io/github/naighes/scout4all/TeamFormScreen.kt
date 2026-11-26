@@ -143,6 +143,9 @@ class TeamFormViewModel(private val app: Scout4AllApplication, private val id: S
         }
     }
 
+    /** The dialog of what went wrong closed. */
+    fun dismissError() = mutableState.update { s -> (s as? TeamFormState.Editing)?.copy(error = null) ?: s }
+
     /** The country chosen in the list. */
     fun pickCountry(choice: CountryChoice) {
         change(TeamField.COUNTRY) { it.copy(country = choice.value) }
@@ -231,13 +234,7 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
                 onPickCountry = model::pickCountry,
             )
         }
-        state.error?.let {
-            Text(
-                it,
-                Modifier.padding(horizontal = 16.dp),
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         // big and at the bottom, where the thumb is
         Button(
             onClick = model::save,
@@ -308,7 +305,7 @@ fun TeamFields(
         label = { Text(stringResource(R.string.name)) },
         singleLine = true,
         isError = error(TeamField.NAME) != null,
-        supportingText = error(TeamField.NAME)?.let { { Text(it) } },
+        supportingText = noteOf(error(TeamField.NAME)),
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.Words,
             imeAction = ImeAction.Next,
@@ -321,7 +318,7 @@ fun TeamFields(
         label = { Text(stringResource(R.string.year)) },
         singleLine = true,
         isError = error(TeamField.YEAR) != null,
-        supportingText = error(TeamField.YEAR)?.let { { Text(it) } },
+        supportingText = noteOf(error(TeamField.YEAR)),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
     )
     FieldTitle(stringResource(R.string.gender), error(TeamField.GENDER))
@@ -348,7 +345,7 @@ fun TeamFields(
 @Composable
 fun FieldTitle(title: String, error: String?) = Column {
     Text(title, Modifier.title(), style = MaterialTheme.typography.titleSmall)
-    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    error?.let { FieldNote(it, Modifier.padding(top = 4.dp)) }
 }
 
 @Composable

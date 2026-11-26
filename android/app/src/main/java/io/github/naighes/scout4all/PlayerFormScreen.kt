@@ -188,6 +188,9 @@ class PlayerFormViewModel(
         }
     }
 
+    /** The dialog of what went wrong closed. */
+    fun dismissError() = update { it.copy(error = null) }
+
     /** A change of the form: the error of the field changed goes away. */
     fun change(field: PlayerField?, edit: (PlayerForm) -> PlayerForm) = update { s ->
         s.copy(form = edit(s.form), invalid = s.invalid?.takeIf { it.first != field }, error = null)
@@ -350,7 +353,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                     label = { Text(stringResource(R.string.name)) },
                     singleLine = true,
                     isError = error(PlayerField.NAME) != null,
-                    supportingText = (error(PlayerField.NAME) ?: playsAlsoIn(state.otherTeams))?.let { { Text(it) } },
+                    supportingText = noteOf(error(PlayerField.NAME)) ?: playsAlsoIn(state.otherTeams)?.let { { Text(it) } },
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Words,
                         imeAction = ImeAction.Next,
@@ -378,7 +381,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 placeholder = { Text(stringResource(R.string.number_placeholder)) },
                 singleLine = true,
                 isError = error(PlayerField.NUMBER) != null,
-                supportingText = error(PlayerField.NUMBER)?.let { { Text(it) } },
+                supportingText = noteOf(error(PlayerField.NUMBER)),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
             FieldTitle(stringResource(R.string.role), error(PlayerField.ROLE))
@@ -431,7 +434,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 suffix = { Text(stringResource(R.string.centimetres)) },
                 singleLine = true,
                 isError = error(PlayerField.HEIGHT) != null,
-                supportingText = error(PlayerField.HEIGHT)?.let { { Text(it) } },
+                supportingText = noteOf(error(PlayerField.HEIGHT)),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
             )
             FieldTitle(stringResource(R.string.dominant_hand), null)
@@ -453,9 +456,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
             )
             NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
         }
-        state.error?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         // big and at the bottom, where the thumb is
         Button(
             onClick = { model.save() },

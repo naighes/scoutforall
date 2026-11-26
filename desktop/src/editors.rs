@@ -1336,7 +1336,7 @@ impl Editor {
                 if let Some(slot) = self.correcting_slot() {
                     *slot = None;
                 }
-                self.form.error = None;
+                self.form.clear();
                 let at = self.sheet().and_then(|sheet| {
                     sheet
                         .tiles
@@ -1351,7 +1351,7 @@ impl Editor {
             Err(MobileError::Namesake { reason }) => self.namesake = Some(reason),
             Err(e) => {
                 if let Some(Some(c)) = self.correcting_slot() {
-                    c.form.error = Some(e.to_string());
+                    c.form.fail(e.to_string());
                 }
             }
         }
@@ -1479,7 +1479,7 @@ impl Editor {
             Ok(Corrected::Season(players)) => self.set_season_players(players),
             Err(e) => {
                 if let Some(Some(c)) = self.correcting_slot() {
-                    c.form.error = Some(e.to_string());
+                    c.form.fail(e.to_string());
                 }
                 return;
             }
@@ -1566,7 +1566,7 @@ impl Editor {
                 }
                 self.linked();
                 if let Err(e) = self.toggle(core, None) {
-                    self.form.error = Some(e.to_string());
+                    self.form.fail(e.to_string());
                 }
             }
             (Kind::Match(m), MATCH_OPPONENT) => {
@@ -1611,7 +1611,7 @@ impl Editor {
             (Kind::Match(m), f) if f >= MATCH_ROSTER => {
                 let toggled = m.roster.get(f - MATCH_ROSTER).map(|p| p.id);
                 if let Err(e) = self.toggle(core, toggled) {
-                    self.form.error = Some(e.to_string());
+                    self.form.fail(e.to_string());
                 }
             }
             _ => {}
@@ -1675,7 +1675,8 @@ impl Editor {
             Kind::Player(p) => {
                 let nationality =
                     countries::chosen(core, &f.text(PLAYER_NATIONALITY)).map_err(|()| {
-                        MobileError::Failed {
+                        MobileError::InvalidPlayer {
+                            field: PlayerField::Nationality,
                             reason: s.no_country_found.to_string(),
                         }
                     })?;
@@ -1739,6 +1740,7 @@ impl Editor {
                 PlayerField::Role => PLAYER_ROLE,
                 PlayerField::BirthDate => PLAYER_BIRTH,
                 PlayerField::Height => PLAYER_HEIGHT,
+                PlayerField::Nationality => PLAYER_NATIONALITY,
             }),
             MobileError::InvalidCompetition { field, .. } => Some(match field {
                 CompetitionField::Name => COMPETITION_NAME,
@@ -1776,7 +1778,7 @@ impl Editor {
             }
             // the details of a match, then its score sheet
             Outcome::Save if self.step(false) => {
-                self.form.error = None;
+                self.form.clear();
                 Edited::Stay
             }
             Outcome::Save => self.saved(core, s, false),
@@ -1815,7 +1817,7 @@ impl Editor {
     fn saved(&mut self, core: &Scout4All, s: &Strings, namesake_confirmed: bool) -> Edited {
         self.namesake = None;
         if let Some(warning) = self.venue_warning(core) {
-            self.form.error = Some(warning);
+            self.form.warn(warning);
             return Edited::Stay;
         }
         match self.save(core, s, namesake_confirmed) {
@@ -1840,9 +1842,10 @@ impl Editor {
                         Kind::Season(_) => self.show_season(field >= SEASON_PLAYERS),
                         Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) => {}
                     }
-                    self.form.focused = field;
+                    self.form.reject(field, e.to_string());
+                } else {
+                    self.form.fail(e.to_string());
                 }
-                self.form.error = Some(e.to_string());
                 Edited::Stay
             }
         }
@@ -1993,9 +1996,9 @@ impl Editor {
             Ok(image) => {
                 t.shown = ui::TeamLogo::from_png(&image.data);
                 t.logo = LogoEdit::Replace(bytes);
-                self.form.error = None;
+                self.form.clear();
             }
-            Err(e) => self.form.error = Some(e.to_string()),
+            Err(e) => self.form.fail(e.to_string()),
         }
     }
 
@@ -2015,13 +2018,11 @@ impl Editor {
             Ok(face) => {
                 p.shown = logo_handle(&face);
                 p.photo = PhotoEdit::Replace(face);
-                self.form.error = None;
+                self.form.clear();
             }
-            Err(form::Face::None) => self.form.error = Some(s.no_face.to_string()),
-            Err(form::Face::Many(n)) => {
-                self.form.error = Some(ui::fill(s.many_faces, &[n.to_string()]))
-            }
-            Err(form::Face::Other(e)) => self.form.error = Some(e),
+            Err(form::Face::None) => self.form.fail(s.no_face.to_string()),
+            Err(form::Face::Many(n)) => self.form.fail(ui::fill(s.many_faces, &[n.to_string()])),
+            Err(form::Face::Other(e)) => self.form.fail(e),
         }
     }
 
@@ -2147,6 +2148,11 @@ impl Editor {
             let outcome = form.key(ck);
             return self.correction_outcome(core, s, outcome);
         }
+        // a dialog over the form takes the keys
+        if self.form.notice.is_some() {
+            self.form.key(ck);
+            return Edited::Stay;
+        }
         if self.on_roster() && ck == key!(e) {
             self.open_correction(core, s, self.form.focused);
             return Edited::Stay;
@@ -2197,6 +2203,12 @@ impl Editor {
 
     /// The keys, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        // a dialog over the form, or over the correction: only its keys
+        let told = self.form.notice.is_some()
+            || self.correcting().is_some_and(|c| c.form.notice.is_some());
+        if told {
+            return crate::notice::hints(s);
+        }
         let correcting = self.correcting().is_some();
         let toggle = match self.kind {
             Kind::Season(_) => s.season_toggle,
@@ -2237,6 +2249,7 @@ impl Editor {
             .collect(),
             // the details of a match: Enter goes on to the score sheet
             (false, false) => self.form.on_field(
+                s,
                 Form::hints(s)
                     .into_iter()
                     .map(|(k, what)| match (k.as_str(), &self.kind) {
@@ -2520,10 +2533,6 @@ impl Editor {
             .into(),
             false => space::vertical().height(0).into(),
         };
-        let error: Element<'a, M> = match &self.form.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         let buttons = ui::answers(
             Some((theme::icons::CLOSE, s.cancel, on(form::Message::Cancel))),
             theme::icons::CHECK,
@@ -2539,10 +2548,14 @@ impl Editor {
             Some(&title),
             column![
                 text(count).size(SIZE_SMALL).color(c.muted),
+                // what's wrong with the players chosen, under their count
+                match self.form.invalid.as_ref().filter(|(at, _)| *at >= first) {
+                    Some((_, why)) => crate::notice::field_note(why, c),
+                    None => space::vertical().height(0).into(),
+                },
                 legend,
                 add,
                 grid,
-                error,
                 container(buttons)
                     .width(Length::Fill)
                     .align_x(Alignment::End),
@@ -2550,12 +2563,13 @@ impl Editor {
             .spacing(14),
             c,
         );
-        row![
+        let sheet = row![
             space::horizontal().width(Length::FillPortion(1)),
             container(panel).width(Length::FillPortion(6)),
             space::horizontal().width(Length::FillPortion(1)),
         ]
-        .into()
+        .into();
+        self.form.over(sheet, s, c, on)
     }
 }
 
@@ -2699,7 +2713,7 @@ mod tests {
         assert!(!id.is_empty());
         // none yet: too few
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
-        assert!(e.form.error.is_some());
+        assert!(e.form.told().is_some());
         assert_eq!(step(&e), MatchStep::RosterB);
         for n in 1..=7u8 {
             let first = MATCH_ROSTER + usize::from(n) - 1;
@@ -2711,10 +2725,10 @@ mod tests {
             send(&mut e, &core, Input(ADDING_NAME, format!("Player {n}")));
             send(&mut e, &core, Input(ADDING_NUMBER, n.to_string()));
             send(&mut e, &core, form::Message::Save);
-            assert!(e.correcting().is_none(), "{:?}", e.form.error);
+            assert!(e.correcting().is_none(), "{:?}", e.form.told());
         }
         let Edited::Saved(saved) = press(&mut e, &core, key!(enter)) else {
-            unreachable!("saved: {:?}", e.form.error);
+            unreachable!("saved: {:?}", e.form.told());
         };
         assert_eq!(saved, id);
         let roster = core
@@ -2735,7 +2749,7 @@ mod tests {
             send(e, core, Input(ADDING_NAME, format!("Player {n}")));
             send(e, core, Input(ADDING_NUMBER, n.to_string()));
             send(e, core, form::Message::Save);
-            assert!(e.correcting().is_none(), "{:?}", e.form.error);
+            assert!(e.correcting().is_none(), "{:?}", e.form.told());
         }
         send(e, core, form::Message::Focus(MATCH_ROSTER));
         press(e, core, key!(space));
@@ -2839,7 +2853,7 @@ mod tests {
         assert_eq!(step(&e), MatchStep::RosterB);
         // seven at least, as when the match is created
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
-        assert!(e.form.error.is_some());
+        assert!(e.form.told().is_some());
         write_players_of_b(&mut e, &core);
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Saved(s) if s == id));
         assert_eq!(chosen_of_b(&core, &cortona, &id), 7);
@@ -2993,9 +3007,19 @@ mod tests {
         press(&mut e, &core, key!(enter));
         press(&mut e, &core, key!(enter));
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
-        let told = e.form.error.clone().unwrap_or_default();
+        let told = e.form.told().unwrap_or_default();
         assert!(told.contains("Terontola"), "{told}");
+        // to know, in a dialog
+        assert!(matches!(
+            &e.form.notice,
+            Some(crate::notice::Notice {
+                level: crate::notice::Level::Warning,
+                ..
+            })
+        ));
         assert!(core.matches(cortona.clone()).unwrap().is_empty());
+        // the warning closed, then saved all the same
+        press(&mut e, &core, key!(enter));
         assert!(matches!(
             press(&mut e, &core, key!(enter)),
             Edited::Saved(_)
@@ -3053,6 +3077,27 @@ mod tests {
         assert_eq!(core.competitions().unwrap().len(), 1);
     }
 
+    /// What's wrong in the form of a player is told under its field, the
+    /// country not found too, not in a dialog; it goes as it's corrected.
+    #[test]
+    fn the_errors_of_a_player_are_told_under_their_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 2);
+        let s = strings(LanguageEnum::It);
+        let mut e = Editor::player(s, &core, cortona, None, PlayerForm::default());
+        press(&mut e, &core, key!(enter));
+        assert!(matches!(&e.form.invalid, Some((PLAYER_NAME, _))));
+        assert_eq!(e.form.notice, None);
+        send(&mut e, &core, Input(PLAYER_NAME, "Anna".into()));
+        assert_eq!(e.form.invalid, None);
+        send(&mut e, &core, Input(PLAYER_NATIONALITY, "Atlantide".into()));
+        press(&mut e, &core, key!(enter));
+        assert!(matches!(&e.form.invalid, Some((PLAYER_NATIONALITY, _))));
+        assert_eq!(e.form.focused, PLAYER_NATIONALITY);
+        assert_eq!(e.form.notice, None);
+    }
+
     /// The error of a field takes the keys back to its step.
     #[test]
     fn an_error_goes_back_to_the_step_of_its_field() {
@@ -3066,7 +3111,9 @@ mod tests {
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
         assert_eq!(step(&e), MatchStep::Match);
         assert_eq!(e.form.focused, MATCH_OPPONENT);
-        assert!(e.form.error.is_some());
+        // under its field, not in a dialog: it goes as the field changes
+        assert!(matches!(&e.form.invalid, Some((MATCH_OPPONENT, _))));
+        assert_eq!(e.form.notice, None);
         // the substitutions: the second step
         send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
         press(&mut e, &core, key!(enter));
@@ -3165,7 +3212,8 @@ mod tests {
         // in use: refused, the form stays
         send(&mut e, &core, Input(CORRECTION_NUMBER, "3".into()));
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
-        assert!(correcting(&e).and_then(|c| c.form.error.clone()).is_some());
+        assert!(correcting(&e).and_then(|c| c.form.told()).is_some());
+        press(&mut e, &core, key!(enter));
         let opposite = core
             .roles()
             .iter()

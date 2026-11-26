@@ -312,7 +312,7 @@ impl DvwScreen {
 
     /// On to the next step with what's chosen.
     fn next(&mut self, s: &Strings) {
-        self.form.error = None;
+        self.form.clear();
         let step = std::mem::replace(&mut self.step, Step::Done);
         match step {
             Step::Sides => {
@@ -342,7 +342,7 @@ impl DvwScreen {
                     }
                     None => {
                         self.step = Step::Day;
-                        self.form.error = Some(format!("{}: {}", s.date, s.dvw_day_hint));
+                        self.form.reject(0, s.dvw_day_hint);
                     }
                 }
             }
@@ -353,7 +353,7 @@ impl DvwScreen {
                 }
                 _ => {
                     self.step = Step::Substitutions;
-                    self.form.error = Some(s.dvw_substitutions.to_string());
+                    self.form.reject(0, s.dvw_substitutions);
                 }
             },
             Step::Team(similar) => match similar.get(self.form.index(0)) {
@@ -382,7 +382,7 @@ impl DvwScreen {
                     // another team B may do
                     Err(e) => {
                         self.step = Step::Opponent(similar, choice);
-                        self.form.error = Some(e.to_string());
+                        self.form.fail(e.to_string());
                     }
                 }
             }
@@ -468,7 +468,7 @@ impl DvwScreen {
                     TeamField::Country => SEARCH,
                     _ => CLASSIFICATION,
                 };
-                self.form.error = Some(reason);
+                self.form.fail(reason);
             }
             Err(e) => {
                 let message = ui::fill(s.dvw_not_imported, &[self.team_name(), e.to_string()]);
@@ -814,18 +814,21 @@ mod tests {
         assert!(matches!(dvw.step, Step::NewTeam(_)));
         dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::NewTeam(_)));
-        assert!(dvw.form.error.is_some());
+        assert!(dvw.form.notice.is_some());
+        // the dialog closed first
+        dvw.key(s, key!(enter));
+        assert!(dvw.form.notice.is_none());
         new_team(&mut dvw);
         dvw.key(s, key!(enter));
         // team B: no team like it, only its name to start
         let Step::Opponent(similar, _) = &dvw.step else {
-            unreachable!("team B to choose: {:?}", dvw.form.error)
+            unreachable!("team B to choose: {:?}", dvw.form.told())
         };
         assert!(similar.is_empty());
         assert_eq!(dvw.form.index(0), 0);
         dvw.key(s, key!(enter));
         let Step::Ready(ready, _) = &dvw.step else {
-            unreachable!("the import is checked: {:?}", dvw.form.error)
+            unreachable!("the import is checked: {:?}", dvw.form.told())
         };
         assert_eq!(
             ready_details(s, ready),
@@ -930,7 +933,7 @@ mod tests {
         dvw.update(s, Message::Form(form::Message::Input(0, "x".into())));
         dvw.key(s, key!(enter));
         assert!(matches!(dvw.step, Step::Substitutions));
-        assert!(dvw.form.error.is_some());
+        assert!(dvw.form.told().is_some());
         assert!(matches!(dvw.key(s, BACK_KEY), Outcome::Stay));
         assert!(matches!(dvw.step, Step::Sides));
         assert!(matches!(dvw.key(s, BACK_KEY), Outcome::Back));
@@ -1019,7 +1022,7 @@ mod tests {
         dvw.update(s, Message::Form(form::Message::Choose(0, 1)));
         dvw.key(s, key!(enter));
         let Step::Ready(ready, _) = &dvw.step else {
-            unreachable!("the import is checked: {:?}", dvw.form.error)
+            unreachable!("the import is checked: {:?}", dvw.form.told())
         };
         assert_eq!(
             ready_details(s, ready)[0],

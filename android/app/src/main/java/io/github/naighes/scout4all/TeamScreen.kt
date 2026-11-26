@@ -467,13 +467,7 @@ private fun rememberTeamDeletion(id: String, name: String, onDeleted: () -> Unit
         delete = { it.deleteTeam(id) },
         onDeleted = onDeleted,
     )
-    error?.let {
-        AlertDialog(
-            onDismissRequest = { error = null },
-            text = { Text(it) },
-            confirmButton = { TextButton(onClick = { error = null }) { Text(stringResource(android.R.string.ok)) } },
-        )
-    }
+    error?.let { NoticeDialog(Notice.error(it)) { error = null } }
     return {
         scope.launch {
             try {

@@ -72,7 +72,7 @@ fun SuggestField(
             placeholder = placeholder?.let { { Text(it) } },
             singleLine = true,
             isError = error != null,
-            supportingText = (error ?: hint)?.let { { Text(it) } },
+            supportingText = noteOf(error) ?: hint?.let { { Text(it) } },
             keyboardOptions = KeyboardOptions(
                 capitalization = KeyboardCapitalization.Words,
                 imeAction = ImeAction.Done,

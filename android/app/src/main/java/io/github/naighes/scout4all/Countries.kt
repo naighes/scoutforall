@@ -74,7 +74,7 @@ fun CountryField(label: String, country: CountryChoice?, error: String?, onClick
         label = { Text(label) },
         singleLine = true,
         isError = error != null,
-        supportingText = error?.let { { Text(it) } },
+        supportingText = noteOf(error),
         // enabled = false only to take the touch: drawn as an enabled field
         colors = androidx.compose.material3.OutlinedTextFieldDefaults.colors(
             disabledTextColor = MaterialTheme.colorScheme.onSurface,

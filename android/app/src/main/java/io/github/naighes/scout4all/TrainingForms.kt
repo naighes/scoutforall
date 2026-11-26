@@ -509,7 +509,7 @@ internal fun NumberField(label: Int, value: String, error: String?, onChange: (S
     label = { Text(stringResource(label)) },
     singleLine = true,
     isError = error != null,
-    supportingText = error?.let { { Text(it) } },
+    supportingText = noteOf(error),
     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
 )
 
@@ -627,7 +627,7 @@ private fun ActivityFields(
                 label = { Text(stringResource(R.string.name)) },
                 singleLine = true,
                 isError = ErrorFor(failure, TrainingField.NAME) != null,
-                supportingText = ErrorFor(failure, TrainingField.NAME)?.let { { Text(it) } },
+                supportingText = noteOf(ErrorFor(failure, TrainingField.NAME)),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
             )
             OutlinedTextField(

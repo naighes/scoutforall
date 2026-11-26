@@ -789,8 +789,9 @@ mod tests {
         let Mode::New(editor) = &screen.mode else {
             panic!("still the form")
         };
-        assert!(editor.form.error.is_some());
+        assert!(editor.form.told().is_some());
         assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 1);
+        screen.key(s, key!(enter));
         type_in(&mut screen, 2, "20:00");
         type_in(&mut screen, 6, "Seconda");
         screen.key(s, key!(enter));
@@ -961,6 +962,7 @@ mod tests {
         assert_eq!(page.mode_name(), "duplicate");
         screen.key(s, key!(enter));
         assert_eq!(core.training_sessions(team.clone()).unwrap().len(), 2);
+        screen.key(s, key!(enter));
         // another hour: it is saved and its sheet opens
         type_in(&mut screen, 1, "20:00");
         screen.key(s, key!(enter));
@@ -1004,13 +1006,13 @@ mod tests {
         let Mode::New(editor) = &screen.mode else {
             panic!("the form")
         };
-        assert!(editor.form.error.is_some());
+        assert!(editor.form.told().is_some());
         type_in(&mut screen, 5, "2026-03-16");
         screen.key(s, key!(alt - enter));
         let Mode::New(editor) = &screen.mode else {
             panic!("the next entry")
         };
-        assert_eq!(editor.form.error, None);
+        assert_eq!(editor.form.told(), None);
         // the next entry starts from the one before, the day after
         assert_eq!(editor.form.text(1), "2026-03-03");
         assert_eq!(editor.form.text(2), "20:30");
@@ -1397,6 +1399,8 @@ mod tests {
             core.cycles(team.clone(), Level::Microcycle).unwrap()[0].weeks,
             Some(2)
         );
+        // the warning closed, then saved, detaching
+        screen.key(s, key!(enter));
         screen.key(s, key!(enter));
         let micro = core.cycles(team.clone(), Level::Microcycle).unwrap();
         assert_eq!(micro[0].weeks, Some(1));

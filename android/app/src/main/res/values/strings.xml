@@ -733,4 +733,7 @@
     <string name="right_hand">Right</string>
     <string name="left_hand">Left</string>
     <string name="federation_id">Federation ID</string>
+    <string name="notice_error">Something went wrong</string>
+    <string name="notice_warning">Heads up</string>
+    <string name="notice_info">Done</string>
 </resources>

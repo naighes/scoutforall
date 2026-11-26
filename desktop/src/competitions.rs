@@ -427,7 +427,7 @@ mod tests {
         };
         assert_eq!(editor.form.focused, 0);
         assert_eq!(
-            editor.form.error.as_deref(),
+            editor.form.told().as_deref(),
             Some("esiste già una competizione con questo nome e questa stagione")
         );
         // a country not found: on the country

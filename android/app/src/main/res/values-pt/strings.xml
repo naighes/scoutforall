@@ -731,4 +731,7 @@
     <string name="right_hand">Direita</string>
     <string name="left_hand">Esquerda</string>
     <string name="federation_id">Registro federativo</string>
+    <string name="notice_error">Algo deu errado</string>
+    <string name="notice_warning">Atenção</string>
+    <string name="notice_info">Concluído</string>
 </resources>
