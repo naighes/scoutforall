@@ -430,6 +430,7 @@ private fun Navigation(
  * app starts again; before, the user may report it. */
 @Composable
 private fun PanicDialog(app: Scout4AllApplication) {
+    val opened = noAppDialog()
     val panic = app.panic.collectAsState().value ?: return
     val context = LocalContext.current
     val title = stringResource(R.string.panic_report_title)
@@ -440,7 +441,7 @@ private fun PanicDialog(app: Scout4AllApplication) {
         title = { Text(stringResource(R.string.panic_title)) },
         text = { Text(stringResource(R.string.panic_text)) },
         dismissButton = {
-            TextButton(onClick = { context.report(title, body) }) { Text(stringResource(R.string.report)) }
+            TextButton(onClick = { opened(context.report(title, body)) }) { Text(stringResource(R.string.report)) }
         },
         confirmButton = {
             TextButton(onClick = app::startAgain) { Text(stringResource(R.string.start_again)) }
@@ -456,6 +457,8 @@ private fun journaled(app: Scout4AllApplication) =
  * offered again. */
 @Composable
 private fun CrashDialog(app: Scout4AllApplication) {
+    // kept once the crash is forgotten
+    val opened = noAppDialog()
     val crash = app.crashed.collectAsState().value ?: return
     val context = LocalContext.current
     val title = stringResource(R.string.crash_report_title)
@@ -469,7 +472,7 @@ private fun CrashDialog(app: Scout4AllApplication) {
         },
         confirmButton = {
             TextButton(onClick = {
-                context.report(title, body)
+                opened(context.report(title, body))
                 app.forgetCrash()
             }) { Text(stringResource(R.string.report)) }
         },

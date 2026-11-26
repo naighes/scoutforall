@@ -244,6 +244,7 @@
     <string name="report_title">Problem in the Android app</string>
     <string name="report_body">What happened?\n\nWhat did you expect instead?\n\n---\n%1$s</string>
     <string name="no_app_to_open">No app can open it</string>
+    <string name="settings_not_saved">Could not save the settings: %1$s</string>
     <!-- archives -->
     <string name="export_team">Share team</string>
     <string name="export_match">Share match</string>

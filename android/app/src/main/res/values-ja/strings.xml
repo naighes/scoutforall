@@ -242,6 +242,7 @@
     <string name="report_title">Android アプリの問題</string>
     <string name="report_body">何が起きましたか？\n\n本来はどうなるはずでしたか？\n\n---\n%1$s</string>
     <string name="no_app_to_open">開けるアプリがありません</string>
+    <string name="settings_not_saved">設定を保存できませんでした: %1$s</string>
     <!-- archives -->
     <string name="export_team">チームを共有</string>
     <string name="export_match">試合を共有</string>

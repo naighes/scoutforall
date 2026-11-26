@@ -1350,11 +1350,22 @@ impl App {
         }
     }
 
-    /// The failure told closed: the app's first, then the screen's.
+    /// The failure to tell: the app's, then the settings', then the
+    /// screen's.
+    fn failure(&self) -> Option<&String> {
+        self.error
+            .as_ref()
+            .or_else(|| self.settings.as_ref().and_then(SettingsScreen::failure))
+            .or_else(|| self.screen.failure())
+    }
+
+    /// The failure told closed, in the order they're told.
     fn dismiss(&mut self) {
-        match (self.error.take(), self.screen.failure_mut()) {
-            (Some(_), _) | (None, None) => {}
-            (None, Some(failure)) => *failure = None,
+        let settings = self.settings.as_mut().filter(|s| s.failure().is_some());
+        match (self.error.take(), settings, self.screen.failure_mut()) {
+            (Some(_), _, _) | (None, None, None) => {}
+            (None, Some(settings), _) => settings.dismiss_failure(),
+            (None, None, Some(failure)) => *failure = None,
         }
     }
 
@@ -1371,7 +1382,7 @@ impl App {
             self.notice = None;
         }
         // a failure told over the screen: it takes the keys until closed
-        let failed = self.error.is_some() || self.screen.failure().is_some();
+        let failed = self.failure().is_some();
         match (&message, failed) {
             (Message::Dismiss, _) => {
                 self.dismiss();
@@ -1729,7 +1740,7 @@ impl App {
             _ => hints,
         };
         // a failure told: only its keys
-        let hints = match self.error.is_some() || self.screen.failure().is_some() {
+        let hints = match self.failure().is_some() {
             true => notice::hints(s),
             false => hints,
         };
@@ -1743,7 +1754,7 @@ impl App {
             .height(Length::Fill)
             .into();
         // the failure over the page, the bars around it still there
-        let content = match self.error.as_ref().or(self.screen.failure()) {
+        let content = match self.failure() {
             Some(why) => notice::dialog(
                 content,
                 &notice::Notice::error(why.clone()),

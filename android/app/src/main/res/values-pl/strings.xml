@@ -245,6 +245,7 @@
     <string name="report_title">Problem w aplikacji na Androida</string>
     <string name="report_body">Co się stało?\n\nCzego się spodziewałeś(-aś)?\n\n---\n%1$s</string>
     <string name="no_app_to_open">Żadna aplikacja nie może tego otworzyć</string>
+    <string name="settings_not_saved">Nie udało się zapisać ustawień: %1$s</string>
     <!-- archives -->
     <string name="export_team">Udostępnij drużynę</string>
     <string name="export_match">Udostępnij mecz</string>

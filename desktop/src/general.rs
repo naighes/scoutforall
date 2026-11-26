@@ -481,17 +481,8 @@ impl General {
             Some(Reading::Licenses(licenses)) => return licenses_view(licenses, close(), c),
             None => {}
         }
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![
-            error,
-            self.form
-                .view(s, c, Message::Form, Some(about(s, self.language, c)))
-        ]
-        .spacing(10)
-        .into()
+        self.form
+            .view(s, c, Message::Form, Some(about(s, self.language, c)))
     }
 }
 

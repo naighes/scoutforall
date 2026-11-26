@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -62,6 +61,7 @@ private const val REPORTS = "scout4all-0fd59357fbe3@intake.linear.app"
 fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit, onTutorial: () -> Unit = {}) {
     val context = LocalContext.current
     val locale = LocalConfiguration.current.locales[0]
+    val opened = noAppDialog()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -78,10 +78,12 @@ fun SettingsScreen(onBack: () -> Unit, onTerms: () -> Unit, onAbout: () -> Unit,
                     stringResource(R.string.language),
                     locale.getDisplayLanguage(locale).replaceFirstChar { it.titlecase(locale) },
                 ) {
-                    context.open(
-                        Intent(
-                            Settings.ACTION_APP_LOCALE_SETTINGS,
-                            Uri.fromParts("package", context.packageName, null),
+                    opened(
+                        context.open(
+                            Intent(
+                                Settings.ACTION_APP_LOCALE_SETTINGS,
+                                Uri.fromParts("package", context.packageName, null),
+                            ),
                         ),
                     )
                 }
@@ -106,6 +108,7 @@ private fun DefaultCountry() {
     var country by remember { mutableStateOf<Result<CountryChoice?>?>(null) }
     LaunchedEffect(Unit) { country = Result.success(app.core { it.defaultCountry() }) }
     var choosing by rememberSaveable { mutableStateOf(false) }
+    val notSaved = notSavedDialog()
     val chosen = country?.getOrNull()
     val title = stringResource(R.string.default_country)
     if (choosing) {
@@ -118,8 +121,8 @@ private fun DefaultCountry() {
                     try {
                         app.core { it.setDefaultCountry(picked.value) }
                         country = Result.success(picked)
-                    } catch (_: MobileException) {
-                        // not saved: it stays as it was
+                    } catch (e: MobileException) {
+                        notSaved(e)
                     }
                 }
             },
@@ -143,13 +146,14 @@ private fun VideoSecondsRows() {
     // null while reading
     var seconds by remember { mutableStateOf<VideoSeconds?>(null) }
     LaunchedEffect(Unit) { seconds = app.core { it.videoSeconds() } }
+    val notSaved = notSavedDialog()
     val current = seconds ?: return
     val save = { chosen: VideoSeconds ->
         scope.launch {
             try {
                 seconds = app.core { it.setVideoSeconds(chosen) }
-            } catch (_: MobileException) {
-                // not saved: it stays as it was
+            } catch (e: MobileException) {
+                notSaved(e)
             }
         }
         Unit
@@ -191,6 +195,7 @@ fun AboutScreen(onBack: () -> Unit, onLicenses: () -> Unit = {}) {
     val version = version()
     val reportTitle = stringResource(R.string.report_title)
     val reportBody = stringResource(R.string.report_body, device())
+    val opened = noAppDialog()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -202,18 +207,18 @@ fun AboutScreen(onBack: () -> Unit, onLicenses: () -> Unit = {}) {
         Column(Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState())) {
             Row(stringResource(R.string.version), version, null)
             Row(stringResource(R.string.license), stringResource(R.string.license_name)) {
-                context.browse("$REPOSITORY/blob/master/LICENSE")
+                opened(context.browse("$REPOSITORY/blob/master/LICENSE"))
             }
             Row(stringResource(R.string.third_party_licenses), null, onLicenses)
             Row(stringResource(R.string.data_privacy), null) {
-                context.browse(PRIVACY)
+                opened(context.browse(PRIVACY))
             }
             Row(stringResource(R.string.source_code), REPOSITORY.removePrefix("https://")) {
-                context.browse(REPOSITORY)
+                opened(context.browse(REPOSITORY))
             }
             HorizontalDivider()
             Row(stringResource(R.string.report_problem), stringResource(R.string.report_problem_detail)) {
-                context.report(reportTitle, reportBody)
+                opened(context.report(reportTitle, reportBody))
             }
         }
     }
@@ -242,9 +247,18 @@ fun Context.report(title: String, body: String) = open(
 
 private fun Context.browse(url: String) = open(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
-/** Another app opens it, if there's one. */
-private fun Context.open(intent: Intent) = try {
+/** Another app opens it: false when there's none. */
+private fun Context.open(intent: Intent): Boolean = try {
     startActivity(intent)
+    true
 } catch (_: ActivityNotFoundException) {
-    Toast.makeText(this, R.string.no_app_to_open, Toast.LENGTH_SHORT).show()
+    false
+}
+
+/** Tells in a dialog that no app can open it: given what `open` returned. */
+@Composable
+fun noAppDialog(): (Boolean) -> Unit {
+    val tell = failureDialog()
+    val none = stringResource(R.string.no_app_to_open)
+    return { opened -> if (!opened) tell(none) }
 }

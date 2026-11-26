@@ -243,6 +243,7 @@
     <string name="report_title">Problema nell\'app Android</string>
     <string name="report_body">Cosa è successo?\n\nCosa ti aspettavi invece?\n\n---\n%1$s</string>
     <string name="no_app_to_open">Nessuna app può aprirlo</string>
+    <string name="settings_not_saved">Impossibile salvare le impostazioni: %1$s</string>
     <!-- archives -->
     <string name="export_team">Condividi squadra</string>
     <string name="export_match">Condividi partita</string>

@@ -18,14 +18,20 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.MobileException
 
 /** What the app tells the user, one look everywhere and as on the
  * desktop (`notice.rs`): a note under the field to correct, a dialog for
@@ -132,6 +138,22 @@ fun NoticeDialog(notice: Notice, onDismiss: () -> Unit) = AlertDialog(
     text = { Text(notice.text.capitalized()) },
     confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.ok)) } },
 )
+
+/** What went wrong, told in a dialog: calling what is returned opens it. */
+@Composable
+fun failureDialog(): (String) -> Unit {
+    var failure by rememberSaveable { mutableStateOf<String?>(null) }
+    failure?.let { NoticeDialog(Notice.error(it)) { failure = null } }
+    return { failure = it }
+}
+
+/** A setting not saved, told in a dialog; the setting stays as it was. */
+@Composable
+fun notSavedDialog(): (MobileException) -> Unit {
+    val tell = failureDialog()
+    val resources = LocalContext.current.resources
+    return { tell(resources.getString(R.string.settings_not_saved, it.reason)) }
+}
 
 const val FIELD_NOTE_TAG = "field-note"
 const val BANNER_TAG = "banner"

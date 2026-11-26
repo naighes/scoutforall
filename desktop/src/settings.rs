@@ -6,7 +6,7 @@
 //! the TUI saves them.
 
 use {
-    crate::{general::General, keymap, strings::Strings, theme::Colors, ui},
+    crate::{general::General, keymap, notice, strings::Strings, theme::Colors, ui},
     iced::{
         Alignment, Element, Length,
         widget::{Column, column, container, row, scrollable, space},
@@ -148,6 +148,9 @@ pub struct SettingsScreen {
     selected: usize,
     /// waiting for the new key of the selected row
     waiting: bool,
+    /// why the selected row refused the key pressed: told under it
+    refused: Option<String>,
+    /// the keys not saved
     error: Option<String>,
 }
 
@@ -167,7 +170,21 @@ impl SettingsScreen {
             labels: labels(language),
             selected: 0,
             waiting: false,
+            refused: None,
             error: None,
+        }
+    }
+
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> Option<&String> {
+        self.error.as_ref().or(self.general.error.as_ref())
+    }
+
+    /// The failure told, closed.
+    pub fn dismiss_failure(&mut self) {
+        match self.error.take() {
+            Some(_) => {}
+            None => self.general.error = None,
         }
     }
 
@@ -195,6 +212,7 @@ impl SettingsScreen {
             Page::Keys => Page::General,
         };
         self.waiting = false;
+        self.refused = None;
     }
 
     pub fn update(&mut self, message: Message, s: &Strings) -> Outcome {
@@ -202,6 +220,7 @@ impl SettingsScreen {
             Message::Page(page) => {
                 self.page = page;
                 self.waiting = false;
+                self.refused = None;
             }
             Message::General(m) => {
                 let stay = self.general.update(&self.dir, s, m);
@@ -214,7 +233,7 @@ impl SettingsScreen {
             Message::Change(i) => {
                 self.selected = i;
                 self.waiting = true;
-                self.error = None;
+                self.refused = None;
             }
             // the keys only: how the digits choose a player is a general
             // setting
@@ -231,11 +250,9 @@ impl SettingsScreen {
     }
 
     fn store(&mut self, keys: ScoutingKeys, s: &Strings) {
+        self.refused = None;
         match save(&self.dir, &keys, self.general.language) {
-            Ok(()) => {
-                self.keys = keys;
-                self.error = None;
-            }
+            Ok(()) => self.keys = keys,
             Err(e) => self.error = Some(s.not_saved.replace("{}", &e)),
         }
     }
@@ -271,10 +288,10 @@ impl SettingsScreen {
                 match assigned(&self.keys, shortcut, ck) {
                     Ok(keys) => self.store(keys, s),
                     Err(Conflict::Reserved) => {
-                        self.error = Some(s.reserved_key.replace("{}", &keymap::label(&ck, s)))
+                        self.refused = Some(s.reserved_key.replace("{}", &keymap::label(&ck, s)))
                     }
                     Err(Conflict::Taken(other)) => {
-                        self.error = Some(
+                        self.refused = Some(
                             s.taken_key
                                 .replacen("{}", &keymap::label(&ck, s), 1)
                                 .replacen("{}", &name(other, self.labels, s), 1),
@@ -312,6 +329,8 @@ impl SettingsScreen {
             let len = lens.get(c).map_or(1, Vec::len);
             start + offset.min(len.saturating_sub(1))
         };
+        // the note is of the row as it was left
+        self.refused = None;
         match ck {
             k if k == BACK_KEY => return Outcome::Close,
             k if k == key!(down) => {
@@ -322,10 +341,7 @@ impl SettingsScreen {
                 self.selected = column_at((column + 1).min(starts.len().saturating_sub(1)))
             }
             k if k == key!(left) => self.selected = column_at(column.saturating_sub(1)),
-            k if k == key!(enter) => {
-                self.waiting = true;
-                self.error = None;
-            }
+            k if k == key!(enter) => self.waiting = true,
             _ => {}
         }
         Outcome::Stay
@@ -392,6 +408,9 @@ impl SettingsScreen {
                             .push(ui::section(second, c));
                     }
                     list = list.push(self.row(index, shortcut, s, c));
+                    if let (true, Some(why)) = (index == self.selected, &self.refused) {
+                        list = list.push(notice::field_note(why, c));
+                    }
                     index += 1;
                 }
                 container(ui::panel(
@@ -403,10 +422,9 @@ impl SettingsScreen {
                 .height(Length::Fill)
                 .into()
             });
-        let hint = match (self.waiting, &self.error) {
-            (true, _) => ui::body(s.press_key).color(c.accent),
-            (false, Some(e)) => ui::body(e.clone()).color(c.danger),
-            (false, None) => ui::body(s.shortcuts).color(c.muted),
+        let hint = match self.waiting {
+            true => ui::body(s.press_key).color(c.accent),
+            false => ui::body(s.shortcuts).color(c.muted),
         };
         let header = row![
             hint,
@@ -523,6 +541,32 @@ mod tests {
         assert_eq!(saved.player_keys, PlayerKeysEnum::Role);
         screen.update(Message::Reset, s);
         assert_eq!(screen.keys.player_keys, PlayerKeysEnum::Role);
+    }
+
+    /// A key refused is noted under its row until the row is left; keys
+    /// not saved are a failure of the screen.
+    #[test]
+    fn a_refused_key_is_noted_and_a_failed_save_is_a_failure() {
+        let s = crate::strings::strings(LanguageEnum::En);
+        let dir = tempfile::tempdir().unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let keys = ScoutingKeys::default().normalized();
+        let mut screen =
+            SettingsScreen::new(core, dir.path().to_path_buf(), keys, LanguageEnum::En, s);
+        screen.update(Message::Page(Page::Keys), s);
+        screen.key(key!(enter), s);
+        screen.key(key!(f2), s);
+        assert!(screen.refused.is_some());
+        assert_eq!(screen.failure(), None);
+        screen.key(key!(down), s);
+        assert_eq!(screen.refused, None);
+        // written aside first: a folder there stops the save
+        std::fs::create_dir(dir.path().join("config.json.tmp")).unwrap();
+        screen.update(Message::Reset, s);
+        assert!(screen.failure().is_some());
+        screen.dismiss_failure();
+        assert_eq!(screen.failure(), None);
     }
 
     #[test]
