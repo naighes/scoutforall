@@ -101,11 +101,5 @@ fun Deletion(
             onDismiss = { onAsking(false) },
         )
     }
-    error?.let {
-        AlertDialog(
-            onDismissRequest = { error = null },
-            text = { Text(it) },
-            confirmButton = { TextButton(onClick = { error = null }) { Text(stringResource(android.R.string.ok)) } },
-        )
-    }
+    FailureDialog(error) { error = null }
 }

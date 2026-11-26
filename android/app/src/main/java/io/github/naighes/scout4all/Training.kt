@@ -230,6 +230,7 @@ fun SessionScreen(
     val activities by rememberCore(refresh, sessionId) { it.sessionActivities(sessionId) }
     val attendance by rememberCore(refresh, sessionId) { it.sessionAttendance(sessionId) }
     var error by rememberSaveable { mutableStateOf<String?>(null) }
+    FailureDialog(error) { error = null }
     var completing by rememberSaveable { mutableStateOf(false) }
     var deleting by rememberSaveable { mutableStateOf(false) }
     // in a series with other planned sessions: which ones go
@@ -340,7 +341,6 @@ fun SessionScreen(
                     }
                 }
             }
-            error?.let { item(key = "error") { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) } }
             item(key = "activities") {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(

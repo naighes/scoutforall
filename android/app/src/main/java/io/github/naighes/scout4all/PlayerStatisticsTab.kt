@@ -66,7 +66,7 @@ internal fun PlayerStatisticsTab(state: PlayerStatisticsState, onDetail: () -> U
             CompetitionChooser(r.competitions, state.competition) { state.competition = it }
         }
         PeriodChooser(state.choice, r?.from, r?.to) { state.choice = it }
-        state.failed?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        state.failed?.let { Banner(Level.ERROR, it) }
         val muted = MaterialTheme.colorScheme.onSurfaceVariant
         when {
             r == null -> if (state.failed == null) {

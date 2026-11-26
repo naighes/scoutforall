@@ -243,7 +243,7 @@ internal fun AnalysisScreen(
                     }
                     PeriodChooser(choice, a.from, a.to) { choice = it }
                     PeriodLine(a.from, a.to, a.matches.size, a.skipped)
-                    failed?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    failed?.let { Banner(Level.ERROR, it) }
                     if (a.matches.isEmpty()) {
                         Text(stringResource(R.string.no_matches_period), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {

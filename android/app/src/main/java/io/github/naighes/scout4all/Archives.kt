@@ -67,7 +67,7 @@ fun rememberExporter(export: (Scout4All) -> ExportedArchive): Exporter {
     val app = context.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
     var error by rememberSaveable { mutableStateOf<String?>(null) }
-    error?.let { ErrorDialog(it) { error = null } }
+    FailureDialog(error) { error = null }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ZIP)) { uri ->
         uri?.let {
             scope.launch {
@@ -169,7 +169,7 @@ fun rememberImport(
     val app = context.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
     val state = viewModel(key = "import-$teamId") { ImportViewModel() }
-    state.error?.let { ErrorDialog(it) { state.error = null } }
+    FailureDialog(state.error) { state.error = null }
     state.chosen?.let { c ->
         ImportDialog(c.preview, teamId, onDismiss = { state.chosen = null }) { into ->
             state.chosen = null
@@ -321,14 +321,6 @@ private suspend fun Context.report(onError: (String) -> Unit, action: suspend ()
         onError(getString(R.string.file_not_read))
     }
 }
-
-/** Why an archive wasn't exported or imported. */
-@Composable
-private fun ErrorDialog(message: String, onDismiss: () -> Unit) = AlertDialog(
-    onDismissRequest = onDismiss,
-    text = { Text(message) },
-    confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(android.R.string.ok)) } },
-)
 
 /** The share sheet, with the archive in a file of the cache that the
  * receiving app may read. */

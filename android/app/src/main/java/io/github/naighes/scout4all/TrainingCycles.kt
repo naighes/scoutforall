@@ -311,6 +311,7 @@ fun CycleScreen(
     var deleting by rememberSaveable { mutableStateOf(false) }
     var withChildren by rememberSaveable { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    FailureDialog(error) { error = null }
     val first = cycle?.firstDay?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
     val last = cycle?.lastDay?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
     // a microcycle's days as the calendar reads them: its sessions and the
@@ -416,7 +417,6 @@ fun CycleScreen(
                     ListItem(modifier = Modifier.clickable { onChild(child.id) }, headlineContent = { Text(windowText(child.firstDay, child.lastDay)) })
                 }
             }
-            error?.let { item(key = "error") { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) } }
         }
     }
     if (deleting) {
@@ -632,9 +632,7 @@ private fun CycleFields(
             Lines(R.string.tr_objectives, objectives) { edit { objectives = it } }
             NotesField(notes) { edit { notes = it } }
         }
-        failure.elsewhere(TrainingField.START, TrainingField.END, TrainingField.WEEKS)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        FailureDialog(failure.elsewhere(TrainingField.START, TrainingField.END, TrainingField.WEEKS)) { failure = null }
         Button(
             onClick = { save(false) },
             enabled = !busy,
@@ -689,7 +687,7 @@ fun AddChildrenScreen(level: Level, cycleId: String, onBack: () -> Unit, onDone:
                         )
                     }
                 }
-                failure?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+                FailureDialog(failure) { failure = null }
                 Button(
                     onClick = {
                         scope.launch {
@@ -770,9 +768,7 @@ fun DuplicateCycleScreen(cycleId: String, onBack: () -> Unit, onDone: () -> Unit
                 CheckRow(stringResource(R.string.tr_copy_objectives), objectives, onChecked = { objectives = it })
                 CheckRow(stringResource(R.string.tr_copy_activities), activities, onChecked = { activities = it })
             }
-            failure.elsewhere(TrainingField.WEEKS)?.let {
-                Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-            }
+            FailureDialog(failure.elsewhere(TrainingField.WEEKS)) { failure = null }
             Button(
                 onClick = { duplicate(false) },
                 enabled = !busy,

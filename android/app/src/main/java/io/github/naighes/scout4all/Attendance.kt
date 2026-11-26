@@ -167,7 +167,7 @@ fun AttendanceScreen(teamId: String, sessionId: String, onBack: () -> Unit) {
                     )
                 }
             }
-            error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+            FailureDialog(error) { error = null }
             Button(
                 onClick = {
                     scope.launch {

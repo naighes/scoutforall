@@ -24,8 +24,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -74,7 +72,7 @@ private sealed interface SetState {
 fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Unit, onStats: () -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val scope = rememberCoroutineScope()
-    val snackbar = remember { SnackbarHostState() }
+    val failed = failureDialog()
     // read again once an event is corrected
     var version by remember { mutableIntStateOf(0) }
     val state by produceState<SetState>(SetState.Loading, version) {
@@ -93,7 +91,6 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
                 actions = { TextButton(onClick = onStats) { Text(stringResource(R.string.statistics)) } },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
@@ -104,7 +101,7 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
                     try {
                         correction = app.core { it.correction(teamId, matchId, setNumber.toUByte(), event.index) }
                     } catch (e: MobileException) {
-                        snackbar.showSnackbar(e.reason)
+                        failed(e.reason)
                     }
                 }
             }
@@ -305,7 +302,7 @@ private fun CorrectionSheet(correction: Correction, teams: Pair<String, String>?
                     }
                 }
             }
-            error?.let { Text(it, color = Lost, style = MaterialTheme.typography.bodyMedium) }
+            FailureDialog(error) { error = null }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.End)) {
                 TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) }
                 FilledTonalButton(onClick = {

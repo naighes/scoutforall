@@ -406,11 +406,8 @@ private fun SessionFields(
                 NumberField(R.string.tr_session_actual, actual, ErrorFor(failure, TrainingField.ACTUAL_DURATION)) { edit { actual = it } }
             }
         }
-        val message = when {
-            entryInvalid -> stringResource(R.string.tr_entry_invalid)
-            else -> failure.elsewhere(TrainingField.START, TrainingField.DURATION, TrainingField.ACTUAL_DURATION)
-        }
-        message?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+        if (entryInvalid) FieldNote(stringResource(R.string.tr_entry_invalid), Modifier.padding(horizontal = 16.dp))
+        FailureDialog(failure.elsewhere(TrainingField.START, TrainingField.DURATION, TrainingField.ACTUAL_DURATION)) { failure = null }
         // big and at the bottom, where the thumb is
         if (series) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -652,9 +649,7 @@ private fun ActivityFields(
                 onSelect = { edit { status = it } },
             )
         }
-        failure.elsewhere(TrainingField.NAME, TrainingField.PLANNED, TrainingField.ACTUAL)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        FailureDialog(failure.elsewhere(TrainingField.NAME, TrainingField.PLANNED, TrainingField.ACTUAL)) { failure = null }
         Button(
             onClick = {
                 busy = true
@@ -825,9 +820,7 @@ private fun DuplicateFields(
             CheckRow(stringResource(R.string.tr_copy_objectives), objectives, onChecked = { objectives = it })
             CheckRow(stringResource(R.string.tr_copy_activities), activities, onChecked = { activities = it })
         }
-        failure.elsewhere(TrainingField.START)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        FailureDialog(failure.elsewhere(TrainingField.START)) { failure = null }
         Button(
             onClick = { duplicate(false) },
             enabled = !busy,

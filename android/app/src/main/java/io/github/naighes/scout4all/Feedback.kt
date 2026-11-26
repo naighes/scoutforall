@@ -139,6 +139,13 @@ fun NoticeDialog(notice: Notice, onDismiss: () -> Unit) = AlertDialog(
     confirmButton = { Button(onClick = onDismiss) { Text(stringResource(R.string.ok)) } },
 )
 
+/** What went wrong doing something and no field shows, in a dialog until
+ * closed: nothing while there's nothing to tell. */
+@Composable
+fun FailureDialog(failure: String?, onDismiss: () -> Unit) {
+    failure?.let { NoticeDialog(Notice.error(it), onDismiss) }
+}
+
 /** What went wrong, told in a dialog: calling what is returned opens it. */
 @Composable
 fun failureDialog(): (String) -> Unit {

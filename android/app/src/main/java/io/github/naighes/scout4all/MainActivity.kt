@@ -484,13 +484,7 @@ private fun CrashDialog(app: Scout4AllApplication) {
 @Composable
 private fun StartupNoticeDialog(app: Scout4AllApplication) {
     val notice = app.startupNotice.collectAsState().value ?: return
-    AlertDialog(
-        onDismissRequest = app::forgetStartupNotice,
-        text = { Text(notice) },
-        confirmButton = {
-            TextButton(onClick = app::forgetStartupNotice) { Text(stringResource(android.R.string.ok)) }
-        },
-    )
+    NoticeDialog(Notice.warning(notice), app::forgetStartupNotice)
 }
 
 /** Back from the screen of `entry`, once: a second touch of the arrow

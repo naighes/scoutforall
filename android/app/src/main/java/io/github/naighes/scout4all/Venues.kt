@@ -539,9 +539,7 @@ private fun VenueFields(id: String?, draft: VenueDraft, modifier: Modifier, onCh
             VenueText(R.string.notes, notes, null, KeyboardCapitalization.Sentences) { edit { notes = it } }
             CheckRow(stringResource(R.string.venue_pinned), pinned, onChecked = { edit { pinned = it } })
         }
-        failure.elsewhere(TrainingField.VENUE_NAME, TrainingField.MAP_LINK, TrainingField.COORDINATES)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        FailureDialog(failure.elsewhere(TrainingField.VENUE_NAME, TrainingField.MAP_LINK, TrainingField.COORDINATES)) { failure = null }
         Button(
             onClick = {
                 busy = true

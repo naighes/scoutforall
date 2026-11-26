@@ -12,6 +12,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isToggleable
@@ -371,6 +372,8 @@ class TrainingScreensTest {
         press(string(R.string.tr_weekly_series))
         press(string(R.string.tr_continue_entry))
         rule.waitForText(string(R.string.tr_entry_invalid))
+        // told as a note, as the other fields to correct
+        rule.onNodeWithTag(FIELD_NOTE_TAG, useUnmergedTree = true).assertExists()
         pickDay(string(R.string.tr_until), monday.plusWeeks(2))
         press(string(R.string.tr_continue_entry))
         rule.waitForText(string(R.string.tr_series_entry, 2), substring = true)
