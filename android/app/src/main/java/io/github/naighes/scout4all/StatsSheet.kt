@@ -427,9 +427,12 @@ internal fun Summary(stats: LiveStats) {
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        PhaseTile(stringResource(R.string.side_out), stats.sideOut, Modifier.weight(1f))
-        PhaseTile(stringResource(R.string.break_points), stats.breakPoints, Modifier.weight(1f))
+    // the figures of the team, its rallies: none with players chosen
+    if (stats.teamFigures) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            PhaseTile(stringResource(R.string.side_out), stats.sideOut, Modifier.weight(1f))
+            PhaseTile(stringResource(R.string.break_points), stats.breakPoints, Modifier.weight(1f))
+        }
     }
     val fundamentals = stats.fundamentals.filter { it.event != EventTypeEnum.D }
     fundamentals.chunked(2).forEach { row ->
@@ -446,25 +449,35 @@ internal fun Summary(stats: LiveStats) {
             Modifier.weight(1f),
             color = if (stats.unforcedErrors > 0u) Lost else null,
         )
-        CountTile(
-            stringResource(R.string.opponent_errors),
-            stats.opponentErrors.toString(),
-            stringResource(R.string.opponent_points) + " " + stats.opponentPoints,
-            Modifier.weight(1f),
-        )
+        if (stats.teamFigures) {
+            CountTile(
+                stringResource(R.string.opponent_errors),
+                stats.opponentErrors.toString(),
+                stringResource(R.string.opponent_points) + " " + stats.opponentPoints,
+                Modifier.weight(1f),
+            )
+        } else {
+            AcesTile(stats, Modifier.weight(1f))
+        }
     }
-    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        CountTile(
-            stringResource(R.string.aces),
-            "${stats.aces} – ${stats.acesAgainst}",
-            stringResource(R.string.ours) + " – " + stringResource(R.string.theirs),
-            Modifier.weight(1f),
-        )
-        Spacer(Modifier.weight(1f))
+    if (stats.teamFigures) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            AcesTile(stats, Modifier.weight(1f))
+            Spacer(Modifier.weight(1f))
+        }
+        Rotations(stats.rotations)
+        Possessions(stats.sideOutPossessions)
     }
-    Rotations(stats.rotations)
-    Possessions(stats.sideOutPossessions)
 }
+
+/** Our aces and theirs. */
+@Composable
+private fun AcesTile(stats: LiveStats, modifier: Modifier) = CountTile(
+    stringResource(R.string.aces),
+    "${stats.aces} – ${stats.acesAgainst}",
+    stringResource(R.string.ours) + " – " + stringResource(R.string.theirs),
+    modifier,
+)
 
 /** The side out by possession: how often the first ball, the second and
  * the later ones end with our point. */
@@ -781,18 +794,17 @@ internal fun Errors(stats: LiveStats) {
         most,
     )
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        CountTile(
-            stringResource(R.string.opponent_errors),
-            stats.opponentErrors.toString(),
-            stringResource(R.string.opponent_points) + " " + stats.opponentPoints,
-            Modifier.weight(1f),
-        )
-        CountTile(
-            stringResource(R.string.aces),
-            "${stats.aces} – ${stats.acesAgainst}",
-            stringResource(R.string.ours) + " – " + stringResource(R.string.theirs),
-            Modifier.weight(1f),
-        )
+        // theirs: of the team, not with players chosen
+        if (stats.teamFigures) {
+            CountTile(
+                stringResource(R.string.opponent_errors),
+                stats.opponentErrors.toString(),
+                stringResource(R.string.opponent_points) + " " + stats.opponentPoints,
+                Modifier.weight(1f),
+            )
+        }
+        AcesTile(stats, Modifier.weight(1f))
+        if (!stats.teamFigures) Spacer(Modifier.weight(1f))
     }
 }
 
