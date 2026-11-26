@@ -194,6 +194,15 @@ pub struct VenuesScreen {
 }
 
 impl VenuesScreen {
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     pub fn new(core: Arc<Scout4All>) -> Result<VenuesScreen, MobileError> {
         let listed = core.venues()?;
         let today = core.clock().today();
@@ -474,11 +483,7 @@ impl VenuesScreen {
             Mode::Browse => self.list(s, c),
             Mode::Sheet => self.sheet(s, c),
         };
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![error, body].spacing(10).into()
+        body
     }
 
     /// How wide the list is at most.
@@ -679,6 +684,19 @@ mod tests {
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
         Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    #[test]
+    fn a_failure_of_the_page_is_told_over_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = scout4all_mobile::Scout4All::for_tests(
+            dir.path().to_string_lossy().into_owned(),
+            "en".into(),
+        )
+        .unwrap();
+        let mut screen = VenuesScreen::new(core).unwrap();
+        screen.error = Some("not saved".into());
+        crate::assert_told_over(crate::Screen::Venues(Box::new(screen)), "not saved");
     }
 
     /// The week of a gym starts on the day of the clock of the core, and
