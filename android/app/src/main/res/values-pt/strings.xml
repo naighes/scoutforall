@@ -83,6 +83,7 @@
     <string name="setter">Levantador</string>
     <string name="libero">Líbero</string>
     <string name="fallback_libero">Segundo líbero</string>
+    <string name="out_for_the_libero">fora pelo líbero</string>
     <string name="none">Nenhum</string>
     <string name="empty_position">Esvaziar a posição</string>
     <string name="no_available_players">Nenhum jogador disponível</string>

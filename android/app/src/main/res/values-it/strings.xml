@@ -82,6 +82,7 @@
     <string name="setter">Palleggiatore</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Secondo libero</string>
+    <string name="out_for_the_libero">fuori per il libero</string>
     <string name="none">Nessuno</string>
     <string name="empty_position">Svuota la posizione</string>
     <string name="no_available_players">Nessun giocatore disponibile</string>

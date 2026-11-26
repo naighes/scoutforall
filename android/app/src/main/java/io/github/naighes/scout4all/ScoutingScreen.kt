@@ -149,6 +149,9 @@ data class ScoutingView(
     val evals: List<EvalChoice>,
     val techniques: List<TechniqueChoice>,
     val replacements: List<ScoutingPlayer>,
+    /** who can go out though not on court: out while the libero plays in
+     * their place */
+    val outForTheLibero: List<ScoutingPlayer> = emptyList(),
     /** how many blocked, to tell with the evaluation of our attack or our
      * block: empty for the other events */
     val blockers: List<BlockersChoice> = emptyList(),
@@ -424,6 +427,10 @@ class ScoutingViewModel(
             evals = s.availableEvals(),
             techniques = s.availableTechniques(),
             replacements = s.replacementChoices(),
+            outForTheLibero = s.playerChoices()
+                .takeIf { state.step == ScoutingStep.PLAYER }
+                .orEmpty()
+                .filter { it.outForTheLibero },
             blockers = s.availableBlockers(),
             targets = s.targetCourt(),
             targetTold = s.targetTold(),
@@ -1165,6 +1172,13 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
             // our fault: the player's, or the team's
             if (state.teamChoice) {
                 Buttons(listOf(Triple("team", stringResource(R.string.the_team)) { model.team() }))
+            }
+            // who goes out though not on court, told apart
+            view.outForTheLibero.forEach { p ->
+                PortraitRow(
+                    p.id, p.name, stringResource(R.string.out_for_the_libero), p.initials, p.number.toInt(),
+                    { model.player(p.id) },
+                )
             }
         }
         ScoutingStep.REPLACEMENT -> {

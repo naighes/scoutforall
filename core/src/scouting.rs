@@ -47,6 +47,9 @@ pub struct PlayerChoice {
     pub name: String,
     pub number: u8,
     pub role: String,
+    /// off the court while the libero plays in their place: still to be
+    /// substituted, though not on court (see `Lineup::is_out_for_the_libero`)
+    pub out_for_the_libero: bool,
 }
 
 /// The order of the choices of the scout.
@@ -811,6 +814,7 @@ impl ScoutingSession {
                     name: player.name.clone(),
                     number: player.number,
                     role,
+                    out_for_the_libero: lineup.is_out_for_the_libero(&player.id),
                 })
             })
             .collect()
@@ -881,6 +885,8 @@ impl ScoutingSession {
                     role: player
                         .role
                         .map_or_else(|| "-".to_string(), |r| r.to_string()),
+                    // from the bench
+                    out_for_the_libero: false,
                 })
                 .collect(),
             _ => vec![],

@@ -1514,6 +1514,9 @@ pub struct ScoutingPlayer {
     pub role: String,
     /// in place of a missing photo
     pub initials: String,
+    /// off the court while the libero plays in their place: to show apart,
+    /// as the court doesn't (see `PlayerChoice::out_for_the_libero`)
+    pub out_for_the_libero: bool,
 }
 
 /// An event as the scout chooses it.
@@ -3228,6 +3231,7 @@ fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
             .role
             .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
         initials: names::initials(&p.name),
+        out_for_the_libero: false,
     }
 }
 
@@ -3381,8 +3385,15 @@ impl Scouting {
     ) -> Vec<ScoutingPlayer> {
         choices
             .into_iter()
-            .filter_map(|c| session.team().find_player(c.id))
-            .map(|p| self.scouting_player(p))
+            .filter_map(|c| {
+                session
+                    .team()
+                    .find_player(c.id)
+                    .map(|p| ScoutingPlayer {
+                        out_for_the_libero: c.out_for_the_libero,
+                        ..self.scouting_player(p)
+                    })
+            })
             .collect()
     }
 
@@ -8320,6 +8331,54 @@ mod tests {
         for p in replacements {
             assert_eq!(p.initials, "PR");
         }
+    }
+
+    /// Who goes out: the one out for the libero too, though not on court,
+    /// told apart; never the libero.
+    #[test]
+    fn the_one_out_for_the_libero_can_go_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        for n in 1..=8 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n} Rossi"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8"),
+            )
+            .unwrap();
+        let scouting = started_set(&app, &team, &m);
+        // the libero 7 on court for 6
+        let court: Vec<u8> = scouting.state().court.iter().map(|p| p.number).collect();
+        assert!(court.contains(&7) && !court.contains(&6));
+        scouting.choose_event(EventTypeEnum::R).unwrap();
+        let choices = scouting.player_choices();
+        let numbers = |out: bool| -> Vec<u8> {
+            choices
+                .iter()
+                .filter(|p| p.out_for_the_libero == out)
+                .map(|p| p.number)
+                .collect()
+        };
+        assert_eq!(numbers(true), vec![6]);
+        assert_eq!(numbers(false), vec![1, 2, 3, 4, 5]);
+        let out = choices.iter().find(|p| p.number == 6).map(|p| p.id.clone());
+        scouting.choose_player(out.unwrap_or_default()).unwrap();
+        assert!(
+            scouting
+                .replacement_choices()
+                .iter()
+                .all(|p| p.number == 8 && !p.out_for_the_libero)
+        );
     }
 
     /// How many blocked: on our block from one on, the one chosen saved

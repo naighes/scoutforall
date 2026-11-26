@@ -1179,6 +1179,42 @@ mod tests {
         assert!(saved_events(&s).await.is_empty());
     }
 
+    /// The middle blocker out for the libero can be substituted, and the
+    /// choice says so: the scout doesn't see them on court. The libero is
+    /// never offered; who comes in comes from the bench.
+    #[tokio::test]
+    async fn the_one_out_for_the_libero_is_offered_as_such() {
+        let mut s = scouting().await;
+        let libero = s.players[6];
+        let out = s
+            .session
+            .snapshot()
+            .current_lineup
+            .get_lineup_choices()
+            .into_iter()
+            .filter_map(|(_, (_, id))| id)
+            .find(|id| s.session.snapshot().current_lineup.is_out_for_the_libero(id))
+            .unwrap();
+        s.session.choose_event(R).await.unwrap();
+        let choices = s.session.player_choices();
+        assert!(choices.iter().all(|c| c.id != libero));
+        assert_eq!(
+            choices
+                .iter()
+                .filter(|c| c.out_for_the_libero)
+                .map(|c| c.id)
+                .collect::<Vec<_>>(),
+            vec![out]
+        );
+        s.session.choose_player(out).await.unwrap();
+        assert!(
+            s.session
+                .replacement_choices()
+                .iter()
+                .all(|c| !c.out_for_the_libero)
+        );
+    }
+
     /// Only the player on the diagonal of the setter can become the setter:
     /// anyone else would move the libero. Up to v0.10 any player on court
     /// but the libero could.

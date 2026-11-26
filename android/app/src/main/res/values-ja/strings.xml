@@ -83,6 +83,7 @@
     <string name="setter">セッター</string>
     <string name="libero">リベロ</string>
     <string name="fallback_libero">控えのリベロ</string>
+    <string name="out_for_the_libero">リベロと交代中</string>
     <string name="none">なし</string>
     <string name="empty_position">ポジションを空ける</string>
     <string name="no_available_players">出場できる選手がいません</string>

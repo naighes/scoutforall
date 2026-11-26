@@ -83,6 +83,7 @@
     <string name="setter">Rozgrywający</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Drugi libero</string>
+    <string name="out_for_the_libero">zmieniony przez libero</string>
     <string name="none">Brak</string>
     <string name="empty_position">Opróżnij pozycję</string>
     <string name="no_available_players">Brak dostępnych zawodników</string>

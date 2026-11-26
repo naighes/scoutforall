@@ -84,6 +84,7 @@
     <string name="setter">Setter</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Second libero</string>
+    <string name="out_for_the_libero">out for the libero</string>
     <string name="none">None</string>
     <string name="empty_position">Empty the position</string>
     <string name="no_available_players">No players available</string>

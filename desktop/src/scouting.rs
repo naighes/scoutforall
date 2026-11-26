@@ -1206,7 +1206,7 @@ impl ScoutingScreen {
                 for p in self.offered(&snap.players) {
                     list = list.push(ui::choice(
                         Some(self.player_key_label(p, p.index.to_string())),
-                        self.player_label(p, c),
+                        self.player_label(p, s, c),
                         false,
                         Some(Message::Player(p.id.to_string())),
                         c,
@@ -1975,11 +1975,26 @@ impl ScoutingScreen {
     }
 
     /// With the shirt number on the key, the name alone.
-    fn player_label<'a>(&self, p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
+    /// Who is out for the libero told apart at the tail: the scout doesn't
+    /// see them on court.
+    fn player_label<'a>(&self, p: &PlayerChoice, s: &Strings, c: Colors) -> Element<'a, Message> {
         let photo = self.photos.get(&p.id.to_string());
-        match self.keys.player_keys {
+        let label = match self.keys.player_keys {
             PlayerKeysEnum::Number => with_photo(photo, ui::name(p.name.clone())),
             PlayerKeysEnum::Role => with_photo(photo, player_label(p, c)),
+        };
+        match p.out_for_the_libero {
+            true => row![
+                label,
+                text(s.out_for_the_libero)
+                    .size(SIZE_SMALL)
+                    .color(c.muted)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into(),
+            false => label,
         }
     }
 
