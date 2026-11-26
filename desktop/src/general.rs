@@ -15,8 +15,12 @@ use {
         ui,
     },
     iced::{
-        Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, space, text},
+        Element, Length, Task,
+        widget::{
+            Column, Id, column, container,
+            operation::{self, AbsoluteOffset, RelativeOffset},
+            row, scrollable, space, text,
+        },
     },
     scout4all_core::{
         settings::{LEAD_SECONDS, STEP_SECONDS, VideoSeconds},
@@ -82,6 +86,51 @@ pub enum Message {
     Licenses,
     /// the terms or the licenses closed, back to the settings
     Close,
+}
+
+/// The text read on its own, as the keys scroll it.
+const READING: &str = "reading";
+/// What a line of the keys scrolls, and a page: less than the text in
+/// sight at the smallest window, a few lines still in view.
+const LINE: f32 = 40.0;
+const PAGE: f32 = 400.0;
+
+/// How the keys move a text read on its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Scroll {
+    By(f32),
+    Start,
+    End,
+}
+
+/// The scroll a key asks of a text read on its own: ↑ ↓ a line, PgUp PgDn
+/// a page, Home End to its ends.
+pub fn scrolling(ck: KeyCombination) -> Option<Scroll> {
+    match ck {
+        k if k == key!(up) => Some(Scroll::By(-LINE)),
+        k if k == key!(down) => Some(Scroll::By(LINE)),
+        k if k == key!(pageup) => Some(Scroll::By(-PAGE)),
+        k if k == key!(pagedown) => Some(Scroll::By(PAGE)),
+        k if k == key!(home) => Some(Scroll::Start),
+        k if k == key!(end) => Some(Scroll::End),
+        _ => None,
+    }
+}
+
+/// The text read on its own, scrolled.
+pub fn scrolled<M: Send + 'static>(scroll: Scroll) -> Task<M> {
+    let id = Id::new(READING);
+    match scroll {
+        Scroll::By(y) => operation::scroll_by(id, AbsoluteOffset { x: 0.0, y }),
+        Scroll::Start => operation::snap_to(
+            id,
+            RelativeOffset {
+                x: None,
+                y: Some(0.0),
+            },
+        ),
+        Scroll::End => operation::snap_to_end(id),
+    }
 }
 
 /// A text read on its own over the settings, closed with Esc or its button.
@@ -164,6 +213,8 @@ pub struct General {
     pub form: Form,
     /// the terms of use or the licenses, being read
     pub reading: Option<Reading>,
+    /// the scroll the keys asked of it, not done yet
+    scroll: Option<Scroll>,
     pub error: Option<String>,
 }
 
@@ -179,6 +230,7 @@ impl General {
             player_keys,
             form: Form::new(s.general, vec![]),
             reading: None,
+            scroll: None,
             error: None,
             core,
         };
@@ -354,7 +406,10 @@ impl General {
                 self.reading = None;
                 true
             }
-            (Some(_), _) => true,
+            (Some(_), k) => {
+                self.scroll = scrolling(k);
+                true
+            }
             (None, k) if k == key!(t) => {
                 self.reading = Some(Reading::Terms(self.core.terms()));
                 true
@@ -372,6 +427,11 @@ impl General {
                 self.outcome(dir, s, outcome)
             }
         }
+    }
+
+    /// The scroll the keys asked of the text being read, once.
+    pub fn take_scroll(&mut self) -> Option<Scroll> {
+        self.scroll.take()
     }
 
     pub fn update(&mut self, dir: &Path, s: &Strings, message: Message) -> bool {
@@ -401,7 +461,7 @@ impl General {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match self.reading {
-            Some(_) => vec![("Esc".to_string(), s.close.to_string())],
+            Some(_) => reading_hints(s),
             None => vec![
                 ("⇧⇥ ⇥".to_string(), s.page.to_string()),
                 ("↑ ↓".to_string(), String::new()),
@@ -433,6 +493,21 @@ impl General {
         .spacing(10)
         .into()
     }
+}
+
+/// The keys that scroll a text read on its own.
+pub fn scrolling_hints() -> Vec<(String, String)> {
+    vec![
+        ("↑ ↓ PgUp PgDn".to_string(), String::new()),
+        ("Home End".to_string(), String::new()),
+    ]
+}
+
+/// The keys of a text read on its own, and how to close it.
+fn reading_hints(s: &Strings) -> Vec<(String, String)> {
+    let mut hints = scrolling_hints();
+    hints.push(("Esc".to_string(), s.close.to_string()));
+    hints
 }
 
 /// The licenses of the parts of others, as the settings name them.
@@ -581,7 +656,7 @@ fn document<'a, M: 'a>(
     .width(Length::Fill);
     let panel = ui::panel(
         Some(&ui::capitalized(title)),
-        scrollable(body).height(Length::Fill),
+        scrollable(body).id(Id::new(READING)).height(Length::Fill),
         c,
     );
     row![
@@ -694,11 +769,22 @@ mod tests {
             crate::settings::Outcome::Stay
         ));
         assert!(settings.general.reading.is_none());
-        // the licenses of the parts of others, closed with their button
+        // the licenses of the parts of others, scrolled by the keys and
+        // closed with their button
         settings.key(key!(l), s);
         assert!(matches!(
+            settings.key(key!(pagedown), s),
+            crate::settings::Outcome::Stay
+        ));
+        assert_eq!(settings.general.take_scroll(), Some(Scroll::By(PAGE)));
+        assert_eq!(settings.general.take_scroll(), None);
+        settings.key(key!(end), s);
+        assert_eq!(settings.general.take_scroll(), Some(Scroll::End));
+        settings.key(key!(up), s);
+        assert_eq!(settings.general.take_scroll(), Some(Scroll::By(-LINE)));
+        assert!(matches!(
             &settings.general.reading,
-            Some(Reading::Licenses(l)) if l.parts.len() == 3
+            Some(Reading::Licenses(l)) if l.parts.len() == 4
         ));
         settings.update(crate::settings::Message::General(Message::Close), s);
         assert!(settings.general.reading.is_none());

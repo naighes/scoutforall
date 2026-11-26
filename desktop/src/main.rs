@@ -963,6 +963,11 @@ impl App {
 
     /// Updates, then moves the focus where the keys went.
     fn update(&mut self, message: Message) -> Task<Message> {
+        // the terms at the first start, scrolled by the keys
+        let terms_scroll = match (&message, &self.terms) {
+            (Message::Key(ck), Some(_)) => general::scrolling(*ck),
+            _ => None,
+        };
         let handled = match message {
             Message::WindowClosed(id) => self.window_closed(id),
             Message::LiveTick => self.live_tick(),
@@ -993,6 +998,16 @@ impl App {
             message => self.handle(message),
         };
         let handled = Task::batch([handled, self.video_window(), self.preview_window()]);
+        // the terms or the licenses read, scrolled by the keys
+        let reading = terms_scroll.or_else(|| {
+            self.settings
+                .as_mut()
+                .and_then(|settings| settings.general.take_scroll())
+        });
+        let handled = match reading {
+            Some(scroll) => Task::batch([handled, general::scrolled(scroll)]),
+            None => handled,
+        };
         // the event chosen kept in sight
         let scroll = match &mut self.screen {
             Screen::Events(screen) => Some(screen.scroll()),
@@ -1700,10 +1715,12 @@ impl App {
 
     fn terms_hints(&self) -> Vec<(String, String)> {
         let s = self.strings;
-        vec![
+        let mut hints = general::scrolling_hints();
+        hints.extend([
             (s.space.to_string(), s.send_statistics.to_string()),
             ("Enter".to_string(), s.accept_terms.to_string()),
-        ]
+        ]);
+        hints
     }
 
     fn subscription(&self) -> Subscription<Message> {
