@@ -16,7 +16,7 @@ pub mod space;
 
 use {
     capture::Quality,
-    chrono::{DateTime, Local},
+    chrono::{DateTime, FixedOffset},
     scout4all_core::video::{self, StoredProfile, VideoFile},
     scout4all_mobile::Scout4All,
     serde::{Deserialize, Serialize},
@@ -193,7 +193,7 @@ impl LiveConfig {
 pub struct Sidecar {
     pub team_id: String,
     pub match_id: String,
-    pub started: DateTime<chrono::FixedOffset>,
+    pub started: DateTime<FixedOffset>,
 }
 
 pub fn write_sidecar(base: &Path, sidecar: &Sidecar) -> Result<(), String> {
@@ -216,7 +216,7 @@ pub fn attach(
     data_dir: &Path,
     base: &Path,
     mp4: &Path,
-    started: DateTime<Local>,
+    started: DateTime<FixedOffset>,
 ) -> Result<(), String> {
     let sidecar = read_sidecar(base).ok_or("the match of the recording is not known")?;
     let (the_match, stored) = core
@@ -253,7 +253,7 @@ pub fn recover(core: &Scout4All, data_dir: &Path, folder: &Path) -> Vec<Result<S
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
             let started = read_sidecar(&base)
-                .map(|s| s.started.with_timezone(&Local))
+                .map(|s| s.started)
                 .ok_or_else(|| format!("{name}: the match of the recording is not known"))?;
             let mp4 = base.with_extension("mp4");
             let made = raw::remux(&base, &mp4).map_err(|e| format!("{name}: {e}"))?;
@@ -298,7 +298,7 @@ mod tests {
         let (core, team, m) = crate::video::screen_tests::imported(&dir);
         let folder = dir.path().join("rec");
         fs::create_dir_all(&folder).unwrap();
-        let started = Local::now();
+        let started = chrono::Local::now().fixed_offset();
         let base = capture::base_name(&folder, started);
         left_raw(&base);
         let sidecar = Sidecar {

@@ -857,7 +857,11 @@ pub(crate) mod tests {
     fn recorded(capture: &Capture) -> std::path::PathBuf {
         let dir = tempfile::tempdir().unwrap();
         let base = dir.path().join("20261106 120000");
-        capture.record(base, chrono::Local::now(), Default::default());
+        capture.record(
+            base,
+            chrono::Local::now().fixed_offset(),
+            Default::default(),
+        );
         capture.preview(false);
         std::thread::sleep(Duration::from_secs(3));
         capture.stop();
@@ -887,10 +891,13 @@ pub(crate) mod tests {
         let encrypted =
             std::env::var("S4A_RTMPS").unwrap_or_else(|_| "rtmps://localhost:19360".into());
         let source = |base: &str, path: &str| {
-            Capture::open(Source::Network(crate::live::network::NetworkSource {
-                url: format!("{base}/{path}"),
-                ..Default::default()
-            }))
+            Capture::open(
+                Source::Network(crate::live::network::NetworkSource {
+                    url: format!("{base}/{path}"),
+                    ..Default::default()
+                }),
+                std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+            )
         };
         // without the user: refused (mediamtx 1.21 says so)
         let refused = source(&plain, "campo");
@@ -931,7 +938,10 @@ pub(crate) mod tests {
                 .unwrap()
         };
         let send = |key: &str| send_as(key, "libx264");
-        let capture = Capture::open(Source::Receiver(receiver.clone()));
+        let capture = Capture::open(
+            Source::Receiver(receiver.clone()),
+            std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+        );
         std::thread::sleep(Duration::from_millis(500));
         let mut wrong = send("sbagliata");
         assert!(wait(&capture, &|s| matches!(

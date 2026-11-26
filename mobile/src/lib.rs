@@ -3465,6 +3465,11 @@ pub struct ClipPick {
 /// For the apps written in Rust (the desktop app), not exported to the
 /// bindings: they drive the scouting from the keyboard as the TUI does.
 impl Scout4All {
+    /// What time it is, for the app: the clock the core asks too.
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        self.clock.clone()
+    }
+
     /// Scouts the set in progress of the match, choosing in `order`: the
     /// keyboard chooses the event first, the touch the player.
     pub fn scouting_in_order(

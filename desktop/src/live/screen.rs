@@ -6,6 +6,7 @@
 //! and seen; or where the app sends, and its key, the
 //! video seen as it comes; then recording.
 
+use scout4all_mobile::clock::Clock;
 use {
     super::{
         LiveConfig, SavedNetwork, SavedReceiver,
@@ -108,6 +109,8 @@ pub struct LiveScreen {
     pub match_id: String,
     opponent: String,
     dir: PathBuf,
+    /// what time it is, for the sources that tell theirs
+    clock: Arc<dyn Clock>,
     config: LiveConfig,
     step: Step,
     /// in the first step, the kind of source chosen
@@ -212,7 +215,13 @@ fn given_back(saved: &SavedNetwork, kept: String) -> (String, String) {
 }
 
 impl LiveScreen {
-    pub fn new(team_id: String, match_id: String, opponent: String, dir: PathBuf) -> LiveScreen {
+    pub fn new(
+        team_id: String,
+        match_id: String,
+        opponent: String,
+        dir: PathBuf,
+        clock: Arc<dyn Clock>,
+    ) -> LiveScreen {
         let config = LiveConfig::read(&dir);
         let free = disk::free(&config.folder(&dir));
         LiveScreen {
@@ -220,6 +229,7 @@ impl LiveScreen {
             match_id,
             opponent,
             dir,
+            clock,
             config,
             step: Step::Source,
             kind: Kind::Camera,
@@ -414,7 +424,7 @@ impl LiveScreen {
             }
             Source::Camera(_) => {}
         }
-        self.capture = Some(Capture::open(source));
+        self.capture = Some(Capture::open(source, self.clock.clone()));
     }
 
     /// Whether what's on screen is the source written: then Enter records.
@@ -596,7 +606,7 @@ impl LiveScreen {
             self.preview.clear();
             self.config.camera = Some(camera.name.clone());
             self.save_config();
-            self.capture = Some(Capture::open(Source::Camera(camera)));
+            self.capture = Some(Capture::open(Source::Camera(camera), self.clock.clone()));
         }
     }
 
@@ -1251,7 +1261,9 @@ impl LiveScreen {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, scout4all_core::shapes::enums::LanguageEnum};
+    use {
+        super::*, scout4all_core::shapes::enums::LanguageEnum, scout4all_mobile::clock::SystemClock,
+    };
 
     fn s() -> &'static Strings {
         crate::strings::strings(LanguageEnum::It)
@@ -1265,6 +1277,7 @@ mod tests {
             "m".into(),
             "Them".into(),
             dir.path().to_path_buf(),
+            Arc::new(SystemClock),
         )
     }
 
@@ -1733,7 +1746,13 @@ mod tests {
         screen.key(key!(q), s());
         assert_eq!(screen.config.quality(), Quality::Low);
         screen.update(Message::Folder(Some(dir.path().join("rec"))), s());
-        let again = LiveScreen::new("t".into(), "m".into(), "Them".into(), dir.path().into());
+        let again = LiveScreen::new(
+            "t".into(),
+            "m".into(),
+            "Them".into(),
+            dir.path().into(),
+            Arc::new(SystemClock),
+        );
         assert_eq!(again.config.quality(), Quality::Low);
         assert_eq!(again.config.folder(dir.path()), dir.path().join("rec"));
     }

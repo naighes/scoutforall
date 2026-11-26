@@ -15,6 +15,7 @@
 //! of the day), `n` a new session, `r` a new series, `c` the microcycle of
 //! the marked, ⌫ deletes the session chosen. No dragging.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::screen::{PERIODS, Period, period_name},
     crate::{
@@ -236,7 +237,7 @@ pub fn segments<'a>(
 
 impl CalendarTab {
     pub fn new(core: Arc<Scout4All>, team_id: String) -> CalendarTab {
-        let today = chrono::Local::now().date_naive();
+        let today = core.clock().today();
         let mut tab = CalendarTab {
             core,
             team_id,

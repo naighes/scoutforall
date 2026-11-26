@@ -46,6 +46,7 @@ mod venue_choice;
 mod venues;
 mod video;
 
+use scout4all_mobile::clock::ClockExt;
 use {
     game::MatchScreen,
     home::HomeScreen,
@@ -84,11 +85,8 @@ fn data_dir() -> Option<PathBuf> {
 /// A new empty folder for the data when theirs can't be opened, gone at
 /// the next start of the system.
 fn empty_data_dir() -> PathBuf {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or_default();
-    std::env::temp_dir().join(format!("scout4all-{}-{stamp}", std::process::id()))
+    let unique = uuid::Uuid::new_v4().simple();
+    std::env::temp_dir().join(format!("scout4all-{}-{unique}", std::process::id()))
 }
 
 /// What was done, then what to tell of it, if anything, below.
@@ -585,6 +583,7 @@ impl App {
                         m,
                         the_match.opponent,
                         self.dir.clone(),
+                        core.clock(),
                     )))
                 }),
             },
@@ -1070,12 +1069,12 @@ impl App {
             return Task::none();
         };
         let (team, m) = (screen.team_id.clone(), screen.match_id.clone());
-        let started = chrono::Local::now();
+        let started = self.core.clock().zoned_now();
         let base = live::capture::base_name(&folder, started);
         let sidecar = live::Sidecar {
             team_id: team.clone(),
             match_id: m.clone(),
-            started: started.fixed_offset(),
+            started,
         };
         let written = std::fs::create_dir_all(&folder)
             .map_err(|e| format!("{}: {e}", folder.display()))

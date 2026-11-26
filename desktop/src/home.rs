@@ -3,6 +3,7 @@
 //! match in progress straight to its set, a recent one, a team; `n` a new
 //! team, `c` the competitions.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
         agenda::{self, Agenda, Pick},
@@ -19,11 +20,6 @@ use {
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{Home, HomeMatch, NextSetKind, Scout4All, TeamListing},
 };
-
-/// Today, by the clock of the computer.
-fn today() -> chrono::NaiveDate {
-    chrono::Local::now().date_naive()
-}
 
 #[derive(Debug, Clone)]
 pub struct Open {
@@ -120,7 +116,7 @@ impl HomeScreen {
         HomeScreen {
             logos,
             home,
-            week: Agenda::week(core, None, today()),
+            week: Agenda::week(core, None, core.clock().today()),
             panel: IN_PROGRESS,
             selected: [0; PANELS],
             editor: None,
@@ -161,7 +157,7 @@ impl HomeScreen {
     }
 
     fn new_team(&mut self, core: &Scout4All, s: &Strings) {
-        let year = chrono::Datelike::year(&chrono::Local::now());
+        let year = chrono::Datelike::year(&core.clock().today());
         let form = core.new_team_form(u16::try_from(year).unwrap_or(2026));
         self.editor = Some(Box::new(Editor::team(core, s, None, form)));
     }

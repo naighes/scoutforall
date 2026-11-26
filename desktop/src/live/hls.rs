@@ -7,6 +7,7 @@
 //! (`PROGRAM-DATE-TIME`) or, without it, as soon as it could have been
 //! made; what's left is shifted in the video screen (`[` `]`).
 
+use scout4all_mobile::clock::Clock;
 use {
     super::{
         network::{
@@ -785,7 +786,7 @@ pub(super) async fn pull(
                 reading.jumps = true;
             }
             for segment in &fresh {
-                fetch(&get, media, segment, &mut reading).await?;
+                fetch(&get, media, segment, &mut reading, io.clock).await?;
                 if let Asked::Quit = io.look() {
                     return Ok(Asked::Quit);
                 }
@@ -855,6 +856,7 @@ async fn fetch(
     media: &url::Url,
     segment: &Segment,
     reading: &mut Reading,
+    wall: &dyn Clock,
 ) -> Result<(), Problem> {
     let started = Instant::now();
     let url = media.join(&segment.uri).map_err(|_| Problem::Invalid)?;
@@ -893,7 +895,7 @@ async fn fetch(
     };
     let ms = |t: u64| u64::try_from(u128::from(t) * 1000 / u128::from(clock.max(1))).unwrap_or(0);
     let first_dts = frames.first().map_or(0, |f| ms(f.dts));
-    let (now, now_instant) = (Utc::now(), Instant::now());
+    let (now, now_instant) = (DateTime::<Utc>::from(wall.utc_now()), Instant::now());
     let mut jumps = std::mem::take(&mut reading.jumps) || segment.discontinuity;
     for f in frames {
         let dts_ms = ms(f.dts);
@@ -1111,11 +1113,14 @@ seg43.mp4
         let url = std::env::var("S4A_HLS")
             .unwrap_or_else(|_| "http://127.0.0.1:18888/campo/index.m3u8".to_string());
         let source = |password: &str| {
-            Capture::open(Source::Network(NetworkSource {
-                url: url.clone(),
-                username: "scout".into(),
-                password: password.into(),
-            }))
+            Capture::open(
+                Source::Network(NetworkSource {
+                    url: url.clone(),
+                    username: "scout".into(),
+                    password: password.into(),
+                }),
+                std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+            )
         };
         let wait = |capture: &Capture, until: &dyn Fn(&Status) -> bool| {
             (0..300).any(|_| {
@@ -1132,7 +1137,7 @@ seg43.mp4
         let late = status.late_ms.unwrap();
         assert!((500..30_000).contains(&late), "{late}");
         let dir = tempfile::tempdir().unwrap();
-        let started = chrono::Local::now();
+        let started = chrono::Local::now().fixed_offset();
         capture.record(dir.path().join("hls"), started, Default::default());
         capture.preview(false);
         std::thread::sleep(Duration::from_secs(25));
@@ -1174,11 +1179,14 @@ seg43.mp4
         use crate::live::capture::{Capture, Source};
         let url = std::env::var("S4A_HLS_SLOW")
             .unwrap_or_else(|_| "http://127.0.0.1:18889/master.m3u8".to_string());
-        let capture = Capture::open(Source::Network(NetworkSource {
-            url,
-            username: "scout".into(),
-            password: "segreta".into(),
-        }));
+        let capture = Capture::open(
+            Source::Network(NetworkSource {
+                url,
+                username: "scout".into(),
+                password: "segreta".into(),
+            }),
+            std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+        );
         let size = |wanted: (u32, u32)| {
             (0..300).any(|_| {
                 std::thread::sleep(Duration::from_millis(100));

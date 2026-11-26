@@ -3,6 +3,7 @@
 //! with its totals and what it contains, and the forms to make, change,
 //! fill, duplicate and delete them.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::{
         calendar::{self, CalendarTab},
@@ -165,12 +166,13 @@ impl CycleEditor {
                 Mask::Date,
                 s.date_placeholder,
             )
-            .with_calendar(),
+            .with_calendar(core.clock().today()),
             _ => Field::text(s.cycle_weeks, draft.weeks.clone()),
         };
         let mut fields = vec![
             Field::text(s.session_title, draft.title.clone()),
-            Field::masked(s.cycle_start, &start, Mask::Date, s.date_placeholder).with_calendar(),
+            Field::masked(s.cycle_start, &start, Mask::Date, s.date_placeholder)
+                .with_calendar(core.clock().today()),
             span,
             Field::lines(s.objectives, draft.objectives.clone()),
             Field::lines(s.notes, draft.notes.clone()),
@@ -599,7 +601,7 @@ impl CyclesTab {
                 first,
                 last,
                 children.iter().map(|c: &Child| c.id.clone()).collect(),
-                chrono::Local::now().date_naive(),
+                self.core.clock().today(),
             )),
             _ => None,
         };

@@ -4,10 +4,11 @@
 //! ones are present, who was unavailable stays out of it, the guests are
 //! not here.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::screen::{Period, period_name},
     crate::{calendar::text_of, strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
-    chrono::{Local, NaiveDate},
+    chrono::NaiveDate,
     iced::{
         Alignment, Element, Length,
         widget::{Column, Id, column, row, scrollable, text},
@@ -58,7 +59,8 @@ pub struct PresenceTab {
 
 impl PresenceTab {
     pub fn new(core: Arc<Scout4All>, team_id: String) -> PresenceTab {
-        PresenceTab::at(core, team_id, Local::now().date_naive())
+        let today = core.clock().today();
+        PresenceTab::at(core, team_id, today)
     }
 
     pub fn at(core: Arc<Scout4All>, team_id: String, today: NaiveDate) -> PresenceTab {

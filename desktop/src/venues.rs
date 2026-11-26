@@ -5,6 +5,7 @@
 //! map, ⌫ deletes it (sessions and matches keep it). In the sheet ‹ › (or
 //! PgUp PgDn) change the week, Home goes back to this one.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
         calendar::{day_of, text_of, time_span},
@@ -13,7 +14,7 @@ use {
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
-    chrono::{Duration, Local, NaiveDate},
+    chrono::{Duration, NaiveDate},
     iced::{
         Alignment, Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
@@ -195,13 +196,14 @@ pub struct VenuesScreen {
 impl VenuesScreen {
     pub fn new(core: Arc<Scout4All>) -> Result<VenuesScreen, MobileError> {
         let listed = core.venues()?;
+        let today = core.clock().today();
         Ok(VenuesScreen {
             core,
             back_to: None,
             listed,
             selected: 0,
             mode: Mode::Browse,
-            anchor: Local::now().date_naive(),
+            anchor: today,
             week: vec![],
             error: None,
         })
@@ -346,7 +348,7 @@ impl VenuesScreen {
     }
 
     fn go_today(&mut self) {
-        self.anchor = Local::now().date_naive();
+        self.anchor = self.core.clock().today();
         self.load_week();
     }
 
@@ -558,7 +560,7 @@ impl VenuesScreen {
                     .into(),
             );
         }
-        let today = Local::now().date_naive();
+        let today = self.core.clock().today();
         let days = self.week.iter().map(|day| {
             let date = day_of(&day.date);
             let lit = date == Some(today);
@@ -677,6 +679,29 @@ mod tests {
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
         Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    /// The week of a gym starts on the day of the clock of the core, and
+    /// comes back to it: not the computer's.
+    #[test]
+    fn the_week_of_a_gym_is_on_the_clock_of_the_core() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = NaiveDate::from_ymd_opt(2041, 3, 9).unwrap();
+        let clock = scout4all_mobile::clock::FixedClock::at(
+            day.and_hms_opt(0, 30, 0).unwrap(),
+            chrono::FixedOffset::east_opt(3600).unwrap(),
+        );
+        let core = Scout4All::with_clock(
+            dir.path().to_string_lossy().into_owned(),
+            "it".into(),
+            Arc::new(clock),
+        )
+        .unwrap();
+        let mut screen = VenuesScreen::new(core).unwrap();
+        assert_eq!(screen.anchor, day);
+        screen.shift(2);
+        screen.go_today();
+        assert_eq!(screen.anchor, day);
     }
 
     fn venue(core: &Scout4All, name: &str) -> String {
@@ -829,7 +854,7 @@ mod tests {
             )
             .unwrap();
         let gym = venue(&core, "Terontola");
-        let today = Local::now().date_naive();
+        let today = core.clock().today();
         for (team, time) in [(&a, "18:00"), (&b, "18:30")] {
             core.save_session(
                 team.clone(),

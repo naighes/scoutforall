@@ -6,6 +6,7 @@
 //! Enter goes on, Esc goes back; on the check Esc leaves the team as it
 //! is.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
         form::{self, Field, Form},
@@ -103,7 +104,7 @@ impl DvwScreen {
         from: Option<String>,
     ) -> Result<DvwScreen, MobileError> {
         let preview = core.preview_dvw(bytes.to_vec())?;
-        let year = chrono::Datelike::year(&chrono::Local::now());
+        let year = chrono::Datelike::year(&core.clock().today());
         let country = core
             .new_team_form(u16::try_from(year).unwrap_or(2026))
             .country

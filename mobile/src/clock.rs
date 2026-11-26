@@ -74,6 +74,8 @@ pub trait ClockExt {
     /// the offset from UTC of where the app runs: the wall and UTC apart,
     /// to the minute (a fixed clock is a zone of its own)
     fn offset(&self) -> FixedOffset;
+    /// now, with the offset of where the app runs
+    fn zoned_now(&self) -> DateTime<FixedOffset>;
 }
 
 impl<C: Clock + ?Sized> ClockExt for C {
@@ -91,6 +93,10 @@ impl<C: Clock + ?Sized> ClockExt for C {
             .and_then(FixedOffset::east_opt)
             .unwrap_or(Utc.fix())
     }
+
+    fn zoned_now(&self) -> DateTime<FixedOffset> {
+        DateTime::<Utc>::from(self.utc_now()).with_timezone(&self.offset())
+    }
 }
 
 #[cfg(test)]
@@ -105,6 +111,7 @@ mod tests {
         let rome = FixedOffset::east_opt(3600).unwrap();
         let clock = FixedClock::at(now, rome);
         assert_eq!((clock.today(), clock.offset()), (now.date(), rome));
+        assert_eq!(clock.zoned_now().to_rfc3339(), "2026-03-09T00:30:00+01:00");
         assert_eq!(
             SystemClock.offset(),
             Local::now().offset().fix(),

@@ -1,6 +1,7 @@
 //! The form of a session made from another: its duplicate. (The weekly
 //! series are written in the form of a new session, `forms`.)
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::forms::{Edited, busy_days, clash_warning, microcycle_options, microcycle_value, split},
     crate::{
@@ -48,7 +49,8 @@ impl DuplicateEditor {
         let proposed = core.proposed_duplicate(session_id.clone())?;
         let (date, time) = split(&Some(proposed.start.clone()));
         let fields = vec![
-            Field::masked(s.date, &date, form::Mask::Date, s.date_placeholder).with_calendar(),
+            Field::masked(s.date, &date, form::Mask::Date, s.date_placeholder)
+                .with_calendar(core.clock().today()),
             Field::masked(s.time, &time, form::Mask::Time, s.time_placeholder),
             Field::choice(s.microcycle, vec!["–".to_string()], 0),
             Field::check(s.copy_objectives, proposed.copy_objectives, false),

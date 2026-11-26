@@ -197,8 +197,9 @@ pub struct Field {
     pub icons: Vec<&'static [u8]>,
     /// a password: its letters not shown
     pub secret: bool,
-    /// a date with a button that opens a month to choose the day from
-    pub calendar: bool,
+    /// a date with a button that opens a month to choose the day from:
+    /// today, where it opens and what it marks
+    pub calendar: Option<NaiveDate>,
 }
 
 impl Field {
@@ -210,14 +211,15 @@ impl Field {
             placeholder: String::new(),
             icons: vec![],
             secret: false,
-            calendar: false,
+            calendar: None,
         }
     }
 
-    /// The date can be chosen from a calendar, the button beside it.
-    pub fn with_calendar(self) -> Field {
+    /// The date can be chosen from a calendar, the button beside it;
+    /// `today` marked.
+    pub fn with_calendar(self, today: NaiveDate) -> Field {
         Field {
-            calendar: true,
+            calendar: Some(today),
             ..self
         }
     }
@@ -954,11 +956,10 @@ impl Form {
     fn toggle_calendar(&mut self, field: usize) -> Outcome {
         self.focused = field;
         let shown = self.picker.is_some_and(|(at, _)| at == field);
-        let calendar = self.fields.get(field).is_some_and(|f| f.calendar);
-        self.picker = match (shown, calendar) {
-            (false, true) => {
-                let day = NaiveDate::parse_from_str(&self.text(field), "%Y-%m-%d")
-                    .unwrap_or_else(|_| chrono::Local::now().date_naive());
+        let today = self.fields.get(field).and_then(|f| f.calendar);
+        self.picker = match (shown, today) {
+            (false, Some(today)) => {
+                let day = NaiveDate::parse_from_str(&self.text(field), "%Y-%m-%d").unwrap_or(today);
                 Some((field, day.with_day(1).unwrap_or(day)))
             }
             _ => None,
@@ -1034,7 +1035,7 @@ impl Form {
     }
 
     fn has_calendar(&self, field: usize) -> bool {
-        self.fields.get(field).is_some_and(|f| f.calendar)
+        self.fields.get(field).is_some_and(|f| f.calendar.is_some())
     }
 
     fn move_key(&mut self, ck: KeyCombination) -> Outcome {
@@ -1171,12 +1172,12 @@ impl Form {
     fn calendar<'a, M: Clone + 'a>(
         &'a self,
         month: NaiveDate,
+        today: NaiveDate,
         chosen: Option<NaiveDate>,
         s: &'static Strings,
         c: Colors,
         on: impl Fn(Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
-        let today = chrono::Local::now().date_naive();
         let arrow = |label: &'static str, step: i32| {
             button(text(label).size(SIZE_BODY).color(c.text))
                 .on_press(on(Message::Month(step)))
@@ -1334,9 +1335,9 @@ impl Form {
             )
             .into()
         };
-        let input: Element<'a, M> = match &f.value {
-            Value::Text(value) => input(value, field::Follow::Never),
-            Value::Lines { content, .. } => field::guard(
+        let input: Element<'a, M> = match (&f.value, f.calendar) {
+            (Value::Text(value), _) => input(value, field::Follow::Never),
+            (Value::Lines { content, .. }, _) => field::guard(
                 text_editor(content)
                     .id(format!("form-field-{i}"))
                     .placeholder(f.placeholder.as_str())
@@ -1362,7 +1363,7 @@ impl Form {
                 field::Follow::Never,
             )
             .into(),
-            Value::Masked { text, .. } if f.calendar => {
+            (Value::Masked { text, .. }, Some(today)) => {
                 let shown = self.picker.filter(|(at, _)| *at == i);
                 let toggle = container(
                     button(ui::icon(
@@ -1385,6 +1386,7 @@ impl Form {
                         line,
                         self.calendar(
                             month,
+                            today,
                             NaiveDate::parse_from_str(text, "%Y-%m-%d").ok(),
                             s,
                             c,
@@ -1396,13 +1398,16 @@ impl Form {
                     None => line.into(),
                 }
             }
-            Value::Masked { text, .. } => input(text, field::Follow::Typing),
-            Value::Search {
-                text: written,
-                dropdown,
-                top,
-                ..
-            } => {
+            (Value::Masked { text, .. }, None) => input(text, field::Follow::Typing),
+            (
+                Value::Search {
+                    text: written,
+                    dropdown,
+                    top,
+                    ..
+                },
+                _,
+            ) => {
                 let dropdown = *dropdown;
                 // a drop-down shows a window of its rows, from `top`
                 let (first, rows) = match dropdown {
@@ -1543,8 +1548,8 @@ impl Form {
                 .spacing(4)
                 .into()
             }
-            Value::Check { .. } => iced::widget::space::vertical().height(0).into(),
-            Value::Choice { options, index } => {
+            (Value::Check { .. }, _) => iced::widget::space::vertical().height(0).into(),
+            (Value::Choice { options, index }, _) => {
                 // the field is one line high: a long label is cut with an
                 // ellipsis (the items are told apart by their index)
                 let items: Vec<ChoiceItem> = options
@@ -1585,7 +1590,7 @@ impl Form {
                 })
                 .into()
             }
-            Value::Segments { options, index } => container(
+            (Value::Segments { options, index }, _) => container(
                 Row::with_children(options.iter().enumerate().map(|(n, option)| {
                     let chosen = n == *index;
                     let ink = match chosen {
@@ -1885,7 +1890,7 @@ mod tests {
         let mut f = Form::new(
             "t",
             vec![
-                Field::masked("d", "2026-11-23", Mask::Date, "").with_calendar(),
+                Field::masked("d", "2026-11-23", Mask::Date, "").with_calendar(day(2026, 11, 26)),
                 Field::masked("plain", "", Mask::Date, ""),
             ],
         );

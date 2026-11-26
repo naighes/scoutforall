@@ -3,6 +3,7 @@
 //! activity written before, to copy. The fields of `form`, saved through
 //! `mobile`, which checks them; an error takes the keys to its field.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::scope::{Answer, SCOPES, ScopeQuestion},
     crate::{
@@ -204,14 +205,16 @@ impl SessionEditor {
                 vec![s.single_session.to_string(), s.weekly_series.to_string()],
                 0,
             ),
-            Field::masked(s.date, &date, Mask::Date, s.date_placeholder).with_calendar(),
+            Field::masked(s.date, &date, Mask::Date, s.date_placeholder)
+                .with_calendar(core.clock().today()),
             Field::masked(s.time, &time, Mask::Time, s.time_placeholder),
             Field::text(s.session_duration, draft.duration.clone()),
             Field {
                 value: venue_value(&venues, draft.venue.as_deref()),
                 ..Field::choice(s.session_location, vec![], 0)
             },
-            Field::masked(s.until_day, "", Mask::Date, s.date_placeholder).with_calendar(),
+            Field::masked(s.until_day, "", Mask::Date, s.date_placeholder)
+                .with_calendar(core.clock().today()),
             Field::text(s.session_title, draft.title.clone()),
             Field::lines(s.objectives, draft.objectives.clone()),
             Field::lines(s.notes, draft.notes.clone()),

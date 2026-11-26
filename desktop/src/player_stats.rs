@@ -12,7 +12,7 @@ use {
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL, grade_color},
         ui,
     },
-    chrono::{Local, NaiveDate},
+    chrono::NaiveDate,
     iced::{
         Element, Length,
         widget::{Column, Row, column, container, responsive, scrollable, space, text},
@@ -53,11 +53,11 @@ pub struct Filters {
     pub competition: Option<Uuid>,
 }
 
-impl Default for Filters {
-    /// The whole season.
-    fn default() -> Filters {
+impl Filters {
+    /// The whole season, `today` in it.
+    pub fn season(today: NaiveDate) -> Filters {
         Filters {
-            choice: PeriodChoice::new(Kind::Season, Local::now().date_naive()),
+            choice: PeriodChoice::new(Kind::Season, today),
             period: AnalysisPeriod::Season,
             competition: None,
         }

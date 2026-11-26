@@ -3,6 +3,7 @@
 //! fields of `form`, saved through the core, which checks them. An error
 //! takes the keys to its field.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
         countries,
@@ -897,12 +898,12 @@ impl Editor {
         id: Option<String>,
         day: Option<NaiveDate>,
     ) -> Result<Editor, MobileError> {
-        let now = Local::now();
+        let now = core.clock().zoned_now();
         // a time the clock skips on that day (summer time): now
         let new = day
             .and_then(|d| d.and_time(now.time()).and_local_timezone(Local).earliest())
-            .unwrap_or(now)
-            .fixed_offset();
+            .map(|at| at.fixed_offset())
+            .unwrap_or(now);
         let data = match &id {
             Some(id) => core.match_form(team_id.clone(), id.clone())?,
             None => MatchForm::new(new),

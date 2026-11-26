@@ -5,6 +5,7 @@
 //! between players and matches, ↑ ↓ in the list, ⌫ deletes the one
 //! chosen, ⇧⌫ the team, t starts the new season.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
         agenda::{self, Agenda, Pick},
@@ -173,11 +174,7 @@ impl TeamScreen {
     pub fn new(core: Arc<Scout4All>, team_id: String) -> Result<TeamScreen, MobileError> {
         let details = core.team(team_id.clone())?;
         let matches = core.matches(team_id.clone())?;
-        let week = Agenda::week(
-            &core,
-            Some(team_id.clone()),
-            chrono::Local::now().date_naive(),
-        );
+        let week = Agenda::week(&core, Some(team_id.clone()), core.clock().today());
         let logo = TeamScreen::logo_of(&core, &team_id);
         let photos = TeamScreen::photos_of(&core, &details);
         Ok(TeamScreen {
@@ -265,7 +262,9 @@ impl TeamScreen {
     fn profile_tab(&mut self, tab: Tab) {
         let read = self.profile.as_ref().is_some_and(|p| p.stats.is_some());
         match (tab, read) {
-            (Tab::Statistics, false) => self.show_statistics(Filters::default()),
+            (Tab::Statistics, false) => {
+                self.show_statistics(Filters::season(self.core.clock().today()))
+            }
             (Tab::Statistics, true) | (Tab::Profile, _) => {
                 if let Some(open) = &mut self.profile {
                     open.tab = tab;

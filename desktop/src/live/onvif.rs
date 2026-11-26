@@ -5,6 +5,7 @@
 //! camera found is kept as its ONVIF address (`http://…/onvif/…`): its
 //! RTSP address asked again at each connection, as the camera says it.
 
+use scout4all_mobile::clock::Clock;
 use {
     super::network::{ANSWER_WITHIN, Problem, problem_of},
     base64::{Engine, engine::general_purpose::STANDARD as BASE64},
@@ -153,6 +154,7 @@ fn percent_decoded(text: &str) -> String {
 pub async fn stream_uri(
     device: &url::Url,
     user: Option<(String, String)>,
+    clock: &dyn Clock,
 ) -> Result<url::Url, Problem> {
     let client = reqwest::Client::builder()
         .timeout(ANSWER_WITHIN)
@@ -162,7 +164,8 @@ pub async fn stream_uri(
         client,
         user,
         // the camera's clock, for the digest: it refuses one too far off
-        offset: camera_clock(&Soap::anonymous(), device).await,
+        offset: camera_clock(&Soap::anonymous(clock), device).await,
+        clock,
     };
     let capabilities = soap
         .call(
@@ -237,7 +240,7 @@ fn profile_token(profiles: &str) -> Option<String> {
 
 /// How far the camera's clock is from this one's, as it says it
 /// (`GetSystemDateAndTime`, asked of everyone); none, none.
-async fn camera_clock(soap: &Soap, device: &url::Url) -> TimeDelta {
+async fn camera_clock(soap: &Soap<'_>, device: &url::Url) -> TimeDelta {
     let answer = soap
         .call(
             device,
@@ -247,7 +250,7 @@ async fn camera_clock(soap: &Soap, device: &url::Url) -> TimeDelta {
     answer
         .ok()
         .and_then(|a| utc_of(&a))
-        .map(|theirs| theirs - Utc::now())
+        .map(|theirs| theirs - DateTime::<Utc>::from(soap.clock.utc_now()))
         .unwrap_or_default()
 }
 
@@ -271,14 +274,15 @@ fn utc_of(answer: &str) -> Option<DateTime<Utc>> {
 }
 
 /// The requests to the camera: SOAP 1.2, with the user if any.
-struct Soap {
+struct Soap<'a> {
     client: reqwest::Client,
     user: Option<(String, String)>,
     offset: TimeDelta,
+    clock: &'a dyn Clock,
 }
 
-impl Soap {
-    fn anonymous() -> Soap {
+impl Soap<'_> {
+    fn anonymous(clock: &dyn Clock) -> Soap<'_> {
         Soap {
             client: reqwest::Client::builder()
                 .timeout(ANSWER_WITHIN)
@@ -286,6 +290,7 @@ impl Soap {
                 .unwrap_or_default(),
             user: None,
             offset: TimeDelta::zero(),
+            clock,
         }
     }
 
@@ -296,7 +301,7 @@ impl Soap {
                 name,
                 password,
                 uuid::Uuid::new_v4().as_bytes(),
-                Utc::now() + self.offset,
+                DateTime::<Utc>::from(self.clock.utc_now()) + self.offset,
             ),
             _ => String::new(),
         };
@@ -669,19 +674,19 @@ mod tests {
             let device =
                 url::Url::parse(&format!("http://127.0.0.1:{port}/onvif/device_service")).unwrap();
             let user = |password: &str| Some(("admin".to_string(), password.to_string()));
-            let uri = stream_uri(&device, user("segreta")).await.unwrap();
+            let uri = stream_uri(&device, user("segreta"), &scout4all_mobile::clock::SystemClock).await.unwrap();
             assert_eq!(
                 uri.as_str(),
                 "rtsp://127.0.0.1:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
             );
             assert_eq!(
-                stream_uri(&device, user("sbagliata")).await,
+                stream_uri(&device, user("sbagliata"), &scout4all_mobile::clock::SystemClock).await,
                 Err(Problem::Refused)
             );
-            assert_eq!(stream_uri(&device, None).await, Err(Problem::Refused));
+            assert_eq!(stream_uri(&device, None, &scout4all_mobile::clock::SystemClock).await, Err(Problem::Refused));
             let nobody = url::Url::parse("http://127.0.0.1:9/onvif/device_service").unwrap();
             assert_eq!(
-                stream_uri(&nobody, user("segreta")).await,
+                stream_uri(&nobody, user("segreta"), &scout4all_mobile::clock::SystemClock).await,
                 Err(Problem::Unreachable)
             );
         });
@@ -700,11 +705,14 @@ mod tests {
         };
         let found = discover(SEARCH_WITHIN);
         let camera = found.first().expect("no camera answered").clone();
-        let capture = Capture::open(Source::Network(NetworkSource {
-            url: camera.address.clone(),
-            username: "scout".into(),
-            password: "segreta".into(),
-        }));
+        let capture = Capture::open(
+            Source::Network(NetworkSource {
+                url: camera.address.clone(),
+                username: "scout".into(),
+                password: "segreta".into(),
+            }),
+            std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+        );
         let seen = (0..150).any(|_| {
             std::thread::sleep(Duration::from_millis(100));
             capture.status().is_some_and(|s| s.frame.is_some())

@@ -8,6 +8,7 @@
 //! the rotation, the phase and the situation (role, our reception in the
 //! rally, the touch before, the set, the reception formation, the P1).
 
+use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
         calendar,
@@ -19,7 +20,7 @@ use {
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL, grade_color},
         ui,
     },
-    chrono::{Local, NaiveDate},
+    chrono::NaiveDate,
     iced::{
         Alignment, Color, Element, Length,
         widget::{
@@ -704,6 +705,7 @@ impl StatsScreen {
 
     fn with(core: Arc<Scout4All>, team_id: String, source: Source, title: String) -> Self {
         let choices = core.situation_choices();
+        let today = core.clock().today();
         StatsScreen {
             locked: None,
             photos: crate::editors::team_photos(&core, &team_id),
@@ -739,7 +741,7 @@ impl StatsScreen {
             team_name: String::new(),
             opponents: vec![],
             opponent: None,
-            choice: PeriodChoice::new(Kind::LastMonth, Local::now().date_naive()),
+            choice: PeriodChoice::new(Kind::LastMonth, today),
             played: vec![],
             clip_evals: vec![],
             clip_zone: None,
