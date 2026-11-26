@@ -178,4 +178,95 @@ mod tests {
         assert!(assets::set_person_photo(&db, PERSON, Some(b"junk")).is_err());
         assert_eq!(count(&db), 1);
     }
+
+    /// A logo of `color` on a transparent square, `share` of it painted.
+    fn on_transparent(color: [u8; 3], share: f64) -> Vec<u8> {
+        let [r, g, b] = color;
+        let side = 20u32;
+        let painted = (f64::from(side * side) * share).round() as u32;
+        let image = RgbaImage::from_fn(side, side, |x, y| match y * side + x < painted {
+            true => Rgba([r, g, b, 255]),
+            false => Rgba([0, 0, 0, 0]),
+        });
+        let mut out = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut out, ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
+    }
+
+    /// Painted half white and half `other`, on a transparent square.
+    fn white_and(other: [u8; 3]) -> Vec<u8> {
+        let image = RgbaImage::from_fn(20, 20, |x, _| match x {
+            0..5 => Rgba([255, 255, 255, 255]),
+            5..10 => Rgba([other[0], other[1], other[2], 255]),
+            _ => Rgba([0, 0, 0, 0]),
+        });
+        let mut out = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut out, ImageFormat::Png)
+            .unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn the_tone_of_a_logo_is_the_one_of_its_visible_part() {
+        use assets::{LogoTone, logo_tone};
+        // the transparent part counts for nothing, however big
+        assert_eq!(
+            logo_tone(&on_transparent([255, 255, 255], 0.1)),
+            LogoTone::Light
+        );
+        assert_eq!(
+            logo_tone(&on_transparent([230, 230, 230], 0.9)),
+            LogoTone::Light
+        );
+        assert_eq!(logo_tone(&on_transparent([0, 0, 0], 0.3)), LogoTone::Dark);
+        assert_eq!(
+            logo_tone(&on_transparent([30, 30, 40], 0.5)),
+            LogoTone::Dark
+        );
+        // a color that shows on both backgrounds
+        assert_eq!(
+            logo_tone(&on_transparent([200, 30, 30], 0.5)),
+            LogoTone::Mixed
+        );
+        assert_eq!(
+            logo_tone(&on_transparent([128, 128, 128], 0.5)),
+            LogoTone::Mixed
+        );
+        // half white, half dark: the dark half shows on a light background
+        assert_eq!(logo_tone(&white_and([0, 0, 0])), LogoTone::Mixed);
+        assert_eq!(logo_tone(&white_and([250, 250, 250])), LogoTone::Light);
+    }
+
+    #[test]
+    fn a_logo_with_its_own_background_or_unreadable_has_no_tone() {
+        use assets::{LogoTone, logo_tone};
+        let opaque = encoded(30, 30, Rgba([255, 255, 255, 255]), ImageFormat::Png);
+        assert_eq!(logo_tone(&opaque), LogoTone::Mixed);
+        let jpeg = encoded(30, 30, Rgba([255, 255, 255, 255]), ImageFormat::Jpeg);
+        assert_eq!(logo_tone(&jpeg), LogoTone::Mixed);
+        assert_eq!(
+            logo_tone(&on_transparent([255, 255, 255], 0.0)),
+            LogoTone::Mixed
+        );
+        assert_eq!(logo_tone(b"junk"), LogoTone::Mixed);
+    }
+
+    #[test]
+    fn only_a_logo_of_the_tone_of_the_background_gets_a_backdrop() {
+        use assets::{LogoBackdrop, LogoTone};
+        let cases = [
+            (LogoTone::Light, false, LogoBackdrop::Dark),
+            (LogoTone::Light, true, LogoBackdrop::None),
+            (LogoTone::Dark, true, LogoBackdrop::Light),
+            (LogoTone::Dark, false, LogoBackdrop::None),
+            (LogoTone::Mixed, false, LogoBackdrop::None),
+            (LogoTone::Mixed, true, LogoBackdrop::None),
+        ];
+        for (tone, dark_theme, backdrop) in cases {
+            assert_eq!(tone.backdrop(dark_theme), backdrop, "{tone:?} {dark_theme}");
+        }
+    }
 }

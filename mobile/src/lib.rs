@@ -13,6 +13,7 @@ use scout4all_core::{
         queue_manager::QueueManager,
         upload::{UploadStep, upload_next, upload_url},
     },
+    assets::{LogoBackdrop, LogoTone},
     benchmark::{Measure, band, grade},
     competition_form::{CompetitionForm, CompetitionFormError},
     db,
@@ -3391,13 +3392,10 @@ impl Scouting {
         choices
             .into_iter()
             .filter_map(|c| {
-                session
-                    .team()
-                    .find_player(c.id)
-                    .map(|p| ScoutingPlayer {
-                        out_for_the_libero: c.out_for_the_libero,
-                        ..self.scouting_player(p)
-                    })
+                session.team().find_player(c.id).map(|p| ScoutingPlayer {
+                    out_for_the_libero: c.out_for_the_libero,
+                    ..self.scouting_player(p)
+                })
             })
             .collect()
     }
@@ -5665,6 +5663,33 @@ pub fn abbreviated_name(name: String) -> String {
 #[uniffi::export]
 pub fn offered_names(names: Vec<String>, written: String) -> Vec<String> {
     scout4all_core::names::offered(&names, &written)
+}
+
+#[uniffi::remote(Enum)]
+pub enum LogoTone {
+    Light,
+    Dark,
+    Mixed,
+}
+
+#[uniffi::remote(Enum)]
+pub enum LogoBackdrop {
+    None,
+    Dark,
+    Light,
+}
+
+/// The tone of the logo the bytes hold, to decide its backdrop once per
+/// logo.
+#[uniffi::export]
+pub fn logo_tone(bytes: Vec<u8>) -> LogoTone {
+    scout4all_core::assets::logo_tone(&bytes)
+}
+
+/// What goes behind a logo of `tone` on the theme so it doesn't vanish.
+#[uniffi::export]
+pub fn logo_backdrop(tone: LogoTone, dark_theme: bool) -> LogoBackdrop {
+    tone.backdrop(dark_theme)
 }
 
 /// The seconds a setting can take, both ends in.
@@ -11587,8 +11612,14 @@ mod tests {
         );
         let m = imported.match_id;
         let of_match = |filter| {
-            app.match_stats(team.clone(), m.clone(), MatchSide::A, StatsScope::Match, filter)
-                .unwrap()
+            app.match_stats(
+                team.clone(),
+                m.clone(),
+                MatchSide::A,
+                StatsScope::Match,
+                filter,
+            )
+            .unwrap()
         };
         assert!(of_match(DetailFilter::default()).team_figures);
         let narrowed = of_match(of_player);
