@@ -438,7 +438,7 @@ private fun DvwContent(
                     state.selected,
                     model::select,
                 )
-                state.opponentError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                state.opponentError?.let { FieldNote(it) }
             }
             is DvwStep.Ready -> {
                 val ready = step.ready
@@ -455,9 +455,7 @@ private fun DvwContent(
                     Text(stringResource(R.string.dvw_match_numbers, ready.matchNumbers.toInt()))
                 }
                 ready.competition?.let { Text(stringResource(R.string.dvw_competition, it)) }
-                ready.oneSide?.let { why ->
-                    Text(why.replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.error)
-                }
+                ready.oneSide?.let { why -> Banner(Level.WARNING, why) }
             }
             DvwStep.Done -> {
                 Question(stringResource(R.string.dvw_done))

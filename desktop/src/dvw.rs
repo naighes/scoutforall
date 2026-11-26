@@ -10,6 +10,7 @@ use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
         form::{self, Field, Form},
+        notice::{self, Level},
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
@@ -382,7 +383,7 @@ impl DvwScreen {
                     // another team B may do
                     Err(e) => {
                         self.step = Step::Opponent(similar, choice);
-                        self.form.fail(e.to_string());
+                        self.form.reject(0, e.to_string());
                     }
                 }
             }
@@ -607,7 +608,7 @@ impl DvwScreen {
         match &self.step {
             Step::Ready(ready, _) => {
                 let one_side: Element<'a, Message> = match &ready.one_side {
-                    Some(why) => ui::body(ui::capitalized(why)).color(c.danger).into(),
+                    Some(why) => notice::banner(Level::Warning, why, c),
                     None => column![].into(),
                 };
                 side_by_side(
