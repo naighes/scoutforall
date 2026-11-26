@@ -407,6 +407,9 @@ class ScreensLayoutTest(private val screen: Size) {
     fun theAbout() = assertFits("about", string(R.string.report_problem)) { AboutScreen(onBack = {}) }
 
     @Test
+    fun theLicenses() = assertFits("licenses", "SeetaFace Engine") { LicensesScreen(onBack = {}) }
+
+    @Test
     fun theTerms() = assertFits("terms", string(R.string.accept_terms), string(R.string.accept_terms)) {
         TermsScreen(onAccept = {}, onBack = {})
     }

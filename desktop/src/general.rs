@@ -1,7 +1,8 @@
 //! The settings of the app, beside its keys (F2): the language, the
 //! country a new team starts with, the statistics sent, the seconds of the
-//! video, how the digits choose a player while scouting; the terms of use
-//! and what the app is, with how to report a problem. Each change is saved
+//! video, how the digits choose a player while scouting; the terms of use,
+//! the licenses of the parts of others and what the app is, with how to
+//! report a problem. Each change is saved
 //! as it's made: the language in `config.json` as the TUI keeps it, the
 //! rest as the app saves it (`mobile`).
 
@@ -10,7 +11,7 @@ use {
         countries,
         form::{self, Field, Form},
         strings::Strings,
-        theme::{Colors, SIZE_BODY, SIZE_SMALL},
+        theme::{self, Colors, SIZE_BODY, SIZE_SMALL, icons::CLOSE},
         ui,
     },
     iced::{
@@ -22,7 +23,7 @@ use {
         shapes::enums::LanguageEnum,
     },
     scout4all_keys::{KeyCombination, PlayerKeysEnum, key},
-    scout4all_mobile::{Scout4All, Terms},
+    scout4all_mobile::{Licenses, Scout4All, Terms},
     std::{path::Path, sync::Arc},
 };
 
@@ -78,6 +79,16 @@ pub enum Message {
     Form(form::Message),
     Open(Link),
     Terms,
+    Licenses,
+    /// the terms or the licenses closed, back to the settings
+    Close,
+}
+
+/// A text read on its own over the settings, closed with Esc or its button.
+#[derive(Debug, Clone)]
+pub enum Reading {
+    Terms(Terms),
+    Licenses(Licenses),
 }
 
 /// The languages, each in its own words, after the flag of where it's
@@ -151,8 +162,8 @@ pub struct General {
     /// how the digits choose a player while scouting: kept with the keys
     pub player_keys: PlayerKeysEnum,
     pub form: Form,
-    /// the terms of use, being read
-    pub terms: Option<Terms>,
+    /// the terms of use or the licenses, being read
+    pub reading: Option<Reading>,
     pub error: Option<String>,
 }
 
@@ -167,7 +178,7 @@ impl General {
             language,
             player_keys,
             form: Form::new(s.general, vec![]),
-            terms: None,
+            reading: None,
             error: None,
             core,
         };
@@ -233,7 +244,7 @@ impl General {
     }
 
     pub fn focus_id(&self) -> Option<Id> {
-        match self.terms {
+        match self.reading {
             Some(_) => None,
             None => Some(self.form.focus_id()),
         }
@@ -338,14 +349,18 @@ impl General {
     }
 
     pub fn key(&mut self, dir: &Path, s: &Strings, ck: KeyCombination) -> bool {
-        match (&self.terms, ck) {
+        match (&self.reading, ck) {
             (Some(_), k) if k == scout4all_keys::BACK_KEY => {
-                self.terms = None;
+                self.reading = None;
                 true
             }
             (Some(_), _) => true,
             (None, k) if k == key!(t) => {
-                self.terms = Some(self.core.terms());
+                self.reading = Some(Reading::Terms(self.core.terms()));
+                true
+            }
+            (None, k) if k == key!(l) => {
+                self.reading = Some(Reading::Licenses(self.core.licenses()));
                 true
             }
             (None, k) if k == key!(r) => {
@@ -370,20 +385,29 @@ impl General {
                 true
             }
             Message::Terms => {
-                self.terms = Some(self.core.terms());
+                self.reading = Some(Reading::Terms(self.core.terms()));
+                true
+            }
+            Message::Licenses => {
+                self.reading = Some(Reading::Licenses(self.core.licenses()));
+                true
+            }
+            Message::Close => {
+                self.reading = None;
                 true
             }
         }
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        match self.terms {
-            Some(_) => vec![("Esc".to_string(), s.back.to_string())],
+        match self.reading {
+            Some(_) => vec![("Esc".to_string(), s.close.to_string())],
             None => vec![
                 ("⇧⇥ ⇥".to_string(), s.page.to_string()),
                 ("↑ ↓".to_string(), String::new()),
                 (format!("← → {}", s.space), s.change.to_string()),
                 ("t".to_string(), s.terms_of_use.to_string()),
+                ("l".to_string(), licenses_title(self.language)),
                 ("r".to_string(), s.report_problem.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
             ],
@@ -391,8 +415,11 @@ impl General {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        if let Some(terms) = &self.terms {
-            return terms_view(terms, None, c);
+        let close = || Some(ui::answers(None, CLOSE, s.close, Some(Message::Close), c));
+        match &self.reading {
+            Some(Reading::Terms(terms)) => return terms_view(terms, close(), c),
+            Some(Reading::Licenses(licenses)) => return licenses_view(licenses, close(), c),
+            None => {}
         }
         let error: Element<'a, Message> = match &self.error {
             Some(e) => ui::body(e.clone()).color(c.danger).into(),
@@ -400,16 +427,23 @@ impl General {
         };
         column![
             error,
-            self.form.view(s, c, Message::Form, Some(about(s, c)))
+            self.form
+                .view(s, c, Message::Form, Some(about(s, self.language, c)))
         ]
         .spacing(10)
         .into()
     }
 }
 
+/// The licenses of the parts of others, as the settings name them.
+fn licenses_title(language: LanguageEnum) -> String {
+    ui::capitalized(scout4all_core::localization::labels(language).third_party_licenses)
+}
+
 /// What the app is: its version, license, data and code; the terms and how
 /// to report a problem.
-fn about<'a>(s: &'static Strings, c: Colors) -> Element<'a, Message> {
+fn about<'a>(s: &'static Strings, language: LanguageEnum, c: Colors) -> Element<'a, Message> {
+    let licenses = licenses_title(language);
     let line = |label: &str, value: Element<'a, Message>| {
         column![
             text(label.to_string()).size(SIZE_SMALL).color(c.muted),
@@ -448,6 +482,10 @@ fn about<'a>(s: &'static Strings, c: Colors) -> Element<'a, Message> {
                 )
             ),
             line(
+                &licenses,
+                ui::pill(&format!("l  {licenses}"), false, Some(Message::Licenses), c)
+            ),
+            line(
                 s.report_problem_detail,
                 ui::pill(
                     &format!("r  {}", s.report_problem),
@@ -474,14 +512,75 @@ pub fn terms_view<'a, M: 'a>(
         .paragraphs
         .iter()
         .map(|p| text(p.clone()).size(SIZE_BODY).into());
+    document(
+        &terms.title,
+        Column::with_children(paragraphs).spacing(12).into(),
+        below,
+        c,
+    )
+}
+
+/// The licenses of the parts of others: what each is, then its text as
+/// written (monospaced, as its lines are laid out); `below` after them.
+pub fn licenses_view<'a, M: 'a>(
+    licenses: &Licenses,
+    below: Option<Element<'a, M>>,
+    c: Colors,
+) -> Element<'a, M> {
+    let parts = licenses.parts.iter().map(|p| {
+        column![
+            text(p.name.clone())
+                .size(SIZE_BODY)
+                .font(theme::fonts().bold)
+                .color(c.text),
+            text(ui::capitalized(&p.purpose))
+                .size(SIZE_SMALL)
+                .color(c.muted),
+            text(format!("{} · {}", p.license, p.source))
+                .size(SIZE_SMALL)
+                .color(c.accent),
+            container(
+                text(p.text.clone())
+                    .size(SIZE_SMALL)
+                    .font(iced::Font::MONOSPACE)
+                    .color(c.text)
+            )
+            .padding([8, 0]),
+        ]
+        .spacing(4)
+        .into()
+    });
+    document(
+        &licenses.title,
+        column![
+            ui::body(licenses.intro.clone()),
+            Column::with_children(parts).spacing(24),
+        ]
+        .spacing(16)
+        .into(),
+        below,
+        c,
+    )
+}
+
+/// A text read on its own, in the middle: the title, the body that
+/// scrolls, `below` at its end.
+fn document<'a, M: 'a>(
+    title: &str,
+    content: Element<'a, M>,
+    below: Option<Element<'a, M>>,
+    c: Colors,
+) -> Element<'a, M> {
     let body = column![
-        Column::with_children(paragraphs).spacing(12),
+        content,
         below.unwrap_or_else(|| space::vertical().height(0).into()),
     ]
     .spacing(20)
+    // the bar of the scroll beside the text, not over it
+    .padding(iced::Padding::ZERO.right(18))
     .width(Length::Fill);
     let panel = ui::panel(
-        Some(&ui::capitalized(&terms.title)),
+        Some(&ui::capitalized(title)),
         scrollable(body).height(Length::Fill),
         c,
     );
@@ -589,12 +688,25 @@ mod tests {
         assert_eq!(core.video_seconds().lead_s, *LEAD_SECONDS.end());
         // the terms, read and left with Esc; Esc again leaves the settings
         settings.key(key!(t), s);
-        assert!(settings.general.terms.is_some());
+        assert!(matches!(settings.general.reading, Some(Reading::Terms(_))));
         assert!(matches!(
             settings.key(scout4all_keys::BACK_KEY, s),
             crate::settings::Outcome::Stay
         ));
-        assert!(settings.general.terms.is_none());
+        assert!(settings.general.reading.is_none());
+        // the licenses of the parts of others, closed with their button
+        settings.key(key!(l), s);
+        assert!(matches!(
+            &settings.general.reading,
+            Some(Reading::Licenses(l)) if l.parts.len() == 3
+        ));
+        settings.update(crate::settings::Message::General(Message::Close), s);
+        assert!(settings.general.reading.is_none());
+        // the terms closed with it too
+        settings.update(crate::settings::Message::General(Message::Terms), s);
+        assert!(settings.general.reading.is_some());
+        settings.update(crate::settings::Message::General(Message::Close), s);
+        assert!(settings.general.reading.is_none());
         // Tab: the keys, and back
         settings.key(key!(tab), s);
         assert!(settings.focus_id().is_none());

@@ -16,6 +16,7 @@ pub mod event_edit;
 pub mod example;
 pub mod faces;
 pub mod legacy;
+pub mod licenses;
 pub mod localization;
 pub mod logging;
 pub mod match_form;

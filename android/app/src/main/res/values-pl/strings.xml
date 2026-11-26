@@ -236,6 +236,7 @@
     <string name="version">Wersja</string>
     <string name="license">Licencja</string>
     <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="third_party_licenses">Licencje stron trzecich</string>
     <string name="data_privacy">Dane i prywatność</string>
     <string name="source_code">Kod źródłowy</string>
     <string name="report_problem">Zgłoś problem</string>

@@ -246,7 +246,7 @@ impl SettingsScreen {
             || ck == key!(shift - backtab)
             || ck == key!(backtab);
         // the terms read, or a country offered to Tab
-        let reading = self.general.terms.is_some() || self.general.form.offering();
+        let reading = self.general.reading.is_some() || self.general.form.offering();
         match (self.page, turn && !self.waiting && !reading) {
             (_, true) => {
                 self.turn();
@@ -360,8 +360,8 @@ impl SettingsScreen {
             ),
         ]
         .spacing(8);
-        let page = match (self.page, &self.general.terms) {
-            // the terms on their own, as they're read
+        let page = match (self.page, &self.general.reading) {
+            // the terms or the licenses on their own, as they're read
             (Page::General, Some(_)) => return self.general.view(s, c).map(Message::General),
             (Page::General, None) => self.general.view(s, c).map(Message::General),
             (Page::Keys, _) => self.keys_view(s, c),

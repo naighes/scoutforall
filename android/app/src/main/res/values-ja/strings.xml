@@ -233,6 +233,7 @@
     <string name="version">バージョン</string>
     <string name="license">ライセンス</string>
     <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="third_party_licenses">サードパーティのライセンス</string>
     <string name="data_privacy">データとプライバシー</string>
     <string name="source_code">ソースコード</string>
     <string name="report_problem">問題を報告</string>

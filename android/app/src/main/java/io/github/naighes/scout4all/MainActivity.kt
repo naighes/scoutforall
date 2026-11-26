@@ -246,7 +246,10 @@ private fun Navigation(
             TermsScreen(onAccept = null, onBack = { nav.back(entry) })
         }
         composable("settings/about") { entry ->
-            AboutScreen(onBack = { nav.back(entry) })
+            AboutScreen(onBack = { nav.back(entry) }, onLicenses = { nav.navigate("settings/licenses") })
+        }
+        composable("settings/licenses") { entry ->
+            LicensesScreen(onBack = { nav.back(entry) })
         }
         composable("new-team") { entry ->
             TeamFormScreen(null, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })

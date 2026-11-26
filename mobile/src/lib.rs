@@ -5397,6 +5397,26 @@ impl Scout4All {
         }
     }
 
+    /// The licenses of the parts made by others the app carries, in the
+    /// settings beside the terms.
+    pub fn licenses(&self) -> Licenses {
+        let labels = self.language.labels();
+        Licenses {
+            title: labels.third_party_licenses.to_string(),
+            intro: labels.third_party_intro.to_string(),
+            parts: scout4all_core::licenses::THIRD_PARTIES
+                .iter()
+                .map(|p| ThirdPartyLicense {
+                    name: p.name.to_string(),
+                    purpose: p.purpose.label(labels).to_string(),
+                    source: p.source.to_string(),
+                    license: p.license.to_string(),
+                    text: p.text.trim().to_string(),
+                })
+                .collect(),
+        }
+    }
+
     /// Saves the current terms of use as seen, keeping the other settings
     /// (those of the TUI too). A new `config.json` has the language too,
     /// which the TUI needs.
@@ -5668,6 +5688,26 @@ pub fn version() -> String {
 pub struct Terms {
     pub title: String,
     pub paragraphs: Vec<String>,
+}
+
+/// The licenses of the parts made by others the app carries: the title, a
+/// line before them, then each part.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct Licenses {
+    pub title: String,
+    pub intro: String,
+    pub parts: Vec<ThirdPartyLicense>,
+}
+
+/// A part made by others: its name, what it's for, where it comes from, the
+/// name of its license and its full text (in English, as written).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ThirdPartyLicense {
+    pub name: String,
+    pub purpose: String,
+    pub source: String,
+    pub license: String,
+    pub text: String,
 }
 
 /// The key of the language in `config.json`.
@@ -6789,6 +6829,43 @@ mod tests {
         assert_eq!(app.terms().title, "warunki korzystania");
         app.set_language("xx".into());
         assert_eq!(app.terms().title, "terms of use");
+    }
+
+    #[test]
+    fn the_licenses_of_others_in_the_language_of_the_app_with_their_texts() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let licenses = app.licenses();
+        assert_eq!(licenses.title, "licenze di terze parti");
+        assert_eq!(
+            licenses
+                .parts
+                .iter()
+                .map(|p| (p.name.as_str(), p.license.as_str(), p.purpose.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "SeetaFace Engine",
+                    "BSD 2-Clause",
+                    "trova il volto in una foto, per ritagliarla"
+                ),
+                (
+                    "U-2-Net (U2NetP)",
+                    "Apache License 2.0",
+                    "toglie lo sfondo a una foto"
+                ),
+                (
+                    "Source Sans 3",
+                    "SIL Open Font License 1.1",
+                    "il carattere dei report PDF"
+                ),
+            ]
+        );
+        // the texts whole, without the blank lines around them
+        assert!(licenses.parts.iter().all(|p| p.text.len() > 1000));
+        assert!(licenses.parts.iter().all(|p| p.text == p.text.trim()));
+        app.set_language("ja".into());
+        assert_eq!(app.licenses().title, "サードパーティのライセンス");
     }
 
     fn form(name: &str) -> TeamForm {

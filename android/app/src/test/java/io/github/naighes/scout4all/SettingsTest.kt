@@ -41,6 +41,43 @@ class SettingsTest {
         rule.onNode(hasText(string(R.string.about)) and hasClickAction()).performClick()
         assertEquals(listOf("terms", "about"), opened)
     }
+
+    @Test
+    fun theLicensesOfOthersOpenFromTheAboutAndCloseWithTheArrow() {
+        val opened = mutableListOf<String>()
+        rule.setContent { Scout4AllTheme { AboutScreen(onBack = {}, onLicenses = { opened += "licenses" }) } }
+        rule.onNode(hasText(string(R.string.third_party_licenses)) and hasClickAction()).performClick()
+        assertEquals(listOf("licenses"), opened)
+    }
+}
+
+/** The licenses of the parts of others: each with its text, closed with the
+ * arrow back; the terms read from the settings close the same way. */
+@RunWith(RobolectricTestRunner::class)
+class LicensesTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun eachPartWithItsLicenseClosedWithTheArrow() {
+        var closed = false
+        rule.setContent { Scout4AllTheme { LicensesScreen(onBack = { closed = true }) } }
+        rule.waitForText("SeetaFace Engine")
+        for (part in listOf("U-2-Net (U2NetP)", "Source Sans 3")) {
+            rule.onNode(hasText(part)).assertExists()
+        }
+        rule.onNode(hasText("Redistributions in binary form", substring = true)).assertExists()
+        rule.onNodeWithContentDescription(string(R.string.back)).performClick()
+        assertEquals(true, closed)
+    }
+
+    @Test
+    fun theTermsFromTheSettingsCloseWithTheArrow() {
+        var closed = false
+        rule.setContent { Scout4AllTheme { TermsScreen(onAccept = null, onBack = { closed = true }) } }
+        rule.waitForText(core { it.terms() }.paragraphs.first())
+        rule.onNodeWithContentDescription(string(R.string.back)).performClick()
+        assertEquals(true, closed)
+    }
 }
 
 /** The seconds of the video: one more or less, saved at once, in their

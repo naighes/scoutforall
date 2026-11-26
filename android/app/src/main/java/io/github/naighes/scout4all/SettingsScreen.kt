@@ -180,12 +180,13 @@ private fun SecondsRow(headline: String, supporting: String, seconds: UInt, rang
     },
 )
 
-/** The version, the license, the data, the code, and how to report a
+/** The version, the license, the licenses of the parts of others, the
+ * data, the code, and how to report a
  * problem: an e-mail that opens an issue on Linear, with the version and
  * the device. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun AboutScreen(onBack: () -> Unit) {
+fun AboutScreen(onBack: () -> Unit, onLicenses: () -> Unit = {}) {
     val context = LocalContext.current
     val version = version()
     val reportTitle = stringResource(R.string.report_title)
@@ -203,6 +204,7 @@ fun AboutScreen(onBack: () -> Unit) {
             Row(stringResource(R.string.license), stringResource(R.string.license_name)) {
                 context.browse("$REPOSITORY/blob/master/LICENSE")
             }
+            Row(stringResource(R.string.third_party_licenses), null, onLicenses)
             Row(stringResource(R.string.data_privacy), null) {
                 context.browse(PRIVACY)
             }

@@ -438,6 +438,13 @@ pub struct Labels {
     pub terms_license: &'static str,
     pub terms_upload: &'static str,
     pub terms_full: &'static str,
+    /// the licenses of the parts of others the app carries (`licenses`):
+    /// the title, a line before them, what each part is for
+    pub third_party_licenses: &'static str,
+    pub third_party_intro: &'static str,
+    pub third_party_face_detection: &'static str,
+    pub third_party_background_removal: &'static str,
+    pub third_party_report_font: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -801,6 +808,11 @@ const EN: Labels = Labels {
     terms_license: "License. Scout4all is released under the GNU Affero General Public License v3.0 (AGPL-3.0-only). You can use, copy, modify and distribute it, even for a fee, as long as you keep the copyright notice and release your changes under the same license, with their source code: also when you offer them as an online service. The program comes with NO WARRANTY.",
     terms_upload: "Data. Unless you turn it off below, the matches you scout are sent to the developer to compute statistics and diagnose bugs; aggregate statistics can be used in future services of the project. They hold no names: teams and players appear only as random identifiers, along with the date, the category, the gender and the country of the team and the events of the match. When you scout both teams of a match, the events of the opposing team are sent too, also as random identifiers. To recognize the same team and the same match among different users, the names of the team and of the opponent pass through the server, which turns them into codes that cannot be turned back into the names, and does not keep them. The server records your IP address in its logs. Data controller: Nicola Baldi. You can change your choice at any time in the settings.",
     terms_full: "Full texts: the LICENSE and DATA-PRIVACY files, on https://github.com/naighes/scoutforall. Contact: nic.baldi@gmail.com",
+    third_party_licenses: "third-party licenses",
+    third_party_intro: "Parts made by others that the app carries, each with its license.",
+    third_party_face_detection: "finds the face in a photo, to crop it",
+    third_party_background_removal: "removes the background of a photo",
+    third_party_report_font: "the font of the PDF reports",
 };
 
 const IT: Labels = Labels {
@@ -1164,6 +1176,11 @@ const IT: Labels = Labels {
     terms_license: "Licenza. Scout4all è distribuito con la licenza GNU Affero General Public License v3.0 (AGPL-3.0-only). Puoi usarlo, copiarlo, modificarlo e distribuirlo, anche a pagamento, purché mantenga la nota di copyright e distribuisca le tue modifiche con la stessa licenza, insieme al loro codice sorgente: anche quando le offri come servizio online. Il programma è fornito SENZA ALCUNA GARANZIA.",
     terms_upload: "Dati. Se non lo disattivi qui sotto, le partite che registri vengono inviate allo sviluppatore per calcolare statistiche e diagnosticare bug; le statistiche aggregate possono essere usate in futuri servizi del progetto. Non contengono nomi: squadre e atleti compaiono solo come identificativi casuali, insieme a data, categoria, genere e paese della squadra ed eventi della partita. Quando registri entrambe le squadre di una partita, vengono inviati anche gli eventi della squadra avversaria, sempre come identificativi casuali. Per riconoscere la stessa squadra e la stessa partita fra utenti diversi, i nomi della squadra e dell'avversario passano dal server, che li trasforma in codici da cui non si risale ai nomi, senza conservarli. Il server registra il tuo indirizzo IP nei suoi log. Titolare del trattamento: Nicola Baldi. Puoi cambiare la tua scelta in qualsiasi momento nelle impostazioni.",
     terms_full: "Testi completi: i file LICENSE e DATA-PRIVACY, su https://github.com/naighes/scoutforall. Contatto: nic.baldi@gmail.com",
+    third_party_licenses: "licenze di terze parti",
+    third_party_intro: "Parti realizzate da altri che l'app contiene, ciascuna con la sua licenza.",
+    third_party_face_detection: "trova il volto in una foto, per ritagliarla",
+    third_party_background_removal: "toglie lo sfondo a una foto",
+    third_party_report_font: "il carattere dei report PDF",
 };
 
 const PT: Labels = Labels {
@@ -1527,6 +1544,11 @@ const PT: Labels = Labels {
     terms_license: "Licença. Scout4all é distribuído sob a GNU Affero General Public License v3.0 (AGPL-3.0-only). Você pode usá-lo, copiá-lo, modificá-lo e distribuí-lo, inclusive mediante pagamento, desde que mantenha o aviso de copyright e distribua suas modificações sob a mesma licença, junto com o código-fonte: também quando as oferecer como serviço online. O programa é fornecido SEM NENHUMA GARANTIA.",
     terms_upload: "Dados. A menos que você desative abaixo, as partidas que você registra são enviadas ao desenvolvedor para calcular estatísticas e diagnosticar bugs; as estatísticas agregadas podem ser usadas em futuros serviços do projeto. Elas não contêm nomes: equipes e atletas aparecem apenas como identificadores aleatórios, junto com a data, a categoria, o gênero e o país da equipe e os eventos da partida. Quando você registra as duas equipes de uma partida, os eventos da equipe adversária também são enviados, igualmente como identificadores aleatórios. Para reconhecer a mesma equipe e a mesma partida entre usuários diferentes, os nomes da equipe e do adversário passam pelo servidor, que os transforma em códigos dos quais não é possível obter os nomes, sem guardá-los. O servidor registra seu endereço IP em seus logs. Controlador dos dados: Nicola Baldi. Você pode mudar sua escolha a qualquer momento nas configurações.",
     terms_full: "Textos completos: os arquivos LICENSE e DATA-PRIVACY, em https://github.com/naighes/scoutforall. Contato: nic.baldi@gmail.com",
+    third_party_licenses: "licenças de terceiros",
+    third_party_intro: "Partes feitas por outros que o app contém, cada uma com sua licença.",
+    third_party_face_detection: "encontra o rosto em uma foto, para recortá-la",
+    third_party_background_removal: "remove o fundo de uma foto",
+    third_party_report_font: "a fonte dos relatórios em PDF",
 };
 
 const PL: Labels = Labels {
@@ -1890,6 +1912,11 @@ const PL: Labels = Labels {
     terms_license: "Licencja. Scout4all jest udostępniany na licencji GNU Affero General Public License v3.0 (AGPL-3.0-only). Możesz go używać, kopiować, modyfikować i rozpowszechniać, także odpłatnie, pod warunkiem zachowania informacji o prawach autorskich i udostępnienia swoich zmian na tej samej licencji, wraz z ich kodem źródłowym: również wtedy, gdy oferujesz je jako usługę online. Program jest dostarczany BEZ ŻADNEJ GWARANCJI.",
     terms_upload: "Dane. Jeśli nie wyłączysz tego poniżej, rejestrowane przez Ciebie mecze są wysyłane do twórcy w celu obliczania statystyk i diagnozowania błędów; zbiorcze statystyki mogą być wykorzystane w przyszłych usługach projektu. Nie zawierają nazwisk: drużyny i zawodnicy występują tylko jako losowe identyfikatory, wraz z datą, kategorią, płcią i krajem drużyny oraz zdarzeniami meczu. Gdy rejestrujesz obie drużyny meczu, wysyłane są także zdarzenia drużyny przeciwnej, również jako losowe identyfikatory. Aby rozpoznać tę samą drużynę i ten sam mecz u różnych użytkowników, nazwy drużyny i przeciwnika przechodzą przez serwer, który zamienia je na kody, z których nie da się odczytać nazw, i ich nie przechowuje. Serwer zapisuje Twój adres IP w swoich logach. Administrator danych: Nicola Baldi. Swój wybór możesz zmienić w każdej chwili w ustawieniach.",
     terms_full: "Pełne teksty: pliki LICENSE i DATA-PRIVACY na https://github.com/naighes/scoutforall. Kontakt: nic.baldi@gmail.com",
+    third_party_licenses: "licencje stron trzecich",
+    third_party_intro: "Elementy stworzone przez innych, zawarte w aplikacji, każdy z własną licencją.",
+    third_party_face_detection: "znajduje twarz na zdjęciu, aby je przyciąć",
+    third_party_background_removal: "usuwa tło ze zdjęcia",
+    third_party_report_font: "czcionka raportów PDF",
 };
 
 const JA: Labels = Labels {
@@ -2253,6 +2280,11 @@ const JA: Labels = Labels {
     terms_license: "ライセンス。Scout4all は GNU Affero General Public License v3.0（AGPL-3.0-only）で公開されています。著作権表示を残し、変更を同じライセンスでソースコードとともに公開する限り、有料であっても使用、複製、改変、配布ができます。変更をオンラインサービスとして提供する場合も同様です。本プログラムは一切の保証なしに提供されます。",
     terms_upload: "データ。下で無効にしない限り、記録した試合は統計の算出とバグの診断のために開発者へ送信されます。集計された統計は、プロジェクトの今後のサービスで使われることがあります。名前は含まれません。チームと選手はランダムな識別子としてのみ記録され、試合の日付、カテゴリー、性別、チームの国、イベントとともに送信されます。試合の両チームを記録した場合は、相手チームのイベントも同様にランダムな識別子として送信されます。異なるユーザー間で同じチームと同じ試合を見分けるため、チーム名と対戦相手名はサーバーを経由し、名前に戻せないコードに変換されます。名前は保存されません。サーバーはログに IP アドレスを記録します。データ管理者：Nicola Baldi。選択は設定でいつでも変更できます。",
     terms_full: "全文：https://github.com/naighes/scoutforall の LICENSE と DATA-PRIVACY ファイル。連絡先：nic.baldi@gmail.com",
+    third_party_licenses: "サードパーティのライセンス",
+    third_party_intro: "アプリに含まれる他者が作成した部品と、それぞれのライセンス。",
+    third_party_face_detection: "写真の顔を見つけて切り抜く",
+    third_party_background_removal: "写真の背景を取り除く",
+    third_party_report_font: "PDFレポートのフォント",
 };
 
 /// Returns the labels of a language.

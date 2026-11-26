@@ -1,8 +1,9 @@
 # Models
 
 `seeta_fd_frontal_v1.0.bin` (1.2 MB): the frontal face detector of the
-SeetaFace engine (funnel-structured cascade), BSD 2-Clause license, taken
-from the `rustface` repository (https://github.com/atomashpolskiy/rustface).
+SeetaFace engine (funnel-structured cascade), BSD 2-Clause license (copy in
+`seeta_fd_frontal_v1.0.LICENSE`), taken from the `rustface` repository
+(https://github.com/atomashpolskiy/rustface).
 It runs locally, in `core::faces`, on every platform (pure Rust, no native
 library). Nothing leaves the device and nobody is recognized: it only finds
 where the face is.
@@ -15,3 +16,6 @@ of U-2-Net (https://github.com/xuebinqin/U-2-Net, Apache License 2.0, copy in
 the weights; they were trained on the DUTS-TR dataset. It runs locally through
 `tract-onnx`, with no native library. `core::faces` uses its mask to make the
 person photo transparent before the PNG is saved.
+
+The texts of both licenses, with the one of the fonts of the reports, are
+shown by the apps in the settings (`core::licenses`), as they ask.
