@@ -13,7 +13,7 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, space, text},
+        widget::{Column, Id, column, container, row, scrollable, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{CompetitionListing, MobileError, Scout4All},
@@ -50,6 +50,15 @@ pub struct CompetitionsScreen {
 }
 
 impl CompetitionsScreen {
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     pub fn new(core: Arc<Scout4All>) -> Result<CompetitionsScreen, MobileError> {
         let listed = core.competition_listings()?;
         Ok(CompetitionsScreen {
@@ -209,11 +218,7 @@ impl CompetitionsScreen {
             ),
             Mode::Browse => self.list(s, c),
         };
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![error, body].spacing(10).into()
+        body
     }
 
     /// How wide the list is at most: a name, its season and its matches
@@ -347,6 +352,19 @@ mod tests {
             })
             .collect();
         (core, team, matches)
+    }
+
+    #[test]
+    fn a_failure_of_the_page_is_told_over_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = scout4all_mobile::Scout4All::for_tests(
+            dir.path().to_string_lossy().into_owned(),
+            "en".into(),
+        )
+        .unwrap();
+        let mut screen = CompetitionsScreen::new(core).unwrap();
+        screen.error = Some("not saved".into());
+        crate::assert_told_over(crate::Screen::Competitions(Box::new(screen)), "not saved");
     }
 
     /// From the home with "c" (or its pill): the competitions with their
