@@ -63,7 +63,6 @@ import io.github.naighes.scout4all.core.TeamClassificationEnum
 import io.github.naighes.scout4all.core.TeamField
 import java.time.Instant
 import java.time.LocalDate
-import java.time.Year
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -138,7 +137,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
             mutableState.value = try {
                 app.core { core ->
                     val preview = core.previewDvw(bytes)
-                    val form = core.newTeamForm(Year.now().value.toUShort())
+                    val form = core.newTeamForm(app.clock.today().year.toUShort())
                     // from a team: the side like it to start, the home one
                     // when neither
                     val like = { side: DvwSide ->

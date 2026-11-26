@@ -35,7 +35,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.TimeZone
 
 /** What the video screen opens: the whole match, or the actions picked in
  * the statistics, of a match or of the matches of a team one after the
@@ -471,7 +470,7 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
             }
             NewVideoFile(uri.toString(), displayName(context, uri))
         }
-        val offset = TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000
+        val offset = app.clock.offset().totalSeconds
         change(files = true) { it.addFiles(added, offset) }
     }
 

@@ -306,7 +306,7 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
     val scope = rememberCoroutineScope()
     var version by rememberSaveable { mutableIntStateOf(0) }
     var asking by rememberSaveable { mutableStateOf(false) }
-    var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
+    var day by rememberSaveable { mutableStateOf(app.clock.today()) }
     val venue by produceState<VenueRecord?>(null, id, version) {
         value = try {
             app.core { it.venue(id) }
@@ -386,14 +386,14 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
                     IconButton(onClick = { day = day.minusWeeks(1) }) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
                     }
-                    TextButton(onClick = { day = LocalDate.now() }) { Text(stringResource(R.string.agenda_today)) }
+                    TextButton(onClick = { day = app.clock.today() }) { Text(stringResource(R.string.agenda_today)) }
                     IconButton(onClick = { day = day.plusWeeks(1) }) {
                         Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
                     }
                 }
             }
             // as in the agendas: the days with something and today, lit
-            val today = LocalDate.now()
+            val today = app.clock.today()
             val shown = week.filter { it.occupations.isNotEmpty() || it.date == today.toString() }
             if (shown.isEmpty()) {
                 item(key = "nothing") { NothingPlanned() }

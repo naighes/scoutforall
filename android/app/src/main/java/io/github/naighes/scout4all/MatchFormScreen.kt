@@ -76,6 +76,7 @@ import io.github.naighes.scout4all.core.RosterPlayer
 import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -213,8 +214,8 @@ class MatchFormViewModel(
                 app.core { core ->
                     val form = when (matchId) {
                         null -> when (example) {
-                            true -> core.tutorialMatchForm(teamId, rfc3339(OffsetDateTime.now()))
-                            false -> core.newMatchForm(rfc3339(day?.let { onDay(it, null) } ?: OffsetDateTime.now()))
+                            true -> core.tutorialMatchForm(teamId, rfc3339(app.clock.offsetNow()))
+                            false -> core.newMatchForm(rfc3339(day?.let { onDay(it, app.clock.now().toLocalTime()) } ?: app.clock.offsetNow()))
                         }
                         else -> core.matchForm(teamId, matchId)
                     }
@@ -631,12 +632,13 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 })
             }
             // the day of the match: the time of day stays
+            val clock = clock()
             val date = form.date?.let(::parseDate)
             DayField(
                 stringResource(R.string.date),
                 date?.toLocalDate(),
                 onDay = { day ->
-                    day?.let { d -> model.change(MatchField.DATE) { it.copy(date = rfc3339(onDay(d, date))) } }
+                    day?.let { d -> model.change(MatchField.DATE) { it.copy(date = rfc3339(onDay(d, date?.toLocalTime() ?: clock.now().toLocalTime()))) } }
                 },
                 otherwise = form.date.orEmpty(),
                 error = error(MatchField.DATE),
@@ -839,10 +841,9 @@ private fun parseDate(date: String): OffsetDateTime? = try {
     null
 }
 
-/** `day`, at the time of `date` (now without one), with the offset of the
- * phone on that day. */
-private fun onDay(day: LocalDate, date: OffsetDateTime?): OffsetDateTime =
-    day.atTime((date ?: OffsetDateTime.now()).toLocalTime())
+/** `day` at `time`, with the offset of the phone on that day. */
+private fun onDay(day: LocalDate, time: LocalTime): OffsetDateTime =
+    day.atTime(time)
         .atZone(ZoneId.systemDefault())
         .toOffsetDateTime()
 

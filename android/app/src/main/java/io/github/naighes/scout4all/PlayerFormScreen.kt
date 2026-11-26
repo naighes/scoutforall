@@ -395,7 +395,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
             // optional, after what scouting needs
             // a player is rarely a child: the calendar opens years back, at
             // most today
-            val today = remember { LocalDate.now() }
+            val today = clock().today()
             DayField(
                 stringResource(R.string.birth_date),
                 runCatching { LocalDate.parse(form.birthDate) }.getOrNull(),

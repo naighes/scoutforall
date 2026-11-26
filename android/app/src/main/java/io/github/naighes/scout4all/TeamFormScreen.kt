@@ -61,7 +61,6 @@ import io.github.naighes.scout4all.core.GenderChoice
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.TeamField
 import io.github.naighes.scout4all.core.TeamForm
-import java.time.Year
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -117,7 +116,7 @@ class TeamFormViewModel(private val app: Scout4AllApplication, private val id: S
             mutableState.value = try {
                 app.core { core ->
                     val form = id?.let { core.team(it).form }
-                        ?: core.newTeamForm(Year.now().value.toUShort())
+                        ?: core.newTeamForm(app.clock.today().year.toUShort())
                     TeamFormState.Editing(
                         form = form,
                         classifications = core.classifications(),

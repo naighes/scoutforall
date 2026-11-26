@@ -1,9 +1,13 @@
 package io.github.naighes.scout4all
 
 import androidx.work.testing.WorkManagerTestInitHelper
+import io.github.naighes.scout4all.core.Clock
 import io.github.naighes.scout4all.core.Scout4All
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneOffset
 
 /** The app, with a WorkManager that sends nothing: Robolectric creates the
  * app before the provider that would set it up. The core is called on the
@@ -14,6 +18,9 @@ import kotlinx.coroutines.Dispatchers
  * write. Without the log of the core: it is one for the JVM, each test
  * would move it into its own data. */
 class TestApplication : Scout4AllApplication() {
+    // the system's, until a test stops it (the core asks this one too)
+    override var clock: Clock = SystemClock
+
     override val coreDispatcher: CoroutineDispatcher get() = Dispatchers.Main.immediate
 
     var startedAgain = 0
@@ -33,4 +40,11 @@ class TestApplication : Scout4AllApplication() {
         WorkManagerTestInitHelper.initializeTestWorkManager(this)
         super.onCreate()
     }
+}
+
+/** A clock stopped at `now` on the wall, `offset` from UTC. */
+class FixedClock(private val now: LocalDateTime, private val offset: ZoneOffset) : Clock {
+    override fun now(): LocalDateTime = now
+
+    override fun utcNow(): Instant = now.toInstant(offset)
 }

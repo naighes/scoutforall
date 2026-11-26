@@ -1,6 +1,5 @@
 package io.github.naighes.scout4all
 
-import java.time.LocalDate
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.ContentScale
@@ -279,15 +278,17 @@ private fun Matches(
     is MatchesState.Failed -> Centered(modifier) { Text(state.message) }
     // room at the bottom: the button doesn't cover the last match
     is MatchesState.Loaded -> {
-        var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
+        val clock = clock()
+        val today = clock.today()
+        var day by rememberSaveable { mutableStateOf(today) }
         val week by rememberAgenda(teamId, AgendaSpan.WEEK, day, state)
         LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
             // the week above the matches
             agendaWeek(
-                week, LocalDate.now(), withTeam = false,
+                week, today, withTeam = false,
                 onPrevious = { day = day.minusWeeks(1) },
                 onNext = { day = day.plusWeeks(1) },
-                onToday = { day = LocalDate.now() },
+                onToday = { day = clock.today() },
                 onMatch = { _, m -> onMatch(m) },
                 onSession = { _, s -> onSession(s) },
             )

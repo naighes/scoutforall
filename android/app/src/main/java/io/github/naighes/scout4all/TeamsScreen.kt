@@ -34,7 +34,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
-import java.time.LocalDate
 import io.github.naighes.scout4all.core.AgendaSpan
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -161,15 +160,16 @@ fun TeamsScreen(
                             list.animateScrollToItem(count - 1)
                         }
                     }
-                    var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
-                    val today = LocalDate.now()
+                    val clock = clock()
+                    val today = clock.today()
+                    var day by rememberSaveable { mutableStateOf(today) }
                     val week by rememberAgenda(null, AgendaSpan.WEEK, day, s.home)
                     LazyColumn(modifier, list, contentPadding = PaddingValues(bottom = 88.dp)) {
                     agendaWeek(
                         week, today, withTeam = true,
                         onPrevious = { day = day.minusWeeks(1) },
                         onNext = { day = day.plusWeeks(1) },
-                        onToday = { day = LocalDate.now() },
+                        onToday = { day = clock.today() },
                         onMatch = onMatch,
                         onSession = onSession,
                     )

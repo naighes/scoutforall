@@ -175,8 +175,9 @@ internal fun TrainingScreen(
 ) {
     var part by rememberSaveable { mutableStateOf(first) }
     var view by rememberSaveable { mutableStateOf(firstView) }
+    val clock = clock()
     var level by rememberSaveable { mutableStateOf(Level.MICROCYCLE) }
-    var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
+    var day by rememberSaveable { mutableStateOf(clock.today()) }
     var sharing by rememberSaveable { mutableStateOf(false) }
     // what is marked to make a cycle of it: the sessions stay across the
     // views and periods of the calendar, the cycles while on their level
@@ -341,7 +342,7 @@ private fun CalendarTab(
     var venue by rememberSaveable { mutableStateOf<String?>(null) }
     var filter by rememberSaveable { mutableStateOf(EventFilter.ALL) }
     var period by rememberSaveable { mutableStateOf(ListPeriod.ANY) }
-    val today = LocalDate.now()
+    val today = clock().today()
     val team = teamId.takeIf { !allTeams }
     val monthDays by rememberAgenda(team, AgendaSpan.MONTH, month.atDay(1), month)
     val weekDays by rememberAgenda(team, AgendaSpan.WEEK, selected, weekOf(selected).first)
@@ -406,7 +407,7 @@ private fun CalendarTab(
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
             }
             TextButton(onClick = {
-                month = YearMonth.now()
+                month = YearMonth.from(today)
                 onSelected(today)
             }) { Text(stringResource(R.string.agenda_today)) }
             IconButton(onClick = {
@@ -689,7 +690,7 @@ private fun AttendanceTab(teamId: String, modifier: Modifier) {
     val cycles by rememberCore(Unit, teamId) { core ->
         listOf(Level.PROGRAM, Level.MESOCYCLE, Level.MICROCYCLE).flatMap { l -> core.cycles(teamId, l).map { l to it } }
     }
-    val today = LocalDate.now()
+    val today = clock().today()
     val scopes = buildList<Triple<String, String, TrainingScope>> {
         add(Triple("all", stringResource(R.string.tr_whole_season), TrainingScope.All))
         weekOf(today).let { (a, b) -> add(Triple("week", stringResource(R.string.tr_this_week), TrainingScope.Dates(a.toString(), b.toString()))) }

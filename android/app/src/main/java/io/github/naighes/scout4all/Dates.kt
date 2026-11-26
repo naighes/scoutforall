@@ -105,7 +105,7 @@ internal fun DayField(
     if (picking) {
         // the picker counts days in UTC
         val millis = { d: LocalDate -> d.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
-        val today = LocalDate.now()
+        val today = clock().today()
         val picker = rememberDatePickerState(
             initialSelectedDateMillis = day?.let(millis),
             initialDisplayedMonthMillis = millis(day ?: opensAt ?: today),

@@ -317,7 +317,7 @@ fun CycleScreen(
     // matches of the team
     val days by rememberAgendaBetween(teamId, first, last, level == Level.MICROCYCLE && first != null)
     val held = children.orEmpty().map { it.id }.toSet()
-    val today = LocalDate.now()
+    val today = clock().today()
     Scaffold(
         topBar = {
             TopAppBar(
@@ -541,7 +541,7 @@ private fun CycleFields(
     val scope = rememberCoroutineScope()
     val first = remember {
         draft.start?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
-            ?: LocalDate.now().let { today ->
+            ?: app.clock.today().let { today ->
                 if (level == Level.MICROCYCLE) today.minusDays((today.dayOfWeek.value - 1).toLong()) else today
             }
     }

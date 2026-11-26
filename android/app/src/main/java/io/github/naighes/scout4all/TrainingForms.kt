@@ -174,7 +174,7 @@ private fun SessionFields(
     val first = remember {
         draft.start?.let(LocalDateTime::parse)
             ?: initialDay?.atTime(initialTime ?: LocalTime.of(18, 0))
-            ?: LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
+            ?: app.clock.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
     }
     val busyDays = rememberBusyDays(teamId)
     var day by rememberSaveable { mutableStateOf<LocalDate?>(first.toLocalDate()) }
