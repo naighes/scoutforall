@@ -173,6 +173,15 @@ impl StartScreen {
         self.error = Some(reason);
     }
 
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     fn go_to(&mut self, step: Step) {
         self.step = step;
         self.lineup = self.start.lineup();
@@ -409,10 +418,6 @@ impl StartScreen {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         let left = container(ui::panel(
             Some(&self.step_title(s)),
             self.choices_view(s, c),
@@ -434,7 +439,7 @@ impl StartScreen {
             .height(Length::Fill)
             .into(),
         };
-        column![error, body].spacing(10).into()
+        body
     }
 
     fn choices_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -780,6 +785,27 @@ mod tests {
         app.set_person_photo(first.clone(), Some(crate::scouting::tests::PNG.to_vec()))
             .unwrap();
         assert_eq!(open(&app).photo_ids(), vec![first]);
+    }
+
+    /// A set that can't start is told by the app in its dialog, and gone
+    /// once closed.
+    #[test]
+    fn a_failure_of_the_start_is_told_over_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = new_match(&app);
+        let start = app.set_start(team.clone(), m.clone()).unwrap();
+        let mut screen = crate::Screen::Start(Box::new(StartScreen::new(start, None, team, m)));
+        assert_eq!(screen.failure(), None);
+        if let crate::Screen::Start(start) = &mut screen {
+            start.failed("no set".into());
+        }
+        assert_eq!(screen.failure().map(String::as_str), Some("no set"));
+        if let Some(failure) = screen.failure_mut() {
+            *failure = None;
+        }
+        assert_eq!(screen.failure(), None);
     }
 
     fn press(screen: &mut StartScreen, ck: KeyCombination) -> Outcome {

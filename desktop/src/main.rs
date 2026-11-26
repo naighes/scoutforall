@@ -145,6 +145,7 @@ impl Screen {
     fn failure(&self) -> Option<&String> {
         match self {
             Screen::Team(screen) => screen.failure().as_ref(),
+            Screen::Start(screen) => screen.failure().as_ref(),
             _ => None,
         }
     }
@@ -153,6 +154,7 @@ impl Screen {
     fn failure_mut(&mut self) -> Option<&mut Option<String>> {
         match self {
             Screen::Team(screen) => Some(screen.failure_mut()),
+            Screen::Start(screen) => Some(screen.failure_mut()),
             _ => None,
         }
     }
