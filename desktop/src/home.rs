@@ -387,6 +387,7 @@ impl HomeScreen {
                             .size(SIZE_SMALL)
                             .color(c.muted),
                     ]
+                    .spacing(6)
                     .align_y(Alignment::Center),
                     self.is_selected(TEAMS, i),
                     Some(Message::Team(id.clone())),
