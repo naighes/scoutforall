@@ -3,7 +3,7 @@
 //! them in the settings. The text of a license stays as written, in English.
 //!
 //! The libraries the program is built with (Rust crates, Android libraries)
-//! aren't here yet.
+//! come last, in one text written by `scripts/licenses.py`.
 
 use crate::localization::Labels;
 
@@ -13,6 +13,7 @@ pub enum Purpose {
     FaceDetection,
     BackgroundRemoval,
     ReportFont,
+    Libraries,
 }
 
 impl Purpose {
@@ -21,6 +22,7 @@ impl Purpose {
             Purpose::FaceDetection => labels.third_party_face_detection,
             Purpose::BackgroundRemoval => labels.third_party_background_removal,
             Purpose::ReportFont => labels.third_party_report_font,
+            Purpose::Libraries => labels.third_party_libraries,
         }
     }
 }
@@ -38,9 +40,9 @@ pub struct ThirdParty {
     pub text: &'static str,
 }
 
-/// The parts made by others the app carries: the models of `faces` and the
-/// font of the reports.
-pub const THIRD_PARTIES: [ThirdParty; 3] = [
+/// The parts made by others the app carries: the models of `faces`, the
+/// font of the reports, then the libraries.
+pub const THIRD_PARTIES: [ThirdParty; 4] = [
     ThirdParty {
         name: "SeetaFace Engine",
         purpose: Purpose::FaceDetection,
@@ -62,6 +64,13 @@ pub const THIRD_PARTIES: [ThirdParty; 3] = [
         license: "SIL Open Font License 1.1",
         text: include_str!("../assets/fonts/LICENSE.md"),
     },
+    ThirdParty {
+        name: "Rust crates, Android libraries",
+        purpose: Purpose::Libraries,
+        source: "https://github.com/naighes/scoutforall",
+        license: "MIT, Apache 2.0, …",
+        text: include_str!("../licenses/libraries.txt"),
+    },
 ];
 
 #[cfg(test)]
@@ -71,7 +80,7 @@ mod tests {
 
     #[test]
     fn each_part_carries_the_whole_text_of_its_license() {
-        let [seeta, u2net, font] = THIRD_PARTIES;
+        let [seeta, u2net, font, libraries] = THIRD_PARTIES;
         // the notice the BSD license asks to reproduce, its conditions
         assert!(seeta.text.contains("Chinese Academy of Sciences"));
         assert!(seeta.text.contains("Redistributions in binary form"));
@@ -79,6 +88,12 @@ mod tests {
         assert!(u2net.text.contains("END OF TERMS AND CONDITIONS"));
         assert!(font.text.contains("Copyright 2010-2024 Adobe"));
         assert!(font.text.contains("SIL OPEN FONT LICENSE Version 1.1"));
+        // each license once, with the libraries under it
+        assert!(libraries.text.starts_with("=== MIT ==="));
+        assert!(libraries.text.contains("Permission is hereby granted"));
+        assert!(libraries.text.contains("END OF TERMS AND CONDITIONS"));
+        assert!(libraries.text.contains("- serde "));
+        assert!(libraries.text.contains("AndroidX"));
     }
 
     #[test]

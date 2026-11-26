@@ -11,6 +11,8 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.performScrollToNode
 import io.github.naighes.scout4all.core.VideoSeconds
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -62,10 +64,14 @@ class LicensesTest {
         var closed = false
         rule.setContent { Scout4AllTheme { LicensesScreen(onBack = { closed = true }) } }
         rule.waitForText("SeetaFace Engine")
-        for (part in listOf("U-2-Net (U2NetP)", "Source Sans 3")) {
-            rule.onNode(hasText(part)).assertExists()
+        val list = rule.onNode(hasScrollToNodeAction())
+        list.performScrollToNode(hasText("Redistributions in binary form", substring = true))
+        for (part in listOf("U-2-Net (U2NetP)", "Source Sans 3", "Rust crates, Android libraries")) {
+            list.performScrollToNode(hasText(part))
         }
-        rule.onNode(hasText("Redistributions in binary form", substring = true)).assertExists()
+        // the libraries, their thousands of lines in paragraphs
+        list.performScrollToNode(hasText("- serde ", substring = true))
+        list.performScrollToNode(hasText("Permission is hereby granted", substring = true))
         rule.onNodeWithContentDescription(string(R.string.back)).performClick()
         assertEquals(true, closed)
     }

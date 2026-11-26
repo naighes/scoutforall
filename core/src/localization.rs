@@ -445,6 +445,7 @@ pub struct Labels {
     pub third_party_face_detection: &'static str,
     pub third_party_background_removal: &'static str,
     pub third_party_report_font: &'static str,
+    pub third_party_libraries: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -813,6 +814,7 @@ const EN: Labels = Labels {
     third_party_face_detection: "finds the face in a photo, to crop it",
     third_party_background_removal: "removes the background of a photo",
     third_party_report_font: "the font of the PDF reports",
+    third_party_libraries: "the libraries the app is built with",
 };
 
 const IT: Labels = Labels {
@@ -1181,6 +1183,7 @@ const IT: Labels = Labels {
     third_party_face_detection: "trova il volto in una foto, per ritagliarla",
     third_party_background_removal: "toglie lo sfondo a una foto",
     third_party_report_font: "il carattere dei report PDF",
+    third_party_libraries: "le librerie con cui è fatta l'app",
 };
 
 const PT: Labels = Labels {
@@ -1549,6 +1552,7 @@ const PT: Labels = Labels {
     third_party_face_detection: "encontra o rosto em uma foto, para recortá-la",
     third_party_background_removal: "remove o fundo de uma foto",
     third_party_report_font: "a fonte dos relatórios em PDF",
+    third_party_libraries: "as bibliotecas com que a app é feita",
 };
 
 const PL: Labels = Labels {
@@ -1917,6 +1921,7 @@ const PL: Labels = Labels {
     third_party_face_detection: "znajduje twarz na zdjęciu, aby je przyciąć",
     third_party_background_removal: "usuwa tło ze zdjęcia",
     third_party_report_font: "czcionka raportów PDF",
+    third_party_libraries: "biblioteki, z których zbudowana jest aplikacja",
 };
 
 const JA: Labels = Labels {
@@ -2285,6 +2290,7 @@ const JA: Labels = Labels {
     third_party_face_detection: "写真の顔を見つけて切り抜く",
     third_party_background_removal: "写真の背景を取り除く",
     third_party_report_font: "PDFレポートのフォント",
+    third_party_libraries: "アプリが使用しているライブラリ",
 };
 
 /// Returns the labels of a language.
