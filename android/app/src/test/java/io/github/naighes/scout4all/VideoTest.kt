@@ -4,6 +4,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -124,6 +125,14 @@ class VideoTest {
         rule.setContent { Scout4AllTheme { VideoScreen(VideoRequest.Match(team, match), onBack = {}) } }
         rule.waitForText(string(R.string.video_none))
         rule.onNodeWithText(string(R.string.video_choose)).assertIsEnabled()
+    }
+
+    /** A match that can't be read: told in the dialog of the app. */
+    @Test
+    fun aMatchThatCannotBeReadSaysWhy() {
+        val (team, _) = servedMatch()
+        rule.setContent { Scout4AllTheme { VideoScreen(VideoRequest.Match(team, "missing"), onBack = {}) } }
+        rule.waitFor { rule.onAllNodesWithTag(NOTICE_TAG).fetchSemanticsNodes().isNotEmpty() }
     }
 
     /** The events marked as TalkBack says them: the aces points won, the

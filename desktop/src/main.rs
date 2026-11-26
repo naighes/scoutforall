@@ -150,6 +150,7 @@ impl Screen {
             Screen::Match(screen) => screen.failure().as_ref(),
             Screen::Venues(screen) => screen.failure().as_ref(),
             Screen::Competitions(screen) => screen.failure().as_ref(),
+            Screen::Video(screen) => screen.failure().as_ref(),
             _ => None,
         }
     }
@@ -163,6 +164,7 @@ impl Screen {
             Screen::Match(screen) => Some(screen.failure_mut()),
             Screen::Venues(screen) => Some(screen.failure_mut()),
             Screen::Competitions(screen) => Some(screen.failure_mut()),
+            Screen::Video(screen) => Some(screen.failure_mut()),
             _ => None,
         }
     }

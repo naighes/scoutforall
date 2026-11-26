@@ -27,6 +27,7 @@ mod strip;
 
 use {
     crate::{
+        notice::{self, Level},
         strings::Strings,
         theme::{self, Colors, SIZE_SMALL},
         ui,
@@ -314,7 +315,10 @@ pub struct VideoScreen {
     /// the video of the actions of the team, before making it
     summary: Option<Summary>,
     /// why the video of the actions picked wasn't made
-    montage_error: Option<String>,
+    /// what went wrong saving or making something: the app tells it
+    failed: Option<String>,
+    /// "video not made", in the language the montage was asked in
+    not_made: &'static str,
 }
 
 /// The matches of a team with actions picked in its statistics, each with
@@ -416,7 +420,8 @@ impl VideoScreen {
             panel: None,
             montage: None,
             summary: None,
-            montage_error: None,
+            failed: None,
+            not_made: "",
         };
         screen.margins = Margins::read(&screen.dir);
         // the durations of the files first: the events in them
@@ -511,7 +516,7 @@ impl VideoScreen {
             }
             Err(e) => {
                 self.tour = Some(tour);
-                self.error = Some(e.to_string());
+                self.failed = Some(e.to_string());
             }
         }
     }
@@ -730,7 +735,7 @@ impl VideoScreen {
     /// thread; of the matches of a team summed up first (what's in, what's
     /// left out), made once asked (`make_montage`).
     pub fn start_montage(&mut self, s: &'static Strings) {
-        self.montage_error = None;
+        self.not_made = s.video_not_made;
         let several = self
             .tour
             .as_ref()
@@ -747,6 +752,19 @@ impl VideoScreen {
         }
     }
 
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.failed
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.failed
+    }
+
+    fn montage_failed(&mut self, why: String) {
+        self.failed = Some(format!("{}: {why}", self.not_made));
+    }
+
     /// The video of the actions of the team made, as summed up.
     fn make_montage(&mut self) {
         if let Some(summary) = self.summary.take() {
@@ -759,7 +777,7 @@ impl VideoScreen {
             return;
         }
         if let Err(e) = montage::prepare(&plan.output) {
-            self.montage_error = Some(e);
+            self.montage_failed(e);
             return;
         }
         self.montage = Some(montage::Montage::start(plan));
@@ -812,7 +830,7 @@ impl VideoScreen {
     fn set_margin(&mut self, margin: Margin, seconds: u32) {
         self.margins = self.margins.with(margin, seconds);
         if let Err(e) = self.margins.write(&self.dir) {
-            self.error = Some(e);
+            self.failed = Some(e);
         }
     }
 
@@ -821,7 +839,7 @@ impl VideoScreen {
     fn toggle_overlay(&mut self) {
         self.margins.overlay = !self.margins.overlay;
         if let Err(e) = self.margins.write(&self.dir) {
-            self.error = Some(e);
+            self.failed = Some(e);
         }
     }
 
@@ -898,10 +916,10 @@ impl VideoScreen {
             Ok(()) => {
                 self.profile = Some(profile);
                 if let Err(e) = self.load_events() {
-                    self.error = Some(e.to_string());
+                    self.failed = Some(e.to_string());
                 }
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => self.failed = Some(e.to_string()),
         }
     }
 
@@ -1175,7 +1193,7 @@ impl VideoScreen {
             self.montage = None;
             match made {
                 Ok(path) => return Outcome::Share(path, self.clips_title()),
-                Err(e) => self.montage_error = Some(e),
+                Err(e) => self.montage_failed(e),
             }
         }
         self.status = self.player.as_ref().and_then(Player::status);
@@ -1309,11 +1327,11 @@ impl VideoScreen {
                 self.profile = Some(profile);
                 self.open_player();
                 if let Err(e) = self.load_events() {
-                    self.error = Some(e.to_string());
+                    self.failed = Some(e.to_string());
                 }
                 self.after_start();
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => self.failed = Some(e.to_string()),
         }
     }
 
@@ -1632,8 +1650,12 @@ impl VideoScreen {
             Some(status) => self.controls(status, s, c),
             None => space::vertical().height(0).into(),
         };
+        let level = match self.profile {
+            Some(_) => Level::Error,
+            None => Level::Warning,
+        };
         let notice: Element<'a, Message> = match notice {
-            Some(n) => ui::body(n).color(c.danger).into(),
+            Some(n) => notice::banner(level, &n, c),
             None => space::vertical().height(0).into(),
         };
         let video = column![notice, screen, controls, file_line].spacing(10);
@@ -1916,11 +1938,15 @@ impl VideoScreen {
                         },
                     }),
                 match (self.invalid_time, self.time_effect()) {
-                    (true, _) => text(s.invalid_time).size(SIZE_SMALL).color(c.danger),
-                    (false, Some(TimeEffect::OnlyThis)) => {
-                        text(s.time_only_this).size(SIZE_SMALL).color(c.muted)
-                    }
-                    (false, _) => text(s.time_aligns_all).size(SIZE_SMALL).color(c.muted),
+                    (true, _) => notice::field_note(s.invalid_time, c),
+                    (false, Some(TimeEffect::OnlyThis)) => text(s.time_only_this)
+                        .size(SIZE_SMALL)
+                        .color(c.muted)
+                        .into(),
+                    (false, _) => text(s.time_aligns_all)
+                        .size(SIZE_SMALL)
+                        .color(c.muted)
+                        .into(),
                 },
             ]
             .spacing(4)
@@ -2213,17 +2239,7 @@ impl VideoScreen {
             )
             .into(),
         };
-        let error: Element<'a, Message> = match &self.montage_error {
-            Some(e) => text(format!("{}: {e}", s.video_not_made))
-                .size(SIZE_SMALL)
-                .color(c.danger)
-                .into(),
-            None => space::horizontal().width(0).into(),
-        };
-        row![line, error]
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .into()
+        line
     }
 
     /// With the actions picked, where their clips are in the video, from
@@ -3711,7 +3727,7 @@ pub(crate) mod screen_tests {
             screen.tick();
         }
         assert!(screen.montage.is_none());
-        assert!(screen.montage_error.is_some());
+        assert!(screen.failure().is_some());
         whole.key(BACK_KEY);
     }
 
@@ -3994,5 +4010,25 @@ pub(crate) mod screen_tests {
         assert_eq!(screen.event_target(0), None);
         let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
         assert_eq!(screen.alignment(s), (s.not_aligned.to_string(), false));
+    }
+
+    /// A change of the video not saved is told by the app, not over the
+    /// player.
+    #[test]
+    fn a_failure_of_the_video_is_told_over_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = scout4all_mobile::Scout4All::for_tests(
+            dir.path().to_string_lossy().into_owned(),
+            "en".into(),
+        )
+        .unwrap();
+        let (team, m) = crate::scouting::tests::both_sides_started(&core);
+        let mut screen = VideoScreen::new(core, dir.path().join("gone"), team, m, MatchSide::A)
+            .unwrap();
+        screen.toggle_overlay();
+        let why = screen.failed.clone().unwrap_or_default();
+        assert!(!why.is_empty());
+        assert_eq!(screen.error, None);
+        crate::assert_told_over(crate::Screen::Video(Box::new(screen)), &why);
     }
 }

@@ -163,13 +163,7 @@ fun VideoScreen(request: VideoRequest, onBack: () -> Unit) {
     val chooseFiles = { choose.launch(arrayOf("video/*")) }
     var montage by remember { mutableStateOf(false) }
     if (montage) MontageDialog(model) { montage = false }
-    model.error?.let { message ->
-        AlertDialog(
-            onDismissRequest = model::dismissError,
-            text = { Text(message) },
-            confirmButton = { TextButton(onClick = model::dismissError) { Text(stringResource(android.R.string.ok)) } },
-        )
-    }
+    model.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
     Turning()
     Immersive(landscape)
     when {
@@ -1037,7 +1031,10 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 val summed = plan
                 when {
-                    failed != null -> Text(stringResource(R.string.video_not_made) + (failed?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""))
+                    failed != null -> Banner(
+                        Level.ERROR,
+                        stringResource(R.string.video_not_made) + (failed?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""),
+                    )
                     made != null -> Text(stringResource(R.string.video_made))
                     summed != null && !asked -> MontageSummary(summed)
                     summed == null || montage == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
