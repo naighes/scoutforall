@@ -1243,7 +1243,7 @@ mod tests {
     };
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
     }
 
     fn team_form(name: &str) -> TeamForm {
@@ -2242,7 +2242,8 @@ mod tests {
     /// the id of the match.
     fn plan_today(core: &Scout4All, team_id: &str) -> String {
         use chrono::TimeZone;
-        let today = chrono::Local::now().date_naive();
+        let today =
+            scout4all_mobile::clock::ClockExt::today(&scout4all_mobile::clock::TestClock::new());
         let at = chrono::Local
             .from_local_datetime(&today.and_hms_opt(18, 0, 0).unwrap())
             .earliest()
@@ -2314,7 +2315,9 @@ mod tests {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
         let core = app(&dir);
-        let today = chrono::Local::now().date_naive().to_string();
+        let today =
+            scout4all_mobile::clock::ClockExt::today(&scout4all_mobile::clock::TestClock::new())
+                .to_string();
         let mut home = HomeScreen::new(&core, core.home().unwrap());
         // nothing planned: the week shows today alone, lit
         assert_eq!(home.week_shown(), vec![(today.clone(), true)]);

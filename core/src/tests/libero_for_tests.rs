@@ -22,7 +22,7 @@ mod tests {
     };
     use crate::tests::EN;
     use EventTypeEnum::*;
-    use chrono::Utc;
+
     use csv::WriterBuilder;
     use uuid::Uuid;
 
@@ -93,7 +93,7 @@ mod tests {
         eval: Option<EvalEnum>,
     ) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval,

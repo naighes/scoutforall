@@ -778,7 +778,7 @@ mod tests {
     const THREE_SETS: &[u8] = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw");
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
     }
 
     fn screen(core: &Arc<Scout4All>) -> DvwScreen {

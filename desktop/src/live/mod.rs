@@ -298,7 +298,9 @@ mod tests {
         let (core, team, m) = crate::video::screen_tests::imported(&dir);
         let folder = dir.path().join("rec");
         fs::create_dir_all(&folder).unwrap();
-        let started = chrono::Local::now().fixed_offset();
+        let started = scout4all_mobile::clock::ClockExt::zoned_now(
+            &scout4all_mobile::clock::TestClock::new(),
+        );
         let base = capture::base_name(&folder, started);
         left_raw(&base);
         let sidecar = Sidecar {

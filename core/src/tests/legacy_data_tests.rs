@@ -32,7 +32,7 @@ mod tests {
         storage::fs::FsStore,
         tests::{EN, Sqlite},
     };
-    use chrono::Utc;
+
     use serde_json::json;
     use std::{io::Write, path::Path};
     use tempfile::TempDir;
@@ -512,7 +512,7 @@ mod tests {
         technique: Option<TechniqueEnum>,
     ) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: Some(player),
             eval: Some(eval),
@@ -614,7 +614,7 @@ mod tests {
 
     fn freeball(event_type: EventTypeEnum, player: Option<Uuid>) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval: None,

@@ -295,7 +295,8 @@ mod tests {
 
     fn core() -> (tempfile::TempDir, Arc<Scout4All>) {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         (dir, core)
     }
 

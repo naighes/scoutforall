@@ -14,7 +14,7 @@ mod tests {
     };
     use EvalEnum::*;
     use EventTypeEnum::*;
-    use chrono::Utc;
+
     use uuid::Uuid;
 
     struct Team {
@@ -106,7 +106,7 @@ mod tests {
         flags: EventFlags,
     ) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: Some(player),
             eval: Some(eval),
@@ -118,7 +118,7 @@ mod tests {
 
     fn theirs(event_type: EventTypeEnum) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: None,
             eval: None,

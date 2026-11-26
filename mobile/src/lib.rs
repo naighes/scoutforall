@@ -6,7 +6,9 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
-use crate::clock::{Clock, ClockExt, SystemClock};
+#[cfg(doc)]
+use crate::clock::SystemClock;
+use crate::clock::{Clock, ClockExt, TestClock};
 use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use scout4all_core::{
     analytics::{
@@ -3848,6 +3850,14 @@ pub struct Scout4All {
 
 type UploadQueueManager = QueueManager<SqliteQueue, SqliteQueue>;
 
+impl Scout4All {
+    /// The data in `data_dir` with the clock of the tests ([`TestClock`]),
+    /// for the Rust tests of `mobile` and of the desktop.
+    pub fn for_tests(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
+        Self::with_clock(data_dir, language, Arc::new(TestClock::new()))
+    }
+}
+
 #[uniffi::export]
 impl Scout4All {
     /// The data in `data_dir`, created if missing; `language` is a code
@@ -3855,13 +3865,9 @@ impl Scout4All {
     /// (an error when it can't be opened, e.g. saved by a newer version)
     /// and moves into it what the versions before left in the folder,
     /// after a copy of it beside it (`startup_notice` tells what stayed).
-    #[uniffi::constructor]
-    pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
-        Self::with_clock(data_dir, language, Arc::new(SystemClock))
-    }
-
-    /// As `new`, asking `clock` what time it is: the app's own, so that
-    /// the app and the core tell the same time (a fixed one in the tests).
+    /// Asks `clock` what time it is: the app's own, so that the app and
+    /// the core tell the same time. No constructor takes the system's by
+    /// itself: the app passes [`SystemClock`], a test [`TestClock`].
     #[uniffi::constructor]
     pub fn with_clock(
         data_dir: String,
@@ -6431,7 +6437,8 @@ mod tests {
     #[test]
     fn an_empty_folder_has_no_teams() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         assert_eq!(app.teams().unwrap(), vec![]);
     }
 
@@ -6525,7 +6532,7 @@ mod tests {
 
     /// The day of the backups, as the migration names them.
     fn backup_of(dir: &tempfile::TempDir) -> PathBuf {
-        let day = chrono::Local::now().date_naive();
+        let day = crate::clock::ClockExt::today(&crate::clock::TestClock::new());
         dir.path().join(format!("data-backup-{day}.zip"))
     }
 
@@ -6540,7 +6547,7 @@ mod tests {
         copy_dir(&legacy_data("v0.18.0"), &data);
         let expected = Runtime::new().unwrap().block_on(listed_in_files(&data));
         assert_eq!(expected.len(), 3);
-        let app = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app = Scout4All::for_tests(data.to_string_lossy().into_owned(), "it".into()).unwrap();
         assert_eq!(app.startup_notice(), None);
         assert_eq!(listed_in_app(&app), expected);
         assert!(data.join(layout::DATABASE).exists());
@@ -6555,7 +6562,7 @@ mod tests {
         // the queue of the uploads moved with it
         assert!(!queued_of(&data).is_empty());
         drop(app);
-        let again = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let again = Scout4All::for_tests(data.to_string_lossy().into_owned(), "it".into()).unwrap();
         assert_eq!(again.startup_notice(), None);
         assert_eq!(listed_in_app(&again), expected);
         let backups = std::fs::read_dir(dir.path())
@@ -6596,7 +6603,7 @@ mod tests {
             .find(|p| p.join("set_1.json").exists())
             .unwrap();
         std::fs::write(broken.join("set_1.json"), "{\"serving").unwrap();
-        let app = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app = Scout4All::for_tests(data.to_string_lossy().into_owned(), "it".into()).unwrap();
         let it = labels(LanguageEnum::It);
         let notice = app.startup_notice().unwrap();
         let lines: Vec<&str> = notice.lines().collect();
@@ -6617,7 +6624,7 @@ mod tests {
         assert_eq!(app.teams().unwrap().len(), 3);
         // the next start tells it again, without a new copy
         drop(app);
-        let again = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let again = Scout4All::for_tests(data.to_string_lossy().into_owned(), "it".into()).unwrap();
         assert_eq!(again.startup_notice().unwrap(), lines[..2].join("\n"));
     }
 
@@ -6637,7 +6644,7 @@ mod tests {
             std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(m)).unwrap();
         };
         mode(0o555);
-        let app = Scout4All::new(data.to_string_lossy().into_owned(), "en".into());
+        let app = Scout4All::for_tests(data.to_string_lossy().into_owned(), "en".into());
         mode(0o755);
         let app = app.unwrap();
         let notice = app.startup_notice().unwrap();
@@ -6653,7 +6660,7 @@ mod tests {
             expected
         );
         drop(app);
-        let again = Scout4All::new(data.to_string_lossy().into_owned(), "en".into()).unwrap();
+        let again = Scout4All::for_tests(data.to_string_lossy().into_owned(), "en".into()).unwrap();
         assert_eq!(again.startup_notice(), None);
         assert_eq!(listed_in_app(&again), expected);
     }
@@ -6667,7 +6674,7 @@ mod tests {
         drop(scout4all_core::db::open(&file).unwrap());
         let newer = scout4all_core::db::schema_version() + 1;
         sql(&dir, &format!("PRAGMA user_version = {newer}"));
-        let e = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
+        let e = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into())
             .err()
             .unwrap();
         assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
@@ -6737,7 +6744,8 @@ mod tests {
     #[test]
     fn a_team_that_cant_be_read_is_unreadable() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "xx".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "xx".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         // the schema doesn't check the spelling of the country, reading does
         sql(
@@ -6772,7 +6780,7 @@ mod tests {
     }
 
     fn app(dir: &tempfile::TempDir, language: &str) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), language.into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), language.into()).unwrap()
     }
 
     fn config(dir: &tempfile::TempDir) -> Value {
@@ -6995,7 +7003,8 @@ mod tests {
     #[test]
     fn a_new_team_is_listed_and_can_be_edited() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let id = app.save_team(None, form(" Cortona ")).unwrap();
         let team = app.team(id.clone()).unwrap();
         assert_eq!(team.name, "Cortona");
@@ -7108,7 +7117,8 @@ mod tests {
     #[test]
     fn an_invalid_form_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let result = app.save_team(
             None,
             TeamForm {
@@ -7130,7 +7140,7 @@ mod tests {
     fn the_country_is_guessed_once_and_offered_to_a_new_team() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_string_lossy().into_owned();
-        let app = Scout4All::new(path.clone(), "it".into()).unwrap();
+        let app = Scout4All::for_tests(path.clone(), "it".into()).unwrap();
         assert_eq!(app.new_team_form(2026).country, None);
         // no SIM, the network in France
         app.guess_default_country(vec!["".into(), "fr".into(), "it-IT".into()])
@@ -7150,12 +7160,13 @@ mod tests {
     #[test]
     fn without_hints_the_country_of_the_language() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "pt".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "pt".into()).unwrap();
         app.guess_default_country(vec![]).unwrap();
         assert_eq!(app.default_country().unwrap().name, "Brasil");
         let english = tempfile::tempdir().unwrap();
-        let app =
-            Scout4All::new(english.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app = Scout4All::for_tests(english.path().to_string_lossy().into_owned(), "en".into())
+            .unwrap();
         app.guess_default_country(vec!["".into()]).unwrap();
         assert_eq!(app.default_country(), None);
     }
@@ -7163,7 +7174,8 @@ mod tests {
     #[test]
     fn countries_by_code_or_name_in_the_language() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "pl".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "pl".into()).unwrap();
         assert_eq!(app.countries(String::new()).len(), 249);
         let found = app.countries("wło".into());
         assert_eq!(found[0].name, "Włochy");
@@ -7176,7 +7188,8 @@ mod tests {
     #[test]
     fn a_team_without_country_names_the_field() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let result = app.save_team(
             None,
             TeamForm {
@@ -7196,7 +7209,8 @@ mod tests {
     #[test]
     fn the_new_form_has_the_year_given() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         assert_eq!(app.new_team_form(2026).year, "2026");
         assert_eq!(
             app.classifications().len(),
@@ -7263,7 +7277,8 @@ mod tests {
     #[test]
     fn a_new_player_starts_with_the_first_number_free() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let number = || app.new_player_form(team.clone()).unwrap().number;
         assert_eq!(number(), "1");
@@ -7296,7 +7311,8 @@ mod tests {
     #[test]
     fn the_registry_offers_adds_takes_to_a_new_season_and_removes() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let senior = app.save_team(None, form("Cortona")).unwrap();
         let ids: Vec<String> = (1..=7)
             .map(|n| {
@@ -7419,7 +7435,8 @@ mod tests {
     #[test]
     fn players_are_added_edited_and_removed() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let anna = app
             .save_player(team.clone(), None, player("Anna", "9"), false)
@@ -7472,7 +7489,8 @@ mod tests {
     #[test]
     fn matches_are_listed_the_most_recent_first() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team_id = app.save_team(None, form("Cortona")).unwrap();
         assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
 
@@ -7531,7 +7549,8 @@ mod tests {
     #[test]
     fn teams_and_matches_are_deleted() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team_id = app.save_team(None, form("Cortona")).unwrap();
         let other = app.save_team(None, form("Arezzo")).unwrap();
         let team = app.read_team(&team_id).unwrap();
@@ -7583,7 +7602,8 @@ mod tests {
     #[test]
     fn team_b_and_the_competition_are_offered_and_saved() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let livorno = app.save_team(None, form("Livorno")).unwrap();
         for n in 1..=7 {
@@ -7670,7 +7690,8 @@ mod tests {
     #[test]
     fn a_competition_is_listed_edited_and_removed() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=7 {
             app.save_player(
@@ -7755,7 +7776,8 @@ mod tests {
     #[test]
     fn a_number_of_the_score_sheet_is_corrected_and_saved() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let ids: Vec<Uuid> = (1..=7)
             .map(|n| {
@@ -7823,7 +7845,8 @@ mod tests {
     #[test]
     fn matches_are_created_and_edited() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let players: Vec<Uuid> = (1..=7)
             .map(|n| {
@@ -7878,7 +7901,8 @@ mod tests {
     #[test]
     fn a_match_of_a_large_team_chooses_its_roster() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=15 {
             // a libero: more than 12 on the score sheet need one
@@ -7926,7 +7950,8 @@ mod tests {
     #[test]
     fn an_invalid_match_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         match app.save_match(
             team.clone(),
@@ -7948,7 +7973,8 @@ mod tests {
     #[test]
     fn a_set_starts_from_the_lineup_and_then_resumes() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let ids: Vec<String> = (1..=7)
             .map(|n| {
@@ -8014,7 +8040,8 @@ mod tests {
     #[test]
     fn a_match_between_two_teams_is_seen_by_both() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, _) = match_with_a_set(&app);
         let livorno = app.save_team(None, form("Livorno")).unwrap();
         let m = app
@@ -8133,7 +8160,8 @@ mod tests {
     #[test]
     fn the_analysis_of_a_competition() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, first) = match_with_a_set(&app);
         let cup = |name: &str| MatchForm {
             competition: name.into(),
@@ -8356,7 +8384,8 @@ mod tests {
     #[test]
     fn the_defense_by_digs() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let player = |n: usize| {
@@ -8404,7 +8433,8 @@ mod tests {
     #[test]
     fn the_replacements_have_the_initials() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         // seven on court with the libero: one on the bench
         for n in 1..=8 {
@@ -8439,7 +8469,8 @@ mod tests {
     #[test]
     fn the_one_out_for_the_libero_can_go_out() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=8 {
             app.save_player(
@@ -8487,7 +8518,8 @@ mod tests {
     #[test]
     fn how_many_blocked_is_told() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         assert!(scouting.available_blockers().is_empty());
@@ -8528,7 +8560,8 @@ mod tests {
     #[test]
     fn the_block_target_is_at_the_net() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Positive).unwrap();
@@ -8573,7 +8606,8 @@ mod tests {
     #[test]
     fn the_serve_target_is_told_on_the_court() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let court = scouting.target_court();
@@ -8646,7 +8680,8 @@ mod tests {
     #[test]
     fn a_set_in_progress_is_scouted_and_undone() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         // no set in progress yet
         assert!(app.scouting(team.clone(), m.clone()).is_err());
@@ -8757,7 +8792,8 @@ mod tests {
     #[test]
     fn a_match_whose_set_does_not_replay_tells_why() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Over).unwrap();
@@ -8787,7 +8823,8 @@ mod tests {
     #[test]
     fn our_block_on_their_reception_straight_over() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Over).unwrap();
@@ -8829,7 +8866,8 @@ mod tests {
     #[test]
     fn our_freeball_is_a_team_event() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         assert!(
@@ -8877,7 +8915,8 @@ mod tests {
     #[test]
     fn our_fault_can_be_the_teams() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Positive).unwrap();
@@ -8918,7 +8957,8 @@ mod tests {
     #[test]
     fn the_libero_goes_out_and_back_in() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let name = |scouting: &Scouting| {
@@ -8962,7 +9002,8 @@ mod tests {
     #[test]
     fn the_libero_for_a_player_of_the_back_row() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let ids: Vec<String> = scouting
@@ -9026,7 +9067,8 @@ mod tests {
     #[test]
     fn the_players_spread_to_receive() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // our serve error: they serve, we receive in P1
@@ -9047,7 +9089,8 @@ mod tests {
     #[test]
     fn the_inverted_p1_stays_until_changed() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let state = scouting.state();
@@ -9071,7 +9114,8 @@ mod tests {
     #[test]
     fn the_reception_is_told_before_their_serve() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         assert!(!scouting.state().reception_open);
@@ -9088,7 +9132,8 @@ mod tests {
     #[test]
     fn nobody_receives_once_the_serve_is_received() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // we serve: the players are in their zones
@@ -9149,7 +9194,8 @@ mod tests {
     #[test]
     fn the_set_that_wins_the_match_has_its_result() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let mut result = None;
         for set in 1..=3 {
@@ -9320,7 +9366,8 @@ mod tests {
     #[test]
     fn the_point_that_wins_the_set_ends_it() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // we serve: the serve waits for its evaluation
@@ -9349,7 +9396,8 @@ mod tests {
     #[test]
     fn the_statistics_of_a_set_and_of_the_match() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         // set 1: 25 aces
         let scouting = started_set(&app, &team, &m);
@@ -9567,7 +9615,8 @@ mod tests {
     #[test]
     fn the_serves_by_zone() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // three serves to cells of 1, one without a zone
@@ -9659,7 +9708,8 @@ mod tests {
     #[test]
     fn the_attacks_by_zone_as_the_serves() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // our serve in the net, their serve received, then our attack to 9
@@ -9708,7 +9758,8 @@ mod tests {
     #[test]
     fn the_serves_by_where_they_started_from() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let labels = |s: &Scouting| {
@@ -9844,7 +9895,8 @@ mod tests {
     #[test]
     fn the_detail_of_a_fundamental() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         // set 1: 25 aces of the player in 1
         let scouting = started_set(&app, &team, &m);
@@ -10134,7 +10186,8 @@ mod tests {
     #[test]
     fn the_events_of_a_set_are_corrected() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         // two aces, a serve error, their error
         let scouting = started_set(&app, &team, &m);
@@ -10295,7 +10348,8 @@ mod tests {
     #[test]
     fn the_statistics_of_a_match_without_sets_are_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let stats = app
             .match_stats(
@@ -10356,7 +10410,8 @@ mod tests {
     #[test]
     fn a_number_in_use_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         app.save_player(team.clone(), None, player("Anna", "9"), false)
             .unwrap();
@@ -10372,7 +10427,8 @@ mod tests {
     #[test]
     fn a_namesake_is_saved_once_confirmed() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         app.save_player(team.clone(), None, player("Anna Rossi", "9"), false)
             .unwrap();
@@ -11460,7 +11516,8 @@ mod tests {
     #[test]
     fn the_analysis_of_the_matches_of_a_period() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, first) = match_with_a_set(&app);
         let second = app
             .save_match(

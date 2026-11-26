@@ -42,7 +42,7 @@ mod tests {
         },
         video::{EventRef, StoredProfile, VideoFile, VideoProfile, VideoProfiles},
     };
-    use chrono::Utc;
+
     use rusqlite::params;
     use serde_json::Value as Json;
     use uuid::Uuid;
@@ -121,7 +121,7 @@ mod tests {
 
     fn serve(player: Uuid) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::S,
             player: Some(player),
             eval: Some(EvalEnum::Positive),
@@ -133,7 +133,7 @@ mod tests {
 
     fn their_error() -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::OE,
             player: None,
             eval: None,
@@ -153,7 +153,7 @@ mod tests {
                 team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -236,7 +236,12 @@ mod tests {
                 "INSERT INTO events (id, match_id, set_number, seq, side, timestamp,
                      event_type, player, eval)
                  VALUES (?1, ?2, 1, 2, 'b', ?3, 'P', ?4, '=')",
-                params![Sql(Uuid::new_v4()), m.id, Sql(Utc::now()), Sql(ids[1])],
+                params![
+                    Sql(Uuid::new_v4()),
+                    m.id,
+                    Sql(crate::tests::clock::now()),
+                    Sql(ids[1])
+                ],
             ))
         })
         .unwrap()

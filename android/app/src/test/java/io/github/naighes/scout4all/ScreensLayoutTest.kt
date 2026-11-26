@@ -89,7 +89,7 @@ class ScreensLayoutTest(private val screen: Size) {
     /** A training today: in the home and in the team, in the week (above
      * the matches in the team), in the block of today. */
     private fun planTraining(team: String): String {
-        val start = java.time.LocalDate.now().toString() + "T18:00"
+        val start = testDay().toString() + "T18:00"
         core { it.saveSession(team, null, it.newSessionDraft().copy(start = start, duration = "90", title = "Ricezione")) }
         return "Ricezione"
     }
@@ -143,7 +143,7 @@ class ScreensLayoutTest(private val screen: Size) {
             it.saveSession(
                 team, null,
                 it.newSessionDraft().copy(
-                    start = java.time.LocalDate.now().plusDays(1).toString() + "T18:00",
+                    start = testDay().plusDays(1).toString() + "T18:00",
                     duration = "90", title = "Ricezione e attacco", venue = gym,
                     objectives = "Ricezione a tre, cambio palla", notes = "Portare i palloni leggeri",
                 ),
@@ -171,7 +171,7 @@ class ScreensLayoutTest(private val screen: Size) {
     )
 
     private fun week(team: String): String = core {
-        val monday = java.time.LocalDate.now().let { d -> d.minusDays((d.dayOfWeek.value - 1).toLong()) }
+        val monday = testDay().let { d -> d.minusDays((d.dayOfWeek.value - 1).toLong()) }
         it.saveCycle(
             team, io.github.naighes.scout4all.core.Level.MICROCYCLE, null,
             it.newCycleDraft().copy(title = "Settimana di ricezione", start = monday.toString(), weeks = "1"),

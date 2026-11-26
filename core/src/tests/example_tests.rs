@@ -23,7 +23,7 @@ mod tests {
         storage::{Store, layout, memory::MemoryStore},
         tests::EN,
     };
-    use chrono::{Datelike, Local};
+    use chrono::Datelike;
     use std::{collections::HashSet, sync::Arc};
 
     fn store() -> Arc<dyn Store> {
@@ -106,7 +106,7 @@ mod tests {
             _ => unreachable!("the example team should be readable"),
         };
         assert_eq!(team.name, "Italy");
-        assert_eq!(i32::from(team.year), Local::now().year());
+        assert_eq!(i32::from(team.year), crate::tests::clock::now().year());
         assert_eq!(
             team.classification,
             Some(TeamClassificationEnum::TopInternational)
@@ -214,7 +214,7 @@ mod tests {
 
     #[test]
     fn the_match_of_the_tutorial_is_at_home_against_brazil() {
-        let date = chrono::Utc::now().fixed_offset();
+        let date = crate::tests::clock::now().fixed_offset();
         let form = tutorial_match(labels(LanguageEnum::It), date, &[]);
         assert_eq!(form.opponent, "Brasile");
         assert!(form.home);
@@ -225,7 +225,7 @@ mod tests {
     /// Seen again the same day: another match, not one already there.
     #[test]
     fn the_match_of_the_tutorial_seen_again_is_numbered() {
-        let date = chrono::Utc::now().fixed_offset();
+        let date = crate::tests::clock::now().fixed_offset();
         let id = |opponent: &str| crate::shapes::r#match::MatchEntry::id_of(opponent, &date);
         let taken = vec![id("Brazil"), id("Brazil 2")];
         assert_eq!(tutorial_match(EN, date, &taken).opponent, "Brazil 3");

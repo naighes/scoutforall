@@ -141,11 +141,11 @@ fun ComposeTestRule.texts(): List<String> =
 /** Until `condition`, letting the main thread run: what the core answers
  * off it reaches the screen there. */
 fun ComposeTestRule.waitFor(why: () -> String = { "" }, condition: () -> Boolean) {
-    val end = System.currentTimeMillis() + 5_000
+    val end = System.nanoTime() + 5_000_000_000
     while (true) {
         waitForIdle()
         if (condition()) return
-        check(System.currentTimeMillis() < end) { "still not so after 5 s ${why()}" }
+        check(System.nanoTime() < end) { "still not so after 5 s ${why()}" }
         Thread.sleep(10)
     }
 }

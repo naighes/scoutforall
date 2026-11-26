@@ -14,12 +14,12 @@ mod tests {
     use crate::tests::EN;
     use EvalEnum::*;
     use EventTypeEnum::*;
-    use chrono::Utc;
+
     use uuid::Uuid;
 
     fn act(event_type: EventTypeEnum, player: Uuid, eval: EvalEnum) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: Some(player),
             eval: Some(eval),

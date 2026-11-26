@@ -588,7 +588,8 @@ mod tests {
 
     /// The camera's answer; its clock two hours ahead.
     fn answer(request: &str, password: &str) -> (&'static str, String) {
-        let now = Utc::now() + TimeDelta::hours(2);
+        let now = scout4all_mobile::clock::ClockExt::utc(&scout4all_mobile::clock::TestClock::new())
+            + TimeDelta::hours(2);
         if request.contains("GetSystemDateAndTime") {
             use chrono::{Datelike, Timelike};
             return (
@@ -674,19 +675,19 @@ mod tests {
             let device =
                 url::Url::parse(&format!("http://127.0.0.1:{port}/onvif/device_service")).unwrap();
             let user = |password: &str| Some(("admin".to_string(), password.to_string()));
-            let uri = stream_uri(&device, user("segreta"), &scout4all_mobile::clock::SystemClock).await.unwrap();
+            let uri = stream_uri(&device, user("segreta"), &scout4all_mobile::clock::TestClock::new()).await.unwrap();
             assert_eq!(
                 uri.as_str(),
                 "rtsp://127.0.0.1:554/Streaming/Channels/101?transportmode=unicast&profile=Profile_1"
             );
             assert_eq!(
-                stream_uri(&device, user("sbagliata"), &scout4all_mobile::clock::SystemClock).await,
+                stream_uri(&device, user("sbagliata"), &scout4all_mobile::clock::TestClock::new()).await,
                 Err(Problem::Refused)
             );
-            assert_eq!(stream_uri(&device, None, &scout4all_mobile::clock::SystemClock).await, Err(Problem::Refused));
+            assert_eq!(stream_uri(&device, None, &scout4all_mobile::clock::TestClock::new()).await, Err(Problem::Refused));
             let nobody = url::Url::parse("http://127.0.0.1:9/onvif/device_service").unwrap();
             assert_eq!(
-                stream_uri(&nobody, user("segreta"), &scout4all_mobile::clock::SystemClock).await,
+                stream_uri(&nobody, user("segreta"), &scout4all_mobile::clock::TestClock::new()).await,
                 Err(Problem::Unreachable)
             );
         });

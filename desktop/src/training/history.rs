@@ -196,7 +196,8 @@ mod tests {
     #[test]
     fn the_earlier_seasons_of_the_team_are_read_with_their_totals() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = |name: &str, year: u16| {
             let form = scout4all_core::team_form::TeamForm {
                 name: name.to_string(),

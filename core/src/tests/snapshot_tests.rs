@@ -11,7 +11,7 @@ mod tests {
             stats::StatsFilter,
         },
     };
-    use chrono::Utc;
+
     use uuid::Uuid;
 
     fn assert_snapshot<F>(
@@ -149,7 +149,7 @@ mod tests {
                 target_player: None,
                 technique: None,
                 eval: Some(EvalEnum::Perfect),
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 flags: Default::default(),
             }],
         };
@@ -210,7 +210,7 @@ mod tests {
                     player: Some(setter),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -238,7 +238,7 @@ mod tests {
                     player: Some(oh1),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -266,7 +266,7 @@ mod tests {
                     player: Some(opposite),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -306,7 +306,7 @@ mod tests {
                     player: Some(oh1),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -334,7 +334,7 @@ mod tests {
                     player: None,
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -362,7 +362,7 @@ mod tests {
                     target_player: Some(setter_replacement),
                     technique: None,
                     player: Some(setter),
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -395,7 +395,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     eval: Some(EvalEnum::Negative),
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -424,7 +424,7 @@ mod tests {
                     player: Some(mb2),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -452,7 +452,7 @@ mod tests {
                     player: None,
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -480,7 +480,7 @@ mod tests {
                     player: Some(libero),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -508,7 +508,7 @@ mod tests {
                     player: Some(setter_replacement),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -545,7 +545,7 @@ mod tests {
                     player: None,
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -573,7 +573,7 @@ mod tests {
                     player: Some(mb2),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -620,7 +620,7 @@ mod tests {
                     player: Some(oh2),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(
@@ -662,7 +662,7 @@ mod tests {
                     player: Some(mb2),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -690,7 +690,7 @@ mod tests {
                     player: Some(libero),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -718,7 +718,7 @@ mod tests {
                     player: Some(oh1),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -758,7 +758,7 @@ mod tests {
                     player: Some(libero),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -786,7 +786,7 @@ mod tests {
                     player: Some(opposite),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -814,7 +814,7 @@ mod tests {
                     player: Some(opposite),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -842,7 +842,7 @@ mod tests {
                     player: Some(mb1),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -870,7 +870,7 @@ mod tests {
                     player: Some(libero),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -898,7 +898,7 @@ mod tests {
                     player: Some(opposite),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -926,7 +926,7 @@ mod tests {
                     player: None,
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -954,7 +954,7 @@ mod tests {
                     player: Some(oh2),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -982,7 +982,7 @@ mod tests {
                     player: Some(libero),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1010,7 +1010,7 @@ mod tests {
                     player: Some(oh1),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1038,7 +1038,7 @@ mod tests {
                     player: None,
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1066,7 +1066,7 @@ mod tests {
                     player: Some(mb1),
                     target_player: None,
                     technique: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1103,7 +1103,7 @@ mod tests {
                     target_player: Some(setter),
                     technique: None,
                     player: Some(setter_replacement),
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1133,7 +1133,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     player: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1166,7 +1166,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     player: Some(opposite),
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1197,7 +1197,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     player: Some(oh1),
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1225,7 +1225,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     player: Some(opposite),
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1262,7 +1262,7 @@ mod tests {
                     target_player: None,
                     technique: None,
                     player: None,
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1291,7 +1291,7 @@ mod tests {
                     technique: None,
                     // the setter, back on court, serves after the rotation
                     player: Some(setter),
-                    timestamp: Utc::now(),
+                    timestamp: crate::tests::clock::now(),
                     flags: Default::default(),
                 },
                 Box::new(|snapshot: &Snapshot, _: &Vec<EventTypeEnum>| {
@@ -1346,7 +1346,7 @@ mod tests {
                 player: None,
                 target_player: None,
                 technique: None,
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 flags: Default::default(),
             })
             .expect("expected their error to apply");
@@ -1357,7 +1357,7 @@ mod tests {
             player: Some(setter), // out
             target_player: Some(setter_replacement),
             technique: None,
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             flags: Default::default(),
         });
         assert!(match setter_already_replaced {
@@ -1373,7 +1373,7 @@ mod tests {
             player: Some(oh1), // out
             target_player: Some(setter_replacement),
             technique: None,
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             flags: Default::default(),
         });
         assert!(match setter_replacement_already_used {
@@ -1389,7 +1389,7 @@ mod tests {
             player: Some(fallback_libero), // out
             target_player: Some(some_other_replacement),
             technique: None,
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             flags: Default::default(),
         });
         assert!(match libero_cannot_be_replaced {
@@ -1406,7 +1406,7 @@ mod tests {
                 player: Some(oh1), // out
                 target_player: Some(some_other_replacement),
                 technique: None,
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 flags: Default::default(),
             })
             .expect("should not throw");
@@ -1417,7 +1417,7 @@ mod tests {
             player: Some(some_other_replacement), // out
             target_player: Some(some_other_player),
             technique: None,
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             flags: Default::default(),
         });
         assert!(match unclosed_change_error {
@@ -1438,7 +1438,7 @@ mod tests {
                 player: Some(some_other_replacement), // out
                 target_player: Some(oh1),
                 technique: None,
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 flags: Default::default(),
             })
             .expect("should not throw");

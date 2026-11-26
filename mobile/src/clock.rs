@@ -6,9 +6,14 @@
 //! the edges (`mobile`, the desktop, Android) ask a [`Clock`]; nothing
 //! reads `Local::now()` / `Utc::now()` / `LocalDate.now()` by itself.
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, Offset, Utc};
+use chrono::{
+    DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, Offset, TimeDelta, TimeZone, Utc,
+};
 use scout4all_core::clock::{UtcNow, WallNow};
-use std::{sync::Arc, time::SystemTime};
+use std::{
+    sync::Arc,
+    time::{Instant, SystemTime},
+};
 
 /// What time it is.
 #[uniffi::export(with_foreign)]
@@ -38,6 +43,9 @@ fn wall_time(text: &str) -> Result<NaiveDateTime, chrono::ParseError> {
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SystemClock;
 
+// the only place that reads the time of the system (the lint denies it
+// everywhere else, see clippy.toml)
+#[allow(clippy::disallowed_methods)]
 impl Clock for SystemClock {
     fn now(&self) -> NaiveDateTime {
         Local::now().naive_local()
@@ -45,6 +53,60 @@ impl Clock for SystemClock {
 
     fn utc_now(&self) -> SystemTime {
         SystemTime::now()
+    }
+}
+
+/// Where the clock of the tests starts: noon of Thursday 26 November 2026,
+/// on the wall (the same day as the tests of the core and of Android).
+pub fn test_start() -> NaiveDateTime {
+    NaiveDate::from_ymd_opt(2026, 11, 26)
+        .and_then(|day| day.and_hms_opt(12, 0, 0))
+        .unwrap_or_default()
+}
+
+/// The clock of the tests (of `mobile` and of the desktop): from a moment
+/// on the wall of the zone the tests run in, going on as a stopwatch. The
+/// day never changes under a test, whatever day it is run, and two moments
+/// still come one after another.
+#[derive(Debug, Clone, Copy)]
+pub struct TestClock {
+    from: DateTime<Utc>,
+    started: Instant,
+}
+
+impl TestClock {
+    /// From [`test_start`].
+    pub fn new() -> TestClock {
+        TestClock::from(test_start())
+    }
+
+    /// From `start` on the wall where the tests run.
+    pub fn from(start: NaiveDateTime) -> TestClock {
+        let from = Local
+            .from_local_datetime(&start)
+            .earliest()
+            .map_or_else(|| start.and_utc(), |t| t.with_timezone(&Utc));
+        TestClock {
+            from,
+            started: Instant::now(),
+        }
+    }
+}
+
+impl Default for TestClock {
+    fn default() -> TestClock {
+        TestClock::new()
+    }
+}
+
+impl Clock for TestClock {
+    fn now(&self) -> NaiveDateTime {
+        self.utc().with_timezone(&Local).naive_local()
+    }
+
+    fn utc_now(&self) -> SystemTime {
+        let gone = TimeDelta::from_std(self.started.elapsed()).unwrap_or_default();
+        (self.from + gone).into()
     }
 }
 
@@ -148,15 +210,30 @@ mod tests {
         let clock = FixedClock::at(now, rome);
         assert_eq!((clock.today(), clock.offset()), (now.date(), rome));
         assert_eq!(clock.zoned_now().to_rfc3339(), "2026-03-09T00:30:00+01:00");
-        assert_eq!(
-            SystemClock.offset(),
-            Local::now().offset().fix(),
-            "the system's zone"
-        );
+        #[allow(clippy::disallowed_methods)]
+        let system = Local::now().offset().fix();
+        assert_eq!(SystemClock.offset(), system, "the system's zone");
         // in UTC it's still the day before
         assert_eq!(
             DateTime::<Utc>::from(clock.utc_now()).to_rfc3339(),
             "2026-03-08T23:30:00+00:00"
         );
+    }
+
+    #[test]
+    fn the_clock_of_the_tests_starts_on_its_day_and_goes_on() {
+        let clock = TestClock::new();
+        let first = clock.utc();
+        assert_eq!(clock.today(), test_start().date());
+        assert!((clock.now() - test_start()).num_seconds() < 60);
+        assert_eq!(
+            clock.offset(),
+            Local
+                .offset_from_local_datetime(&test_start())
+                .earliest()
+                .map_or(Utc.fix(), |o| o.fix())
+        );
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert!(clock.utc() > first, "a stopwatch");
     }
 }

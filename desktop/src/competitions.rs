@@ -309,7 +309,8 @@ mod tests {
 
     /// Cortona with its players, a match in "Serie C" and two in "Coppa".
     fn competitions_played(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, Vec<String>) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core
             .save_team(
                 None,
@@ -397,7 +398,7 @@ mod tests {
         // none yet: they're made in the form of a match
         let empty = tempfile::tempdir().unwrap();
         let none =
-            Scout4All::new(empty.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+            Scout4All::for_tests(empty.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         assert!(CompetitionsScreen::new(none).unwrap().listed.is_empty());
     }
 

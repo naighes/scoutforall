@@ -493,7 +493,8 @@ mod tests {
     fn the_player_keys_chosen_among_the_general_settings() {
         let s = crate::strings::strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let keys = ScoutingKeys::default().normalized();
         assert_eq!(keys.player_keys, PlayerKeysEnum::Number);
         let mut screen =

@@ -3,3 +3,15 @@
 allow-unwrap-in-tests = true
 allow-expect-in-tests = true
 allow-panic-in-tests = true
+
+# nothing reads the time by itself (see CLAUDE.md): the core takes it as an
+# argument, the edges ask a `scout4all_mobile::clock::Clock`; the tests use
+# `TestClock` / `Scout4All::for_tests` (mobile, desktop) or
+# `crate::tests::clock` (core). Only `SystemClock` reads it.
+disallowed-methods = [
+    { path = "chrono::offset::Utc::now", reason = "ask a Clock (TestClock in the tests)" },
+    { path = "chrono::offset::Local::now", reason = "ask a Clock (TestClock in the tests)" },
+    { path = "chrono::offset::Utc::today", reason = "ask a Clock (TestClock in the tests)" },
+    { path = "chrono::offset::Local::today", reason = "ask a Clock (TestClock in the tests)" },
+    { path = "std::time::SystemTime::now", reason = "ask a Clock (TestClock in the tests)" },
+]

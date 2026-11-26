@@ -1149,7 +1149,8 @@ mod tests {
 
     /// The app, its team and a session on 2 March at 18:00 titled "Prima".
     fn page(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, SessionPage) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core.tutorial_team().unwrap();
         let id = session(&core, &team, "2026-03-02T18:00", "Prima");
         let page = SessionPage::new(core.clone(), team.clone(), id).unwrap();

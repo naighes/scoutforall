@@ -29,7 +29,7 @@ mod tests {
         tests::{EN, Sqlite},
     };
     use EventTypeEnum::*;
-    use chrono::Utc;
+    
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -106,7 +106,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -1007,7 +1007,7 @@ mod tests {
     async fn event_that_does_not_apply_is_not_saved() {
         let mut s = scouting().await;
         let event = |event_type, player, target_player| EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval: None,

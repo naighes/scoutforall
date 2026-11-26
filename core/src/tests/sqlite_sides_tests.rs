@@ -340,7 +340,7 @@ mod tests {
         let p = Sqlite::new();
         let (a, m) = block_of_v1(&p).await;
         let attack = EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: A,
             player: Some(a.players[1].id),
             eval: Some(Perfect),
@@ -455,7 +455,7 @@ mod tests {
         let p = Sqlite::new();
         let (a, m) = block_of_v3(&p).await;
         let serve = EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: S,
             player: Some(a.players[0].id),
             eval: Some(Perfect),

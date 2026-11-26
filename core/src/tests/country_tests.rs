@@ -19,7 +19,7 @@ mod tests {
         },
         tests::Sqlite,
     };
-    use chrono::Utc;
+
     use std::io::{Cursor, Read};
 
     fn code(code: &str) -> CountryCode {
@@ -198,7 +198,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley".to_string(),
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",

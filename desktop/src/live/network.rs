@@ -746,7 +746,7 @@ mod tests {
         let base = dir.path().join("20261106 120000");
         capture.record(
             base.clone(),
-            chrono::Local::now().fixed_offset(),
+            scout4all_mobile::clock::ClockExt::zoned_now(&scout4all_mobile::clock::SystemClock),
             Default::default(),
         );
         capture.preview(false);
@@ -887,7 +887,9 @@ mod tests {
         let (send, commands) = std::sync::mpsc::channel();
         send.send(Command::Record {
             base: dir.path().join("20261110 120000"),
-            started: chrono::Local::now().fixed_offset(),
+            started: scout4all_mobile::clock::ClockExt::zoned_now(
+                &scout4all_mobile::clock::TestClock::new(),
+            ),
             quality: crate::live::capture::Quality::High,
         })
         .unwrap();
@@ -952,9 +954,13 @@ mod tests {
         let mut feed = Feed::new().unwrap();
         let base = dir.path().join("20261110 120000");
         let mut take = Some(
-            Take::start_on(base.clone(), chrono::Local::now().fixed_offset(), |_| {
-                Some(0)
-            })
+            Take::start_on(
+                base.clone(),
+                scout4all_mobile::clock::ClockExt::zoned_now(
+                    &scout4all_mobile::clock::TestClock::new(),
+                ),
+                |_| Some(0),
+            )
             .unwrap(),
         );
         for (i, f) in frames.iter().enumerate() {
@@ -975,8 +981,16 @@ mod tests {
         // with room for its MP4 and the reserve: on
         let base = dir.path().join("20261110 130000");
         let room = |_: &std::path::Path| Some(crate::live::space::RESERVE + 10_000_000);
-        let mut take =
-            Some(Take::start_on(base, chrono::Local::now().fixed_offset(), room).unwrap());
+        let mut take = Some(
+            Take::start_on(
+                base,
+                scout4all_mobile::clock::ClockExt::zoned_now(
+                    &scout4all_mobile::clock::TestClock::new(),
+                ),
+                room,
+            )
+            .unwrap(),
+        );
         for (i, f) in frames.iter().enumerate() {
             let at = u64::try_from(i).unwrap() * 33;
             feed.frame(f, i == 0, at, 0, &mut take, &mut Pace::new(None), &status);
@@ -1014,7 +1028,7 @@ mod tests {
         assert!(seen);
         capture.record(
             folder.join("20261112 120000"),
-            chrono::Local::now().fixed_offset(),
+            scout4all_mobile::clock::ClockExt::zoned_now(&scout4all_mobile::clock::SystemClock),
             Default::default(),
         );
         std::thread::sleep(Duration::from_secs(3));

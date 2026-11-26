@@ -50,6 +50,8 @@ panic = "deny"
 todo = "deny"
 unimplemented = "deny"
 unreachable = "deny"
+# the time only from a clock (see clippy.toml)
+disallowed_methods = "deny"
 
 [profile.release]
 opt-level = 3

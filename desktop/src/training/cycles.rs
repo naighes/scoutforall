@@ -1520,7 +1520,8 @@ mod tests {
     }
 
     fn app(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core.tutorial_team().unwrap();
         (core, team)
     }

@@ -35,7 +35,7 @@ mod tests {
         fn set(&self, receptions: &[EvalEnum]) -> SetEntry {
             let [setter, _, _, opposite, ..] = self.positions;
             let touch = |event_type, player, eval| EventEntry {
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 event_type,
                 player: Some(player),
                 eval: Some(eval),
@@ -44,7 +44,7 @@ mod tests {
                 flags: Default::default(),
             };
             let theirs = EventEntry {
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 event_type: OS,
                 player: None,
                 eval: None,

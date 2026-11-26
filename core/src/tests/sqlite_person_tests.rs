@@ -32,7 +32,7 @@ mod tests {
         },
         team_form::TeamForm,
     };
-    use chrono::{NaiveDate, Utc};
+    use chrono::NaiveDate;
     use uuid::Uuid;
 
     struct P {
@@ -255,7 +255,7 @@ mod tests {
                 &t,
                 MatchInput::against(
                     "Arezzo",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -530,7 +530,7 @@ mod tests {
                 &t,
                 MatchInput::against(
                     "Arezzo",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",

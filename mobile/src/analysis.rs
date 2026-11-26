@@ -4,8 +4,8 @@
 //! choices of the filters on the situation.
 use super::{
     ClipPick, CompetitionChoice, DetailFilter, DetailStats, GradeBand, LiveStats, MatchSide,
-    MobileError, RoleChoice, Scout4All, ScoutingPlayer, StatsScope, choosable, clips_of, detail_of, narrowed,
-    series_name, summary, touched,
+    MobileError, RoleChoice, Scout4All, ScoutingPlayer, StatsScope, choosable, clips_of, detail_of,
+    narrowed, series_name, summary, touched,
 };
 use crate::clock::ClockExt;
 use chrono::NaiveDate;

@@ -47,7 +47,7 @@ class TrainingScreensTest {
 
     private val team = saveNationalTeam()
 
-    private fun session(day: LocalDate = LocalDate.now().plusDays(1), title: String = "Ricezione"): String =
+    private fun session(day: LocalDate = testDay().plusDays(1), title: String = "Ricezione"): String =
         core {
             it.saveSession(team, null, it.newSessionDraft().copy(start = "${day}T18:00", duration = "90", title = title))
         }.id
@@ -140,7 +140,7 @@ class TrainingScreensTest {
 
     @Test
     fun aSessionIsDuplicatedAWeekLater() {
-        val day = LocalDate.now().plusDays(1)
+        val day = testDay().plusDays(1)
         val s = session(day)
         activity(s, "Palleggio")
         val copies = mutableListOf<String>()
@@ -227,7 +227,7 @@ class TrainingScreensTest {
 
     @Test
     fun theSessionsOfAWeekAreAddedToItsMicrocycle() {
-        val monday = LocalDate.now().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val monday = testDay().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
         val cycle = core {
             it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(title = "Carico", start = monday.toString(), weeks = "1"), emptyList(), false)
         }
@@ -249,7 +249,7 @@ class TrainingScreensTest {
      * its first day and offers the free ones only when there are some. */
     @Test
     fun theSheetOfAMicrocycleListsItsSessionsAndMakesOne() {
-        val monday = LocalDate.now().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val monday = testDay().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
         val cycle = core {
             it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(title = "Carico", start = monday.toString(), weeks = "1"), emptyList(), false)
         }
@@ -280,7 +280,7 @@ class TrainingScreensTest {
      * not list it. */
     @Test
     fun theSheetOfAMicrocycleOffersTheFreeOnesOnly() {
-        val monday = LocalDate.now().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val monday = testDay().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
         val cycle = core {
             it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(start = monday.toString(), weeks = "1"), emptyList(), false)
         }
@@ -306,7 +306,7 @@ class TrainingScreensTest {
         // the + says what it makes
         rule.onNode(hasContentDescription(string(R.string.tr_new_session)) and hasClickAction()).performClick()
         rule.onNodeWithText(string(R.string.tr_new_session), useUnmergedTree = true).assertExists()
-        assertEquals(listOf(LocalDate.now()), days)
+        assertEquals(listOf(testDay()), days)
         // only there: the day chosen doesn't offer it again
         rule.onNodeWithText("Add a session").assertDoesNotExist() // the old link, gone
     }
@@ -318,7 +318,7 @@ class TrainingScreensTest {
         hub(Part.CALENDAR, onNewMatch = { days += it })
         rule.waitForText(string(R.string.agenda_today))
         rule.onNode(hasText(string(R.string.new_match)) and hasClickAction()).performScrollTo().performClick()
-        assertEquals(listOf(LocalDate.now()), days)
+        assertEquals(listOf(testDay()), days)
     }
 
     /** The month fills its weeks with the days of the months around, in
@@ -327,7 +327,7 @@ class TrainingScreensTest {
     fun theMonthShowsTheDaysOfTheMonthsAround() {
         hub(Part.CALENDAR)
         rule.waitForText(string(R.string.agenda_today))
-        val month = java.time.YearMonth.now()
+        val month = java.time.YearMonth.from(testDay())
         val lead = month.atDay(1).dayOfWeek.value - 1
         val cells = lead + month.lengthOfMonth()
         val around = (cells + 6) / 7 * 7 - month.lengthOfMonth()
@@ -360,7 +360,7 @@ class TrainingScreensTest {
      * each entry a series of its own. */
     @Test
     fun aSeriesIsWrittenEntryByEntry() {
-        val monday = LocalDate.now().plusWeeks(1).with(java.time.DayOfWeek.MONDAY)
+        val monday = testDay().plusWeeks(1).with(java.time.DayOfWeek.MONDAY)
         var repeated = false
         rule.setContent {
             Scout4AllTheme {
@@ -386,7 +386,7 @@ class TrainingScreensTest {
     }
 
     private fun twoEntries(): List<io.github.naighes.scout4all.core.SessionRecord> {
-        val monday = LocalDate.now().plusWeeks(1).with(java.time.DayOfWeek.MONDAY)
+        val monday = testDay().plusWeeks(1).with(java.time.DayOfWeek.MONDAY)
         fun entry(first: LocalDate) = io.github.naighes.scout4all.core.SeriesDraft(
             first.toString(), monday.plusWeeks(2).toString(),
             listOf(io.github.naighes.scout4all.core.SeriesBand(first.dayOfWeek.value.toUByte(), "20:30", 120.toUShort(), null)),
@@ -441,8 +441,8 @@ class TrainingScreensTest {
      * only the days with something, the filter hides what it leaves out. */
     @Test
     fun theListOfTheCalendarHasTheBusyDaysAndTheFilterHides() {
-        val first = session(LocalDate.now().plusDays(1), "Ricezione")
-        val second = session(LocalDate.now().plusDays(3), "Battuta")
+        val first = session(testDay().plusDays(1), "Ricezione")
+        val second = session(testDay().plusDays(3), "Battuta")
         core { it.setSessionStatus(second, SessionStatus.CANCELLED) }
         hub(Part.CALENDAR)
         rule.waitForText(string(R.string.agenda_today))
@@ -455,9 +455,9 @@ class TrainingScreensTest {
         rule.waitForText("Ricezione")
         rule.waitForText("Battuta")
         // the day in between, empty, is not there
-        val empty = LocalDate.now().plusDays(2)
+        val empty = testDay().plusDays(2)
         assertEquals(0, rule.onAllNodes(hasText(fullDayText(empty))).fetchSemanticsNodes().size)
-        rule.onNode(hasText(fullDayText(LocalDate.now().plusDays(1)))).assertExists()
+        rule.onNode(hasText(fullDayText(testDay().plusDays(1)))).assertExists()
         // the chip, not the row of the cancelled session
         val chip = androidx.compose.ui.test.SemanticsMatcher.expectValue(
             androidx.compose.ui.semantics.SemanticsProperties.Role,
@@ -474,7 +474,7 @@ class TrainingScreensTest {
      * whatever period it was on. */
     @Test
     fun toCloseLooksAtAnyDateInTheList() {
-        session(LocalDate.now().minusMonths(3), "Vecchia")
+        session(testDay().minusMonths(3), "Vecchia")
         hub(Part.CALENDAR)
         rule.waitForText(string(R.string.agenda_today))
         press(string(R.string.tr_calendar_list))
@@ -491,13 +491,13 @@ class TrainingScreensTest {
      * for them, like "to close". */
     @Test
     fun noAttendanceShowsTheCompletedSessionsWithoutIt() {
-        val bare = session(LocalDate.now().minusMonths(3), "Scoperta")
+        val bare = session(testDay().minusMonths(3), "Scoperta")
         core { it.completeSession(bare, emptyList()) }
-        val taken = session(LocalDate.now().minusMonths(3).plusDays(1), "Rilevata")
+        val taken = session(testDay().minusMonths(3).plusDays(1), "Rilevata")
         val rows = core { it.sessionAttendance(taken) }.rows
         core { it.saveAttendance(taken, rows.map { r -> r.copy(status = AttendanceStatus.PRESENT) }) }
         core { it.completeSession(taken, emptyList()) }
-        session(LocalDate.now().plusDays(1), "Futura")
+        session(testDay().plusDays(1), "Futura")
         hub(Part.CALENDAR)
         rule.waitForText(string(R.string.agenda_today))
         press(string(R.string.tr_calendar_list))
@@ -514,7 +514,7 @@ class TrainingScreensTest {
 
     @Test
     fun theAttendanceReportCountsTheCompletedSessions() {
-        val s = session(LocalDate.now().minusDays(1))
+        val s = session(testDay().minusDays(1))
         val rows = core { it.sessionAttendance(s) }.rows
         core { it.saveAttendance(s, rows.mapIndexed { i, r -> r.copy(status = if (i == 0) AttendanceStatus.ABSENT else AttendanceStatus.PRESENT) }) }
         core { it.completeSession(s, emptyList()) }
@@ -576,7 +576,7 @@ class TrainingScreensTest {
      * no box. */
     @Test
     fun markedSessionsMakeAMicrocycle() {
-        val monday = LocalDate.now().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }.plusWeeks(1)
+        val monday = testDay().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }.plusWeeks(1)
         val first = session(monday, "Ricezione")
         val second = session(monday.plusDays(2), "Battuta")
         val held = session(monday.plusDays(3), "Attacco")
@@ -594,7 +594,7 @@ class TrainingScreensTest {
         // the month keeps the mark: the second marked on its day
         press(string(R.string.tr_calendar_month))
         val day = monday.plusDays(2)
-        if (java.time.YearMonth.from(day) != java.time.YearMonth.now()) {
+        if (java.time.YearMonth.from(day) != java.time.YearMonth.from(testDay())) {
             val next = hasContentDescription(string(R.string.agenda_next_week))
             rule.onNode(androidx.compose.ui.test.hasScrollToNodeAction()).performScrollToNode(next)
             rule.onNode(next).performClick()
@@ -621,7 +621,7 @@ class TrainingScreensTest {
      * that day at that time. */
     @Test
     fun theWeekByTheHourOpensASessionAndMakesOneAtAHalfHour() {
-        val today = LocalDate.now()
+        val today = testDay()
         val held = session(today, "Ricezione")
         val at = mutableListOf<Pair<LocalDate, LocalTime>>()
         val opened = mutableListOf<String>()
@@ -648,7 +648,7 @@ class TrainingScreensTest {
      * by side in their day, each half of it. */
     @Test
     fun sessionsAtTheSameTimeGoSideBySideInTheWeek() {
-        val today = LocalDate.now()
+        val today = testDay()
         session(today, "Ricezione")
         val other = saveTeam("Arezzo")
         core { it.saveSession(other, null, it.newSessionDraft().copy(start = "${today}T18:00", duration = "90", title = "Battuta")) }
@@ -669,7 +669,7 @@ class TrainingScreensTest {
      * the marked; the programs, with no level above, have none. */
     @Test
     fun markedCyclesMakeTheLevelAbove() {
-        val monday = LocalDate.now().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val monday = testDay().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
         val a = microcycle("Carico", monday)
         val b = microcycle("Scarico", monday.plusWeeks(1))
         val c = microcycle("Tenuto", monday.plusWeeks(2))
@@ -695,7 +695,7 @@ class TrainingScreensTest {
      * lasts to the week of the last; saved, it holds them. */
     @Test
     fun aMicrocycleOfSessionsIsProposedAndHoldsThem() {
-        val monday = LocalDate.now().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }.plusWeeks(1)
+        val monday = testDay().let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }.plusWeeks(1)
         val first = session(monday.plusDays(1), "Ricezione")
         val second = session(monday.plusWeeks(1).plusDays(3), "Battuta")
         val saved = mutableListOf<String>()
@@ -718,7 +718,7 @@ class TrainingScreensTest {
      * minutes of the one copied. */
     @Test
     fun anActivityIsCopiedFromAnotherSession() {
-        val other = session(LocalDate.now().minusDays(7), "Prima")
+        val other = session(testDay().minusDays(7), "Prima")
         core {
             it.saveActivity(other, null, it.newActivityDraft().copy(name = "Palleggio", description = "a coppie", planned = "25"))
         }
@@ -742,7 +742,7 @@ class TrainingScreensTest {
      * with it; shared, the archive holds the sessions and the cycles. */
     @Test
     fun theTrainingIsSharedAsAnArchive() {
-        val monday = LocalDate.now().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val monday = testDay().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
         val held = session(monday, "Ricezione")
         core {
             it.saveCycle(team, Level.MICROCYCLE, null, it.newCycleDraft().copy(start = monday.toString(), weeks = "1"), listOf(held), false)
@@ -777,7 +777,7 @@ class TrainingScreensTest {
      * (the planned one when not written). */
     @Test
     fun theSheetOfAMesocycleTotalsTheSessionsOfItsMicrocycles() {
-        val monday = LocalDate.now().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
+        val monday = testDay().plusWeeks(2).let { it.minusDays((it.dayOfWeek.value - 1).toLong()) }
         val done = session(monday, "Fatta")
         val cancelled = session(monday.plusDays(1), "Annullata")
         val planned = session(monday.plusDays(8), "Prevista")

@@ -35,7 +35,7 @@ mod tests {
             technique::{ServeTypeEnum, TechniqueEnum},
         },
     };
-    use chrono::{Duration, Utc};
+    use chrono::Duration;
     use uuid::Uuid;
 
     struct Providers {
@@ -113,7 +113,7 @@ mod tests {
 
     fn serve(player: Uuid) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::S,
             player: Some(player),
             eval: Some(EvalEnum::Positive),
@@ -125,7 +125,7 @@ mod tests {
 
     fn their_error() -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::OE,
             player: None,
             eval: None,
@@ -145,7 +145,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -413,7 +413,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "B",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     6,
                     "",
@@ -456,7 +456,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "B",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     6,
                     "",
@@ -856,7 +856,7 @@ mod tests {
         let (setter, oh1, mb2, opposite, oh2, mb1, libero) =
             (ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6]);
         let act = |event_type, player, eval| EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: Some(player),
             eval: Some(eval),
@@ -875,7 +875,7 @@ mod tests {
                         team,
                         crate::match_form::MatchInput::against(
                             "Cortona Volley",
-                            Utc::now().fixed_offset(),
+                            crate::tests::clock::now().fixed_offset(),
                             true,
                             DEFAULT_MAX_SUBSTITUTIONS,
                             "",

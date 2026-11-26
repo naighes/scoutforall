@@ -19,7 +19,7 @@ mod tests {
     use crate::tests::EN;
     use EvalEnum::*;
     use EventTypeEnum::*;
-    use chrono::Utc;
+
     use uuid::Uuid;
 
     struct Team {
@@ -129,7 +129,7 @@ mod tests {
 
     fn ev(event_type: EventTypeEnum, player: Option<Uuid>, eval: Option<EvalEnum>) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval,
@@ -195,7 +195,7 @@ mod tests {
             video_clock: false,
             roster: vec![],
             opponent: opponent.to_string(),
-            date: Utc::now().fixed_offset(),
+            date: crate::tests::clock::now().fixed_offset(),
             id: "match".to_string(),
             team,
             home,

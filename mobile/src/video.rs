@@ -4,12 +4,12 @@
 //! play the files (the desktop with its own decoder, Android with its
 //! player) and ask the review the rest: the logic is the same on both.
 
+use crate::clock::ClockExt;
 use crate::{
     AnalysisPeriod, ClipPick, MatchSide, MobileError, Origins, Scout4All, SetEvent, VideoEvent,
     clips_of, count_of,
     strip::{ClipSpan, clip_spans},
 };
-use crate::clock::ClockExt;
 use chrono::FixedOffset;
 use scout4all_core::{
     shapes::{enums::PhaseEnum, r#match::MatchEntry},
@@ -1168,7 +1168,10 @@ mod tests {
             })
         };
         let t = |side| ("t".to_string(), side);
-        assert_eq!(old(r#""side":"B","#), Some(vec![t(MatchSide::B), t(MatchSide::B)]));
+        assert_eq!(
+            old(r#""side":"B","#),
+            Some(vec![t(MatchSide::B), t(MatchSide::B)])
+        );
         assert_eq!(old(""), Some(vec![t(MatchSide::A), t(MatchSide::A)]));
         assert_eq!(restore_clips(""), None);
         assert_eq!(restore_clips("{\"team_id\": 3}"), None);
@@ -1206,7 +1209,8 @@ mod tests {
 
     /// The match of the fixture imported, its team and its id.
     fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let choice = DvwChoice {
             opponent: DvwOpponent::Name,
             side: DvwSide::Home,
@@ -1389,7 +1393,8 @@ mod tests {
     #[test]
     fn the_video_of_b_is_corrected_by_the_touches() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let choice = DvwChoice {
             opponent: DvwOpponent::NewTeam,
             side: DvwSide::Home,

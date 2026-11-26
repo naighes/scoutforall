@@ -3525,7 +3525,8 @@ pub(crate) mod tests {
     fn the_actions_of_the_detail_to_watch() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let siena = core
             .matches(team.clone())
@@ -3596,7 +3597,8 @@ pub(crate) mod tests {
         use scout4all_core::shapes::court_zone::ServeStartEnum::{Z1, Z5};
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let arezzo = match_against(&core, &team, "Arezzo");
         let scouting = core.scouting(team.clone(), arezzo.clone()).unwrap();
@@ -3654,7 +3656,8 @@ pub(crate) mod tests {
     fn the_serves_along_an_arrow() {
         use scout4all_core::shapes::court_zone::ServeStartEnum::{Z1, Z5};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let arezzo = match_against(&core, &team, "Arezzo");
         let scouting = core.scouting(team.clone(), arezzo.clone()).unwrap();
@@ -3706,7 +3709,9 @@ pub(crate) mod tests {
     /// just scouted, in it.
     pub(crate) fn with_a_video(core: &Scout4All, team: &str, m: &str) {
         let (the_match, _) = core.video(team, m).unwrap();
-        let start = chrono::Utc::now().fixed_offset() - chrono::TimeDelta::seconds(60);
+        let start = scout4all_mobile::clock::ClockExt::zoned_now(
+            &scout4all_mobile::clock::TestClock::new(),
+        ) - chrono::TimeDelta::seconds(60);
         let profile = scout4all_core::video::VideoProfile {
             files: vec![scout4all_core::video::VideoFile {
                 path: format!("{m}.mp4"),
@@ -3723,7 +3728,8 @@ pub(crate) mod tests {
     fn the_actions_of_the_team_to_watch() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let open = |core: &Arc<Scout4All>| {
             let mut screen = StatsScreen::team(core.clone(), team.clone(), s).unwrap();
@@ -3778,7 +3784,8 @@ pub(crate) mod tests {
         use scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide};
         let s = strings(LanguageEnum::En);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let none = team_with_two_matches(&core);
         let screen = StatsScreen::team(core.clone(), none, s).unwrap();
         assert!(!screen.filters().contains(&Filter::Opponent));
@@ -3866,7 +3873,8 @@ pub(crate) mod tests {
     fn the_competition_of_a_team() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let none = team_with_two_matches(&core);
         let screen = StatsScreen::team(core.clone(), none, s).unwrap();
         assert_eq!(screen.filters().first(), Some(&Filter::Period));
@@ -3915,7 +3923,8 @@ pub(crate) mod tests {
     fn the_statistics_of_a_player_and_their_detail() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let analysis = core
             .team_analysis(
@@ -3960,7 +3969,8 @@ pub(crate) mod tests {
     fn the_analysis_of_a_team_by_keys() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         // from the team, s
         let mut from = crate::team::TeamScreen::new(core.clone(), team.clone()).unwrap();
@@ -4032,7 +4042,8 @@ pub(crate) mod tests {
     #[test]
     fn the_trend_has_the_errors_and_the_points() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let siena = core
             .matches(team.clone())
@@ -4144,7 +4155,8 @@ pub(crate) mod tests {
     #[test]
     fn the_photo_of_a_player_is_read_for_the_statistics() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let m = match core.matches(team.clone()).unwrap().into_iter().next() {
             Some(scout4all_mobile::MatchListing::Match { id, .. }) => id,
@@ -4163,7 +4175,8 @@ pub(crate) mod tests {
     fn the_detail_of_a_match_by_situation() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let first = match core
             .matches(team.clone())
@@ -4253,7 +4266,8 @@ pub(crate) mod tests {
     #[test]
     fn the_digs_only_in_the_detail_of_the_defense() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let s = strings(LanguageEnum::It);
         let mut screen = StatsScreen::team(core, team, s).unwrap();
@@ -4287,7 +4301,8 @@ pub(crate) mod tests {
     fn more_players_and_rotations_at_a_time() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let ids: Vec<String> = core
             .team(team.clone())
@@ -4425,7 +4440,8 @@ pub(crate) mod tests {
     fn the_libero_in_the_filter_of_the_players_of_a_team() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_a_libero_receiving(&core);
         let mut screen = StatsScreen::team(core, team, s).unwrap();
         screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
@@ -4468,7 +4484,8 @@ pub(crate) mod tests {
         use scout4all_core::trend::Series;
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let mut screen = StatsScreen::team(core, team, s).unwrap();
         screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
@@ -4498,7 +4515,8 @@ pub(crate) mod tests {
     fn side_by_side_no_filter_of_the_players() {
         let s = strings(LanguageEnum::En);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = team_with_a_libero_receiving(&core);
         let mut screen = StatsScreen::team(core, team, s).unwrap();
         screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
@@ -4533,7 +4551,8 @@ pub(crate) mod tests {
     fn the_statistics_of_either_team_of_a_match_on_both_sides() {
         use scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let import = |opponent| {
             let choice = DvwChoice {
                 opponent,

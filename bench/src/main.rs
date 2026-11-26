@@ -491,7 +491,12 @@ fn largest_team(app: &Arc<Scout4All>) -> R<String> {
 
 fn open(dir: &Path) -> R<Arc<Scout4All>> {
     fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-    Scout4All::new(dir.to_string_lossy().into_owned(), "en".to_string()).map_err(|e| e.to_string())
+    Scout4All::with_clock(
+        dir.to_string_lossy().into_owned(),
+        "en".to_string(),
+        std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Empties the cache of the lists (`match_summary`), as after an update

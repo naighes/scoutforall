@@ -1262,7 +1262,7 @@ impl LiveScreen {
 #[cfg(test)]
 mod tests {
     use {
-        super::*, scout4all_core::shapes::enums::LanguageEnum, scout4all_mobile::clock::SystemClock,
+        super::*, scout4all_core::shapes::enums::LanguageEnum, scout4all_mobile::clock::TestClock,
     };
 
     fn s() -> &'static Strings {
@@ -1277,7 +1277,7 @@ mod tests {
             "m".into(),
             "Them".into(),
             dir.path().to_path_buf(),
-            Arc::new(SystemClock),
+            Arc::new(TestClock::new()),
         )
     }
 
@@ -1751,7 +1751,7 @@ mod tests {
             "m".into(),
             "Them".into(),
             dir.path().into(),
-            Arc::new(SystemClock),
+            Arc::new(TestClock::new()),
         );
         assert_eq!(again.config.quality(), Quality::Low);
         assert_eq!(again.config.folder(dir.path()), dir.path().join("rec"));

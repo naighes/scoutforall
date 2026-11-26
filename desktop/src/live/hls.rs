@@ -1078,7 +1078,8 @@ seg43.mp4
     /// segment could have been made: its last frame when listed.
     #[test]
     fn when_the_frames_were_taken() {
-        let now = Utc::now();
+        let now =
+            scout4all_mobile::clock::ClockExt::utc(&scout4all_mobile::clock::TestClock::new());
         let at = Instant::now();
         let segment = |date: Option<DateTime<Utc>>| Segment {
             sequence: 0,
@@ -1137,7 +1138,8 @@ seg43.mp4
         let late = status.late_ms.unwrap();
         assert!((500..30_000).contains(&late), "{late}");
         let dir = tempfile::tempdir().unwrap();
-        let started = chrono::Local::now().fixed_offset();
+        let started =
+            scout4all_mobile::clock::ClockExt::zoned_now(&scout4all_mobile::clock::SystemClock);
         capture.record(dir.path().join("hls"), started, Default::default());
         capture.preview(false);
         std::thread::sleep(Duration::from_secs(25));

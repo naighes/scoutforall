@@ -1022,7 +1022,8 @@ mod tests {
 
     fn two_teams() -> (tempfile::TempDir, Arc<Scout4All>, String, String, String) {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let a = core.tutorial_team().unwrap();
         let b = core
             .save_team(

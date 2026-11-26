@@ -21,7 +21,7 @@ mod tests {
         },
         tests::{EN, Sqlite},
     };
-    use chrono::Utc;
+
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -357,7 +357,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",

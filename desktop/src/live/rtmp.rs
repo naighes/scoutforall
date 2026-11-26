@@ -859,7 +859,7 @@ pub(crate) mod tests {
         let base = dir.path().join("20261106 120000");
         capture.record(
             base,
-            chrono::Local::now().fixed_offset(),
+            scout4all_mobile::clock::ClockExt::zoned_now(&scout4all_mobile::clock::SystemClock),
             Default::default(),
         );
         capture.preview(false);

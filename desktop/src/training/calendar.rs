@@ -2014,7 +2014,7 @@ mod tests {
     }
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
     }
 
     fn session(core: &Scout4All, team: &str, start: &str) -> String {
@@ -2160,7 +2160,8 @@ mod tests {
     #[test]
     fn the_gym_filter_is_there_only_with_gyms() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core.tutorial_team().unwrap();
         let mut tab = CalendarTab::new(core.clone(), team);
         assert!(!offers_venues(&tab));

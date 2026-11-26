@@ -2164,7 +2164,7 @@ pub(crate) mod tests {
     #[test]
     fn the_photo_of_a_player_is_read_for_the_choices() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = team_with_shirts(&core);
         let details = core.team(team.clone()).unwrap();
         let first = details.players[0].id.clone();
@@ -2183,7 +2183,7 @@ pub(crate) mod tests {
 
     fn shirt_screen(keys: ScoutingKeys) -> (tempfile::TempDir, ScoutingScreen) {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = team_with_shirts(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
@@ -2279,7 +2279,7 @@ pub(crate) mod tests {
     #[test]
     fn the_statistics_are_narrowed_to_a_phase_and_a_rotation() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = both_sides_started(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
@@ -2304,7 +2304,7 @@ pub(crate) mod tests {
     #[test]
     fn both_sides_show_one_side_and_f5_swaps_it() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = both_sides_started(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
@@ -2353,7 +2353,7 @@ pub(crate) mod tests {
     #[test]
     fn the_statistics_compare_both_sides_and_the_arrows_change_them() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = both_sides_started(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
@@ -2389,7 +2389,7 @@ pub(crate) mod tests {
     #[test]
     fn the_shift_key_makes_the_change_of_the_other_side() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = both_sides_started(&core);
         let new = || {
             let scouting = core
@@ -2557,7 +2557,7 @@ pub(crate) mod tests {
     fn the_arrows_reach_where_the_serve_starts_from() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         // three aces: we still serve
         let arezzo = match_against(&core, &team, "Arezzo");

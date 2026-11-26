@@ -628,7 +628,8 @@ mod tests {
 
     /// The match of the tests of the TUI, three sets, imported.
     fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
             opponent: DvwOpponent::Name,
@@ -650,7 +651,8 @@ mod tests {
     fn the_point_lost_by_b_without_a_cause_goes_to_a_who_serves() {
         use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum::*, TeamSideEnum};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team_id, match_id) = crate::scouting::tests::both_sides_started(&core);
         let scouting = core
             .scouting_in_order(
@@ -698,7 +700,8 @@ mod tests {
     fn a_pair_of_touches_of_both_sides_is_corrected_from_the_keys() {
         use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum::*};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team_id, match_id) = crate::scouting::tests::both_sides_started(&core);
         let scouting = core
             .scouting_in_order(

@@ -46,7 +46,7 @@ mod venue_choice;
 mod venues;
 mod video;
 
-use scout4all_mobile::clock::ClockExt;
+use scout4all_mobile::clock::{ClockExt, SystemClock};
 use {
     game::MatchScreen,
     home::HomeScreen,
@@ -362,7 +362,12 @@ impl App {
         let dir = data_dir().unwrap_or_else(|| PathBuf::from(".scout4all"));
         let (language, keys, theme) = config(&dir);
         let strings = strings::strings(language);
-        let core = Scout4All::new(dir.to_string_lossy().into_owned(), language.to_string());
+        let clock = Arc::new(SystemClock);
+        let core = Scout4All::with_clock(
+            dir.to_string_lossy().into_owned(),
+            language.to_string(),
+            clock.clone(),
+        );
         let (core, error) = match core {
             // what the start has to tell: the data folder of the versions
             // before not all moved into the database
@@ -373,9 +378,10 @@ impl App {
             // a new empty folder in place of the data (never one with
             // something in it: the start moves it into a database): the
             // error tells why
-            Err(e) => match Scout4All::new(
+            Err(e) => match Scout4All::with_clock(
                 empty_data_dir().to_string_lossy().into_owned(),
                 language.to_string(),
+                clock,
             ) {
                 Ok(core) => (core, Some(e.to_string())),
                 Err(_) => std::process::exit(1),

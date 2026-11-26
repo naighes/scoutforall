@@ -679,7 +679,8 @@ mod tests {
     fn each_change_is_saved_as_it_is_made() {
         let s = crate::strings::strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         core.accept_terms().unwrap();
         let mut settings = crate::settings::SettingsScreen::new(
             core.clone(),

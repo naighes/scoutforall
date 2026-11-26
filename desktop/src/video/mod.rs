@@ -2486,7 +2486,7 @@ pub(crate) mod screen_tests {
         dir: &tempfile::TempDir,
         opponent: DvwOpponent,
     ) -> (Arc<Scout4All>, String, String) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
             opponent,
@@ -3244,7 +3244,7 @@ pub(crate) mod screen_tests {
         let temp = tempfile::tempdir().unwrap();
         let kept = std::env::var("S4A_CLIPS_DIR").map(PathBuf::from).ok();
         let dir = kept.as_deref().unwrap_or(temp.path());
-        let core = Scout4All::new(dir.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::for_tests(dir.to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = std::fs::read(downloads.join("&And03 CORTONA V vs POLISPORTIV.dvw")).unwrap();
         let day = core.preview_dvw(bytes.clone()).unwrap().days[0].clone();
         let choice = DvwChoice {
@@ -3367,7 +3367,7 @@ pub(crate) mod screen_tests {
     fn the_actions_of_a_team_match_after_match() {
         use crate::stats::tests::{match_against, team_with_two_matches, with_a_video};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let (arezzo, siena) = (
             match_against(&core, &team, "Arezzo"),
@@ -3429,7 +3429,7 @@ pub(crate) mod screen_tests {
         use crate::stats::tests::{match_against, team_with_two_matches};
         let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let (arezzo, siena) = (
             match_against(&core, &team, "Arezzo"),
@@ -3576,7 +3576,7 @@ pub(crate) mod screen_tests {
     #[test]
     fn the_seconds_chosen_in_the_settings() {
         let dir = tempfile::tempdir().unwrap();
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into())
             .unwrap()
             .set_video_seconds(VideoSeconds {
                 step_s: 12,

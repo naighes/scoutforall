@@ -23,7 +23,7 @@ mod tests {
         },
         tests::Sqlite,
     };
-    use chrono::Utc;
+
     use std::sync::{Arc, atomic::AtomicBool};
     use uuid::Uuid;
 
@@ -32,7 +32,7 @@ mod tests {
     fn their_errors(n: usize) -> Vec<EventEntry> {
         (0..n)
             .map(|_| EventEntry {
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 event_type: EventTypeEnum::OE,
                 player: None,
                 eval: None,

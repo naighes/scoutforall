@@ -11,7 +11,7 @@ mod tests {
     use EvalEnum::*;
     use EventTypeEnum::*;
     use TeamSideEnum::*;
-    use chrono::Utc;
+
     use uuid::Uuid;
 
     /// Rotation 0 (setter in position 1): outside hitter 1 in 2, middle
@@ -65,7 +65,7 @@ mod tests {
 
     fn ev(event_type: EventTypeEnum, player: Option<Uuid>, eval: Option<EvalEnum>) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval,

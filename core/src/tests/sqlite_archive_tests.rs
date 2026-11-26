@@ -40,7 +40,7 @@ pub(crate) mod tests {
         storage::fs::FsStore,
         tests::{EN, LEGACY_VERSIONS as VERSIONS, copy_dir, legacy_fixtures},
     };
-    use chrono::Utc;
+
     use serde_json::Value as Json;
     use std::collections::BTreeMap;
     use tempfile::TempDir;
@@ -283,7 +283,7 @@ pub(crate) mod tests {
                 env!("CARGO_PKG_VERSION")
             )
         );
-        assert!((Utc::now() - m.exported_at).num_seconds() < 60);
+        assert!((crate::tests::clock::now() - m.exported_at).num_seconds() < 60);
         // readable: the words of the database
         let first = &read["matches.json"][0];
         assert_eq!(first["scouting"], "a");
@@ -340,7 +340,7 @@ pub(crate) mod tests {
 
     fn serve(player: Uuid) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::S,
             player: Some(player),
             eval: Some(EvalEnum::Positive),
@@ -352,7 +352,7 @@ pub(crate) mod tests {
 
     fn their_error() -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::OE,
             player: None,
             eval: None,
@@ -402,7 +402,7 @@ pub(crate) mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     opponent,
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
