@@ -1215,12 +1215,14 @@ impl ScoutingScreen {
             }
             ScoutingStep::Replacement => {
                 list = list.push(self.typed_line(s, c));
+                // the rows of the team's list: at stopped play they may scroll
                 for p in self.offered(&snap.replacements) {
-                    list = list.push(ui::choice(
-                        Some(self.player_key_label(p, replacement_key(p.index))),
-                        self.player_label(p, c),
+                    list = list.push(ui::portrait_row(
+                        self.photos.get(&p.id.to_string()),
+                        scout4all_core::names::initials(&p.name),
+                        self.replacement_label(p, c),
                         false,
-                        Some(Message::Replacement(p.id.to_string())),
+                        Message::Replacement(p.id.to_string()),
                         c,
                     ));
                 }
@@ -1979,6 +1981,24 @@ impl ScoutingScreen {
             PlayerKeysEnum::Number => with_photo(photo, ui::name(p.name.clone())),
             PlayerKeysEnum::Role => with_photo(photo, player_label(p, c)),
         }
+    }
+
+    /// Who comes in as in the team's list, the number at the tail: with the
+    /// shirt number on the key that number is the key, else the key of the
+    /// place before the name.
+    fn replacement_label<'a>(&self, p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
+        let key: Element<'a, Message> = match self.keys.player_keys {
+            PlayerKeysEnum::Number => space::horizontal().width(0).into(),
+            PlayerKeysEnum::Role => ui::keycap(&replacement_key(p.index), c),
+        };
+        row![
+            key,
+            ui::name(p.name.clone()),
+            ui::tail_number(p.number, c),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .into()
     }
 
     /// The digits typed so far, while they wait for one more or Enter.

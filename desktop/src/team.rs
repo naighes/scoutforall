@@ -1087,12 +1087,7 @@ impl TeamScreen {
                     text(p.role.clone().unwrap_or_default())
                         .size(SIZE_SMALL)
                         .color(c.muted),
-                    text(p.number.to_string())
-                        .size(20)
-                        .font(theme::fonts().bold)
-                        .color(c.accent)
-                        .width(Length::Fixed(34.0))
-                        .align_x(Alignment::End),
+                    ui::tail_number(p.number, c),
                 ]
                 .spacing(8)
                 .align_y(Alignment::Center),

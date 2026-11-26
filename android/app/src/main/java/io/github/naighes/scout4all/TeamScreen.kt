@@ -255,7 +255,12 @@ private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, onNewSeason: 
         }
         // room at the bottom: the button doesn't cover the last player
         else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
-            items(team.players, key = { it.id }) { PlayerRow(it, onPlayer) }
+            items(team.players, key = { it.id }) { p ->
+                PortraitRow(
+                    p.id, p.name, p.role, p.initials, p.number.toInt(), { onPlayer(p.id) },
+                    Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
             item(key = "season") { season() }
         }
     }
@@ -356,27 +361,36 @@ fun matchDate(date: String): String = try {
     date
 }
 
-/** A box of the list: the square portrait at its head, as tall as the row
- * (the initials without a photo), name and role, the number at its tail. */
+/** A box of a list of players: the square portrait at its head, as tall as
+ * the row (the initials without a photo), the name and the role if any, the
+ * number at its tail. The team's list, who comes in. */
 @Composable
-private fun PlayerRow(player: Player, onPlayer: (String) -> Unit) = Surface(
-    onClick = { onPlayer(player.id) },
-    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+internal fun PortraitRow(
+    id: String,
+    name: String,
+    role: String?,
+    initials: String,
+    number: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) = Surface(
+    onClick = onClick,
+    modifier = modifier.fillMaxWidth(),
     shape = RoundedCornerShape(12.dp),
     color = MaterialTheme.colorScheme.surfaceVariant,
     // the grey is also the primary container: its content would be amber
     contentColor = MaterialTheme.colorScheme.onSurface,
 ) {
     Row(Modifier.heightIn(min = PORTRAIT), verticalAlignment = Alignment.CenterVertically) {
-        Portrait(player)
+        Portrait(id, initials)
         Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Text(player.name, style = MaterialTheme.typography.bodyLarge)
-            player.role?.let {
+            Text(name, style = MaterialTheme.typography.bodyLarge)
+            role?.let {
                 Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }
         Text(
-            player.number.toString(),
+            number.toString(),
             Modifier.padding(end = 16.dp),
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
@@ -389,9 +403,9 @@ private fun PlayerRow(player: Player, onPlayer: (String) -> Unit) = Surface(
 /** A transparent photo shows the grey of the box, an old one fills the
  * square. */
 @Composable
-private fun Portrait(player: Player) = Box(Modifier.size(PORTRAIT), contentAlignment = Alignment.Center) {
-    when (val photo = photoOf(player.id)) {
-        null -> Text(player.initials, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+private fun Portrait(id: String, initials: String) = Box(Modifier.size(PORTRAIT), contentAlignment = Alignment.Center) {
+    when (val photo = photoOf(id)) {
+        null -> Text(initials, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         else -> Image(photo, contentDescription = null, Modifier.fillMaxSize().testTag(SHOWN_IMAGE), contentScale = ContentScale.Crop)
     }
 }

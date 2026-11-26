@@ -1512,6 +1512,8 @@ pub struct ScoutingPlayer {
     pub name: String,
     pub number: u8,
     pub role: String,
+    /// in place of a missing photo
+    pub initials: String,
 }
 
 /// An event as the scout chooses it.
@@ -3225,6 +3227,7 @@ fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
         role: p
             .role
             .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
+        initials: names::initials(&p.name),
     }
 }
 
@@ -8283,6 +8286,40 @@ mod tests {
         assert_eq!(total(Some(DigsEnum::All)), 2);
         assert_eq!(total(Some(DigsEnum::Defense)), 1);
         assert_eq!(total(Some(DigsEnum::Cover)), 1);
+    }
+
+    /// Who comes in has the initials, in place of a missing photo.
+    #[test]
+    fn the_replacements_have_the_initials() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        // seven on court with the libero: one on the bench
+        for n in 1..=8 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n} Rossi"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8"),
+            )
+            .unwrap();
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_event(EventTypeEnum::R).unwrap();
+        let out = scouting.player_choices().into_iter().nth(1).map(|p| p.id);
+        scouting.choose_player(out.unwrap_or_default()).unwrap();
+        let replacements = scouting.replacement_choices();
+        assert!(!replacements.is_empty());
+        for p in replacements {
+            assert_eq!(p.initials, "PR");
+        }
     }
 
     /// How many blocked: on our block from one on, the one chosen saved

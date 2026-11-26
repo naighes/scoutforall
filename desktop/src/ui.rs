@@ -263,6 +263,17 @@ pub fn choice<'a, M: Clone + 'a>(
     list_row(body, chosen, message, c)
 }
 
+/// The shirt number at the tail of a `portrait_row`, large in the accent.
+pub fn tail_number<'a, M: 'a>(number: u8, c: Colors) -> Element<'a, M> {
+    text(number.to_string())
+        .size(20)
+        .font(theme::fonts().bold)
+        .color(c.accent)
+        .width(Length::Fixed(34.0))
+        .align_x(Alignment::End)
+        .into()
+}
+
 /// The height of a row with a portrait.
 const PORTRAIT: f32 = 48.0;
 

@@ -72,7 +72,6 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -1171,22 +1170,12 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
         ScoutingStep.REPLACEMENT -> {
             Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
             Hint(stringResource(R.string.who_comes_in))
-            Column {
+            // at stopped play: the list may scroll
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 view.replacements.forEach { p ->
-                    ListItem(
-                        modifier = Modifier.tutorial("replacement:${p.number}").clickable { model.replacement(p) },
-                        leadingContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    p.number.toString(),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                PlayerPhoto(p.id, 40.dp)
-                            }
-                        },
-                        headlineContent = { Text(p.name) },
-                        supportingContent = { Text(p.role) },
+                    PortraitRow(
+                        p.id, p.name, role = null, p.initials, p.number.toInt(), { model.replacement(p) },
+                        Modifier.tutorial("replacement:${p.number}"),
                     )
                 }
             }
