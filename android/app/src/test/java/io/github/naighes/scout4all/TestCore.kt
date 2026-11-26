@@ -6,6 +6,9 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.junit4.ComposeTestRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.test.core.app.ApplicationProvider
+import io.github.naighes.scout4all.core.DvwChoice
+import io.github.naighes.scout4all.core.DvwOpponent
+import io.github.naighes.scout4all.core.DvwSide
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.GenderEnum
 import io.github.naighes.scout4all.core.MatchForm
@@ -14,6 +17,7 @@ import io.github.naighes.scout4all.core.RoleEnum
 import io.github.naighes.scout4all.core.Scout4All
 import io.github.naighes.scout4all.core.TeamClassificationEnum
 import io.github.naighes.scout4all.core.TeamForm
+import io.github.naighes.scout4all.core.TeamListing
 import io.github.naighes.scout4all.core.TeamSideEnum
 import kotlinx.coroutines.runBlocking
 
@@ -150,4 +154,24 @@ fun ComposeTestRule.waitFor(why: () -> String = { "" }, condition: () -> Boolean
  * evaluation an event. */
 fun serve(team: String, match: String, vararg evals: EvalEnum) = core { c ->
     c.scouting(team, match).use { scouting -> evals.forEach { scouting.chooseEval(it) } }
+}
+
+/** "Home"–"Visiting" of the TUI fixture, imported into "Home" on both
+ * sides, "Visiting" a new team: the match of A and the team B. */
+fun bothSides(): Triple<String, String, String> {
+    val home = saveTeam("Home")
+    val bytes = app.javaClass.classLoader!!.getResourceAsStream("three_sets.dvw")!!.use { it.readBytes() }
+    val choice = DvwChoice(
+        side = DvwSide.HOME,
+        day = "2015-01-25",
+        maxSubstitutions = 6u,
+        teamId = home,
+        classification = null,
+        gender = null,
+        country = null,
+        opponent = DvwOpponent.NewTeam,
+    )
+    val m = core { it.importDvw(bytes, choice) }.matchId
+    val b = core { it.teams() }.firstNotNullOf { t -> (t as? TeamListing.Team)?.takeIf { it.name == "Visiting" }?.id }
+    return Triple(home, m, b)
 }

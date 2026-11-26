@@ -55,8 +55,8 @@ fun matchWatch(teamId: String, matchId: String, side: MatchSide, scope: StatsSco
         clear = clear,
         lines = listOf(stringResource(if (hasVideo) R.string.clips_pick_hint else R.string.clips_no_video)),
     ) {
-        val match = TeamClipMatch(matchId, "", "", (count ?: 0).toUInt(), true)
-        onWatch(VideoRequest.Clips(teamId, pick, title, listOf(match), side = side))
+        val match = TeamClipMatch(matchId, teamId, side, "", "", (count ?: 0).toUInt(), true)
+        onWatch(VideoRequest.Clips(teamId, pick, title, listOf(match)))
     }
 }
 

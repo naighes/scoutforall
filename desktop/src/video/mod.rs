@@ -454,7 +454,6 @@ impl VideoScreen {
     pub fn with_tour(
         core: Arc<Scout4All>,
         dir: PathBuf,
-        team_id: String,
         matches: Vec<MatchClips>,
         title: String,
     ) -> Result<VideoScreen, MobileError> {
@@ -469,9 +468,9 @@ impl VideoScreen {
         let mut screen = VideoScreen::with_clips(
             core,
             dir,
-            team_id,
+            first.team_id,
             first.match_id,
-            MatchSide::A,
+            first.side,
             first.events,
             title,
         )?;
@@ -496,9 +495,9 @@ impl VideoScreen {
         let opened = VideoScreen::with_clips(
             self.core.clone(),
             self.dir.clone(),
-            self.team_id.clone(),
+            m.team_id,
             m.match_id,
-            MatchSide::A,
+            m.side,
             m.events,
             clips.title.clone(),
         );
@@ -675,7 +674,11 @@ impl VideoScreen {
     fn tour_match(&self, m: &MatchClips) -> Result<TourMatch, LeftOut> {
         let (the_match, stored) = self
             .core
-            .video(&self.team_id, &m.match_id)
+            .video_of(&m.team_id, &m.match_id, m.side)
+            .map_err(|_| LeftOut::Unreadable)?;
+        let of_b = (m.side == MatchSide::B)
+            .then(|| self.core.origins_of_b(&m.team_id, &m.match_id))
+            .transpose()
             .map_err(|_| LeftOut::Unreadable)?;
         let profile = match stored {
             StoredProfile::Profile(p) if !p.files.is_empty() => p,
@@ -694,7 +697,7 @@ impl VideoScreen {
             .map_err(|_| LeftOut::Unreadable)?;
         let all = self
             .core
-            .video_events(&the_match, &profile, &durations, None)
+            .video_events(&the_match, &profile, &durations, of_b.as_ref())
             .map_err(|_| LeftOut::Unreadable)?;
         let picked = all
             .iter()
@@ -2539,6 +2542,66 @@ pub(crate) mod screen_tests {
         assert_eq!(screen.events.len(), refs.len());
     }
 
+    /// The actions of team B in its analysis, match after match: the match
+    /// scouted on both sides is in it, its video A's, the actions B's.
+    #[test]
+    fn the_actions_of_a_team_seen_as_b() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team, m) = imported_with(&dir, DvwOpponent::NewTeam);
+        let (the_match, _) = core.video(&team, &m).unwrap();
+        let path = dir.path().join("a.mp4");
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/video/testdata/two_seconds.mp4"
+            ),
+            &path,
+        )
+        .unwrap();
+        let profile = VideoProfile {
+            files: vec![VideoFile {
+                path: video::stored_path(dir.path(), &path),
+                start: None,
+            }],
+            ..Default::default()
+        };
+        core.save_video(&the_match, &profile).unwrap();
+        let team_b = core.analysis_opponents(team.clone()).unwrap()[0]
+            .id
+            .to_string();
+        let pick = scout4all_mobile::ClipPick {
+            scope: scout4all_mobile::StatsScope::Match,
+            event: scout4all_core::shapes::enums::EventTypeEnum::S,
+            filter: scout4all_mobile::DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let refs = core.match_clips_of(&team, &m, MatchSide::B, &pick).unwrap();
+        let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
+        let matches = core.team_clips(&team_b, &period, None, &pick).unwrap();
+        assert_eq!(
+            matches
+                .iter()
+                .map(|c| (c.match_id.as_str(), c.team_id.as_str(), c.side, c.has_video))
+                .collect::<Vec<_>>(),
+            [(m.as_str(), team.as_str(), MatchSide::B, true)]
+        );
+        assert_eq!(matches[0].events, refs);
+        let screen = VideoScreen::with_tour(
+            core,
+            dir.path().to_path_buf(),
+            matches.clone(),
+            "Serve".into(),
+        )
+        .unwrap();
+        assert_eq!(screen.events.len(), refs.len());
+        // in the video made: B's match, its actions
+        let made = screen.tour_match(&matches[0]).unwrap();
+        assert_eq!(made.the_match.team.id.to_string(), team_b);
+        assert_eq!(made.picked.len(), refs.len());
+    }
+
     /// The video seen from B is changed too: the profile is A's, so it's
     /// saved under A's team and the event of B told by its own touch.
     #[test]
@@ -3319,7 +3382,6 @@ pub(crate) mod screen_tests {
         let mut screen = VideoScreen::with_tour(
             core,
             dir.path().to_path_buf(),
-            team,
             matches,
             "Serve".into(),
         )
@@ -3413,7 +3475,6 @@ pub(crate) mod screen_tests {
             let mut screen = VideoScreen::with_tour(
                 core.clone(),
                 dir.path().to_path_buf(),
-                team.clone(),
                 matches,
                 "Battute".into(),
             )

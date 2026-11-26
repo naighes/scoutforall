@@ -308,6 +308,37 @@ class VideoTest {
         assertEquals(0L, model!!.position)
     }
 
+    /** The actions of team B in its analysis, as a video: the match scouted
+     * on both sides is there, read from B's side. */
+    @Test
+    fun theActionsOfATeamSeenAsB() {
+        val (home, match, b) = bothSides()
+        val path = "content://nowhere/$match/a.mp4"
+        core { c -> c.videoReview(home, match, MatchSide.A, null).addFiles(listOf(NewVideoFile(path, "a.mp4")), 7200) }
+        ShadowMediaMetadataRetriever.addMetadata(DataSource.toDataSource(app, Uri.parse(path)), MediaMetadataRetriever.METADATA_KEY_DURATION, "600000")
+        val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, emptyList(), null, null)
+        val matches = core { it.teamClipMatches(b, AnalysisPeriod.LastMatches(4u), null, pick) }
+        // in the analysis of B: its match scouted on both sides, A's video
+        assertEquals(listOf(Triple(match, home, MatchSide.B)), matches.map { Triple(it.matchId, it.teamId, it.side) })
+        assertTrue(matches.single().hasVideo)
+        val serves = core { it.matchClipCount(home, match, MatchSide.B, pick) }
+        assertEquals(serves, matches.single().actions)
+        val request = VideoRequest.Clips(b, pick, "Serve", matches)
+        // the saved request opens the same match from the same side
+        assertEquals(matches, savedClips(request.saved())?.matches)
+        var model: VideoModel? = null
+        rule.setContent {
+            Scout4AllTheme {
+                VideoScreen(request, onBack = {})
+                model = viewModel<VideoModel>()
+            }
+        }
+        rule.waitFor { model?.total == 600_000L }
+        // B's serves, from the review of B's side
+        assertEquals(serves.toInt(), model!!.events.size)
+        assertEquals(serves, core { it.videoReview(home, match, MatchSide.B, pick).events().size.toUInt() })
+    }
+
     /** The video of the aces of the team: summed up before making it, the
      * matches in the video each after its card, the aces counted across
      * them; the others left out, said why. */

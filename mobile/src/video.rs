@@ -166,6 +166,13 @@ pub struct FileSpan {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
 pub struct TeamClipMatch {
     pub match_id: String,
+    /// team A of the match, whose video it is (`video_review`): empty
+    /// when saved by a version without it (`restore_clips`)
+    #[serde(default)]
+    pub team_id: String,
+    /// the side the actions are of: B's in a match scouted on both sides
+    #[serde(default)]
+    pub side: MatchSide,
     pub opponent: String,
     /// `YYYY-MM-DD`
     pub day: String,
@@ -273,6 +280,8 @@ impl Scout4All {
             .map(|m| TeamClipMatch {
                 actions: count_of(m.events.len()),
                 match_id: m.match_id,
+                team_id: m.team_id,
+                side: m.side,
                 opponent: m.opponent,
                 day: m.day,
                 has_video: m.has_video,
@@ -959,10 +968,14 @@ pub struct SavedClips {
     pub matches: Vec<TeamClipMatch>,
     /// without a video: left out, said
     pub left_out: Vec<TeamClipMatch>,
-    /// the team of the matches: B's actions of a match scouted on both
-    /// sides (missing when saved by a version without it: A)
+}
+
+/// What the versions before the team and the side of each match saved:
+/// one side for all of them (missing in older ones: A).
+#[derive(Deserialize)]
+struct SavedSide {
     #[serde(default)]
-    pub side: MatchSide,
+    side: MatchSide,
 }
 
 /// The actions picked written to be saved (empty if they can't be: then
@@ -976,7 +989,19 @@ pub fn save_clips(clips: SavedClips) -> String {
 /// read (written empty, by another version).
 #[uniffi::export]
 pub fn restore_clips(saved: &str) -> Option<SavedClips> {
-    serde_json::from_str(saved).ok()
+    let mut clips: SavedClips = serde_json::from_str(saved).ok()?;
+    let side = serde_json::from_str::<SavedSide>(saved).ok()?.side;
+    let team_id = clips.team_id.clone();
+    clips
+        .matches
+        .iter_mut()
+        .chain(clips.left_out.iter_mut())
+        .filter(|m| m.team_id.is_empty())
+        .for_each(|m| {
+            m.team_id = team_id.clone();
+            m.side = side;
+        });
+    Some(clips)
 }
 
 /// The name of the video of the actions picked, from what they are: the
@@ -1103,6 +1128,8 @@ mod tests {
             title: "Attack · #".to_string(),
             matches: vec![TeamClipMatch {
                 match_id: "m1".to_string(),
+                team_id: "t".to_string(),
+                side: MatchSide::A,
                 opponent: "Brasile".to_string(),
                 day: "2026-11-01".to_string(),
                 actions: 7,
@@ -1110,22 +1137,36 @@ mod tests {
             }],
             left_out: vec![TeamClipMatch {
                 match_id: "m2".to_string(),
+                team_id: "a".to_string(),
+                side: MatchSide::B,
                 opponent: "Japan".to_string(),
                 day: "2026-11-02".to_string(),
                 actions: 2,
                 has_video: false,
             }],
-            side: MatchSide::B,
         };
         assert_eq!(
             restore_clips(&save_clips(clips.clone())),
             Some(clips.clone())
         );
-        // saved before the side: A
-        assert_eq!(
-            restore_clips(&save_clips(clips.clone()).replace(r#","side":"B""#, "")).map(|c| c.side),
-            Some(MatchSide::A)
-        );
+        // saved before the team and the side of each match: the team of
+        // the clips, their one side (A when not saved either)
+        let old = |side: &str| {
+            let saved = save_clips(clips.clone())
+                .replace(r#""team_id":"t","side":"A","#, "")
+                .replace(r#""team_id":"a","side":"B","#, "")
+                .replace(r#""left_out""#, &format!(r#"{side}"left_out""#));
+            restore_clips(&saved).map(|c| {
+                c.matches
+                    .iter()
+                    .chain(&c.left_out)
+                    .map(|m| (m.team_id.clone(), m.side))
+                    .collect::<Vec<_>>()
+            })
+        };
+        let t = |side| ("t".to_string(), side);
+        assert_eq!(old(r#""side":"B","#), Some(vec![t(MatchSide::B), t(MatchSide::B)]));
+        assert_eq!(old(""), Some(vec![t(MatchSide::A), t(MatchSide::A)]));
         assert_eq!(restore_clips(""), None);
         assert_eq!(restore_clips("{\"team_id\": 3}"), None);
     }

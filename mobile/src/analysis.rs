@@ -3,8 +3,8 @@
 //! match, each figure match by match with its moving average, and the
 //! choices of the filters on the situation.
 use super::{
-    ClipPick, CompetitionChoice, DetailFilter, DetailStats, GradeBand, LiveStats, MobileError,
-    RoleChoice, Scout4All, ScoutingPlayer, StatsScope, choosable, clips_of, detail_of, narrowed,
+    ClipPick, CompetitionChoice, DetailFilter, DetailStats, GradeBand, LiveStats, MatchSide,
+    MobileError, RoleChoice, Scout4All, ScoutingPlayer, StatsScope, choosable, clips_of, detail_of, narrowed,
     series_name, summary, touched,
 };
 use chrono::{Local, NaiveDate};
@@ -24,7 +24,7 @@ use scout4all_core::{
     trend::Series,
     video::{EventRef, StoredProfile, VideoProfiles},
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 /// The matches to analyse: only the ones with a set scouted, up to today.
@@ -273,6 +273,7 @@ impl Scout4All {
         let today = Local::now().date_naive();
         let (all, chosen) = self.chosen_matches(&team, &period, competition, today)?;
         let competitions = self.competitions_played(&all, today)?;
+        let chosen = entries(chosen);
         team_analysis(
             &team,
             &all,
@@ -300,6 +301,7 @@ impl Scout4All {
         let today = Local::now().date_naive();
         let (all, chosen) = self.chosen_matches(&team, &period, competition, today)?;
         let competitions = self.competitions_played(&all, today)?;
+        let chosen = entries(chosen);
         let labels = self.language.labels();
         let filter = DetailFilter {
             players: vec![player_id],
@@ -397,6 +399,7 @@ impl Scout4All {
         let (all, chosen) =
             self.chosen_matches_of_b(&team, &opponent, &period, competition, today)?;
         let competitions = self.competitions_played(&all, today)?;
+        let chosen = entries(chosen);
         team_analysis(
             &team_b,
             &all,
@@ -430,6 +433,7 @@ impl Scout4All {
             against.contains_key(&m.id)
         })?;
         let competitions = self.competitions_played(&all, today)?;
+        let chosen = entries(chosen);
         team_analysis(
             &team,
             &all,
@@ -455,6 +459,10 @@ impl Scout4All {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchClips {
     pub match_id: String,
+    /// team A of the match, whose video it is (`video_of`)
+    pub team_id: String,
+    /// the side the actions are of: B's by their own indexes
+    pub side: MatchSide,
     pub opponent: String,
     /// `YYYY-MM-DD`, where it was played
     pub day: String,
@@ -478,15 +486,11 @@ impl Scout4All {
         let team = self.read_team(team_id)?;
         let (_, chosen) =
             self.chosen_matches(&team, period, competition, Local::now().date_naive())?;
-        // the actions of a match are watched from the page of its team A
-        let own: HashSet<String> = self
-            .runtime
-            .block_on(self.match_reader.read_summaries(&team))?
-            .into_iter()
-            .filter_map(Result::ok)
-            .map(|m| m.id)
+        let videos: HashMap<&str, (Uuid, MatchSide)> = chosen
+            .iter()
+            .map(|c| (c.entry.id.as_str(), (c.team_a, c.side)))
             .collect();
-        let matches: Vec<&MatchEntry> = chosen.iter().filter(|m| own.contains(&m.id)).collect();
+        let matches: Vec<&MatchEntry> = chosen.iter().map(|c| &c.entry).collect();
         let analysis = Analysis::of(&matches);
         let pick = ClipPick {
             scope: StatsScope::Match,
@@ -495,12 +499,15 @@ impl Scout4All {
         let mut found = vec![];
         for m in analysis.matches.iter().map(|m| m.entry) {
             let events = clips_of(m, &pick)?;
-            if events.is_empty() {
+            let (Some(&(team_a, side)), false) = (videos.get(m.id.as_str()), events.is_empty())
+            else {
                 continue;
-            }
-            let profile = self.runtime.block_on(self.videos.read(&m.team.id, &m.id));
+            };
+            let profile = self.runtime.block_on(self.videos.read(&team_a, &m.id));
             found.push(MatchClips {
                 match_id: m.id.clone(),
+                team_id: team_a.to_string(),
+                side,
                 opponent: m.opponent.clone(),
                 day: day(m).format(DAY).to_string(),
                 events,
@@ -551,7 +558,7 @@ impl Scout4All {
         period: &AnalysisPeriod,
         competition: Option<Uuid>,
         today: NaiveDate,
-    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
+    ) -> Result<(Vec<MatchSummary>, Vec<Chosen>), MobileError> {
         let against = self.both_against(team, opponent)?;
         let all: Vec<MatchSummary> = self
             .runtime
@@ -569,10 +576,7 @@ impl Scout4All {
             .select_in(&all, today, competition)
             .into_iter()
             .filter_map(|m| self.match_reader.read_of_b(team, &m.id).ok().flatten())
-            .map(|mut m: MatchEntry| {
-                name_the_removed(&mut m.team, self.language.labels());
-                m
-            })
+            .map(|entry| self.chosen(entry, team.id, MatchSide::B))
             .collect();
         Ok((all, chosen))
     }
@@ -587,7 +591,7 @@ impl Scout4All {
         period: &AnalysisPeriod,
         competition: Option<Uuid>,
         today: NaiveDate,
-    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
+    ) -> Result<(Vec<MatchSummary>, Vec<Chosen>), MobileError> {
         self.chosen_matches_among(team, period, competition, today, |_| true)
     }
 
@@ -599,7 +603,7 @@ impl Scout4All {
         competition: Option<Uuid>,
         today: NaiveDate,
         keep: impl Fn(&MatchSummary) -> bool,
-    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
+    ) -> Result<(Vec<MatchSummary>, Vec<Chosen>), MobileError> {
         let (all, team_a): (Vec<MatchSummary>, Vec<Option<TeamEntry>>) = self
             .runtime
             .block_on(self.match_reader.scouted_summaries(team))?
@@ -618,7 +622,12 @@ impl Scout4All {
             .select_in(&all, today, competition)
             .into_iter()
             .filter_map(|m| match as_b.get(m.id.as_str()) {
-                Some(a) => self.match_reader.read_of_b(a, &m.id).ok().flatten(),
+                Some(a) => self
+                    .match_reader
+                    .read_of_b(a, &m.id)
+                    .ok()
+                    .flatten()
+                    .map(|entry| self.chosen(entry, a.id, MatchSide::B)),
                 None => self
                     .runtime
                     .block_on(
@@ -626,15 +635,35 @@ impl Scout4All {
                             .read_some(team, std::slice::from_ref(&m.id)),
                     )
                     .into_iter()
-                    .find_map(Result::ok),
-            })
-            .map(|mut m: MatchEntry| {
-                name_the_removed(&mut m.team, self.language.labels());
-                m
+                    .find_map(Result::ok)
+                    .map(|entry| self.chosen(entry, team.id, MatchSide::A)),
             })
             .collect();
         Ok((all, chosen))
     }
+
+    /// The match read of the period, its removed players named.
+    fn chosen(&self, mut entry: MatchEntry, team_a: Uuid, side: MatchSide) -> Chosen {
+        name_the_removed(&mut entry.team, self.language.labels());
+        Chosen {
+            entry,
+            team_a,
+            side,
+        }
+    }
+}
+
+/// A match of the period read in full, as the team of the analysis sees
+/// it, and where its video is: the match of team A `team_a`, from `side`.
+struct Chosen {
+    entry: MatchEntry,
+    team_a: Uuid,
+    side: MatchSide,
+}
+
+/// The matches read, without where their video is.
+fn entries(chosen: Vec<Chosen>) -> Vec<MatchEntry> {
+    chosen.into_iter().map(|c| c.entry).collect()
 }
 
 /// The analysis of the matches of the team (see `Scout4All::team_analysis`).

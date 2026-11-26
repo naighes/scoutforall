@@ -183,7 +183,7 @@ enum Go {
         String,
     ),
     /// the actions of the team picked in its statistics, match after match
-    TeamClips(String, Vec<scout4all_mobile::MatchClips>, String),
+    TeamClips(Vec<scout4all_mobile::MatchClips>, String),
     /// back to the statistics the actions were picked in
     Unpark,
     /// the file of the video to choose
@@ -564,9 +564,8 @@ impl App {
                 self.watch(opened);
                 return Task::none();
             }
-            Go::TeamClips(team, matches, title) => {
-                let opened =
-                    video::VideoScreen::with_tour(core, self.dir.clone(), team, matches, title);
+            Go::TeamClips(matches, title) => {
+                let opened = video::VideoScreen::with_tour(core, self.dir.clone(), matches, title);
                 self.watch(opened);
                 return Task::none();
             }
@@ -1908,7 +1907,7 @@ fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -
             None => Go::Stay,
         },
         stats::Outcome::WatchTour(matches) => {
-            Go::TeamClips(screen.team_id.clone(), matches, screen.clips_title(s))
+            Go::TeamClips(matches, screen.clips_title(s))
         }
         stats::Outcome::Back => match (screen.match_id(), screen.player_filters()) {
             (Some(m), _) => Go::Match(screen.of_b.clone().unwrap_or(screen.team_id.clone()), m),
