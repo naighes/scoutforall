@@ -155,7 +155,7 @@ class AnalysisTest {
     fun theAnalysisSeenFromAnOpponentScoutedOnBothSides() {
         val team = saveNationalTeam()
         winMatch(team, "Cortona")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.matches_count, 1), substring = true)
         rule.onAllNodesWithText(string(R.string.seen_from)).assertCountEquals(0)
     }
@@ -164,7 +164,7 @@ class AnalysisTest {
     fun theAnalysisSeenFromTheOpponent() {
         val both = saveNationalTeam()
         serve(both, startFirstSetBoth(both), EvalEnum.PERFECT)
-        rule.setContent { Scout4AllTheme { AnalysisScreen(both, onBack = {}) } }
+        open(both)
         rule.waitForText(string(R.string.seen_from))
         val chip = { name: String -> rule.onNode(hasText(name) and hasClickAction()) }
         chip("Arezzo").performClick()
@@ -178,7 +178,7 @@ class AnalysisTest {
     fun theTeamAndTheOpponentSideBySide() {
         val both = saveNationalTeam()
         serve(both, startFirstSetBoth(both), EvalEnum.PERFECT)
-        rule.setContent { Scout4AllTheme { AnalysisScreen(both, onBack = {}) } }
+        open(both)
         rule.waitForText(string(R.string.seen_from))
         // none until an opponent is chosen
         rule.onAllNodesWithText(string(R.string.compare)).assertCountEquals(0)
@@ -198,7 +198,7 @@ class AnalysisTest {
     fun oneCompetitionIsNotOffered() {
         val team = saveNationalTeam()
         winMatch(team, "Cortona", "Coppa")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.matches_count, 1), substring = true)
         assertEquals(0, rule.onAllNodesWithText(string(R.string.all_competitions)).fetchSemanticsNodes().size)
     }
@@ -210,7 +210,7 @@ class AnalysisTest {
         val team = saveNationalTeam()
         winMatch(team, "Cortona", "Coppa")
         winMatch(team, "Arezzo", "Serie A")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.all_competitions))
         rule.waitForText(string(R.string.matches_count, 2), substring = true)
         rule.onNode(hasText("Coppa") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
@@ -224,7 +224,7 @@ class AnalysisTest {
     fun aFilterOfTheSituation() {
         val team = saveNationalTeam()
         winMatch(team, "Cortona")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.rally_reception))
         rule.onNode(hasText(string(R.string.rally_reception)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         // `!` among the bad ones
@@ -238,13 +238,23 @@ class AnalysisTest {
     fun twoRotationsAtATime() {
         val team = saveNationalTeam()
         winMatch(team, "Cortona")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.filter_rotation))
         rule.onNode(hasText(string(R.string.filter_rotation)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText("S1")
         rule.onNode(hasText("S1") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.onNode(hasText("S3") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.filter_rotation) + " S1 S3")
+    }
+
+    /** The analysis of the team, of its last matches: the default period, the
+     * last month, would leave the matches of the tests out as time passes. */
+    private fun open(team: String) {
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        val last = hasText(string(R.string.last_matches, 5)) and hasClickAction()
+        rule.waitForText(string(R.string.last_matches, 5))
+        rule.onNode(last).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
     }
 
     private fun days(from: String, to: String) {
