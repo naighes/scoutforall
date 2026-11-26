@@ -937,6 +937,8 @@ impl StatsScreen {
                         self.detail = Some(a.detail.clone());
                         self.played = period::played_days(&a.played_days);
                         self.analysis = Some(a);
+                        // fewer series with players chosen: the last one
+                        self.series = self.series.min(self.series_count().saturating_sub(1));
                     }
                     Err(e) => self.error = Some(e.to_string()),
                 }
@@ -3085,6 +3087,30 @@ fn summary<'a>(
         .align_y(Alignment::Center)
         .into()
     });
+    // the figures of the team, its rallies: none with players chosen
+    let nothing = || -> Element<'a, Message> { space::vertical().height(0).into() };
+    let phases: Element<'a, Message> = match live.team_figures {
+        true => column![
+            phase(s.side_out, &live.side_out),
+            phase(s.break_point, &live.break_points),
+        ]
+        .spacing(6)
+        .into(),
+        false => nothing(),
+    };
+    let by_possession: Element<'a, Message> = match live.team_figures {
+        true => column![
+            gap(tall),
+            ui::section(s.side_out_by_possession, c),
+            Column::with_children(possessions).spacing(match tall {
+                true => 10,
+                false => 4,
+            }),
+        ]
+        .spacing(6)
+        .into(),
+        false => nothing(),
+    };
     let first = ui::panel(
         Some(s.summary),
         column![
@@ -3095,16 +3121,10 @@ fn summary<'a>(
             }),
             level,
             gap(tall),
-            phase(s.side_out, &live.side_out),
-            phase(s.break_point, &live.break_points),
+            phases,
             attack(s.first_attack, &live.first_attack),
             attack(s.counter_attack, &live.counter_attack),
-            gap(tall),
-            ui::section(s.side_out_by_possession, c),
-            Column::with_children(possessions).spacing(match tall {
-                true => 10,
-                false => 4,
-            }),
+            by_possession,
         ]
         .spacing(6)
         .height(height(tall)),
@@ -3261,6 +3281,30 @@ fn summary<'a>(
         ]
         .spacing(6)
     };
+    let aces = || {
+        tile(
+            s.aces,
+            format!("{} – {}", live.aces, live.aces_against),
+            c.text,
+            Some(s.ours_theirs.to_string()),
+            c,
+        )
+    };
+    // theirs: of the team, not with players chosen
+    let counts = match live.team_figures {
+        true => row![
+            tile(
+                s.opponent_errors,
+                live.opponent_errors.to_string(),
+                c.text,
+                Some(format!("{} {}", s.opponent_points, live.opponent_points)),
+                c,
+            ),
+            aces(),
+        ],
+        false => row![aces()],
+    }
+    .spacing(8);
     let fourth = ui::panel(
         Some(s.errors),
         column![
@@ -3278,23 +3322,7 @@ fn summary<'a>(
                 true
             ),
             gap(tall),
-            row![
-                tile(
-                    s.opponent_errors,
-                    live.opponent_errors.to_string(),
-                    c.text,
-                    Some(format!("{} {}", s.opponent_points, live.opponent_points)),
-                    c
-                ),
-                tile(
-                    s.aces,
-                    format!("{} – {}", live.aces, live.aces_against),
-                    c.text,
-                    Some(s.ours_theirs.to_string()),
-                    c
-                ),
-            ]
-            .spacing(8),
+            counts,
         ]
         .spacing(14)
         .height(height(tall)),
@@ -3305,16 +3333,23 @@ fn summary<'a>(
             .width(Length::FillPortion(1))
             .height(height(tall)),
         container(
-            column![
-                container(second).height(match tall {
-                    true => Length::FillPortion(3),
+            match live.team_figures {
+                true => column![
+                    container(second).height(match tall {
+                        true => Length::FillPortion(3),
+                        false => Length::Shrink,
+                    }),
+                    container(third).height(match tall {
+                        true => Length::FillPortion(2),
+                        false => Length::Shrink,
+                    }),
+                ],
+                // the rotations are of the team
+                false => column![container(third).height(match tall {
+                    true => Length::Fill,
                     false => Length::Shrink,
-                }),
-                container(third).height(match tall {
-                    true => Length::FillPortion(2),
-                    false => Length::Shrink,
-                }),
-            ]
+                })],
+            }
             .spacing(14)
         )
         .width(Length::FillPortion(1))
@@ -4416,6 +4451,36 @@ pub(crate) mod tests {
         use EventTypeEnum::{A, B, D, P, S};
         assert_eq!(totals, [(P, 1), (A, 0), (S, 0), (B, 0), (D, 0)]);
         assert_eq!(aces(&screen), 0);
+    }
+
+    /// With a player chosen the trend of the team has no side out nor
+    /// break point, of the team: the series asked stays one there is.
+    #[test]
+    fn the_series_of_the_team_are_not_of_a_player() {
+        use scout4all_core::trend::Series;
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
+        screen.update(Message::Page(1));
+        let shown = |screen: &StatsScreen| {
+            screen
+                .analysis
+                .as_ref()
+                .and_then(|a| a.trend.get(screen.series))
+                .map(|t| t.series)
+        };
+        screen.update(Message::Series(Series::ALL.len() - 1));
+        assert_eq!(shown(&screen), Some(Series::BreakPoint));
+        assert!(screen.live.as_ref().is_some_and(|l| l.team_figures));
+        let player = screen.choosable_players()[0].id.clone();
+        screen.update(Message::Players(vec![player]));
+        assert_eq!(shown(&screen), Some(Series::Serve));
+        assert!(screen.live.as_ref().is_some_and(|l| !l.team_figures));
+        screen.update(Message::Players(vec![]));
+        assert!(screen.live.as_ref().is_some_and(|l| l.team_figures));
     }
 
     /// The opponent and the team side by side: no filter of the players
