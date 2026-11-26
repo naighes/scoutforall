@@ -6903,6 +6903,11 @@ mod tests {
                     "SIL Open Font License 1.1",
                     "il carattere dei report PDF"
                 ),
+                (
+                    "Rust crates, Android libraries",
+                    "MIT, Apache 2.0, …",
+                    "le librerie con cui è fatta l'app"
+                ),
             ]
         );
         // the texts whole, without the blank lines around them
