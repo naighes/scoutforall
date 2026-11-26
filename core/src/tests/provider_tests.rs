@@ -466,8 +466,8 @@ mod tests {
             .await
             .unwrap();
         let mut queue = UploadQueue::default();
-        queue.enqueue(team.id, first.id.clone());
-        queue.enqueue(team.id, second.id.clone());
+        queue.enqueue(team.id, first.id.clone(), crate::tests::clock::now());
+        queue.enqueue(team.id, second.id.clone(), crate::tests::clock::now());
         queue.mark_retry(&team.id, &first.id);
         p.queue_writer.save(&queue).await.unwrap();
         let read = p.queue_reader.load().await.unwrap();
@@ -827,7 +827,7 @@ mod tests {
 
         // exported and imported elsewhere
         let uuid = Uuid::parse_str(&m.id).unwrap();
-        let zip = archive::export(&db, Subject::Match(uuid)).unwrap();
+        let zip = archive::export(&db, Subject::Match(uuid), crate::tests::clock::now()).unwrap();
         let target = database();
         archive::import(&target, &zip, &Language::default()).unwrap();
         let target = sqlite(&target);

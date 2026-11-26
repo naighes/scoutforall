@@ -986,6 +986,7 @@ fn migrate_folder(
     db: &Database,
     data_dir: &Path,
     labels: &Labels,
+    today: NaiveDate,
 ) -> Option<String> {
     let backup = Backup {
         dir: data_dir
@@ -995,6 +996,7 @@ fn migrate_folder(
             || "scout4all".to_string(),
             |name| name.to_string_lossy().into_owned(),
         ),
+        day: today,
     };
     match runtime.block_on(migrate(store, db, &backup, labels)) {
         Ok(migrated) => {
@@ -3470,6 +3472,16 @@ impl Scout4All {
         self.clock.clone()
     }
 
+    /// What the core asks for the time in UTC (the touches of a scouting).
+    fn utc_now(&self) -> scout4all_core::clock::UtcNow {
+        clock::utc_now_of(self.clock.clone())
+    }
+
+    /// The year on the clock, for a team.
+    fn this_year(&self) -> u16 {
+        u16::try_from(chrono::Datelike::year(&self.clock.today())).unwrap_or_default()
+    }
+
     /// Scouts the set in progress of the match, choosing in `order`: the
     /// keyboard chooses the event first, the touch the player.
     pub fn scouting_in_order(
@@ -3511,12 +3523,21 @@ impl Scout4All {
             reason: e.message(labels),
         };
         match self.set_reader.read_touches(&m, set.set_number)? {
-            None => set_start::resume(m, set, self.set_writer.clone()).map_err(failed),
+            None => {
+                set_start::resume(m, set, self.set_writer.clone(), self.utc_now()).map_err(failed)
+            }
             Some(touches) => {
                 let b = self.read_match_of(team_id, match_id, MatchSide::B)?;
-                set_start::resume_both(m, set, touches, b.team, self.set_writer.clone())
-                    .map(|session| session.with_earlier_of_b(&b.sets))
-                    .map_err(failed)
+                set_start::resume_both(
+                    m,
+                    set,
+                    touches,
+                    b.team,
+                    self.set_writer.clone(),
+                    self.utc_now(),
+                )
+                .map(|session| session.with_earlier_of_b(&b.sets))
+                .map_err(failed)
             }
         }
     }
@@ -3859,7 +3880,14 @@ impl Scout4All {
                 reason: e.to_string(),
             })?;
         let db = open_database(&data_dir.join(layout::DATABASE), language.labels())?;
-        let notice = migrate_folder(&runtime, &*store, &db, &data_dir, language.labels());
+        let notice = migrate_folder(
+            &runtime,
+            &*store,
+            &db,
+            &data_dir,
+            language.labels(),
+            clock.today(),
+        );
         let queue = Arc::new(SqliteQueue::new(db.clone()));
         let app = Self {
             runtime: Arc::new(runtime),
@@ -4434,8 +4462,11 @@ impl Scout4All {
         // corrected (the set ends as it did)
         let m = &correction.current_match;
         if m.get_status().is_ok_and(|status| status.match_finished) {
-            self.runtime
-                .block_on(self.finished_matches().finished(m.team.id, m.id.clone()));
+            self.runtime.block_on(self.finished_matches().finished(
+                m.team.id,
+                m.id.clone(),
+                self.clock.utc(),
+            ));
         }
         Ok(())
     }
@@ -4518,6 +4549,7 @@ impl Scout4All {
                 input,
                 self.set_writer.clone(),
                 Some(b.team),
+                self.utc_now(),
             ))
             .map(|_| ())
             .map_err(failed)
@@ -4540,7 +4572,13 @@ impl Scout4All {
         };
         let input = set_start.form().clone().validate(&m.team).map_err(failed)?;
         self.runtime
-            .block_on(set_start::start(m, input, self.set_writer.clone(), None))
+            .block_on(set_start::start(
+                m,
+                input,
+                self.set_writer.clone(),
+                None,
+                self.utc_now(),
+            ))
             .map(|_| ())
             .map_err(failed)
     }
@@ -5099,7 +5137,7 @@ impl Scout4All {
         let id = parse_id(&team_id)?;
         // a team removed or not there: not exported
         self.read_team(&team_id)?;
-        let bytes = archives::export(&self.db, archives::Subject::Team(id))?;
+        let bytes = archives::export(&self.db, archives::Subject::Team(id), self.clock.utc())?;
         Ok(ExportedArchive {
             file_name: format!("{id}.zip"),
             bytes,
@@ -5114,7 +5152,7 @@ impl Scout4All {
     ) -> Result<ExportedArchive, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let id = Uuid::parse_str(&m.id).map_err(failed)?;
-        let bytes = archives::export(&self.db, archives::Subject::Match(id))?;
+        let bytes = archives::export(&self.db, archives::Subject::Match(id), self.clock.utc())?;
         Ok(ExportedArchive {
             file_name: format!("{id}.zip"),
             bytes,
@@ -5375,6 +5413,7 @@ impl Scout4All {
             &self.match_writer,
             &*self.set_writer,
             &*self.finished_matches(),
+            self.clock.utc(),
         ))?;
         Ok(DvwImported {
             team_id: team.team.id.to_string(),
@@ -5471,6 +5510,7 @@ impl Scout4All {
             &self.team_reader,
             &self.team_writer,
             self.language.labels(),
+            self.this_year(),
         ))?;
         match added {
             Some(team) => self
@@ -5512,6 +5552,7 @@ impl Scout4All {
                 let team = self.runtime.block_on(example::add_example_team(
                     &self.team_writer,
                     self.language.labels(),
+                    self.this_year(),
                 ))?;
                 let id = team.id.to_string();
                 self.update_tutorial(|tutorial| Tutorial {
@@ -5649,8 +5690,8 @@ struct SentFinishedMatches {
 
 #[async_trait::async_trait]
 impl FinishedMatches for SentFinishedMatches {
-    async fn finished(&self, team_id: Uuid, match_id: String) {
-        self.queued.finished(team_id, match_id).await;
+    async fn finished(&self, team_id: Uuid, match_id: String, at: DateTime<Utc>) {
+        self.queued.finished(team_id, match_id, at).await;
         self.sender.request();
     }
 }
@@ -5668,8 +5709,11 @@ pub enum Uploads {
 /// process: the app starts it once, the tests leave it off (each of them has
 /// its own data, the log would go to the last one's).
 #[uniffi::export]
-pub fn start_log(data_dir: String) {
-    init_logger(PathBuf::from(data_dir).join("scout4all.log"));
+pub fn start_log(data_dir: String, clock: Arc<dyn Clock>) {
+    init_logger(
+        PathBuf::from(data_dir).join("scout4all.log"),
+        clock::wall_now_of(clock),
+    );
 }
 
 /// A name of a player in little room: each long word cut to its first

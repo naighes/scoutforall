@@ -115,7 +115,7 @@ mod tests {
     /// gives it) and none of its training.
     async fn with_team(source: &Database, team: &TeamEntry) -> Database {
         let db = database();
-        let archive = export(source, Subject::Team(team.id)).unwrap();
+        let archive = export(source, Subject::Team(team.id), crate::tests::clock::now()).unwrap();
         import(&db, &archive, &en()).unwrap();
         db
     }
@@ -151,7 +151,7 @@ mod tests {
     #[tokio::test]
     async fn the_archive_holds_the_training_not_removed() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let m = manifest(&archive).unwrap();
         assert_eq!(
             (m.kind, m.contents, m.id),
@@ -193,7 +193,7 @@ mod tests {
     #[tokio::test]
     async fn the_gyms_go_and_come_back_the_local_ones_win() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let files = files(&archive);
         let venues = files["venues.json"].as_array().unwrap();
         assert_eq!(venues.len(), 1);
@@ -236,7 +236,7 @@ mod tests {
         // a training without gyms has an empty file of them
         execute(&db, "UPDATE training_sessions SET venue_id = NULL");
         assert_eq!(
-            files_of(&export(&db, Subject::Training(t.id)).unwrap())["venues.json"],
+            files_of(&export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap())["venues.json"],
             Json::Array(vec![])
         );
     }
@@ -246,13 +246,13 @@ mod tests {
     }
 
     fn files_of_team(db: &Database, t: &TeamEntry) -> BTreeMap<String, Json> {
-        files(&export(db, Subject::Team(t.id)).unwrap())
+        files(&export(db, Subject::Team(t.id), crate::tests::clock::now()).unwrap())
     }
 
     #[tokio::test]
     async fn the_training_goes_and_comes_back() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let there = with_team(&db, &t).await;
         let before = rows(&there);
         let imported = import(&there, &archive, &en()).unwrap();
@@ -269,7 +269,7 @@ mod tests {
         assert_ne!(rows(&there), before);
         // the same training: what it exports is what it was given
         assert_eq!(
-            tables(&export(&there, Subject::Training(t.id)).unwrap()),
+            tables(&export(&there, Subject::Training(t.id), crate::tests::clock::now()).unwrap()),
             tables(&archive)
         );
         // the guest is a person without a team, with only the name
@@ -306,7 +306,7 @@ mod tests {
     #[tokio::test]
     async fn the_team_must_be_here_first() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let empty = database();
         let e = import(&empty, &archive, &en()).unwrap_err();
         assert!(message(e).contains(EN.import_team_first));
@@ -321,7 +321,7 @@ mod tests {
     #[tokio::test]
     async fn the_preview_tells_the_team_and_how_much_training() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         match preview(&archive, &en()).unwrap() {
             Preview::Training(p) => {
                 assert_eq!((p.team.id, p.sessions, p.cycles), (t.id, 2, 3));
@@ -333,7 +333,7 @@ mod tests {
     #[tokio::test]
     async fn the_local_data_win_and_what_is_removed_here_stays() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let there = with_team(&db, &t).await;
         import(&there, &archive, &en()).unwrap();
         execute(
@@ -357,7 +357,7 @@ mod tests {
     #[tokio::test]
     async fn what_overlaps_what_is_here_stays_out() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let there = with_team(&db, &t).await;
         // here: another session across the time of S2, another microcycle
         // across the week of the archive's one, and a match in programma
@@ -405,7 +405,7 @@ mod tests {
     #[tokio::test]
     async fn a_scheduled_match_is_in_the_way_a_played_one_is_not() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let there = with_team(&db, &t).await;
         execute(
             &there,
@@ -424,7 +424,7 @@ mod tests {
     #[tokio::test]
     async fn rows_of_another_team_refuse_the_archive() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let there = with_team(&db, &t).await;
         let mut files = files(&archive);
         files.get_mut("training_sessions.json").unwrap()[0]["team_id"] =
@@ -457,7 +457,7 @@ mod tests {
     #[tokio::test]
     async fn a_fuzzed_archive_is_taken_or_refused_whole() {
         let (db, t) = trained().await;
-        let archive = export(&db, Subject::Training(t.id)).unwrap();
+        let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
         let base = files(&archive);
         let names: Vec<String> = base.keys().filter(|n| *n != MANIFEST).cloned().collect();
         let mut rng = Rng(0x5eed);
@@ -586,6 +586,6 @@ mod tests {
             })
             .unwrap();
         assert_eq!(live, 0);
-        assert!(export(&db, Subject::Training(t.id)).is_err());
+        assert!(export(&db, Subject::Training(t.id), crate::tests::clock::now()).is_err());
     }
 }

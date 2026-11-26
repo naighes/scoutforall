@@ -58,7 +58,7 @@ use crate::{
     storage::{Store, StoreEntry, layout, write_json},
     video::{VIDEO_PROFILE_FILE_NAME, VideoProfile},
 };
-use chrono::{Local, NaiveDate};
+use chrono::NaiveDate;
 use rusqlite::{OptionalExtension, Transaction, params};
 use serde_json::from_slice;
 use std::{
@@ -74,6 +74,8 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::FileOptions};
 pub struct Backup {
     pub dir: PathBuf,
     pub prefix: String,
+    /// the day it's taken, in its name
+    pub day: NaiveDate,
 }
 
 /// What a migration did.
@@ -721,7 +723,7 @@ async fn teams_to_remove(store: &dyn Store, teams: &[LegacyTeam], going: &[&str]
 async fn take_backup(store: &dyn Store, backup: &Backup) -> Result<PathBuf, AppError> {
     let blobs = all_blobs(store).await?;
     let zip = zip_blobs(&blobs)?;
-    let path = free_path(backup, Local::now().date_naive());
+    let path = free_path(backup, backup.day);
     let part = path.with_extension("zip.part");
     let io = |e: std::io::Error| AppError::IO(IOError::from(e));
     std::fs::File::create(&part)

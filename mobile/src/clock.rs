@@ -7,7 +7,8 @@
 //! reads `Local::now()` / `Utc::now()` / `LocalDate.now()` by itself.
 
 use chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, Offset, Utc};
-use std::time::SystemTime;
+use scout4all_core::clock::{UtcNow, WallNow};
+use std::{sync::Arc, time::SystemTime};
 
 /// What time it is.
 #[uniffi::export(with_foreign)]
@@ -23,9 +24,15 @@ pub trait Clock: Send + Sync {
 uniffi::custom_type!(NaiveDateTime, String, {
     remote,
     lower: |time| time.format("%Y-%m-%dT%H:%M:%S%.f").to_string(),
-    try_lift: |time| Ok(NaiveDateTime::parse_from_str(&time, "%Y-%m-%dT%H:%M:%S%.f")
-        .or_else(|_| NaiveDateTime::parse_from_str(&time, "%Y-%m-%dT%H:%M"))?),
+    try_lift: |time| Ok(wall_time(&time)?),
 });
+
+/// The time on the wall as `java.time.LocalDateTime` writes it: to the
+/// minute, the second, or a fraction of it.
+fn wall_time(text: &str) -> Result<NaiveDateTime, chrono::ParseError> {
+    NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S%.f")
+        .or_else(|_| NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M"))
+}
 
 /// The clock of the system.
 #[derive(Debug, Clone, Copy, Default)]
@@ -76,6 +83,8 @@ pub trait ClockExt {
     fn offset(&self) -> FixedOffset;
     /// now, with the offset of where the app runs
     fn zoned_now(&self) -> DateTime<FixedOffset>;
+    /// now in UTC
+    fn utc(&self) -> DateTime<Utc>;
 }
 
 impl<C: Clock + ?Sized> ClockExt for C {
@@ -95,13 +104,40 @@ impl<C: Clock + ?Sized> ClockExt for C {
     }
 
     fn zoned_now(&self) -> DateTime<FixedOffset> {
-        DateTime::<Utc>::from(self.utc_now()).with_timezone(&self.offset())
+        self.utc().with_timezone(&self.offset())
     }
+
+    fn utc(&self) -> DateTime<Utc> {
+        DateTime::<Utc>::from(self.utc_now())
+    }
+}
+
+/// What the core asks for the time in UTC, by `clock`.
+pub fn utc_now_of(clock: Arc<dyn Clock>) -> UtcNow {
+    Arc::new(move || clock.utc())
+}
+
+/// What the core asks for the time on the wall, by `clock`.
+pub fn wall_now_of(clock: Arc<dyn Clock>) -> WallNow {
+    Arc::new(move || clock.now())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_wall_time_as_java_writes_it() {
+        for text in [
+            "2026-11-26T10:15",
+            "2026-11-26T10:15:30",
+            "2026-11-26T10:15:30.120",
+            "2026-11-26T10:15:30.123456",
+            "2026-11-26T10:15:30.123456789",
+        ] {
+            assert!(wall_time(text).is_ok(), "{text}: {:?}", wall_time(text));
+        }
+    }
 
     #[test]
     fn a_fixed_clock_tells_the_same_moment_on_the_wall_and_in_utc() {

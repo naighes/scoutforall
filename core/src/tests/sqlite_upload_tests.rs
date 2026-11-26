@@ -86,6 +86,7 @@ mod tests {
 
         async fn migrate(&self, db: &Database) -> Migrated {
             let backup = Backup {
+                day: crate::tests::clock::today(),
                 dir: self.dir.path().to_path_buf(),
                 prefix: "backup".into(),
             };

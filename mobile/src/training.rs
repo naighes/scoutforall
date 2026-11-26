@@ -3,6 +3,7 @@
 //! sheets. The dates travel as text: `YYYY-MM-DD` a day, `YYYY-MM-DDTHH:MM`
 //! a moment (local, without offset, as the core keeps them).
 use super::{MobileError, Scout4All, failed, parse_id};
+use crate::clock::ClockExt;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use scout4all_core::{
     errors::AppError,
@@ -1538,7 +1539,7 @@ impl Scout4All {
         use scout4all_core::providers::sqlite::archive::{self as archives, Subject};
         let id = parse_id(&team_id)?;
         self.read_team(&team_id)?;
-        let bytes = archives::export(&self.db, Subject::Training(id))?;
+        let bytes = archives::export(&self.db, Subject::Training(id), self.clock.utc())?;
         Ok(super::ExportedArchive {
             file_name: format!("{id}-training.zip"),
             bytes,

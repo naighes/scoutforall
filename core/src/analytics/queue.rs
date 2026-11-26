@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -32,8 +33,8 @@ impl UploadQueue {
         &self.pending
     }
 
-    // add match to upload queue
-    pub fn enqueue(&mut self, team_id: Uuid, match_id: String) {
+    /// The match queued for the upload `at`, once.
+    pub fn enqueue(&mut self, team_id: Uuid, match_id: String, at: DateTime<Utc>) {
         // avoid duplicates
         if self.pending.iter().any(|p| p.is(&team_id, &match_id)) {
             return;
@@ -41,7 +42,7 @@ impl UploadQueue {
         self.pending.push(PendingUpload {
             team_id,
             match_id,
-            queued_at: chrono::Utc::now().timestamp(),
+            queued_at: at.timestamp(),
             retry_count: 0,
         });
     }

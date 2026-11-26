@@ -1029,7 +1029,12 @@ mod tests {
         let m = scouted(&p, &a).await;
         let gone = a.players[1].id;
         p.persons.remove(&gone).unwrap();
-        let zip = export(&p.db, Subject::Match(Uuid::parse_str(&m.id).unwrap())).unwrap();
+        let zip = export(
+            &p.db,
+            Subject::Match(Uuid::parse_str(&m.id).unwrap()),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let (_, persons) = unzip(&zip)
             .unwrap()
             .into_iter()

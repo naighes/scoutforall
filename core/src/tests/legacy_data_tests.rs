@@ -191,6 +191,7 @@ mod tests {
         let p = Sqlite::new();
         let backups = TempDir::new().unwrap();
         let backup = Backup {
+            day: crate::tests::clock::today(),
             dir: backups.path().to_path_buf(),
             prefix: "backup".into(),
         };
@@ -275,7 +276,8 @@ mod tests {
             .expect("expected the imported match to load");
         assert_eq!(replayed(&again), replayed(m));
         let id = Uuid::parse_str(&m.id).unwrap();
-        let archive = archives::export(&from.db, Subject::Match(id)).unwrap();
+        let archive =
+            archives::export(&from.db, Subject::Match(id), crate::tests::clock::now()).unwrap();
         let to = Sqlite::new();
         archives::import(&to.db, &archive, &language).expect("expected the match to import");
         let team = to.team_reader.read_single(&m.team.id).await.unwrap();

@@ -61,7 +61,12 @@ mod tests {
 
     #[test]
     fn the_images_go_as_files_and_the_rows_do_not_point_to_them() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let files = unzip(&archive).unwrap();
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         // the logo and the photo of the player; not the one of who was removed
@@ -79,7 +84,12 @@ mod tests {
 
     #[test]
     fn an_archive_without_images_has_none_of_the_files() {
-        let archive = export(&with_team(false), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(false),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         assert!(
             unzip(&archive)
                 .unwrap()
@@ -90,7 +100,12 @@ mod tests {
 
     #[test]
     fn the_images_come_back_with_the_team_and_the_person() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let there = database();
         import(&there, &archive, &en()).unwrap();
         let logo = assets::team_logo(&there, TEAM).unwrap().unwrap();
@@ -114,7 +129,12 @@ mod tests {
 
     #[test]
     fn the_local_images_win_and_the_missing_ones_come() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let here = with_team(false);
         let mine = picture([1, 2, 3, 255]);
         assets::store_team_logo(&here, TEAM, Some(&mine)).unwrap();
@@ -126,7 +146,12 @@ mod tests {
 
     #[test]
     fn what_is_not_an_image_refuses_the_archive() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let files: Vec<(String, Vec<u8>)> = unzip(&archive)
             .unwrap()
             .into_iter()
@@ -176,7 +201,12 @@ mod tests {
     /// the pointers), without the later columns.
     #[test]
     fn a_team_of_v1_3_0_with_images_is_imported() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let old = rewritten(&archive, |name, json| match name {
             "manifest.json" => json["schema"] = Json::from(4),
             "persons.json" => each_row(json, |row| {
@@ -213,7 +243,12 @@ mod tests {
 
     #[test]
     fn the_training_rows_do_not_point_to_the_images() {
-        let archive = export(&trained(), Subject::Training(uuid(TEAM))).unwrap();
+        let archive = export(
+            &trained(),
+            Subject::Training(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         unzip(&archive)
             .unwrap()
             .into_iter()
@@ -228,7 +263,12 @@ mod tests {
     /// images: the archive is imported all the same.
     #[test]
     fn a_training_of_v1_3_0_with_pointers_is_imported() {
-        let archive = export(&trained(), Subject::Training(uuid(TEAM))).unwrap();
+        let archive = export(
+            &trained(),
+            Subject::Training(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let pointer = Json::from("44444444-4444-4444-4444-444444444444");
         let old = rewritten(&archive, |name, json| match name {
             "manifest.json" => json["schema"] = Json::from(7),

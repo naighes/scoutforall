@@ -225,7 +225,10 @@ pub(crate) mod tests {
                 ),
                 p,
             };
-            app.queue.enqueue(team.id, m.id.clone()).await.unwrap();
+            app.queue
+                .enqueue(team.id, m.id.clone(), crate::tests::clock::now())
+                .await
+                .unwrap();
             (app, m)
         }
 
@@ -315,7 +318,10 @@ pub(crate) mod tests {
         let (app, m) = App::with_a_finished_match().await;
         app.upload_next(&api).await;
         // e.g. the queue of a backup restored on a new phone
-        app.queue.enqueue(m.team.id, m.id.clone()).await.unwrap();
+        app.queue
+            .enqueue(m.team.id, m.id.clone(), crate::tests::clock::now())
+            .await
+            .unwrap();
         app.upload_next(&api).await;
         let puts: Vec<String> = api
             .requests()

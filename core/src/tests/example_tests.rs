@@ -78,13 +78,25 @@ mod tests {
     async fn a_new_installation_gets_the_national_team_once() {
         let store = store();
         let (reader, writer) = database();
-        let added = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
-            .await
-            .unwrap();
+        let added = add_example_team_if_new(
+            store.as_ref(),
+            &reader,
+            &writer,
+            EN,
+            crate::tests::clock::this_year(),
+        )
+        .await
+        .unwrap();
         assert!(added.is_some());
-        let again = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
-            .await
-            .unwrap();
+        let again = add_example_team_if_new(
+            store.as_ref(),
+            &reader,
+            &writer,
+            EN,
+            crate::tests::clock::this_year(),
+        )
+        .await
+        .unwrap();
         assert!(again.is_none());
 
         let teams = reader.read_all().await.unwrap();
@@ -121,9 +133,15 @@ mod tests {
         let store = store();
         store.write(layout::CONFIG, b"{}").await.unwrap();
         let (reader, writer) = database();
-        let added = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
-            .await
-            .unwrap();
+        let added = add_example_team_if_new(
+            store.as_ref(),
+            &reader,
+            &writer,
+            EN,
+            crate::tests::clock::this_year(),
+        )
+        .await
+        .unwrap();
         assert!(added.is_none());
         assert!(!reader.any_team_ever().unwrap());
     }
@@ -134,10 +152,16 @@ mod tests {
         let add = || async {
             let store = store();
             let (reader, writer) = database();
-            add_example_team_if_new(store.as_ref(), &reader, &writer, labels(LanguageEnum::It))
-                .await
-                .unwrap()
-                .unwrap()
+            add_example_team_if_new(
+                store.as_ref(),
+                &reader,
+                &writer,
+                labels(LanguageEnum::It),
+                crate::tests::clock::this_year(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
         };
         let (one, other) = (add().await, add().await);
         assert_eq!(one.name, "Italia");

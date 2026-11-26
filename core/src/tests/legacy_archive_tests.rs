@@ -599,7 +599,7 @@ pub(crate) mod tests {
     async fn the_archive_tells_what_it_is() {
         let db = migrated("v0.18.0").await;
         let team = uuid(FIXTURE_VOLLEY_V0_18_0);
-        let archive = export(&db, Subject::Team(team)).unwrap();
+        let archive = export(&db, Subject::Team(team), crate::tests::clock::now()).unwrap();
         let Opened::Database(manifest) = open(&db, &archive, EN).unwrap() else {
             panic!("expected an archive of the database");
         };

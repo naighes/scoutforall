@@ -237,8 +237,8 @@ pub(crate) fn invalid(labels: &Labels, why: impl std::fmt::Display) -> AppError 
     AppError::IO(IOError::Msg(format!("{}: {why}", labels.invalid_archive)))
 }
 
-/// The archive of `subject`, as zip bytes.
-pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
+/// The archive of `subject`, as zip bytes, exported `now`.
+pub fn export(db: &Database, subject: Subject, now: DateTime<Utc>) -> Result<Vec<u8>, AppError> {
     let (kind, id, contents) = match subject {
         Subject::Match(id) => (Kind::Match, id, None),
         Subject::Team(id) | Subject::TeamWithMatches(id) => (Kind::Team, id, None),
@@ -265,7 +265,7 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
         contents,
         id,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
-        exported_at: Utc::now(),
+        exported_at: now,
     };
     let mut files = vec![(MANIFEST.to_string(), pretty(&manifest)?)];
     for (table, rows) in &tables {

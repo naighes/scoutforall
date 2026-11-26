@@ -5,6 +5,7 @@ pub mod analysis;
 pub mod analytics;
 pub mod assets;
 pub mod benchmark;
+pub mod clock;
 pub mod competition_form;
 pub mod constants;
 pub mod db;

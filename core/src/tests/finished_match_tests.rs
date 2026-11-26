@@ -99,7 +99,7 @@ mod tests {
             queue: queue.clone(),
             enabled: Arc::new(AtomicBool::new(enabled)),
         };
-        let mut session = set_start::resume(m, set, set_writer)
+        let mut session = set_start::resume(m, set, set_writer, crate::tests::clock::utc_now())
             .unwrap()
             .with_finished(Arc::new(finished));
         session.choose_event(EventTypeEnum::OE).await.unwrap();

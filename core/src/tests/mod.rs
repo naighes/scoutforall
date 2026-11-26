@@ -19,6 +19,7 @@ mod archive_tests;
 mod assets_tests;
 mod ball_tests;
 mod benchmark_tests;
+pub(crate) mod clock;
 mod competition_filter_tests;
 mod config_tests;
 mod country_tests;

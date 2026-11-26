@@ -12,7 +12,7 @@ mod tests {
         match_ids
             .iter()
             .fold(UploadQueue::default(), |mut queue, match_id| {
-                queue.enqueue(TEAM, match_id.to_string());
+                queue.enqueue(TEAM, match_id.to_string(), crate::tests::clock::now());
                 queue
             })
     }
@@ -69,8 +69,16 @@ mod tests {
         // the match id is date and opponent: unique only within a team
         let (first, second) = (Uuid::new_v4(), Uuid::new_v4());
         let mut queue = UploadQueue::default();
-        queue.enqueue(first, "2026-10-18_rivals".to_string());
-        queue.enqueue(second, "2026-10-18_rivals".to_string());
+        queue.enqueue(
+            first,
+            "2026-10-18_rivals".to_string(),
+            crate::tests::clock::now(),
+        );
+        queue.enqueue(
+            second,
+            "2026-10-18_rivals".to_string(),
+            crate::tests::clock::now(),
+        );
         queue.mark_retry(&first, "2026-10-18_rivals");
         let team_of_head = |queue: &UploadQueue| queue.peek().map(|p| p.team_id);
         assert_eq!(team_of_head(&queue), Some(second));

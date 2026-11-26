@@ -38,7 +38,7 @@ use crate::{
     },
     team_form::TeamFormError,
 };
-use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveTime};
+use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveTime, Utc};
 use std::collections::HashMap;
 use thiserror::Error;
 use unicode_normalization::UnicodeNormalization;
@@ -878,6 +878,7 @@ pub async fn save_import(
     match_writer: &(impl MatchWriter + Sync + ?Sized),
     set_writer: &(impl SetWriter + Sync + ?Sized),
     finished: &(impl FinishedMatches + ?Sized),
+    now: DateTime<Utc>,
 ) -> Result<MatchEntry, AppError> {
     if let Some(saved) = imported_already(plan, opponent, match_reader).await? {
         return Err(AppError::Match(MatchError::MatchAlreadyExists(saved.id)));
@@ -929,7 +930,7 @@ pub async fn save_import(
     if opponent.team().is_some() {
         match_writer.save_roster_of_b(&m, &plan.roster_b).await?;
     }
-    finished.finished(saved_team.id, m.id.clone()).await;
+    finished.finished(saved_team.id, m.id.clone(), now).await;
     Ok(MatchEntry {
         sets: plan.entry.sets.clone(),
         ..m

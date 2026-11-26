@@ -64,6 +64,7 @@ pub(crate) mod tests {
         );
         let db = database();
         let backup = Backup {
+            day: crate::tests::clock::today(),
             dir: dir.path().to_path_buf(),
             prefix: "backup".into(),
         };
@@ -173,7 +174,12 @@ pub(crate) mod tests {
             // all the teams into one database: the persons shared
             let together = database();
             for (id, (team, matches)) in &all {
-                let archive = export(&db, Subject::TeamWithMatches(*id)).unwrap();
+                let archive = export(
+                    &db,
+                    Subject::TeamWithMatches(*id),
+                    crate::tests::clock::now(),
+                )
+                .unwrap();
                 // alone: the team and its matches (its opponents are names)
                 let alone = database();
                 let imported = import(&alone, &archive, &en()).unwrap();
@@ -190,7 +196,8 @@ pub(crate) mod tests {
                 // each match on its own, with its team
                 for m in matches {
                     let uuid = Uuid::parse_str(&m.id).unwrap();
-                    let archive = export(&db, Subject::Match(uuid)).unwrap();
+                    let archive =
+                        export(&db, Subject::Match(uuid), crate::tests::clock::now()).unwrap();
                     let alone = database();
                     let imported = import(&alone, &archive, &en()).unwrap();
                     assert_eq!((imported.kind, imported.id), (Kind::Match, uuid));
@@ -200,7 +207,7 @@ pub(crate) mod tests {
                     assert_eq!(matches_back, &vec![m.clone()], "{version} {}", m.id);
                 }
                 // the team without them
-                let archive = export(&db, Subject::Team(*id)).unwrap();
+                let archive = export(&db, Subject::Team(*id), crate::tests::clock::now()).unwrap();
                 let alone = database();
                 let imported = import(&alone, &archive, &en()).unwrap();
                 assert_eq!(imported.matches, 0);
@@ -240,7 +247,12 @@ pub(crate) mod tests {
     async fn the_manifest_tells_what_the_archive_is() {
         let db = migrated("v0.18.0").await;
         let (id, (_, matches)) = contents(&db).await.into_iter().next().unwrap();
-        let archive = export(&db, Subject::TeamWithMatches(id)).unwrap();
+        let archive = export(
+            &db,
+            Subject::TeamWithMatches(id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let read = files(&archive);
         let names: Vec<&str> = read.keys().map(String::as_str).collect();
         assert_eq!(
@@ -281,7 +293,7 @@ pub(crate) mod tests {
             matches.len()
         );
         let m = Uuid::parse_str(&matches[0].id).unwrap();
-        let archive = export(&db, Subject::Match(m)).unwrap();
+        let archive = export(&db, Subject::Match(m), crate::tests::clock::now()).unwrap();
         assert_eq!(
             manifest(&archive).map(|m| (m.kind, m.id)),
             Some((Kind::Match, m))
@@ -455,7 +467,7 @@ pub(crate) mod tests {
 
     fn detailed_archive(db: &Database) -> Vec<u8> {
         let team = Uuid::parse_str(DETAILED_TEAM).unwrap();
-        export(db, Subject::Team(team)).unwrap()
+        export(db, Subject::Team(team), crate::tests::clock::now()).unwrap()
     }
 
     fn details(db: &Database) -> String {
@@ -489,7 +501,8 @@ pub(crate) mod tests {
             ),
         );
         let team = Uuid::parse_str(DETAILED_TEAM).unwrap();
-        let mut files = files(&export(&db, Subject::Training(team)).unwrap());
+        let mut files =
+            files(&export(&db, Subject::Training(team), crate::tests::clock::now()).unwrap());
         let person = &table(&mut files, "persons")[0];
         let empty = [
             ("birth_date", Json::Null),
@@ -535,7 +548,14 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn what_is_removed_does_not_go() {
         let s = scouted().await;
-        let read = files(&export(&s.db, Subject::TeamWithMatches(s.team.id)).unwrap());
+        let read = files(
+            &export(
+                &s.db,
+                Subject::TeamWithMatches(s.team.id),
+                crate::tests::clock::now(),
+            )
+            .unwrap(),
+        );
         let column = |name: &str, column: &str| -> Vec<Json> {
             read[&format!("{name}.json")]
                 .as_array()
@@ -578,7 +598,12 @@ pub(crate) mod tests {
         assert_eq!(person(0)["notes"], "notes 1");
         assert_eq!(person(0)["birth_date"], "2000-01-01");
         // and back: the same, nothing is told different
-        let archive = export(&s.db, Subject::TeamWithMatches(s.team.id)).unwrap();
+        let archive = export(
+            &s.db,
+            Subject::TeamWithMatches(s.team.id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let before = rows(&s.db);
         let imported = import(&s.db, &archive, &en()).unwrap();
         let same = |n: usize| Merged {
@@ -603,7 +628,14 @@ pub(crate) mod tests {
         assert_eq!(rows(&s.db), before);
         // a set removed whose events aren't (as the sync may bring them)
         execute(&s.db, "UPDATE sets SET deleted = 1");
-        let read = files(&export(&s.db, Subject::Match(s.match_id())).unwrap());
+        let read = files(
+            &export(
+                &s.db,
+                Subject::Match(s.match_id()),
+                crate::tests::clock::now(),
+            )
+            .unwrap(),
+        );
         assert!(read["events.json"].as_array().unwrap().is_empty());
         assert!(read["set_lineups.json"].as_array().unwrap().is_empty());
         execute(&s.db, "UPDATE sets SET deleted = 0 WHERE number = 1");
@@ -618,7 +650,12 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_match_here_is_never_overwritten() {
         let s = scouted().await;
-        let archive = export(&s.db, Subject::Match(s.match_id())).unwrap();
+        let archive = export(
+            &s.db,
+            Subject::Match(s.match_id()),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let other = database();
         import(&other, &archive, &en()).unwrap();
         let before = rows(&other);
@@ -636,7 +673,12 @@ pub(crate) mod tests {
         assert_eq!(e, EN.match_already_exists);
         assert_eq!(rows(&other), before);
         // the archive of a team: the match counted and left
-        let archive = export(&s.db, Subject::TeamWithMatches(s.team.id)).unwrap();
+        let archive = export(
+            &s.db,
+            Subject::TeamWithMatches(s.team.id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let imported = import(&other, &archive, &en()).unwrap();
         assert_eq!((imported.matches, imported.matches_here), (0, 1));
         assert_eq!(rows(&other), before);
@@ -652,11 +694,16 @@ pub(crate) mod tests {
         let (_, there) = contents(&two).await.remove(&id).unwrap();
         assert!(there.iter().all(|t| t.id != matches[0].id));
         let before = rows(&two);
-        let archive = export(&one, Subject::Match(m)).unwrap();
+        let archive = export(&one, Subject::Match(m), crate::tests::clock::now()).unwrap();
         let e = message(import(&two, &archive, &en()).unwrap_err());
         assert_eq!(e, EN.match_already_exists);
         assert_eq!(rows(&two), before);
-        let archive = export(&one, Subject::TeamWithMatches(id)).unwrap();
+        let archive = export(
+            &one,
+            Subject::TeamWithMatches(id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let imported = import(&two, &archive, &en()).unwrap();
         assert_eq!(
             (imported.matches, imported.matches_here),
@@ -667,7 +714,12 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn the_local_data_win() {
         let s = scouted().await;
-        let archive = export(&s.db, Subject::TeamWithMatches(s.team.id)).unwrap();
+        let archive = export(
+            &s.db,
+            Subject::TeamWithMatches(s.team.id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let other = database();
         import(&other, &archive, &en()).unwrap();
         let player = s.team.players[0].id;
@@ -733,7 +785,7 @@ pub(crate) mod tests {
         let other = database();
         import(
             &other,
-            &export(&s.db, Subject::Team(s.team.id)).unwrap(),
+            &export(&s.db, Subject::Team(s.team.id), crate::tests::clock::now()).unwrap(),
             &en(),
         )
         .unwrap();
@@ -760,7 +812,7 @@ pub(crate) mod tests {
         add(&other, "new here 2").await;
         let imported = import(
             &other,
-            &export(&s.db, Subject::Team(s.team.id)).unwrap(),
+            &export(&s.db, Subject::Team(s.team.id), crate::tests::clock::now()).unwrap(),
             &en(),
         )
         .unwrap();
@@ -783,8 +835,18 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn what_is_removed_here_comes_back() {
         let s = scouted().await;
-        let team_archive = export(&s.db, Subject::TeamWithMatches(s.team.id)).unwrap();
-        let match_archive = export(&s.db, Subject::Match(s.match_id())).unwrap();
+        let team_archive = export(
+            &s.db,
+            Subject::TeamWithMatches(s.team.id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
+        let match_archive = export(
+            &s.db,
+            Subject::Match(s.match_id()),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let all = contents(&s.db).await;
         // the match
         let matches = SqliteMatchWriter::new(s.db.clone());
@@ -831,7 +893,12 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_removed_match_changed_since_stays_removed() {
         let s = scouted().await;
-        let archive = export(&s.db, Subject::Match(s.match_id())).unwrap();
+        let archive = export(
+            &s.db,
+            Subject::Match(s.match_id()),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         SqliteSetWriter::new(s.db.clone(), en())
             .append_event(&s.m, 1, &serve(s.team.players[0].id))
             .await
@@ -846,7 +913,12 @@ pub(crate) mod tests {
         assert_eq!(rows(&s.db), before);
         let imported = import(
             &s.db,
-            &export(&s.db, Subject::TeamWithMatches(s.team.id)).unwrap(),
+            &export(
+                &s.db,
+                Subject::TeamWithMatches(s.team.id),
+                crate::tests::clock::now(),
+            )
+            .unwrap(),
             &en(),
         )
         .unwrap();
@@ -897,7 +969,12 @@ pub(crate) mod tests {
             ),
         );
         // from B, with its matches: A too
-        let archive = export(&s.db, Subject::TeamWithMatches(b.id)).unwrap();
+        let archive = export(
+            &s.db,
+            Subject::TeamWithMatches(b.id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let read = files(&archive);
         assert_eq!(read["teams.json"].as_array().unwrap().len(), 2);
         assert_eq!(read["competitions.json"][0]["name"], "Serie C");
@@ -938,13 +1015,18 @@ pub(crate) mod tests {
         };
         assert_eq!(row(&other), row(&s.db));
         // the match alone: both teams
-        let archive = export(&s.db, Subject::Match(s.match_id())).unwrap();
+        let archive = export(
+            &s.db,
+            Subject::Match(s.match_id()),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         assert_eq!(files(&archive)["teams.json"].as_array().unwrap().len(), 2);
         let alone = database();
         import(&alone, &archive, &en()).unwrap();
         assert_eq!(contents(&alone).await.len(), 2);
         // B alone: not A nor the match
-        let read = files(&export(&s.db, Subject::Team(b.id)).unwrap());
+        let read = files(&export(&s.db, Subject::Team(b.id), crate::tests::clock::now()).unwrap());
         assert_eq!(read["teams.json"].as_array().unwrap().len(), 1);
         assert!(read["matches.json"].as_array().unwrap().is_empty());
         assert!(read["competitions.json"].as_array().unwrap().is_empty());
@@ -967,11 +1049,18 @@ pub(crate) mod tests {
             Subject::Team(Uuid::new_v4()),
             Subject::TeamWithMatches(Uuid::new_v4()),
         ] {
-            let e = message(export(&s.db, subject).unwrap_err());
+            let e = message(export(&s.db, subject, crate::tests::clock::now()).unwrap_err());
             assert!(e.starts_with("not found"), "{subject:?}: {e}");
         }
         // an archive without its subject
-        let mut changed = files(&export(&s.db, Subject::Match(s.match_id())).unwrap());
+        let mut changed = files(
+            &export(
+                &s.db,
+                Subject::Match(s.match_id()),
+                crate::tests::clock::now(),
+            )
+            .unwrap(),
+        );
         changed.insert(
             "manifest.json".into(),
             serde_json::to_value(Manifest {
@@ -988,7 +1077,14 @@ pub(crate) mod tests {
     /// The archive, changed by `change`, refused by an import that changes
     /// nothing: the error.
     fn refused(s: &Scouted, change: impl FnOnce(&mut BTreeMap<String, Json>)) -> AppError {
-        let mut changed = files(&export(&s.db, Subject::Match(s.match_id())).unwrap());
+        let mut changed = files(
+            &export(
+                &s.db,
+                Subject::Match(s.match_id()),
+                crate::tests::clock::now(),
+            )
+            .unwrap(),
+        );
         change(&mut changed);
         let other = database();
         let before = rows(&other);
@@ -1010,14 +1106,20 @@ pub(crate) mod tests {
             let db = migrated(version).await;
             let before = rows(&db);
             for (id, (team, matches)) in contents(&db).await {
-                let archive = export(&db, Subject::TeamWithMatches(id)).unwrap();
+                let archive = export(
+                    &db,
+                    Subject::TeamWithMatches(id),
+                    crate::tests::clock::now(),
+                )
+                .unwrap();
                 match preview(&archive, &en()).unwrap() {
                     Preview::Team(previewed) => assert_eq!(previewed, team, "{version}"),
                     other => panic!("{version}: {other:?}"),
                 }
                 for m in matches {
                     let uuid = Uuid::parse_str(&m.id).unwrap();
-                    let archive = export(&db, Subject::Match(uuid)).unwrap();
+                    let archive =
+                        export(&db, Subject::Match(uuid), crate::tests::clock::now()).unwrap();
                     match preview(&archive, &en()).unwrap() {
                         Preview::Match(previewed) => {
                             let MatchPreview {
@@ -1096,7 +1198,12 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn the_preview_refuses_what_the_import_does() {
         let s = scouted().await;
-        let archive = export(&s.db, Subject::Match(s.match_id())).unwrap();
+        let archive = export(
+            &s.db,
+            Subject::Match(s.match_id()),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let mut files = files(&archive);
         set_manifest(&mut files, "schema", crate::db::schema_version() + 1);
         assert!(matches!(
@@ -1203,7 +1310,14 @@ pub(crate) mod tests {
         // a new match whose event has the id of one here: refused halfway,
         // after its teams and persons
         let s = scouted().await;
-        let mut changed = files(&export(&s.db, Subject::TeamWithMatches(s.team.id)).unwrap());
+        let mut changed = files(
+            &export(
+                &s.db,
+                Subject::TeamWithMatches(s.team.id),
+                crate::tests::clock::now(),
+            )
+            .unwrap(),
+        );
         let new_id = Json::from(Uuid::new_v4().to_string());
         for name in ["match_roster", "sets", "set_lineups", "events"] {
             for row in table(&mut changed, name) {
@@ -1220,7 +1334,12 @@ pub(crate) mod tests {
         );
         import(
             &other,
-            &export(&s.db, Subject::TeamWithMatches(s.team.id)).unwrap(),
+            &export(
+                &s.db,
+                Subject::TeamWithMatches(s.team.id),
+                crate::tests::clock::now(),
+            )
+            .unwrap(),
             &en(),
         )
         .unwrap();

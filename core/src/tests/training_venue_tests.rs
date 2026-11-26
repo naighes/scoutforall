@@ -954,7 +954,12 @@ mod tests {
                 .create(&a, match_input(&w, &a, 23, Some(g.id)))
                 .await
                 .unwrap();
-        let archive = export(&w.p.db, Subject::TeamWithMatches(a.id)).unwrap();
+        let archive = export(
+            &w.p.db,
+            Subject::TeamWithMatches(a.id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let there = crate::tests::sqlite_archive_tests::tests::database();
         import(&there, &archive, &crate::localization::Language::default()).unwrap();
         let rows: Vec<(String, i64)> = there
@@ -989,7 +994,12 @@ mod tests {
                 .create(&a, match_input(&w, &a, 24, Some(g.id)))
                 .await
                 .unwrap();
-        let archive = export(&w.p.db, Subject::TeamWithMatches(a.id)).unwrap();
+        let archive = export(
+            &w.p.db,
+            Subject::TeamWithMatches(a.id),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         import(&there, &archive, &crate::localization::Language::default()).unwrap();
         let (name, pinned): (String, i64) = there
             .read(|tx| {

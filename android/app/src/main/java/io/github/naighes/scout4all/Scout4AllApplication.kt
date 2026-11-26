@@ -53,8 +53,8 @@ open class Scout4AllApplication : Application() {
         mutableStartupNotice.value = null
     }
 
-    /** The log of the core, one for the process. */
-    protected open fun startLog(dataDir: String) = startCoreLog(dataDir)
+    /** The log of the core, one for the process, at the time of the app's clock. */
+    protected open fun startLog(dataDir: String) = startCoreLog(dataDir, AskingClock { clock })
 
     /** A new installation starts with the example team, before the teams
      * are listed; without it the app works all the same. Then, once, the
