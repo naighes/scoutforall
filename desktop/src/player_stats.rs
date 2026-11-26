@@ -6,6 +6,7 @@
 use {
     crate::{
         charts::{self, MatchesTrend},
+        notice::{self, Level},
         period::{self, Kind, PeriodChoice},
         stats::{matches_legend, short_day},
         strings::Strings,
@@ -254,7 +255,7 @@ impl PlayerStats {
             _ => None,
         };
         let content: Element<'a, Message> = match &self.read {
-            Err(error) => ui::body(error.clone()).color(c.danger).into(),
+            Err(error) => notice::banner(Level::Error, error, c),
             Ok(r) if r.matches.is_empty() => small(s.no_matches_period.to_string()).into(),
             Ok(r) if r.fundamentals.is_empty() => small(s.no_events.to_string()).into(),
             Ok(r) => figures(r, columns, s, c),

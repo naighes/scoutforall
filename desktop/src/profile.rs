@@ -4,6 +4,7 @@
 
 use {
     crate::{
+        notice::{self, Level},
         player_stats::PlayerStats,
         strings::Strings,
         team::Message,
@@ -126,7 +127,7 @@ fn details<'a>(
     };
     let season: Element<'a, Message> = match numbers {
         Numbers::Loading => space::vertical().height(0).into(),
-        Numbers::Failed(error) => ui::body(error.clone()).color(c.danger).into(),
+        Numbers::Failed(error) => notice::banner(Level::Error, error, c),
         Numbers::Ready(profile) => metrics(profile, s, c),
     };
     let fields = fields(shown.player, ready, shown.country.clone(), s);

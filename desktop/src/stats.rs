@@ -14,6 +14,7 @@ use {
         calendar,
         charts::{self, MatchesTrend, Trend},
         keymap,
+        notice::{self, Level},
         period::{self, Kind, PeriodChoice},
         player_stats::Filters,
         strings::Strings,
@@ -1682,7 +1683,7 @@ impl StatsScreen {
             .map(|(i, f)| self.filter_row(f, i == self.row, few, s, c))
             .collect();
         let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
+            Some(e) => notice::banner(Level::Error, e, c),
             None => space::vertical().height(0).into(),
         };
         let empty = self

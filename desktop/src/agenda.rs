@@ -8,6 +8,7 @@
 use {
     crate::{
         calendar::{day_of, text_of},
+        notice::{self, Level},
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
@@ -273,7 +274,7 @@ impl Agenda {
             });
         }
         let body: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
+            Some(e) => notice::banner(Level::Error, e, c),
             None => Column::with_children(rows).spacing(3).into(),
         };
         let mut actions: Vec<Element<'a, Message>> =
