@@ -7,7 +7,8 @@ use super::{
     MobileError, RoleChoice, Scout4All, ScoutingPlayer, StatsScope, choosable, clips_of, detail_of, narrowed,
     series_name, summary, touched,
 };
-use chrono::{Local, NaiveDate};
+use crate::clock::ClockExt;
+use chrono::NaiveDate;
 use scout4all_core::player_form::name_the_removed;
 use scout4all_core::providers::match_reader::MatchReader;
 use scout4all_core::{
@@ -270,7 +271,7 @@ impl Scout4All {
         filter: DetailFilter,
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
-        let today = Local::now().date_naive();
+        let today = self.clock.today();
         let (all, chosen) = self.chosen_matches(&team, &period, competition, today)?;
         let competitions = self.competitions_played(&all, today)?;
         let chosen = entries(chosen);
@@ -298,7 +299,7 @@ impl Scout4All {
         competition: Option<Uuid>,
     ) -> Result<PlayerStatistics, MobileError> {
         let team = self.read_team(&team_id)?;
-        let today = Local::now().date_naive();
+        let today = self.clock.today();
         let (all, chosen) = self.chosen_matches(&team, &period, competition, today)?;
         let competitions = self.competitions_played(&all, today)?;
         let chosen = entries(chosen);
@@ -395,7 +396,7 @@ impl Scout4All {
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
         let team_b = self.read_team(&opponent.to_string())?;
-        let today = Local::now().date_naive();
+        let today = self.clock.today();
         let (all, chosen) =
             self.chosen_matches_of_b(&team, &opponent, &period, competition, today)?;
         let competitions = self.competitions_played(&all, today)?;
@@ -427,7 +428,7 @@ impl Scout4All {
         filter: DetailFilter,
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
-        let today = Local::now().date_naive();
+        let today = self.clock.today();
         let against = self.both_against(&team, &opponent)?;
         let (all, chosen) = self.chosen_matches_among(&team, &period, competition, today, |m| {
             against.contains_key(&m.id)
@@ -487,7 +488,7 @@ impl Scout4All {
         pick: &ClipPick,
     ) -> Result<Vec<MatchClips>, MobileError> {
         let team = self.read_team(team_id)?;
-        let today = Local::now().date_naive();
+        let today = self.clock.today();
         let (_, chosen) = match opponent {
             Some(o) => self.chosen_matches_of_b(&team, &o, period, competition, today)?,
             None => self.chosen_matches(&team, period, competition, today)?,

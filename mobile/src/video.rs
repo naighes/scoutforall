@@ -9,7 +9,8 @@ use crate::{
     clips_of, count_of,
     strip::{ClipSpan, clip_spans},
 };
-use chrono::{FixedOffset, Local, Offset};
+use crate::clock::ClockExt;
+use chrono::FixedOffset;
 use scout4all_core::{
     shapes::{enums::PhaseEnum, r#match::MatchEntry},
     video::{self, Anchor, AnchorSource, EventRef, StoredProfile, VideoFile, VideoProfile},
@@ -402,7 +403,7 @@ impl VideoReview {
         utc_offset_s: i32,
     ) -> Result<(), MobileError> {
         let offset =
-            FixedOffset::east_opt(utc_offset_s).unwrap_or_else(|| Local::now().offset().fix());
+            FixedOffset::east_opt(utc_offset_s).unwrap_or_else(|| self.core.clock.offset());
         let mut st = self.state();
         let Some(profile) = st.profile.clone() else {
             return Ok(());

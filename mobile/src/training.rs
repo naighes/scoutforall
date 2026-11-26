@@ -3,7 +3,7 @@
 //! sheets. The dates travel as text: `YYYY-MM-DD` a day, `YYYY-MM-DDTHH:MM`
 //! a moment (local, without offset, as the core keeps them).
 use super::{MobileError, Scout4All, failed, parse_id};
-use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use scout4all_core::{
     errors::AppError,
     providers::{
@@ -753,7 +753,7 @@ impl Scout4All {
 
     /// The sessions of the team, by start.
     pub fn training_sessions(&self, team_id: String) -> Result<Vec<SessionRecord>, MobileError> {
-        let now = Local::now().naive_local();
+        let now = self.clock.now();
         let sessions = self
             .runtime
             .block_on(self.training().sessions(&parse_id(&team_id)?))?;
@@ -764,7 +764,7 @@ impl Scout4All {
         let session = self
             .runtime
             .block_on(self.training().session(&parse_id(&session_id)?))?;
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     /// A form for a new session: the usual duration, planned.
@@ -798,7 +798,7 @@ impl Scout4All {
                 .runtime
                 .block_on(training.create_session(&parse_id(&team_id)?, input))?,
         };
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     /// Whether saving the draft (or, with none, removing the session) asks
@@ -856,7 +856,7 @@ impl Scout4All {
                 input,
                 scope,
             ))?;
-        let now = Local::now().naive_local();
+        let now = self.clock.now();
         written
             .first()
             .map(|s| session_record(s, now))
@@ -873,7 +873,7 @@ impl Scout4All {
             self.training()
                 .set_session_status(&parse_id(&session_id)?, status),
         )?;
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     /// Completes the session and the planned activities chosen.
@@ -886,7 +886,7 @@ impl Scout4All {
             self.training()
                 .complete_session(&parse_id(&session_id)?, ids(&activities)?),
         )?;
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     pub fn remove_session(&self, session_id: String) -> Result<(), MobileError> {
@@ -1116,7 +1116,7 @@ impl Scout4All {
             inputs,
             create_others,
         ))?;
-        let now = Local::now().naive_local();
+        let now = self.clock.now();
         Ok(SeriesResult {
             created: outcome
                 .created
@@ -1178,7 +1178,7 @@ impl Scout4All {
             self.training()
                 .duplicate_session(&parse_id(&session_id)?, input),
         )?;
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     // ---- cycles
@@ -1411,7 +1411,7 @@ impl Scout4All {
         let events = self.runtime.block_on(self.training().agenda(
             team.as_ref(),
             period,
-            Local::now().naive_local(),
+            self.clock.now(),
         ))?;
         Ok(by_day(&period, &events)
             .iter()
@@ -1450,7 +1450,7 @@ impl Scout4All {
         let events = self.runtime.block_on(self.training().agenda(
             team.as_ref(),
             period,
-            Local::now().naive_local(),
+            self.clock.now(),
         ))?;
         Ok(busy_days(&events)
             .iter()
@@ -1566,7 +1566,7 @@ impl Scout4All {
             &Context {
                 team: &team.name,
                 year: team.year,
-                printed: Local::now().naive_local(),
+                printed: self.clock.now(),
                 venues: &venues,
             },
             &session,
@@ -1608,7 +1608,7 @@ impl Scout4All {
             &Context {
                 team: &team.name,
                 year: team.year,
-                printed: Local::now().naive_local(),
+                printed: self.clock.now(),
                 venues: &venues,
             },
             &cycle,
@@ -1898,6 +1898,28 @@ mod tests {
             (done.status, done.to_close),
             (SessionStatus::Completed, false)
         );
+    }
+
+    #[test]
+    fn a_session_is_to_close_by_the_time_of_the_clock_given() {
+        use crate::clock::FixedClock;
+        let dir = tempfile::tempdir().unwrap();
+        let at = |time: &str| {
+            let now = chrono::NaiveDateTime::parse_from_str(time, "%Y-%m-%dT%H:%M").unwrap();
+            let clock = FixedClock::at(now, chrono::FixedOffset::east_opt(3600).unwrap());
+            Scout4All::with_clock(
+                dir.path().to_string_lossy().into_owned(),
+                "it".into(),
+                Arc::new(clock),
+            )
+            .unwrap()
+        };
+        let morning = at("2026-03-04T10:00");
+        let team = team(&morning, "Cortona");
+        let evening = session(&morning, &team, "2026-03-04T18:30");
+        assert!(!evening.to_close);
+        let next_day = at("2026-03-05T10:00");
+        assert!(next_day.training_sessions(team).unwrap()[0].to_close);
     }
 
     #[test]

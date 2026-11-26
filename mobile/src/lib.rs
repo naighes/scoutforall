@@ -6,7 +6,8 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
+use crate::clock::{Clock, ClockExt, SystemClock};
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
@@ -119,6 +120,7 @@ use uuid::Uuid;
 uniffi::setup_scaffolding!();
 
 mod analysis;
+pub mod clock;
 pub mod sender;
 pub use analysis::*;
 pub mod strip;
@@ -3814,6 +3816,8 @@ pub struct Scout4All {
     uploads_enabled: Arc<AtomicBool>,
     /// sends the queue in the background, once `send_in_background`
     sender: Arc<UploadSender>,
+    /// what time it is: the system's, or the one the app gives
+    clock: Arc<dyn Clock>,
 }
 
 type UploadQueueManager = QueueManager<SqliteQueue, SqliteQueue>;
@@ -3827,6 +3831,17 @@ impl Scout4All {
     /// after a copy of it beside it (`startup_notice` tells what stayed).
     #[uniffi::constructor]
     pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
+        Self::with_clock(data_dir, language, Arc::new(SystemClock))
+    }
+
+    /// As `new`, asking `clock` what time it is: the app's own, so that
+    /// the app and the core tell the same time (a fixed one in the tests).
+    #[uniffi::constructor]
+    pub fn with_clock(
+        data_dir: String,
+        language: String,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
         let language = Language::new(LanguageEnum::from_str(&language).unwrap_or(LanguageEnum::En));
         set_errors_language(language.clone());
@@ -3860,6 +3875,7 @@ impl Scout4All {
             store,
             notice: Mutex::new(notice),
             language,
+            clock,
         };
         // unreadable settings: nothing sent until the terms are accepted
         let enabled = app.read_config().is_ok_and(|c| c.consent.uploads_enabled());
@@ -3985,7 +4001,7 @@ impl Scout4All {
             initials: names::initials(&player.name),
             age: player
                 .birth_date
-                .and_then(|birth| age(birth, Local::now().date_naive())),
+                .and_then(|birth| age(birth, self.clock.today())),
             matches_played: stats.matches_played,
             matches_scouted: stats.matches_scouted,
             sets_played: stats.sets_played,
@@ -4802,7 +4818,7 @@ impl Scout4All {
             .filter(|_| !namesake_confirmed)
             .map(|p| player_form::namesake_message(p, labels));
         let input = form
-            .validate(&team, existing.as_ref(), Local::now().date_naive())
+            .validate(&team, existing.as_ref(), self.clock.today())
             .map_err(|e| MobileError::InvalidPlayer {
                 field: e.into(),
                 reason: e.message(labels),
@@ -5964,7 +5980,7 @@ impl Scout4All {
         };
         let opponent = opponent_plan(file, side, &team.team, opponent_choice)
             .map_err(|e| failed(e.describe(labels)))?;
-        let date = match_date(file, day, *Local::now().offset());
+        let date = match_date(file, day, self.clock.offset());
         let plan = match_plan(
             file,
             side,
@@ -6460,7 +6476,7 @@ mod tests {
 
     /// The day of the backups, as the migration names them.
     fn backup_of(dir: &tempfile::TempDir) -> PathBuf {
-        let day = Local::now().date_naive();
+        let day = chrono::Local::now().date_naive();
         dir.path().join(format!("data-backup-{day}.zip"))
     }
 

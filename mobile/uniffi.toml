@@ -1,2 +1,9 @@
 [bindings.kotlin]
 package_name = "io.github.naighes.scout4all.core"
+
+# the time on the wall (`clock::Clock::now`), as java.time writes it
+[bindings.kotlin.custom_types.NaiveDateTime]
+type_name = "java.time.LocalDateTime"
+imports = ["java.time.LocalDateTime"]
+into_custom = "LocalDateTime.parse({})"
+from_custom = "{}.toString()"
