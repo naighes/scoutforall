@@ -146,6 +146,7 @@ impl Screen {
         match self {
             Screen::Team(screen) => screen.failure().as_ref(),
             Screen::Start(screen) => screen.failure().as_ref(),
+            Screen::Events(screen) => screen.failure().as_ref(),
             _ => None,
         }
     }
@@ -155,6 +156,7 @@ impl Screen {
         match self {
             Screen::Team(screen) => Some(screen.failure_mut()),
             Screen::Start(screen) => Some(screen.failure_mut()),
+            Screen::Events(screen) => Some(screen.failure_mut()),
             _ => None,
         }
     }

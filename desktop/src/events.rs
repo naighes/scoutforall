@@ -168,6 +168,15 @@ impl EventsScreen {
         (Id::new(LIST), self.selected as f32 / last as f32)
     }
 
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     fn correct(&mut self, index: usize) {
         self.selected = index.min(self.set.events.len().saturating_sub(1));
         self.error = None;
@@ -382,11 +391,10 @@ impl EventsScreen {
         let Some(e) = self.set.events.get(self.selected) else {
             return column![].into();
         };
-        let note: Element<'a, Message> = match (self.saved, &self.error, e.editable) {
-            (_, Some(error), _) => ui::body(error.clone()).color(c.danger).into(),
-            (true, None, _) => ui::body(s.corrected).color(c.accent).into(),
-            (false, None, false) => ui::body(s.lineup_fixed).color(c.muted).into(),
-            (false, None, true) => ui::answers(
+        let note: Element<'a, Message> = match (self.saved, e.editable) {
+            (true, _) => ui::body(s.corrected).color(c.accent).into(),
+            (false, false) => ui::body(s.lineup_fixed).color(c.muted).into(),
+            (false, true) => ui::answers(
                 None,
                 theme::icons::EDIT,
                 s.correct,
@@ -484,10 +492,6 @@ impl EventsScreen {
             .find(|e| Some(e.value) == st.eval)
             .map(|e| e.name.clone())
             .unwrap_or_default();
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => column![].into(),
-        };
         let player = st
             .event
             .player
@@ -513,7 +517,6 @@ impl EventsScreen {
                     .spacing(12)
                 )
                 .height(Length::Fill),
-                error,
                 ui::answers(
                     Some((theme::icons::CLOSE, s.cancel, Message::Cancel)),
                     theme::icons::CHECK,
@@ -643,6 +646,22 @@ mod tests {
         };
         let imported = core.import_dvw(bytes, choice).unwrap();
         (core, imported.team_id, imported.match_id)
+    }
+
+    /// A correction that fails is told by the app in its dialog, and gone
+    /// once closed.
+    #[test]
+    fn a_failure_of_a_correction_is_told_over_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team_id, match_id) = imported(&dir);
+        let mut events = EventsScreen::new(core, team_id, match_id, 1).unwrap();
+        events.error = Some("not saved".into());
+        let mut screen = crate::Screen::Events(Box::new(events));
+        assert_eq!(screen.failure().map(String::as_str), Some("not saved"));
+        if let Some(failure) = screen.failure_mut() {
+            *failure = None;
+        }
+        assert_eq!(screen.failure(), None);
     }
 
     /// B serving, its point lost without a cause (`PL`, as ⇧W does for B):
