@@ -40,6 +40,7 @@ import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.TeamSideEnum
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.drawBehind
@@ -75,8 +76,6 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -446,14 +445,7 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val model = viewModel { ScoutingViewModel(app, teamId, matchId) }
     val state by model.state.collectAsState()
-    val snackbar = remember { SnackbarHostState() }
     val error = (state as? ScoutingUi.Choosing)?.error
-    LaunchedEffect(error) {
-        if (error != null) {
-            snackbar.showSnackbar(error)
-            model.errorShown()
-        }
-    }
     val view = when (val s = state) {
         is ScoutingUi.Choosing -> s.view
         is ScoutingUi.SetOver -> s.view
@@ -489,9 +481,9 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        val modifier = Modifier.fillMaxSize().padding(padding)
+        Box(Modifier.fillMaxSize().padding(padding)) {
+        val modifier = Modifier.fillMaxSize()
         when (val s = state) {
             ScoutingUi.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is ScoutingUi.Failed -> Centered(modifier) { Text(s.message) }
@@ -504,9 +496,26 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
                 }
             }
         }
+        // never a dialog, and over the screen: nothing moves under the finger
+        error?.let { ScoutingError(it, model::errorShown, Modifier.align(Alignment.TopCenter)) }
+        }
     }
     }
 }
+
+/** A choice that didn't go: across the top until the next one, or touched
+ * away. */
+@Composable
+private fun ScoutingError(error: String, onDismiss: () -> Unit, modifier: Modifier) = Banner(
+    Level.ERROR,
+    error,
+    modifier
+        .padding(8.dp)
+        // the tint of the banner is light: nothing of the screen through it
+        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+        .clickable(onClick = onDismiss)
+        .semantics { liveRegion = LiveRegionMode.Polite },
+)
 
 /** The teams and the points in a line, the home team on the left, and the
  * rotation. */

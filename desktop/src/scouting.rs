@@ -8,7 +8,7 @@ use {
     crate::{
         charts::{self, Trend},
         court::{Content, Court, Touch},
-        keymap,
+        keymap, notice,
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SCORE, SIZE_SMALL, grade_color},
         ui,
@@ -131,8 +131,8 @@ pub struct ScoutingScreen {
     /// the digits of the shirt number typed so far, while more than one
     /// player's number starts with them
     typed: String,
-    /// an error, or that the set is over: any key closes it
-    notice: Option<(String, bool)>,
+    /// an error, or that the set is over (`set_over`): any key closes it
+    notice: Option<String>,
     set_over: bool,
     show_stats: bool,
     match_scope: bool,
@@ -233,10 +233,10 @@ impl ScoutingScreen {
         match progress {
             Ok(Progress::SetOver) => {
                 self.set_over = true;
-                self.notice = Some((String::new(), false));
+                self.notice = Some(String::new());
             }
             Ok(Progress::Choosing | Progress::Saved) => {}
-            Err(e) => self.notice = Some((e, true)),
+            Err(e) => self.notice = Some(e),
         }
     }
 
@@ -424,7 +424,7 @@ impl ScoutingScreen {
             return;
         }
         if let Err(e) = self.scouting.swap_side() {
-            self.notice = Some((e.to_string(), true));
+            self.notice = Some(e.to_string());
         }
     }
 
@@ -881,23 +881,15 @@ impl ScoutingScreen {
         .height(Length::Fill);
         match &self.notice {
             None => body.into(),
-            Some((message, error)) => {
-                let message = match self.set_over {
-                    true => s.set_over.to_string(),
-                    false => message.clone(),
+            Some(why) => {
+                // never a dialog: the scouting doesn't stop
+                let (level, message) = match self.set_over {
+                    true => (notice::Level::Info, s.set_over),
+                    false => (notice::Level::Error, why.as_str()),
                 };
-                let color = match error {
-                    true => c.danger,
-                    false => c.accent,
-                };
-                let banner = ui::list_row(
-                    container(ui::body(message).color(color))
-                        .width(Length::Fill)
-                        .align_x(Alignment::Center),
-                    true,
-                    Some(Message::Dismiss),
-                    c,
-                );
+                let banner = iced::widget::mouse_area(notice::banner(level, message, c))
+                    .on_press(Message::Dismiss)
+                    .interaction(iced::mouse::Interaction::Pointer);
                 column![banner, body].spacing(10).into()
             }
         }
@@ -2502,7 +2494,7 @@ pub(crate) mod tests {
         // 33 is on the bench
         screen.key(key!('3'));
         screen.key(key!('3'));
-        assert!(screen.notice.as_ref().is_some_and(|(_, error)| *error));
+        assert!(screen.notice.is_some() && !screen.set_over);
         screen.key(key!(enter));
         assert_eq!(screen.notice, None);
         assert!(screen.typed.is_empty());
