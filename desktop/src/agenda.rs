@@ -282,16 +282,17 @@ impl Agenda {
         if self.anchor != self.today {
             actions.push(ui::pill(s.today, false, Some(Message::Today), c));
         }
-        actions.push(ui::tip(
-            ui::pill("‹", false, Some(Message::Previous), c),
-            s.previous_week,
-            c,
-        ));
-        actions.push(ui::tip(
-            ui::pill("›", false, Some(Message::Next), c),
-            s.next_week,
-            c,
-        ));
+        // the arrows stay side by side where the actions wrap
+        let arrows = row![
+            ui::tip(
+                ui::pill("‹", false, Some(Message::Previous), c),
+                s.previous_week,
+                c,
+            ),
+            ui::tip(ui::pill("›", false, Some(Message::Next), c), s.next_week, c,),
+        ]
+        .spacing(8);
+        actions.push(arrows.into());
         let body = scrollable(body).height(Length::Fill);
         ui::panel_with(s.week, actions, body, c)
     }

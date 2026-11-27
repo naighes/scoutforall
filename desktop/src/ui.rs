@@ -4,13 +4,14 @@
 
 use {
     crate::{
+        head::Head,
         strings::Strings,
         theme::{
             self, BORDER, Colors, RADIUS_PANEL, RADIUS_PILL, SIZE_BODY, SIZE_SMALL, SIZE_TITLE,
         },
     },
     iced::{
-        Alignment, Background, Border, Color, Element, Length, Padding,
+        Alignment, Background, Border, Color, Element, Length, Padding, alignment,
         widget::{button, column, container, responsive, row, space, svg, text, tooltip},
     },
 };
@@ -697,18 +698,22 @@ pub fn panel_with<'a, M: 'a>(
     content: impl Into<Element<'a, M>>,
     c: Colors,
 ) -> Element<'a, M> {
-    let head = row![
+    let title = row![
         mark(c, 18.0),
         text(title.to_string())
             .size(SIZE_TITLE)
             .font(theme::fonts().bold)
-            .color(c.text)
-            .width(Length::Fill),
-        row(actions).spacing(8).align_y(Alignment::Center),
+            .color(c.text),
     ]
     .spacing(10)
-    .height(Length::Fixed(34.0))
     .align_y(Alignment::Center);
+    // the actions wrap among themselves too, in a panel narrower than them
+    let actions = row(actions)
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .wrap()
+        .align_x(alignment::Horizontal::Right);
+    let head = Head::new(title, actions);
     panel(None, column![head, content.into()].spacing(12), c)
 }
 
