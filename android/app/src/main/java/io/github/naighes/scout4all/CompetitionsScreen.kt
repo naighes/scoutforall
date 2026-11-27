@@ -1,6 +1,5 @@
 package io.github.naighes.scout4all
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,7 +19,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -124,21 +122,22 @@ fun CompetitionsScreen(onBack: () -> Unit, onCompetition: (String) -> Unit) {
 }
 
 @Composable
-private fun CompetitionRow(c: CompetitionListing, onClick: () -> Unit, onRemove: () -> Unit) = ListItem(
-    modifier = Modifier.clickable(onClick = onClick),
-    headlineContent = { Text(c.name) },
-    supportingContent = {
-        Column {
-            Text(listOfNotNull(c.season, c.format).joinToString(" · "))
-            Text(pluralStringResource(R.plurals.matches_count, c.matches.toInt(), c.matches.toInt()))
-        }
-    },
-    trailingContent = {
-        IconButton(onClick = onRemove) {
+private fun CompetitionRow(c: CompetitionListing, onClick: () -> Unit, onRemove: () -> Unit) = BoxRow(
+    onClick = onClick,
+    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+    head = { Initials(c.initials) },
+    tail = {
+        IconButton(onClick = onRemove, Modifier.padding(end = 4.dp)) {
             Icon(Icons.Filled.Delete, contentDescription = "${stringResource(R.string.delete_competition)}: ${c.name}")
         }
     },
-)
+) {
+    Text(c.name, style = MaterialTheme.typography.bodyLarge)
+    listOf(
+        listOfNotNull(c.season, c.format).joinToString(" · "),
+        pluralStringResource(R.plurals.matches_count, c.matches.toInt(), c.matches.toInt()),
+    ).forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+}
 
 sealed interface CompetitionFormState {
     data object Loading : CompetitionFormState

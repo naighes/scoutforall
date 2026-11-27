@@ -801,6 +801,8 @@ pub struct CompetitionChoice {
 pub struct CompetitionListing {
     pub id: Uuid,
     pub name: String,
+    /// of the name, at the head of its row
+    pub initials: String,
     pub season: Option<String>,
     pub format: String,
     pub matches: u32,
@@ -4162,6 +4164,7 @@ impl Scout4All {
             .into_iter()
             .map(|(c, matches)| CompetitionListing {
                 id: c.id,
+                initials: names::initials(&c.name),
                 name: c.name,
                 season: c.season,
                 format: c.format.name(labels).to_string(),

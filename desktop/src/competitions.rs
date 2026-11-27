@@ -232,7 +232,8 @@ impl CompetitionsScreen {
                 .clone()
                 .map_or_else(String::new, |season| format!("{season} · "));
             let line = row![
-                ui::list_row(
+                ui::box_row(
+                    ui::initials(competition.initials.clone(), c),
                     row![
                         column![
                             text(competition.name.clone())
@@ -254,27 +255,38 @@ impl CompetitionsScreen {
                     .spacing(10)
                     .align_y(Alignment::Center),
                     i == self.selected,
-                    Some(Message::Edit(i)),
+                    Message::Edit(i),
                     c,
                 ),
-                ui::icon_button(
-                    theme::icons::DELETE,
+                ui::tip(
+                    ui::icon_button(
+                        theme::icons::DELETE,
+                        s.delete_competition,
+                        Message::Delete(i),
+                        false,
+                        c,
+                    ),
                     s.delete_competition,
-                    Message::Delete(i),
-                    false,
                     c,
                 ),
             ]
-            .spacing(6)
+            .spacing(4)
             .align_y(Alignment::Center);
             line.into()
         });
-        let list: Element<'a, Message> = match self.listed.is_empty() {
-            true => ui::body(s.no_competitions).color(c.muted).into(),
-            false => scrollable(Column::with_children(rows).spacing(3))
+        let list: Element<'a, Message> =
+            match self.listed.is_empty() {
+                true => ui::body(s.no_competitions).color(c.muted).into(),
+                // the scrollbar beside the rows, not over their bins
+                false => scrollable(Column::with_children(rows).spacing(4).padding(
+                    iced::Padding {
+                        right: 14.0,
+                        ..iced::Padding::ZERO
+                    },
+                ))
                 .height(Length::Fill)
                 .into(),
-        };
+            };
         container(
             container(ui::panel(
                 Some(s.competitions),
@@ -389,6 +401,14 @@ mod tests {
         );
 
         let mut screen = CompetitionsScreen::new(core.clone()).unwrap();
+        assert_eq!(
+            screen
+                .listed
+                .iter()
+                .map(|c| c.initials.as_str())
+                .collect::<Vec<_>>(),
+            vec!["C", "SC"]
+        );
         assert_eq!(
             screen
                 .listed
