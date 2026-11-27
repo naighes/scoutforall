@@ -156,9 +156,10 @@ pub(crate) fn mask_of(shape: &[usize], values: &[f32]) -> Result<GrayImage, Phot
     }
 }
 
-/// Runs the local U2NetP model once per uploaded photo and applies its mask
-/// to the original pixels. The loaded model is reused for later uploads.
-fn remove_background(image: &DynamicImage) -> Result<RgbaImage, PhotoError> {
+/// Runs the local U2NetP model once per uploaded photo: the mask of the
+/// person, in its own square of `SEGMENTATION_SIDE`. The loaded model is
+/// reused for later uploads.
+fn segmentation_mask(image: &DynamicImage) -> Result<GrayImage, PhotoError> {
     let resized = image.resize_exact(SEGMENTATION_SIDE, SEGMENTATION_SIDE, FilterType::CatmullRom);
     let rgb = resized.to_rgb8();
     let mean = [0.485_f32, 0.456, 0.406];
@@ -183,15 +184,69 @@ fn remove_background(image: &DynamicImage) -> Result<RgbaImage, PhotoError> {
         .ok_or_else(|| failed("segmentation produced no mask"))?;
     let output = output.to_plain_array_view::<f32>().map_err(failed)?;
     let values: Vec<f32> = output.iter().copied().collect();
-    let mask = mask_of(output.shape(), &values)?;
-    let mask = image::imageops::resize(&mask, image.width(), image.height(), FilterType::Lanczos3);
-    let mut rgba = image.to_rgba8();
-    rgba.pixels_mut()
+    mask_of(output.shape(), &values)
+}
+
+/// The part of the `mask` of the whole photo (`width` x `height`) under
+/// `square`, as large as the result (`assets::PHOTO_SIDE` at most): only the
+/// pixels of the mask around the square are stretched, with the reach of
+/// the filter on each side so the edges blend as in the whole.
+pub(crate) fn mask_in(mask: &GrayImage, (width, height): (u32, u32), square: Square) -> GrayImage {
+    let side = square.side.clamp(1, assets::PHOTO_SIDE);
+    let scale = f64::from(side) / f64::from(square.side.max(1));
+    // one axis: the first and last pixel of the mask around the square, and
+    // where the square starts in them once stretched
+    let axis = |start: u32, photo: u32, cells: u32| {
+        let cell = f64::from(photo.max(1)) / f64::from(cells.max(1));
+        // the reach of Lanczos3 in the pixels of the mask: three, more
+        // where it shrinks
+        let reach = (3.0 * (1.0 / (cell * scale)).max(1.0)).ceil() as u32;
+        let first = ((f64::from(start) / cell).floor() as u32).saturating_sub(reach);
+        let end = f64::from(start.saturating_add(square.side));
+        let last = ((end / cell).ceil() as u32)
+            .saturating_add(reach)
+            .min(cells);
+        let length = ((f64::from(last.saturating_sub(first)) * cell * scale).round() as u32).max(1);
+        let offset = ((f64::from(start) - f64::from(first) * cell) * scale).round() as u32;
+        (first, last.saturating_sub(first).max(1), length, offset)
+    };
+    let (x, w, stretched_w, offset_x) = axis(square.x, width, mask.width());
+    let (y, h, stretched_h, offset_y) = axis(square.y, height, mask.height());
+    let around = image::imageops::crop_imm(mask, x, y, w, h).to_image();
+    let stretched =
+        image::imageops::resize(&around, stretched_w, stretched_h, FilterType::Lanczos3);
+    // the rounding may leave the square a pixel short at the edge: stretched
+    // back to the side
+    let under = image::imageops::crop_imm(&stretched, offset_x, offset_y, side, side).to_image();
+    match under.dimensions() {
+        (w, h) if (w, h) == (side, side) => under,
+        // nothing of the mask under the square: all of it kept
+        (0, _) | (_, 0) => GrayImage::from_pixel(side, side, image::Luma([u8::MAX])),
+        _ => image::imageops::resize(&under, side, side, FilterType::Triangle),
+    }
+}
+
+/// The person in `square` of the image, no larger than the photo stored
+/// (`assets::PHOTO_SIDE`), the background transparent. Only the square is
+/// worked at that size: the mask is stretched to the scale of the result,
+/// not to the pixels of the whole photo.
+fn person_in(image: &DynamicImage, square: Square) -> Result<RgbaImage, PhotoError> {
+    let mask = mask_in(&segmentation_mask(image)?, image.dimensions(), square);
+    let side = mask.width();
+    let crop = image.crop_imm(square.x, square.y, square.side, square.side);
+    let mut person = match square.side == side {
+        true => crop.to_rgba8(),
+        false => crop
+            .resize_exact(side, side, FilterType::Lanczos3)
+            .to_rgba8(),
+    };
+    person
+        .pixels_mut()
         .zip(mask.pixels())
         .for_each(|(pixel, alpha)| {
             pixel[3] = alpha[0];
         });
-    Ok(rgba)
+    Ok(person)
 }
 
 /// The significant faces of the image, in its own pixels.
@@ -220,8 +275,9 @@ fn faces(image: &DynamicImage) -> Result<Vec<(i32, i32, u32, u32)>, PhotoError> 
     Ok(significant(&boxes))
 }
 
-/// The face in the photo, cropped as a square, not yet reduced: PNG bytes,
-/// to show as a preview and to hand to `assets::set_person_photo`.
+/// The face in the photo, cropped as a square no larger than the photo
+/// stored: PNG bytes, to show as a preview and to hand to
+/// `assets::set_person_photo`.
 pub fn crop_face(bytes: &[u8]) -> Result<Vec<u8>, PhotoError> {
     let image = assets::decode_image(bytes)?;
     let (width, height) = image.dimensions();
@@ -232,11 +288,10 @@ pub fn crop_face(bytes: &[u8]) -> Result<Vec<u8>, PhotoError> {
         many => return Err(PhotoError::ManyFaces(many.len())),
     };
     let square = crop_square(face, width, height);
-    let foreground = remove_background(&image)?;
-    let crop =
-        DynamicImage::ImageRgba8(foreground).crop_imm(square.x, square.y, square.side, square.side);
+    let person = DynamicImage::ImageRgba8(person_in(&image, square)?);
     let mut out = Vec::new();
-    crop.write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+    person
+        .write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
         .map_err(|e| PhotoError::Image(AppError::IO(crate::errors::IOError::Msg(e.to_string()))))?;
     Ok(out)
 }
