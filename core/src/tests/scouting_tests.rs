@@ -29,7 +29,7 @@ mod tests {
         tests::{EN, Sqlite},
     };
     use EventTypeEnum::*;
-    
+
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -1234,7 +1234,12 @@ mod tests {
             .get_lineup_choices()
             .into_iter()
             .filter_map(|(_, (_, id))| id)
-            .find(|id| s.session.snapshot().current_lineup.is_out_for_the_libero(id))
+            .find(|id| {
+                s.session
+                    .snapshot()
+                    .current_lineup
+                    .is_out_for_the_libero(id)
+            })
             .unwrap();
         s.session.choose_event(R).await.unwrap();
         let choices = s.session.player_choices();

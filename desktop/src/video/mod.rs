@@ -2550,7 +2550,8 @@ pub(crate) mod screen_tests {
         dir: &tempfile::TempDir,
         opponent: DvwOpponent,
     ) -> (Arc<Scout4All>, String, String) {
-        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
             opponent,
@@ -2643,7 +2644,9 @@ pub(crate) mod screen_tests {
         };
         let refs = core.match_clips_of(&team, &m, MatchSide::B, &pick).unwrap();
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
-        let matches = core.team_clips(&team_b, &period, None, None, &pick).unwrap();
+        let matches = core
+            .team_clips(&team_b, &period, None, None, &pick)
+            .unwrap();
         assert_eq!(
             matches
                 .iter()
@@ -3498,7 +3501,8 @@ pub(crate) mod screen_tests {
     fn the_actions_of_a_team_match_after_match() {
         use crate::stats::tests::{match_against, team_with_two_matches, with_a_video};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let (arezzo, siena) = (
             match_against(&core, &team, "Arezzo"),
@@ -3517,13 +3521,9 @@ pub(crate) mod screen_tests {
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
         let matches = core.team_clips(&team, &period, None, None, &pick).unwrap();
         assert_eq!(matches.len(), 2);
-        let mut screen = VideoScreen::with_tour(
-            core,
-            dir.path().to_path_buf(),
-            matches,
-            "Serve".into(),
-        )
-        .unwrap();
+        let mut screen =
+            VideoScreen::with_tour(core, dir.path().to_path_buf(), matches, "Serve".into())
+                .unwrap();
         assert_eq!(screen.match_id, arezzo);
         assert_eq!(screen.events.len(), 3);
         // the clips of Arezzo one after the other, then Siena
@@ -3560,7 +3560,8 @@ pub(crate) mod screen_tests {
         use crate::stats::tests::{match_against, team_with_two_matches};
         let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let (arezzo, siena) = (
             match_against(&core, &team, "Arezzo"),
@@ -4138,8 +4139,8 @@ pub(crate) mod screen_tests {
         )
         .unwrap();
         let (team, m) = crate::scouting::tests::both_sides_started(&core);
-        let mut screen = VideoScreen::new(core, dir.path().join("gone"), team, m, MatchSide::A)
-            .unwrap();
+        let mut screen =
+            VideoScreen::new(core, dir.path().join("gone"), team, m, MatchSide::A).unwrap();
         screen.toggle_overlay();
         let why = screen.failed.clone().unwrap_or_default();
         assert!(!why.is_empty());
