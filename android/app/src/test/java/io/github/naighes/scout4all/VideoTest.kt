@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import androidx.compose.ui.geometry.Offset
@@ -20,13 +21,16 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.AnalysisPeriod
+import io.github.naighes.scout4all.core.ClipMargins
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.NewVideoFile
 import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.VideoSeconds
+import io.github.naighes.scout4all.core.initials
 import io.github.naighes.scout4all.core.stripBars
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -401,6 +405,30 @@ class VideoLayoutTest(private val screen: Size) {
         rule.waitForText(string(R.string.video_missing, "20261025 175500.mp4"))
         rule.shot("video-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+    }
+
+    /** Over the video each team has its logo, or its initials. */
+    @Test
+    fun theTeamsOverTheVideoHaveTheirLogos() {
+        val (team, match) = servedMatch()
+        val request = aceClips(team, match)
+        val png = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).let { bitmap ->
+            bitmap.eraseColor(android.graphics.Color.RED)
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        core {
+            it.setTeamLogo(team, png)
+            // from the action itself: how the match stands is told from it
+            it.saveClipMargins(ClipMargins(0u, 5u, true))
+        }
+        val opponent = core { it.videoReview(team, match, MatchSide.A, null).opponent() }
+        rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
+        rule.waitFor {
+            rule.onAllNodesWithTag(initialsTag(initials(opponent)), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() &&
+                listOf(LOGO_AS_IT_IS, LOGO_BACKDROP)
+                    .sumOf { rule.onAllNodesWithTag(it, useUnmergedTree = true).fetchSemanticsNodes().size } == 1
+        }
+        rule.shot("video-logos-$screen")
     }
 
     /** The actions picked, the strip of their clips under the bar. */

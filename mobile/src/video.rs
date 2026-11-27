@@ -133,6 +133,14 @@ pub struct VideoStanding {
     pub phase: PhaseEnum,
 }
 
+/// The logos drawn by how the match stands (`VideoStanding`): of the team
+/// the video is told by and of its opponent, none without one.
+#[derive(Debug, Clone, Default, PartialEq, uniffi::Record)]
+pub struct VideoLogos {
+    pub team: Option<Vec<u8>>,
+    pub opponent: Option<Vec<u8>>,
+}
+
 /// A piece of the video of the actions picked: from its margin before to
 /// its margin after, the actions overlapping as one (the first one's card,
 /// the others counted).
@@ -322,6 +330,19 @@ impl Scout4All {
     }
 }
 
+impl Scout4All {
+    /// The logos of the teams of the match, as the team of `the_match`
+    /// sees them (of the side B, its own first).
+    pub fn video_logos(&self, the_match: &MatchEntry) -> Result<VideoLogos, MobileError> {
+        let team = the_match.team.id.to_string();
+        Ok(VideoLogos {
+            team: self.team_logo(team.clone())?,
+            opponent: scout4all_core::assets::opponent_logo(&self.db, &the_match.id, &team)?
+                .map(|image| image.data),
+        })
+    }
+}
+
 #[uniffi::export]
 impl VideoReview {
     /// Whether a newer version wrote the profile: shown, not changed.
@@ -335,6 +356,11 @@ impl VideoReview {
 
     pub fn team(&self) -> String {
         self.state().the_match.team.name.clone()
+    }
+
+    pub fn logos(&self) -> Result<VideoLogos, MobileError> {
+        let the_match = self.state().the_match.clone();
+        self.core.video_logos(&the_match)
     }
 
     /// Whether only the actions picked in the statistics are shown.
@@ -1085,6 +1111,7 @@ pub fn written(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::PNG;
     use crate::{DetailFilter, DvwChoice, DvwOpponent, DvwSide, StatsScope};
     use scout4all_core::shapes::{
         country::CountryCode,
@@ -1431,6 +1458,15 @@ mod tests {
             .clone()
             .video_review(team.clone(), m.clone(), MatchSide::B, None)
             .unwrap();
+        // over the video each side sees its own logo first
+        assert_eq!(of_a.logos().unwrap(), VideoLogos::default());
+        let b = app.analysis_opponents(team.clone()).unwrap()[0].id;
+        app.set_team_logo(b.to_string(), Some(PNG.to_vec()))
+            .unwrap();
+        let theirs = of_a.logos().unwrap();
+        assert_eq!((theirs.team, theirs.opponent.is_some()), (None, true));
+        let ours = of_b.logos().unwrap();
+        assert_eq!((ours.team.is_some(), ours.opponent), (true, None));
         // the video is A's: B's events are placed in it
         assert_eq!(of_b.files().len(), 1);
         of_b.set_durations(vec![9_000_000]).unwrap();

@@ -28,6 +28,7 @@ import io.github.naighes.scout4all.core.TeamClipMatch
 import io.github.naighes.scout4all.core.VideoAlignment
 import io.github.naighes.scout4all.core.VideoEventRow
 import io.github.naighes.scout4all.core.VideoFileRow
+import io.github.naighes.scout4all.core.VideoLogos
 import io.github.naighes.scout4all.core.VideoReview
 import io.github.naighes.scout4all.core.VideoStanding
 import kotlinx.coroutines.Dispatchers
@@ -130,6 +131,9 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         private set
     var standing by mutableStateOf<VideoStanding?>(null)
         private set
+    /** the logos of the teams of the match shown, for how it stands */
+    var logos by mutableStateOf<VideoLogos?>(null)
+        private set
 
     /** the event chosen follows the video: off once chosen by hand, on
      * again when the video is moved or played */
@@ -185,6 +189,11 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
             app.core { it.videoReview(shown?.teamId ?: request.teamId, matchId, shown?.side ?: MatchSide.A, pick) }
         } catch (e: MobileException) {
             error = e.reason
+            null
+        }
+        logos = try {
+            review?.let { r -> app.core { r.logos() } }
+        } catch (e: MobileException) {
             null
         }
         loadFiles()

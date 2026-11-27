@@ -786,7 +786,16 @@ impl TeamPicture {
         team_id: Option<&str>,
         name: &str,
     ) -> TeamPicture {
-        team_id.and_then(|id| TeamLogo::of(core, id)).map_or_else(
+        TeamPicture::from_logo(team_id.and_then(|id| TeamLogo::of(core, id)), name)
+    }
+
+    /// The picture of the team `name` from the PNG of its logo, if any.
+    pub fn from_png(png: Option<&[u8]>, name: &str) -> TeamPicture {
+        TeamPicture::from_logo(png.and_then(TeamLogo::from_png), name)
+    }
+
+    fn from_logo(logo: Option<TeamLogo>, name: &str) -> TeamPicture {
+        logo.map_or_else(
             || TeamPicture::Initials(scout4all_core::names::initials(name)),
             TeamPicture::Logo,
         )

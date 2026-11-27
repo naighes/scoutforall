@@ -251,6 +251,8 @@ pub struct VideoScreen {
     pub team_id: String,
     pub match_id: String,
     the_match: MatchEntry,
+    /// beside the names over the video: ours, then the opponent's
+    pictures: [ui::TeamPicture; 2],
     /// the match of B: its events told by the touches (`Scout4All::
     /// origins_of_b`) the profile of A keeps them by
     of_b: Option<Origins>,
@@ -384,12 +386,14 @@ impl VideoScreen {
             StoredProfile::Newer(_) => None,
         };
         let seconds = core.video_seconds();
+        let pictures = team_pictures(&core, &the_match);
         let mut screen = VideoScreen {
             core,
             dir,
             team_id,
             match_id,
             the_match,
+            pictures,
             of_b,
             profile,
             player: None,
@@ -1800,7 +1804,7 @@ impl VideoScreen {
                 match self.standing().filter(|_| self.margins.overlay) {
                     Some(st) => stack![
                         frame,
-                        container(overlay_view(st, &self.the_match, s, c))
+                        container(overlay_view(st, &self.the_match, &self.pictures, s, c))
                             .padding(16)
                             .width(Length::Fill)
                             .height(Length::Fill)
@@ -2351,6 +2355,19 @@ fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message>
         })
 }
 
+/// The side of the logo of a team over the video.
+const OVERLAY_PICTURE: f32 = 24.0;
+
+/// What stands for the teams of the match beside their names, ours first:
+/// their logos, or their initials (also when the logos can't be read).
+fn team_pictures(core: &Scout4All, the_match: &MatchEntry) -> [ui::TeamPicture; 2] {
+    let logos = core.video_logos(the_match).unwrap_or_default();
+    [
+        ui::TeamPicture::from_png(logos.team.as_deref(), &the_match.team.name),
+        ui::TeamPicture::from_png(logos.opponent.as_deref(), &the_match.opponent),
+    ]
+}
+
 /// How the match stands, over the corner of the video: on a veil, not a
 /// box, the letters as large as the body's or more. A line a team, ours
 /// first, as on TV: the ball by the one to serve, its name, the sets won
@@ -2359,6 +2376,7 @@ fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message>
 fn overlay_view<'a>(
     st: Standing,
     m: &MatchEntry,
+    pictures: &[ui::TeamPicture; 2],
     s: &'static Strings,
     c: Colors,
 ) -> Element<'a, Message> {
@@ -2375,13 +2393,15 @@ fn overlay_view<'a>(
     let letters = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
     let letter = theme::SIZE_BODY * 0.6;
     let score_letter = (theme::SIZE_TITLE + 4.0) * 0.6;
-    let team = |serving: bool, name: String, sets: u8, points: u8| {
+    let team = |serving: bool, picture: &ui::TeamPicture, name: String, sets: u8, points: u8| {
         let ball: Element<'a, Message> = match serving {
             true => ui::icon(theme::icons::VOLLEYBALL, 16.0, white).into(),
             false => space::horizontal().width(Length::Fixed(16.0)).into(),
         };
         row![
             container(ball).width(Length::Fixed(16.0)),
+            // on the veil, dark in both themes
+            ui::team_picture(picture, OVERLAY_PICTURE, theme::DARK),
             text(name)
                 .size(theme::SIZE_BODY)
                 .font(bold)
@@ -2403,6 +2423,7 @@ fn overlay_view<'a>(
         .align_y(Alignment::Center)
     };
     let [us, them] = names;
+    let [ours, theirs] = pictures;
     let serving_us = st.phase == PhaseEnum::Break;
     let divider = container(space::vertical().height(Length::Fixed(44.0)))
         .width(Length::Fixed(1.0))
@@ -2413,8 +2434,8 @@ fn overlay_view<'a>(
     container(
         row![
             column![
-                team(serving_us, us, st.sets_us, st.score_us),
-                team(!serving_us, them, st.sets_them, st.score_them),
+                team(serving_us, ours, us, st.sets_us, st.score_us),
+                team(!serving_us, theirs, them, st.sets_them, st.score_them),
             ]
             .spacing(2),
             divider,
@@ -2649,6 +2670,36 @@ pub(crate) mod screen_tests {
             panic!("no profile saved");
         };
         assert_eq!(saved.correction(event), Some(5_000));
+    }
+
+    /// Over the video each team has its logo or its initials; seen from B,
+    /// B's are first.
+    #[test]
+    fn the_teams_over_the_video_have_their_logos() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team, m) = imported_with(&dir, DvwOpponent::NewTeam);
+        let open = |side| {
+            VideoScreen::new(
+                core.clone(),
+                dir.path().to_path_buf(),
+                team.clone(),
+                m.clone(),
+                side,
+            )
+            .unwrap()
+        };
+        let logos = |screen: &VideoScreen| {
+            screen
+                .pictures
+                .each_ref()
+                .map(|p| matches!(p, ui::TeamPicture::Logo(_)))
+        };
+        assert_eq!(logos(&open(MatchSide::A)), [false, false]);
+        let b = core.analysis_opponents(team.clone()).unwrap()[0].id;
+        core.set_team_logo(b.to_string(), Some(crate::scouting::tests::PNG.to_vec()))
+            .unwrap();
+        assert_eq!(logos(&open(MatchSide::A)), [false, true]);
+        assert_eq!(logos(&open(MatchSide::B)), [true, false]);
     }
 
     fn with_file(dir: &tempfile::TempDir, name: &str) -> VideoScreen {

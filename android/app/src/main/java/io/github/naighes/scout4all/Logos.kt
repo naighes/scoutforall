@@ -76,19 +76,33 @@ fun initialsTag(letters: String) = "initials-$letters"
  * only. */
 @Composable
 fun TeamPicture(teamId: String?, name: String, size: Dp = 48.dp, modifier: Modifier = Modifier) {
-    val letters: @Composable () -> Unit = {
-        val shown = initials(name)
-        Box(modifier.size(size).clearAndSetSemantics { testTag = initialsTag(shown) }, contentAlignment = Alignment.Center) {
-            Text(
-                shown,
-                style = if (size < 40.dp) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-    }
+    val letters: @Composable () -> Unit = { TeamInitials(name, size, modifier) }
     when (teamId) {
         null -> letters()
         else -> TeamLogo(teamId, size, modifier, none = letters)
+    }
+}
+
+/** The initials of the team in a square, not read as its name says it. */
+@Composable
+private fun TeamInitials(name: String, size: Dp, modifier: Modifier = Modifier) {
+    val shown = initials(name)
+    Box(modifier.size(size).clearAndSetSemantics { testTag = initialsTag(shown) }, contentAlignment = Alignment.Center) {
+        Text(
+            shown,
+            style = if (size < 40.dp) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** `TeamPicture` of a logo already read: `logo` null for a team without
+ * one. */
+@Composable
+fun LogoOrInitials(logo: ByteArray?, name: String, size: Dp, modifier: Modifier = Modifier) {
+    when (logo) {
+        null -> TeamInitials(name, size, modifier)
+        else -> TeamLogoBox(logo, size, modifier)
     }
 }
 
