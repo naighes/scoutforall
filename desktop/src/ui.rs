@@ -882,6 +882,18 @@ pub fn logo_slot<'a, M: 'a>(
     }
 }
 
+/// The side of the photo beside a name in a row of events.
+pub const ROW_PHOTO: f32 = 32.0;
+
+/// The photo of a row of events; without one its width alone, so that a row
+/// without a player grows no taller.
+pub fn row_photo<'a, M: 'a>(handle: Option<&iced::widget::image::Handle>) -> Element<'a, M> {
+    match handle {
+        Some(h) => logo(h, ROW_PHOTO),
+        None => space::horizontal().width(Length::Fixed(ROW_PHOTO)).into(),
+    }
+}
+
 /// The name of the app as the site writes it, `height` tall.
 pub fn wordmark<'a>(height: f32, c: Colors) -> svg::Svg<'a> {
     svg(svg::Handle::from_memory(theme::WORDMARK))

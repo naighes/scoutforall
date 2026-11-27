@@ -1,16 +1,15 @@
 package io.github.naighes.scout4all
 
-import androidx.compose.ui.semantics.clearAndSetSemantics
-import androidx.compose.ui.semantics.testTag
-import androidx.compose.material3.Text
-import io.github.naighes.scout4all.core.initials
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -25,11 +24,14 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.LogoBackdrop
 import io.github.naighes.scout4all.core.LogoTone
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.initials
 import io.github.naighes.scout4all.core.logoBackdrop
 import io.github.naighes.scout4all.core.logoTone
 
@@ -161,6 +163,26 @@ fun photoOf(playerId: String): androidx.compose.ui.graphics.ImageBitmap? {
         }
     }
     return remember(bytes) { decodeImage(bytes) }
+}
+
+/** The side of the photo beside a name in a row of events. */
+val ROW_PHOTO = 32.dp
+
+/** The photo of a row of events; without one its width alone, so that a row
+ * without a player grows no taller. */
+@Composable
+fun RowPhoto(photo: ByteArray?) =
+    if (photo != null) LogoBox(photo, ROW_PHOTO) else Spacer(Modifier.width(ROW_PHOTO))
+
+/** The photos of the persons, by id: only who has one, each read once. */
+suspend fun Scout4AllApplication.personPhotos(ids: List<String>): Map<String, ByteArray> = core { core ->
+    ids.distinct().mapNotNull { id ->
+        try {
+            core.personPhoto(id)?.let { id to it }
+        } catch (e: MobileException) {
+            null
+        }
+    }.toMap()
 }
 
 /** `bytes` in a square, an empty box when null or not an image. */

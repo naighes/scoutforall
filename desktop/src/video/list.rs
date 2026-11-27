@@ -20,9 +20,6 @@ use {
     std::collections::HashMap,
 };
 
-/// The side of the photo beside a name: as tall as the bar of the team.
-const PHOTO: f32 = 32.0;
-
 /// The space between the parts of a row.
 const GAP: f32 = 8.0;
 
@@ -30,7 +27,7 @@ const GAP: f32 = 8.0;
 /// some, so that the names keep theirs.
 pub fn width(pictured: bool) -> f32 {
     match pictured {
-        true => 400.0 + PHOTO + GAP,
+        true => 400.0 + ui::ROW_PHOTO + GAP,
         false => 400.0,
     }
 }
@@ -182,7 +179,7 @@ fn row_of<'a>(
     };
     let bar = iced::widget::container(iced::widget::space::vertical())
         .width(Length::Fixed(4.0))
-        .height(Length::Fixed(PHOTO))
+        .height(Length::Fixed(ui::ROW_PHOTO))
         .style(move |_| iced::widget::container::Style {
             background: Some(team.into()),
             border: iced::Border {
@@ -201,7 +198,7 @@ fn row_of<'a>(
             .shaping(text::Shaping::Advanced)
             .width(Length::Fixed(16.0)),
     ]
-    .push(photo.map(|photo| ui::logo_slot(photo, PHOTO)))
+    .push(photo.map(ui::row_photo))
     .push(column![text(name).size(SIZE_BODY).color(color), player].width(Length::Fill))
     .push(score)
     .spacing(GAP)

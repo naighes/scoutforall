@@ -61,7 +61,8 @@ import kotlinx.coroutines.launch
 
 private sealed interface SetState {
     data object Loading : SetState
-    data class Loaded(val set: SetEvents) : SetState
+    /** `photos` of who touched in the events, by player id */
+    data class Loaded(val set: SetEvents, val photos: Map<String, ByteArray>) : SetState
     data class Failed(val message: String) : SetState
 }
 
@@ -77,7 +78,8 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
     var version by remember { mutableIntStateOf(0) }
     val state by produceState<SetState>(SetState.Loading, version) {
         value = try {
-            SetState.Loaded(app.core { it.setEvents(teamId, matchId, setNumber.toUByte()) })
+            val set = app.core { it.setEvents(teamId, matchId, setNumber.toUByte()) }
+            SetState.Loaded(set, app.personPhotos(set.events.mapNotNull { it.event.player?.id }))
         } catch (e: MobileException) {
             SetState.Failed(e.reason)
         }
@@ -96,7 +98,7 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
         when (val s = state) {
             SetState.Loading -> Centered(modifier) { CircularProgressIndicator() }
             is SetState.Failed -> LoadFailed(s.message, modifier)
-            is SetState.Loaded -> SetEventsList(s.set, modifier) { event ->
+            is SetState.Loaded -> SetEventsList(s.set, s.photos, modifier) { event ->
                 scope.launch {
                     try {
                         correction = app.core { it.correction(teamId, matchId, setNumber.toUByte(), event.index) }
@@ -124,17 +126,25 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
 }
 
 @Composable
-private fun SetEventsList(set: SetEvents, modifier: Modifier, onEvent: (SetEvent) -> Unit) {
+private fun SetEventsList(
+    set: SetEvents,
+    photos: Map<String, ByteArray>,
+    modifier: Modifier,
+    onEvent: (SetEvent) -> Unit,
+) {
     if (set.events.isEmpty()) {
         Centered(modifier) { Text(stringResource(R.string.no_events)) }
         return
     }
     // the last events first in sight: the ones just scouted
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (set.events.size - 1).coerceAtLeast(0))
+    val pictured = set.events.any { it.event.player?.id in photos }
     LazyColumn(modifier, state = list, contentPadding = PaddingValues(vertical = 8.dp)) {
         // on both sides: whose touch it is, by name and color
         val teams = set.teams()
-        items(set.events, key = { it.index.toInt() }) { e -> EventRow(e, teams) { onEvent(e) } }
+        items(set.events, key = { it.index.toInt() }) { e ->
+            EventRow(e, teams, pictured, e.event.player?.id?.let { photos[it] }) { onEvent(e) }
+        }
     }
 }
 
@@ -150,9 +160,16 @@ private fun whose(event: ScoutedEvent, teams: Pair<String, String>?): String? =
 
 /** An event: its place, the symbol of the evaluation, the event and the
  * player, the set or serve; the score after it. The changes of the lineup
- * can't be corrected: dimmed. */
+ * can't be corrected: dimmed. `pictured` when some event listed has a
+ * photo: `photo` beside the name, else its place empty. */
 @Composable
-private fun EventRow(e: SetEvent, teams: Pair<String, String>?, onClick: () -> Unit) = Row(
+private fun EventRow(
+    e: SetEvent,
+    teams: Pair<String, String>?,
+    pictured: Boolean,
+    photo: ByteArray?,
+    onClick: () -> Unit,
+) = Row(
     Modifier.fillMaxWidth().clickable(onClick = onClick)
         .let { m -> if (teams == null) m else m.drawBehind { drawRect(sideColor(e.event.sideB), size = size.copy(width = 4.dp.toPx())) } }
         .padding(horizontal = 16.dp, vertical = 10.dp),
@@ -175,6 +192,7 @@ private fun EventRow(e: SetEvent, teams: Pair<String, String>?, onClick: () -> U
         fontWeight = FontWeight.Bold,
         color = color,
     )
+    if (pictured) RowPhoto(photo)
     Column(Modifier.weight(1f)) {
         Text(
             listOfNotNull(e.event.name.replaceFirstChar { it.uppercase() }, e.event.technique).joinToString(" · "),

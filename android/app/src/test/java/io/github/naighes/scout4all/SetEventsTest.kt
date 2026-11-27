@@ -1,11 +1,14 @@
 package io.github.naighes.scout4all
 
+import android.graphics.Bitmap
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.performClick
 import io.github.naighes.scout4all.core.EvalEnum
+import java.io.ByteArrayOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -36,6 +39,20 @@ class SetEventsTest {
     fun noEvents() {
         show()
         rule.waitForText(string(R.string.no_events))
+    }
+
+    /** The photo of who touched beside their name, none until one has it. */
+    @Test
+    fun thePhotoOfWhoTouched() {
+        serve(team, match, EvalEnum.PERFECT)
+        val server = core { c -> c.setEvents(team, match, 1u).events.firstNotNullOf { it.event.player?.id } }
+        val png = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).let { bitmap ->
+            bitmap.eraseColor(android.graphics.Color.RED)
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        core { it.setPersonPhoto(server, png) }
+        show()
+        rule.waitFor { rule.onAllNodesWithTag(SHOWN_IMAGE, useUnmergedTree = true).fetchSemanticsNodes().size == 1 }
     }
 
     @Test

@@ -201,22 +201,9 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
             null
         }
         loadFiles()
-        loadPhotos()
+        photos = app.personPhotos(events.mapNotNull { it.event.event.player?.id })
         loading = false
         if (clips != null) events.indices.firstOrNull { target(it) != null }?.let { goToEvent(it) }
-    }
-
-    private suspend fun loadPhotos() {
-        val players = events.mapNotNull { it.event.event.player?.id }.distinct()
-        photos = app.core { core ->
-            players.mapNotNull { id ->
-                try {
-                    core.personPhoto(id)?.let { id to it }
-                } catch (e: MobileException) {
-                    null
-                }
-            }.toMap()
-        }
     }
 
     /** The files of the video read (how long each is) and played one after

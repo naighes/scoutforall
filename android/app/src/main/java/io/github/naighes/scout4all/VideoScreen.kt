@@ -671,7 +671,7 @@ private fun EventRow(
             style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
             color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        if (pictured) LogoBox(photo, 32.dp)
+        if (pictured) RowPhoto(photo)
         Column(Modifier.weight(1f)) {
             val symbol = s.symbol ?: "✕".takeIf { mark.error }
             Text(

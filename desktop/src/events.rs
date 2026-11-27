@@ -4,16 +4,18 @@
 //! serve, each a line of choices (↑ ↓ among them, ← → change); Enter saves
 //! if the events after it still fit and the set ends as it did, Esc
 //! leaves it as it was. The changes of the lineup can't be corrected.
+//! The photo of who touched beside their name.
 
 use {
     crate::{
+        editors,
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, space, text},
+        widget::{Column, Id, column, container, image, row, scrollable, space, text},
     },
     scout4all_core::{
         event_edit::EditField,
@@ -24,7 +26,7 @@ use {
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{Correction, CorrectionState, MobileError, Scout4All, SetEvent, SetEvents},
-    std::sync::Arc,
+    std::{collections::HashMap, sync::Arc},
 };
 
 /// The list, to keep the event chosen in sight.
@@ -123,6 +125,8 @@ pub struct EventsScreen {
     pub team_id: String,
     pub match_id: String,
     set: SetEvents,
+    /// of who touched in the events, by player id
+    photos: HashMap<String, image::Handle>,
     selected: usize,
     correcting: Option<Correcting>,
     error: Option<String>,
@@ -138,8 +142,11 @@ impl EventsScreen {
         set_number: u8,
     ) -> Result<EventsScreen, MobileError> {
         let set = core.set_events(team_id.clone(), match_id.clone(), set_number)?;
+        let players = set.events.iter().filter_map(|e| e.event.player.as_ref());
+        let photos = editors::person_photos(&core, players.map(|p| p.id.clone()));
         Ok(EventsScreen {
             core,
+            photos,
             team_id,
             match_id,
             // the last events first in sight: the ones just scouted
@@ -352,12 +359,12 @@ impl EventsScreen {
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let paired = self.paired();
-        let rows = self
-            .set
-            .events
-            .iter()
-            .enumerate()
-            .map(|(i, e)| event_row(e, i == self.selected, paired.contains(&i), i, c));
+        let photo_of = |e: &SetEvent| self.photos.get(&e.event.player.as_ref()?.id);
+        let pictured = self.set.events.iter().any(|e| photo_of(e).is_some());
+        let rows = self.set.events.iter().enumerate().map(|(i, e)| {
+            let photo = pictured.then(|| photo_of(e));
+            event_row(e, photo, i == self.selected, paired.contains(&i), i, c)
+        });
         let list: Element<'a, Message> = match self.set.events.is_empty() {
             true => ui::body(s.no_events).color(c.muted).into(),
             false => scrollable(Column::with_children(rows).spacing(2))
@@ -556,6 +563,8 @@ fn player_line<'a>(e: &SetEvent, c: Colors) -> Element<'a, Message> {
 /// player, the score after it; the changes of the lineup dimmed.
 fn event_row<'a>(
     e: &SetEvent,
+    // its place, empty without one; none when no event listed has a photo
+    photo: Option<Option<&image::Handle>>,
     chosen: bool,
     paired: bool,
     i: usize,
@@ -581,16 +590,21 @@ fn event_row<'a>(
             .font(bold)
             .color(color)
             .width(Length::Fixed(20.0)),
+    ]
+    .push(photo.map(ui::row_photo))
+    .push(
         column![
             text(describe(e)).size(SIZE_BODY).color(color),
             player_line(e, c),
         ]
         .width(Length::Fill),
+    )
+    .push(
         text(format!("{}–{}", e.score_us, e.score_them))
             .size(SIZE_BODY)
             .font(bold)
             .color(color),
-    ]
+    )
     .spacing(10)
     .align_y(Alignment::Center);
     // the touch paired with the chosen one moves with it: a mark and a tint
@@ -657,6 +671,26 @@ mod tests {
         let mut events = EventsScreen::new(core, team_id, match_id, 1).unwrap();
         events.error = Some("not saved".into());
         crate::assert_told_over(crate::Screen::Events(Box::new(events)), "not saved");
+    }
+
+    /// The photos of who touched in the events: only who has one.
+    #[test]
+    fn the_photos_of_the_players_in_the_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team_id, match_id) = imported(&dir);
+        let open =
+            || EventsScreen::new(core.clone(), team_id.clone(), match_id.clone(), 1).unwrap();
+        let screen = open();
+        assert!(screen.photos.is_empty());
+        let player = screen
+            .set
+            .events
+            .iter()
+            .find_map(|e| Some(e.event.player.as_ref()?.id.clone()))
+            .unwrap();
+        core.set_person_photo(player.clone(), Some(crate::scouting::tests::PNG.to_vec()))
+            .unwrap();
+        assert_eq!(open().photos.keys().collect::<Vec<_>>(), vec![&player]);
     }
 
     /// B serving, its point lost without a cause (`PL`, as ⇧W does for B):
