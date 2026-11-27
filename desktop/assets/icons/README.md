@@ -5,5 +5,6 @@ under their own names (outlined): `analytics`, `edit`,
 `file_download`, `insert_chart`, `picture_as_pdf`, `videocam`,
 `radio_button_checked`, `emoji_events`, `cancel`, `toll`,
 `event`, `today`, `sports_volleyball`, `close`, `check`, `delete`, `arrow_forward`, `share`, `save`,
+`mail`, `call`, `chat` (how to reach a player),
 `error_outline`, `info`, `warning_amber` (the levels of a notice).
 `theme.svg` is drawn here: a circle half filled.

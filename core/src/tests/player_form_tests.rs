@@ -3,7 +3,10 @@
 #[cfg(test)]
 mod tests {
     use crate::{
-        player_form::{PlayerForm, PlayerFormError, namesake, namesake_message, removed},
+        player_form::{
+            Contacts, PhoneContact, PlayerForm, PlayerFormError, dial_code, namesake,
+            namesake_message, removed,
+        },
         providers::team_writer::{PlayerDetails, PlayerInput},
         shapes::{country::CountryCode, enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
         tests::EN,
@@ -443,6 +446,67 @@ mod tests {
         assert_eq!(
             (gone.email, gone.phone, gone.birth_place),
             Default::default()
+        );
+    }
+
+    #[test]
+    fn the_prefix_of_a_country() {
+        let of = |code| CountryCode::known(code).and_then(dial_code);
+        assert_eq!(of("IT"), Some(39));
+        assert_eq!(of("PL"), Some(48));
+        // no phones of its own
+        assert_eq!(of("AQ"), None);
+    }
+
+    #[test]
+    fn the_links_to_reach_a_player() {
+        let reached = |email: &str, phone: &str| {
+            Contacts::of(&PlayerEntry {
+                email: email.into(),
+                phone: phone.into(),
+                ..player("Anna", 7, false)
+            })
+        };
+        assert_eq!(reached("", ""), Contacts::default());
+        let mobile = reached("anna+volley@example.com", "+393331234567");
+        assert_eq!(
+            mobile.email.map(|e| (e.address, e.link)),
+            Some((
+                "anna+volley@example.com".into(),
+                "mailto:anna+volley@example.com".into()
+            ))
+        );
+        assert_eq!(
+            mobile.phone,
+            Some(PhoneContact {
+                shown: "+39 333 123 4567".into(),
+                call_link: Some("tel:+393331234567".into()),
+                whatsapp_link: Some("https://wa.me/393331234567".into()),
+            })
+        );
+        // a landline keeps its zero
+        let landline = reached("", "+390575601234").phone;
+        assert!(landline.as_ref().is_some_and(|p| p.shown.contains(" 0575")));
+        assert_eq!(
+            landline.and_then(|p| p.call_link).as_deref(),
+            Some("tel:+390575601234")
+        );
+        // what would start the fields of a message stays in the address
+        assert_eq!(
+            reached("a?bcc=x@example.com", "")
+                .email
+                .map(|e| e.link)
+                .as_deref(),
+            Some("mailto:a%3Fbcc%3Dx@example.com")
+        );
+        // a number that can't be read is shown, not called
+        assert_eq!(
+            reached("", "12").phone,
+            Some(PhoneContact {
+                shown: "12".into(),
+                call_link: None,
+                whatsapp_link: None,
+            })
         );
     }
 }

@@ -76,6 +76,8 @@ pub enum Message {
     OtherTeam(String),
     EditPlayer,
     DeletePlayer,
+    /// a `mailto:`, `tel:` or `wa.me` link of the player open
+    OpenLink(String),
     /// the numbers of a profile, as `load_profile` worked them out
     ProfileLoaded {
         team: String,
@@ -667,6 +669,10 @@ impl TeamScreen {
                 self.ask_deletion(s);
                 Outcome::Stay
             }
+            (Message::OpenLink(link), Mode::Browse, Some(_)) => {
+                self.open_link(s, &link);
+                Outcome::Stay
+            }
             (Message::ProfileTab(tab), Mode::Browse, Some(_)) => {
                 self.profile_tab(tab);
                 Outcome::Stay
@@ -701,6 +707,7 @@ impl TeamScreen {
                 | Message::OtherTeam(_)
                 | Message::EditPlayer
                 | Message::DeletePlayer
+                | Message::OpenLink(_)
                 | Message::ProfileTab(_)
                 | Message::PlayerStats(_),
                 Mode::Browse,
@@ -862,6 +869,12 @@ impl TeamScreen {
                 self.profile_tab(other);
                 Outcome::Stay
             }
+            k if tab == Tab::Profile && self.link_of(s, k).is_some() => {
+                if let Some(link) = self.link_of(s, k) {
+                    self.open_link(s, &link);
+                }
+                Outcome::Stay
+            }
             k if k == key!(e) || (k == key!(enter) && tab == Tab::Profile) => {
                 self.edit_player(s, Some(self.player));
                 Outcome::Stay
@@ -884,19 +897,61 @@ impl TeamScreen {
         }
     }
 
+    /// The ways to reach the player open: the key, what it does, the link.
+    fn links(&self, s: &Strings) -> Vec<(KeyCombination, &'static str, String, String)> {
+        let contacts = self
+            .profile
+            .as_ref()
+            .and_then(|open| self.details.players.iter().find(|p| p.id == open.player))
+            .map(|player| &player.contacts);
+        let email = contacts
+            .and_then(|c| c.email.as_ref())
+            .map(|e| (key!(m), "m", s.write_email.to_string(), e.link.clone()));
+        let phone = contacts.and_then(|c| c.phone.as_ref());
+        let call = phone
+            .and_then(|p| p.call_link.clone())
+            .map(|link| (key!(c), "c", s.call.to_string(), link));
+        let whatsapp = phone
+            .and_then(|p| p.whatsapp_link.clone())
+            .map(|link| (key!(w), "w", "WhatsApp".to_string(), link));
+        email.into_iter().chain(call).chain(whatsapp).collect()
+    }
+
+    fn link_of(&self, s: &Strings, ck: KeyCombination) -> Option<String> {
+        self.links(s)
+            .into_iter()
+            .find(|(key, ..)| *key == ck)
+            .map(|(.., link)| link)
+    }
+
+    /// Opened by the app of the system for it; told when there's none.
+    fn open_link(&mut self, s: &Strings, link: &str) {
+        self.error = open::that_detached(link)
+            .err()
+            .map(|_| s.no_app_to_open.to_string());
+    }
+
     fn profile_hints(&self, s: &Strings) -> Vec<(String, String)> {
-        let own = match self.profile.as_ref().map(|p| (p.tab, p.stats.as_ref())) {
-            Some((Tab::Statistics, Some(stats))) => [("⇧⇥ ⇥".to_string(), s.page.to_string())]
+        let own: Vec<(String, String)> =
+            match self.profile.as_ref().map(|p| (p.tab, p.stats.as_ref())) {
+                Some((Tab::Statistics, Some(stats))) => [("⇧⇥ ⇥".to_string(), s.page.to_string())]
+                    .into_iter()
+                    .chain(stats.hints(s))
+                    .chain([("e".to_string(), s.edit.to_string())])
+                    .collect(),
+                _ => [
+                    ("← → ⇧⇥ ⇥".to_string(), s.page.to_string()),
+                    ("Enter / e".to_string(), s.edit.to_string()),
+                ]
                 .into_iter()
-                .chain(stats.hints(s))
-                .chain([("e".to_string(), s.edit.to_string())])
+                .chain(
+                    self.links(s)
+                        .into_iter()
+                        .map(|(_, key, what, _)| (key.to_string(), what)),
+                )
+                .chain([("⌫".to_string(), s.remove_player.to_string())])
                 .collect(),
-            _ => vec![
-                ("← → ⇧⇥ ⇥".to_string(), s.page.to_string()),
-                ("Enter / e".to_string(), s.edit.to_string()),
-                ("⌫".to_string(), s.remove_player.to_string()),
-            ],
-        };
+            };
         own.into_iter()
             .chain([("Esc".to_string(), s.back.to_string())])
             .collect()
@@ -1520,7 +1575,7 @@ mod tests {
         };
         assert_eq!(editor.form.text(1), "1");
         assert_eq!(editor.form.fields[1].placeholder, s.number_placeholder);
-        assert_eq!(editor.form.fields[5].placeholder, s.height_placeholder);
+        assert_eq!(editor.form.fields[6].placeholder, s.height_placeholder);
         for m in [
             Input(0, "Anna Rossi".into()),
             Input(1, "9".into()),
@@ -1862,10 +1917,10 @@ mod tests {
         team.key(s, key!(enter));
         for m in [
             Input(1, "0".into()),
-            Input(4, "Ital".into()),
-            Take(4, 0),
-            Choose(6, 2),
-            Input(7, " 123 ".into()),
+            Input(5, "Ital".into()),
+            Take(5, 0),
+            Choose(7, 2),
+            Input(8, " 123 ".into()),
         ] {
             team.update(s, Message::Form(m));
         }
@@ -1881,9 +1936,9 @@ mod tests {
         let Mode::Edit(editor) = &team.mode else {
             unreachable!("the form of the player")
         };
-        assert_eq!(editor.form.text(4), "Italia");
-        assert_eq!(editor.form.index(6), 2);
-        assert_eq!(editor.form.text(7), "123");
+        assert_eq!(editor.form.text(5), "Italia");
+        assert_eq!(editor.form.index(7), 2);
+        assert_eq!(editor.form.text(8), "123");
         team.key(s, BACK_KEY);
         assert!(matches!(team.mode, Mode::Browse));
         assert!(team.profile.is_some());
@@ -1918,6 +1973,36 @@ mod tests {
         assert!(
             matches!(outcome, Outcome::OpenPlayer { team, player } if team == "other" && player == anna)
         );
+    }
+
+    /// The profile of a player with contacts hints their keys; without,
+    /// none of them.
+    #[test]
+    fn the_profile_offers_the_contacts_known() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let (senior, anna) = senior(&core);
+        let hinted = |core: &Arc<Scout4All>| {
+            let mut team = TeamScreen::new(core.clone(), senior.clone()).unwrap();
+            assert!(team.show_profile(&anna));
+            team.hints(s)
+                .into_iter()
+                .map(|(key, _)| key)
+                .filter(|key| ["m", "c", "w"].contains(&key.as_str()))
+                .collect::<Vec<_>>()
+        };
+        assert!(hinted(&core).is_empty());
+        let players = core.team(senior.clone()).unwrap().players;
+        let form = players.into_iter().find(|p| p.id == anna).unwrap().form;
+        let reached = PlayerForm {
+            email: "anna@example.com".into(),
+            phone: "+393331234567".into(),
+            ..form
+        };
+        core.save_player(senior.clone(), Some(anna.clone()), reached, false)
+            .unwrap();
+        assert_eq!(hinted(&core), ["m", "c", "w"]);
     }
 
     /// The photo of a player is read for the list of the team, and is gone
@@ -2024,7 +2109,7 @@ mod tests {
         };
         let f = &editor.form;
         assert_eq!(
-            (f.text(0), f.text(1), f.text(3), f.text(5), f.text(8)),
+            (f.text(0), f.text(1), f.text(3), f.text(6), f.text(9)),
             (
                 "Anna Rossi".to_string(),
                 "9".to_string(),

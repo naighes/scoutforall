@@ -309,6 +309,85 @@ fn country_of(number: &PhoneNumber) -> Option<CountryCode> {
         .or_else(main)
 }
 
+/// The international prefix of the phones of `country` (39 for Italy);
+/// none for a country without its own numbering.
+pub fn dial_code(country: CountryCode) -> Option<u16> {
+    let id = country.as_str().parse::<country::Id>().ok()?;
+    DATABASE
+        .by_id(id.as_ref())
+        .map(|metadata| metadata.country_code())
+}
+
+/// How to reach a player, as shown and as the links the system opens:
+/// none of what isn't known.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Contacts {
+    pub email: Option<EmailContact>,
+    pub phone: Option<PhoneContact>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmailContact {
+    pub address: String,
+    /// `mailto:`
+    pub link: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PhoneContact {
+    /// `+39 333 123 4567`
+    pub shown: String,
+    /// `tel:`; none, as the WhatsApp one, for a number that can't be read
+    pub call_link: Option<String>,
+    /// the conversation on `wa.me`
+    pub whatsapp_link: Option<String>,
+}
+
+impl Contacts {
+    pub fn of(player: &PlayerEntry) -> Self {
+        let email = Some(&player.email)
+            .filter(|email| !email.is_empty())
+            .map(|email| EmailContact {
+                address: email.clone(),
+                link: format!("mailto:{}", escaped(email)),
+            });
+        let phone = Some(&player.phone)
+            .filter(|phone| !phone.is_empty())
+            .map(|phone| phone_contact(phone));
+        Contacts { email, phone }
+    }
+}
+
+fn phone_contact(phone: &str) -> PhoneContact {
+    let number = phonenumber::parse(None, phone)
+        .ok()
+        .filter(phonenumber::is_valid);
+    // from the digits stored: the crate drops the leading zero of the
+    // Italian landlines when it writes a number again
+    let digits: String = phone.chars().filter(char::is_ascii_digit).collect();
+    let international = number
+        .as_ref()
+        .map(|n| n.format().mode(Mode::International).to_string());
+    PhoneContact {
+        shown: international.unwrap_or_else(|| phone.to_string()),
+        call_link: number.as_ref().map(|_| format!("tel:+{digits}")),
+        whatsapp_link: number.as_ref().map(|_| format!("https://wa.me/{digits}")),
+    }
+}
+
+/// The address in a `mailto:` link: what would start the fields of the
+/// message (`?`, `&`...) written as its code.
+fn escaped(address: &str) -> String {
+    address
+        .bytes()
+        .map(|byte| match byte {
+            b'@' | b'.' | b'-' | b'_' | b'+' => char::from(byte).to_string(),
+            byte if byte.is_ascii_alphanumeric() => char::from(byte).to_string(),
+            byte => format!("%{byte:02X}"),
+        })
+        .collect()
+}
+
 /// One or two digits, surrounding spaces aside.
 pub(crate) fn parse_number(number: &str) -> Option<u8> {
     let number = number.trim();

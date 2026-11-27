@@ -91,6 +91,44 @@ pub fn chosen(core: &Scout4All, written: &str) -> Result<Option<CountryCode>, ()
     }
 }
 
+/// A country as the prefix of a phone: "Italia +39".
+pub fn with_prefix(core: &Scout4All, code: CountryCode) -> String {
+    prefixed(core, code, core.country_name(code))
+}
+
+fn prefixed(core: &Scout4All, code: CountryCode, name: String) -> String {
+    match core.dial_code(code) {
+        Some(prefix) => format!("{name} +{prefix}"),
+        None => name,
+    }
+}
+
+/// What the drop-down of the prefixes offers: the countries with phones of
+/// their own, each with its prefix.
+pub fn prefixes(core: &Scout4All, written: &str, browsing: bool) -> Vec<Suggestion> {
+    offered(core, written, browsing)
+        .into_iter()
+        .filter_map(|offered| {
+            let code = named(core, &offered.value)?;
+            let value = prefixed(core, code, offered.value);
+            core.dial_code(code).map(|_| Suggestion {
+                label: format!("{}  {value}", flag(code)),
+                value,
+                picture: None,
+            })
+        })
+        .collect()
+}
+
+/// The country of the prefix `written`, with or without its number.
+pub fn of_prefix(core: &Scout4All, written: &str) -> Result<Option<CountryCode>, ()> {
+    let name = match written.trim().rsplit_once(" +") {
+        Some((name, prefix)) if prefix.chars().all(|c| c.is_ascii_digit()) => name,
+        _ => written,
+    };
+    chosen(core, name)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

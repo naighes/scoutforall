@@ -137,7 +137,8 @@ fn details<'a>(
     let others = ready
         .filter(|profile| !profile.other_teams.is_empty())
         .map(|profile| other_teams(profile, s, c));
-    let any = !fields.is_empty() || notes.is_some() || others.is_some();
+    let contacts = contacts(shown.player, s, c);
+    let any = !fields.is_empty() || contacts.is_some() || notes.is_some() || others.is_some();
     let rule = any.then(|| {
         container(space::horizontal())
             .width(Length::Fill)
@@ -151,6 +152,7 @@ fn details<'a>(
         .push(season)
         .push(rule)
         .push(grid(fields, FIELD_COLUMNS, FIELD_SIZE, c))
+        .push(contacts)
         .push(notes)
         .push(others)
         .spacing(22)
@@ -319,6 +321,7 @@ fn fields(
     });
     [
         birth,
+        written(s.birth_place, &form.birth_place),
         country.map(|name| Item::new(s.nationality, name)),
         written(s.height_of, &form.height_cm).map(|height| Item {
             value: format!("{} cm", height.value),
@@ -330,6 +333,39 @@ fn fields(
     .into_iter()
     .flatten()
     .collect()
+}
+
+/// The email and the phone, each with what can be done with it.
+fn contacts<'a>(player: &Player, s: &'static Strings, c: Colors) -> Option<Element<'a, Message>> {
+    let action = move |icon, label: &str, link: &str| {
+        ui::action(icon, label, Message::OpenLink(link.to_string()), false, c).into()
+    };
+    let line = |label: &str, value: &str, actions: Vec<Element<'a, Message>>| {
+        let actions = Row::with_children(actions).spacing(8).wrap();
+        column![item(Item::new(label, value), FIELD_SIZE, c), actions].spacing(8)
+    };
+    let email = player.contacts.email.as_ref().map(|email| {
+        let write = action(theme::icons::MAIL, s.write_email, &email.link);
+        line(s.email, &email.address, vec![write])
+    });
+    let phone = player.contacts.phone.as_ref().map(|phone| {
+        let call = phone
+            .call_link
+            .as_ref()
+            .map(|link| action(theme::icons::CALL, s.call, link));
+        let whatsapp = phone
+            .whatsapp_link
+            .as_ref()
+            .map(|link| action(theme::icons::CHAT, "WhatsApp", link));
+        line(
+            s.phone,
+            &phone.shown,
+            call.into_iter().chain(whatsapp).collect(),
+        )
+    });
+    let lines: Vec<Element<'a, Message>> =
+        email.into_iter().chain(phone).map(Element::from).collect();
+    (!lines.is_empty()).then(|| Row::with_children(lines).spacing(32).wrap().into())
 }
 
 fn item<'a>(item: Item, size: f32, c: Colors) -> Element<'a, Message> {

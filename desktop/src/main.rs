@@ -673,6 +673,7 @@ impl App {
                     heading,
                     name,
                     content: transfer::Content::File(path),
+                    contacts: None,
                 });
             }
             Go::PickVideo => {
@@ -755,11 +756,18 @@ impl App {
             transfer::Export::Microcycle(_) => s.plan_pdf,
         };
         match transfer::archive(&self.core, &export) {
-            Ok((name, bytes)) => self.offer(transfer::Sharing {
-                heading: heading.to_string(),
-                name,
-                content: transfer::Content::Bytes(Arc::new(bytes)),
-            }),
+            Ok((name, bytes)) => {
+                let contacts = export.is_archive().then(|| transfer::ContactsChoice {
+                    included: self.core.archive_contacts(),
+                    export,
+                });
+                self.offer(transfer::Sharing {
+                    heading: heading.to_string(),
+                    name,
+                    content: transfer::Content::Bytes(Arc::new(bytes)),
+                    contacts,
+                })
+            }
             Err(e) => {
                 self.error = Some(e.to_string());
                 Task::none()
@@ -767,15 +775,40 @@ impl App {
         }
     }
 
-    /// A file made, to share or save: asked in a dialog, or saved where
-    /// the system has no sheet to share with.
+    /// A file made, to share or save: asked in a dialog; where the system
+    /// has no sheet to share with, saved at once when there's nothing else
+    /// to choose.
     fn offer(&mut self, sharing: transfer::Sharing) -> Task<Message> {
-        match share::NATIVE {
+        match share::NATIVE || sharing.contacts.is_some() {
             true => {
                 self.sharing = Some(sharing);
                 Task::none()
             }
             false => save(sharing),
+        }
+    }
+
+    /// The archive made again with the contacts taken in or left out, the
+    /// choice remembered.
+    fn choose_contacts(&mut self, sharing: transfer::Sharing) {
+        let Some(choice) = sharing.contacts else {
+            return;
+        };
+        let included = !choice.included;
+        let made = self
+            .core
+            .set_archive_contacts(included)
+            .and_then(|()| transfer::archive(&self.core, &choice.export));
+        match made {
+            Ok((name, bytes)) => {
+                self.sharing = Some(transfer::Sharing {
+                    name,
+                    content: transfer::Content::Bytes(Arc::new(bytes)),
+                    contacts: Some(transfer::ContactsChoice { included, ..choice }),
+                    ..sharing
+                })
+            }
+            Err(e) => self.error = Some(e.to_string()),
         }
     }
 
@@ -788,6 +821,10 @@ impl App {
         match message {
             transfer::ShareMessage::Cancel => Task::none(),
             transfer::ShareMessage::Save => save(sharing),
+            transfer::ShareMessage::Contacts => {
+                self.choose_contacts(sharing);
+                Task::none()
+            }
             transfer::ShareMessage::Share => match match &sharing.content {
                 transfer::Content::Bytes(bytes) => {
                     share::staged(&sharing.name, bytes).map_err(|e| ui::io_error(&e, self.language))

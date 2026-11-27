@@ -160,6 +160,8 @@ const COMPETITION_COUNTRY: usize = 4;
 const COMPETITION_FRIENDLY: usize = 5;
 
 pub struct PlayerEditor {
+    /// the prefix proposed for a player without a phone
+    proposed: Option<String>,
     team_id: String,
     id: Option<String>,
     roles: Vec<RoleChoice>,
@@ -189,17 +191,37 @@ const PLAYER_NAME: usize = 0;
 const PLAYER_NUMBER: usize = 1;
 const PLAYER_ROLE: usize = 2;
 const PLAYER_BIRTH: usize = 3;
-const PLAYER_NATIONALITY: usize = 4;
-const PLAYER_HEIGHT: usize = 5;
-const PLAYER_HAND: usize = 6;
-const PLAYER_FEDERATION_ID: usize = 7;
-const PLAYER_NOTES: usize = 8;
+const PLAYER_BIRTH_PLACE: usize = 4;
+const PLAYER_NATIONALITY: usize = 5;
+const PLAYER_HEIGHT: usize = 6;
+const PLAYER_HAND: usize = 7;
+const PLAYER_FEDERATION_ID: usize = 8;
+const PLAYER_NOTES: usize = 9;
+const PLAYER_EMAIL: usize = 10;
+const PLAYER_PREFIX: usize = 11;
+const PLAYER_PHONE: usize = 12;
 
 const HANDS: [DominantHand; 2] = [DominantHand::Right, DominantHand::Left];
 
 fn nationality_field(core: &Scout4All, s: &Strings, code: Option<CountryCode>) -> Field {
     let name = code.map(|c| core.country_name(c)).unwrap_or_default();
     Field::search(s.nationality, name)
+}
+
+/// The prefix of a phone: the one of the number, else the one proposed
+/// for a player without one.
+fn prefix_of(core: &Scout4All, team_id: &str, form: &PlayerForm) -> String {
+    let country = match form.phone.is_empty() {
+        true => form.phone_country.or_else(|| {
+            core.proposed_phone_country(team_id.to_string(), form.nationality)
+                .ok()
+                .flatten()
+        }),
+        false => form.phone_country,
+    };
+    country
+        .map(|code| countries::with_prefix(core, code))
+        .unwrap_or_default()
 }
 
 fn hand_field(s: &Strings, hand: Option<DominantHand>) -> Field {
@@ -692,21 +714,34 @@ impl Editor {
                 Mask::Date,
                 s.date_placeholder,
             ),
+            Field::text(s.birth_place, start.birth_place.clone()),
             nationality_field(core, s, start.nationality),
             Field::text(s.height, start.height_cm.clone()).placeholder(s.height_placeholder),
             hand_field(s, start.dominant_hand),
             Field::text(s.federation_id, start.federation_id.clone()),
             Field::lines(s.notes, start.notes.clone()),
+            Field::text(s.email, start.email.clone()),
+            Field::dropdown(s.phone_prefix, prefix_of(core, &team_id, &start)),
+            Field::text(s.phone, start.phone.clone()),
         ];
+        // the prefix proposed follows the nationality until another one is
+        // chosen, or a number written with it
+        let proposed = start
+            .phone
+            .is_empty()
+            .then(|| prefix_of(core, &team_id, &start));
         let title = match id {
             Some(_) => s.edit_player,
             None => s.new_player,
         };
+        let mut form = Form::new(title, fields);
+        form.sections = vec![(PLAYER_EMAIL, s.contacts.to_string())];
         Editor {
-            form: Form::new(title, fields),
+            form,
             namesake: None,
             same_person: None,
             kind: Kind::Player(Box::new(PlayerEditor {
+                proposed,
                 team_id,
                 id,
                 roles,
@@ -863,6 +898,10 @@ impl Editor {
                 Field::masked("", &start.birth_date, Mask::Date, "").value,
             ),
             (
+                PLAYER_BIRTH_PLACE,
+                Field::text("", start.birth_place.clone()).value,
+            ),
+            (
                 PLAYER_NATIONALITY,
                 nationality_field(core, s, start.nationality).value,
             ),
@@ -876,7 +915,17 @@ impl Editor {
                 Field::text("", start.federation_id.clone()).value,
             ),
             (PLAYER_NOTES, Field::lines("", start.notes.clone()).value),
+            (PLAYER_EMAIL, Field::text("", start.email.clone()).value),
+            (
+                PLAYER_PREFIX,
+                Field::dropdown("", prefix_of(core, &p.team_id, start)).value,
+            ),
+            (PLAYER_PHONE, Field::text("", start.phone.clone()).value),
         ];
+        p.proposed = start
+            .phone
+            .is_empty()
+            .then(|| prefix_of(core, &p.team_id, start));
         for (field, value) in values {
             if let Some(f) = self.form.fields.get_mut(field) {
                 f.value = value;
@@ -1548,9 +1597,44 @@ impl Editor {
             .map(|c| &mut c.form)
     }
 
+    /// The prefix proposed for the nationality written, unless the user
+    /// chose another one.
+    fn propose_prefix(&mut self, core: &Scout4All) {
+        let Kind::Player(p) = &mut self.kind else {
+            return;
+        };
+        let untouched = p
+            .proposed
+            .as_ref()
+            .is_some_and(|proposed| *proposed == self.form.text(PLAYER_PREFIX))
+            && self.form.text(PLAYER_PHONE).trim().is_empty();
+        if !untouched {
+            return;
+        }
+        let form = PlayerForm {
+            nationality: countries::chosen(core, &self.form.text(PLAYER_NATIONALITY))
+                .ok()
+                .flatten(),
+            ..PlayerForm::default()
+        };
+        let prefix = prefix_of(core, &p.team_id, &form);
+        if let Some(field) = self.form.fields.get_mut(PLAYER_PREFIX) {
+            field.value = Field::dropdown("", prefix.clone()).value;
+        }
+        p.proposed = Some(prefix);
+    }
+
     fn changed(&mut self, core: &Scout4All, s: &Strings, field: usize) {
         match (&mut self.kind, field) {
             (Kind::Player(p), PLAYER_NAME) if p.id.is_none() => self.offer_persons(s),
+            (Kind::Player(_), PLAYER_PREFIX) => {
+                let (written, all) = (
+                    self.form.text(PLAYER_PREFIX),
+                    self.form.browsing(PLAYER_PREFIX),
+                );
+                self.form
+                    .suggest(PLAYER_PREFIX, countries::prefixes(core, &written, all));
+            }
             (Kind::Player(_), PLAYER_NATIONALITY) => {
                 let (written, all) = (
                     self.form.text(PLAYER_NATIONALITY),
@@ -1558,6 +1642,7 @@ impl Editor {
                 );
                 self.form
                     .suggest(PLAYER_NATIONALITY, countries::offered(core, &written, all));
+                self.propose_prefix(core);
             }
             // a player taken to the new season, or left
             (Kind::Season(t), f) if f >= SEASON_PLAYERS => {
@@ -1725,6 +1810,19 @@ impl Editor {
                             reason: s.no_country_found.to_string(),
                         }
                     })?;
+                let phone_country =
+                    countries::of_prefix(core, &f.text(PLAYER_PREFIX)).map_err(|()| {
+                        MobileError::InvalidPlayer {
+                            field: PlayerField::Phone,
+                            reason: s.no_country_found.to_string(),
+                        }
+                    });
+                let phone = f.text(PLAYER_PHONE);
+                // without a number the prefix says nothing
+                let phone_country = match phone.trim().is_empty() {
+                    true => None,
+                    false => phone_country?,
+                };
                 let form = PlayerForm {
                     name: f.text(PLAYER_NAME),
                     number: f.text(PLAYER_NUMBER),
@@ -1743,10 +1841,10 @@ impl Editor {
                         .and_then(|i| HANDS.get(i))
                         .copied(),
                     federation_id: f.text(PLAYER_FEDERATION_ID),
-                    email: String::new(),
-                    phone_country: None,
-                    phone: String::new(),
-                    birth_place: String::new(),
+                    email: f.text(PLAYER_EMAIL),
+                    phone_country,
+                    phone,
+                    birth_place: f.text(PLAYER_BIRTH_PLACE),
                     person: p.person.as_ref().map(|person| person.id),
                 };
                 let id =
@@ -1790,7 +1888,8 @@ impl Editor {
                 PlayerField::BirthDate => PLAYER_BIRTH,
                 PlayerField::Height => PLAYER_HEIGHT,
                 PlayerField::Nationality => PLAYER_NATIONALITY,
-                PlayerField::Email | PlayerField::Phone => PLAYER_NOTES,
+                PlayerField::Email => PLAYER_EMAIL,
+                PlayerField::Phone => PLAYER_PHONE,
             }),
             MobileError::InvalidCompetition { field, .. } => Some(match field {
                 CompetitionField::Name => COMPETITION_NAME,
@@ -3172,6 +3271,67 @@ mod tests {
         press(&mut e, &core, key!(enter));
         assert_eq!(step(&e), MatchStep::Competition);
         assert_eq!(e.form.focused, MATCH_SUBSTITUTIONS);
+    }
+
+    /// The prefix of a new player is the one of the team, then of the
+    /// nationality written, until another one is chosen; the contacts are
+    /// saved and read back, kept by a later edit.
+    #[test]
+    fn the_contacts_of_a_player() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 0);
+        let mut e = Editor::player(s, &core, cortona.clone(), None, PlayerForm::default());
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Italia +39");
+        send(&mut e, &core, Input(PLAYER_NATIONALITY, "Polonia".into()));
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Polonia +48");
+        send(&mut e, &core, Input(PLAYER_NATIONALITY, String::new()));
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Italia +39");
+        send(&mut e, &core, Input(PLAYER_PREFIX, "Francia".into()));
+        send(&mut e, &core, Input(PLAYER_NATIONALITY, "Polonia".into()));
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Francia");
+        send(&mut e, &core, Input(PLAYER_PREFIX, "Italia +39".into()));
+
+        send(&mut e, &core, Input(PLAYER_NAME, "Anna".into()));
+        send(&mut e, &core, Input(PLAYER_NUMBER, "5".into()));
+        send(&mut e, &core, Choose(PLAYER_ROLE, 1));
+        send(&mut e, &core, Input(PLAYER_BIRTH_PLACE, "Cortona".into()));
+        send(&mut e, &core, Input(PLAYER_EMAIL, "anna".into()));
+        send(&mut e, &core, Input(PLAYER_PHONE, "333 123 4567".into()));
+        send(&mut e, &core, form::Message::Save);
+        assert!(matches!(&e.form.invalid, Some((PLAYER_EMAIL, _))));
+        send(
+            &mut e,
+            &core,
+            Input(PLAYER_EMAIL, "anna@example.com".into()),
+        );
+        assert!(matches!(
+            send(&mut e, &core, form::Message::Save),
+            Edited::Saved(_)
+        ));
+
+        let saved = core.team(cortona.clone()).unwrap().players.remove(0);
+        let mut e = Editor::player(
+            s,
+            &core,
+            cortona.clone(),
+            Some(saved.id.clone()),
+            saved.form.clone(),
+        );
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Italia +39");
+        assert_eq!(e.form.text(PLAYER_EMAIL), "anna@example.com");
+        assert!(matches!(
+            send(&mut e, &core, form::Message::Save),
+            Edited::Saved(_)
+        ));
+        let again = core.team(cortona).unwrap().players.remove(0);
+        assert_eq!(again.form, saved.form);
+        assert_eq!(again.form.birth_place, "Cortona");
+        assert_eq!(
+            again.contacts.phone.map(|p| p.shown).as_deref(),
+            Some("+39 333 123 4567")
+        );
     }
 
     /// A new match can be of another team A, with its players, not against

@@ -233,6 +233,9 @@ pub mod icons {
     pub const VIEW_LIST: &[u8] = include_bytes!("../assets/icons/view_list.svg");
     pub const THIS_TEAM: &[u8] = include_bytes!("../assets/icons/this_team.svg");
     pub const ALL_TEAMS: &[u8] = include_bytes!("../assets/icons/all_teams.svg");
+    pub const MAIL: &[u8] = include_bytes!("../assets/icons/mail.svg");
+    pub const CALL: &[u8] = include_bytes!("../assets/icons/call.svg");
+    pub const CHAT: &[u8] = include_bytes!("../assets/icons/chat.svg");
     pub const HOME: &[u8] = include_bytes!("../assets/icons/home.svg");
     pub const AWAY: &[u8] = include_bytes!("../assets/icons/away.svg");
     pub const BACK: &[u8] = include_bytes!("../assets/icons/back.svg");

@@ -44,7 +44,9 @@ use scout4all_core::{
     match_form::{CompetitionInput, MatchForm, MatchFormError, RosterNumber},
     names,
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
-    player_form::{self, PlayerForm, PlayerFormError, name_the_removed},
+    player_form::{
+        self, Contacts, EmailContact, PhoneContact, PlayerForm, PlayerFormError, name_the_removed,
+    },
     player_profile::{PlayerSeasonStats, age, has_training},
     providers::{
         match_reader::MatchReader,
@@ -721,6 +723,27 @@ pub struct Player {
     pub initials: String,
     /// what the form starts from, to edit the player
     pub form: PlayerForm,
+    /// how to reach them
+    pub contacts: Contacts,
+}
+
+#[uniffi::remote(Record)]
+pub struct Contacts {
+    pub email: Option<EmailContact>,
+    pub phone: Option<PhoneContact>,
+}
+
+#[uniffi::remote(Record)]
+pub struct EmailContact {
+    pub address: String,
+    pub link: String,
+}
+
+#[uniffi::remote(Record)]
+pub struct PhoneContact {
+    pub shown: String,
+    pub call_link: Option<String>,
+    pub whatsapp_link: Option<String>,
 }
 
 /// A person of the registry that can be added to a team (D5): playing in
@@ -4952,6 +4975,21 @@ impl Scout4All {
         })
     }
 
+    /// The country of the prefix to propose for a player without a phone:
+    /// the one of the nationality, else the one of the team.
+    pub fn proposed_phone_country(
+        &self,
+        team_id: String,
+        nationality: Option<CountryCode>,
+    ) -> Result<Option<CountryCode>, MobileError> {
+        Ok(nationality.or(self.read_team(&team_id)?.country))
+    }
+
+    /// The international prefix of the phones of `country`.
+    pub fn dial_code(&self, country: CountryCode) -> Option<u16> {
+        player_form::dial_code(country)
+    }
+
     /// The person of the registry with the name written (case, accents and
     /// spaces aside) that can be added to the team: the one to ask about
     /// before a new person with the same name is made.
@@ -6525,6 +6563,7 @@ fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
             role: p.role.map(|r| r.friendly_name(labels).to_string()),
             initials: names::initials(&p.name),
             form: PlayerForm::of(p),
+            contacts: Contacts::of(p),
         })
         .collect();
     players.sort_by_key(|p| p.number);
@@ -10626,6 +10665,39 @@ pub(crate) mod tests {
             Err(MobileError::Failed { reason }) => reason,
             other => panic!("expected a failure, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_prefix_proposed_is_the_nationality_else_the_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let team = app
+            .save_team(
+                None,
+                TeamForm {
+                    country: CountryCode::known("IT"),
+                    ..form("Cortona")
+                },
+            )
+            .unwrap();
+        let proposed = |nationality: Option<&str>| {
+            app.proposed_phone_country(team.clone(), nationality.and_then(CountryCode::known))
+                .unwrap()
+        };
+        assert_eq!(proposed(Some("PL")), CountryCode::known("PL"));
+        assert_eq!(proposed(None), CountryCode::known("IT"));
+        assert_eq!(app.dial_code(proposed(None).unwrap()), Some(39));
+        let reached = PlayerForm {
+            phone_country: proposed(None),
+            phone: "333 123 4567".into(),
+            ..player("p", "7")
+        };
+        app.save_player(team.clone(), None, reached, false).unwrap();
+        let contacts = app.team(team).unwrap().players.remove(0).contacts;
+        assert_eq!(
+            contacts.phone.and_then(|p| p.call_link).as_deref(),
+            Some("tel:+393331234567")
+        );
     }
 
     #[test]
