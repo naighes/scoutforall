@@ -389,11 +389,16 @@ internal fun PortraitRow(
     }
 }
 
+/** The initials at the head of a `BoxRow`, in place of a missing picture. */
+@Composable
+internal fun Initials(initials: String) =
+    Text(initials, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
 /** A transparent photo shows the grey of the box, an old one fills the
  * square. */
 @Composable
 private fun Portrait(id: String, initials: String) = when (val photo = photoOf(id)) {
-    null -> Text(initials, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    null -> Initials(initials)
     else -> Image(photo, contentDescription = null, Modifier.fillMaxSize().testTag(SHOWN_IMAGE), contentScale = ContentScale.Crop)
 }
 

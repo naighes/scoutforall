@@ -127,6 +127,15 @@ class TeamsScreenTest {
         assertEquals(listOf(won), matches)
     }
 
+    /** Without a logo, the initials in its place. */
+    @Test
+    fun aTeamWithoutALogoHasItsInitials() {
+        saveTeam("Cortona Volley")
+        show()
+        rule.waitForText("Cortona Volley")
+        rule.onNodeWithText("CV", useUnmergedTree = true).assertIsDisplayed()
+    }
+
     /** The teams created by hand start pinned; a touch on the pin moves
      * the team below the pinned ones, saved for the next start. */
     @Test

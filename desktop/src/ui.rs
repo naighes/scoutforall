@@ -296,9 +296,14 @@ pub fn portrait_row<'a, M: Clone + 'a>(
             .content_fit(iced::ContentFit::Cover)
             .border_radius(corners)
             .into(),
-        None => text(initials).size(SIZE_SMALL).color(c.muted).into(),
+        None => self::initials(initials, c),
     };
     box_row(picture, content, chosen, message, c)
+}
+
+/// The initials at the head of a `box_row`, in place of a missing picture.
+pub fn initials<'a, M: 'a>(initials: String, c: Colors) -> Element<'a, M> {
+    text(initials).size(SIZE_SMALL).color(c.muted).into()
 }
 
 /// The corners of a `box_row`.

@@ -362,8 +362,12 @@ impl HomeScreen {
                     year,
                     players,
                     pinned,
+                    initials,
                 } => ui::box_row(
-                    ui::team_logo_slot(self.logos.get(i).and_then(Option::as_ref), 36.0, c),
+                    match self.logos.get(i).and_then(Option::as_ref) {
+                        Some(logo) => ui::team_logo(logo, 36.0, c),
+                        None => ui::initials(initials.clone(), c),
+                    },
                     row![
                         column![
                             ui::body(name.clone()).font(theme::fonts().bold),

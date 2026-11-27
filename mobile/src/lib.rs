@@ -870,6 +870,8 @@ pub enum TeamListing {
         players: u32,
         /// kept at the top of the list (see `set_pinned`)
         pinned: bool,
+        /// in place of a missing logo
+        initials: String,
     },
     Unreadable {
         folder: String,
@@ -3948,6 +3950,7 @@ impl Scout4All {
                     id: team.id.to_string(),
                     players: count(&team),
                     pinned: pins.is_pinned(&team.id),
+                    initials: names::initials(&team.name),
                     name: team.name,
                     year: team.year,
                 },
@@ -7027,6 +7030,7 @@ mod tests {
                 players: 0,
                 // created by hand
                 pinned: true,
+                initials: "CV".into(),
             }]
         );
     }

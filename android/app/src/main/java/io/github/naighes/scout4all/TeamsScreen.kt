@@ -250,7 +250,7 @@ private fun TeamRow(
         onClick = { onTeam(team.id) },
         // the bar clipped to the corners of the box
         modifier = TEAM_ROW.tutorial("team:${team.id}").clip(ROW_SHAPE).pinnedRow(team.pinned),
-        head = { TeamLogo(team.id, 48.dp) },
+        head = { TeamLogo(team.id, 48.dp) { Initials(team.initials) } },
         // full when pinned, at the top of the list: a touch changes it
         tail = {
             IconButton(onClick = { onPin(team.id, !team.pinned) }, Modifier.padding(end = 4.dp)) {

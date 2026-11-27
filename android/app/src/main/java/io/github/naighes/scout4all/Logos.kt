@@ -41,10 +41,15 @@ const val LOGO_AS_IT_IS = "logo-as-it-is"
 fun decodeImage(bytes: ByteArray?): ImageBitmap? =
     bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap()
 
-/** The logo of the team in a square: an empty box when it has none, so the
- * names line up. Read once per team. */
+/** The logo of the team in a square: without it `none`, else an empty box,
+ * so the names line up. Read once per team. */
 @Composable
-fun TeamLogo(teamId: String, size: Dp = 40.dp, modifier: Modifier = Modifier) {
+fun TeamLogo(
+    teamId: String,
+    size: Dp = 40.dp,
+    modifier: Modifier = Modifier,
+    none: (@Composable () -> Unit)? = null,
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val bytes by produceState<ByteArray?>(null, teamId) {
         value = try {
@@ -53,7 +58,10 @@ fun TeamLogo(teamId: String, size: Dp = 40.dp, modifier: Modifier = Modifier) {
             null
         }
     }
-    TeamLogoBox(bytes, size, modifier)
+    when {
+        bytes == null && none != null -> none()
+        else -> TeamLogoBox(bytes, size, modifier)
+    }
 }
 
 /** The color behind a logo, none when it shows on the theme. */
