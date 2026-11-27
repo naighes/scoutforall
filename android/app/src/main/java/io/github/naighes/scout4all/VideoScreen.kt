@@ -592,6 +592,8 @@ private fun EventsList(model: VideoModel, modifier: Modifier) {
         }
         return
     }
+    val photos = model.photos
+    val pictured = events.any { it.event.event.player?.id in photos }
     LazyColumn(modifier.fillMaxWidth(), state = list) {
         itemsIndexed(events, key = { _, e -> "${e.setNumber}-${e.event.index}" }) { i, e ->
             val newSet = i == 0 || events[i - 1].setNumber != e.setNumber
@@ -605,7 +607,9 @@ private fun EventsList(model: VideoModel, modifier: Modifier) {
             }
             // the score before it, from 0-0 at each set
             val before = events.getOrNull(i - 1)?.takeIf { !newSet }?.event
-            EventRow(e, eventMark(e, before?.scoreUs ?: 0u, before?.scoreThem ?: 0u), i == model.selected, model.total) {
+            val mark = eventMark(e, before?.scoreUs ?: 0u, before?.scoreThem ?: 0u)
+            val photo = e.event.event.player?.id?.let { photos[it] }
+            EventRow(e, mark, pictured, photo, i == model.selected, model.total) {
                 model.goToEvent(i)
             }
         }
@@ -632,9 +636,18 @@ internal fun eventMark(e: VideoEventRow, us: UByte, them: UByte): EventMark {
 
 /** An event: a bar of its team on the left (ours light blue, theirs pink),
  * its symbol red on a direct error, its score green or red on the point it
- * ended; TalkBack says which. */
+ * ended; TalkBack says which. `pictured` when some event listed has a
+ * photo: `photo` beside the name, else its place empty. */
 @Composable
-private fun EventRow(e: VideoEventRow, mark: EventMark, chosen: Boolean, total: Long, onClick: () -> Unit) {
+private fun EventRow(
+    e: VideoEventRow,
+    mark: EventMark,
+    pictured: Boolean,
+    photo: ByteArray?,
+    chosen: Boolean,
+    total: Long,
+    onClick: () -> Unit,
+) {
     val muted = !e.inside || !e.event.editable
     val color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
     val s = e.event.event
@@ -658,6 +671,7 @@ private fun EventRow(e: VideoEventRow, mark: EventMark, chosen: Boolean, total: 
             style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
             color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (pictured) LogoBox(photo, 32.dp)
         Column(Modifier.weight(1f)) {
             val symbol = s.symbol ?: "✕".takeIf { mark.error }
             Text(

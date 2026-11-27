@@ -93,17 +93,28 @@ pub fn team_photos(
     core: &scout4all_mobile::Scout4All,
     team_id: &str,
 ) -> std::collections::HashMap<String, iced::widget::image::Handle> {
-    core.team(team_id.to_string())
+    let players = core
+        .team(team_id.to_string())
         .map(|details| details.players)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    person_photos(core, players.into_iter().map(|p| p.id))
+}
+
+/// The photos of the persons, by id: only who has one, each read once.
+pub fn person_photos(
+    core: &scout4all_mobile::Scout4All,
+    ids: impl IntoIterator<Item = String>,
+) -> std::collections::HashMap<String, iced::widget::image::Handle> {
+    ids.into_iter()
+        .collect::<std::collections::HashSet<_>>()
         .into_iter()
-        .filter_map(|p| {
+        .filter_map(|id| {
             let handle = core
-                .person_photo(p.id.clone())
+                .person_photo(id.clone())
                 .ok()
                 .flatten()
                 .and_then(|jpeg| logo_handle(&jpeg))?;
-            Some((p.id, handle))
+            Some((id, handle))
         })
         .collect()
 }

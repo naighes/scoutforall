@@ -134,6 +134,10 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
     /** the logos of the teams of the match shown, for how it stands */
     var logos by mutableStateOf<VideoLogos?>(null)
         private set
+    /** the photos of who touched in the events, by player id: only who has
+     * one */
+    var photos by mutableStateOf<Map<String, ByteArray>>(emptyMap())
+        private set
 
     /** the event chosen follows the video: off once chosen by hand, on
      * again when the video is moved or played */
@@ -197,8 +201,22 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
             null
         }
         loadFiles()
+        loadPhotos()
         loading = false
         if (clips != null) events.indices.firstOrNull { target(it) != null }?.let { goToEvent(it) }
+    }
+
+    private suspend fun loadPhotos() {
+        val players = events.mapNotNull { it.event.event.player?.id }.distinct()
+        photos = app.core { core ->
+            players.mapNotNull { id ->
+                try {
+                    core.personPhoto(id)?.let { id to it }
+                } catch (e: MobileException) {
+                    null
+                }
+            }.toMap()
+        }
     }
 
     /** The files of the video read (how long each is) and played one after

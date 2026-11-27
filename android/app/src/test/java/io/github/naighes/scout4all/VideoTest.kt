@@ -3,6 +3,8 @@ package io.github.naighes.scout4all
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -429,6 +431,31 @@ class VideoLayoutTest(private val screen: Size) {
                     .sumOf { rule.onAllNodesWithTag(it, useUnmergedTree = true).fetchSemanticsNodes().size } == 1
         }
         rule.shot("video-logos-$screen")
+    }
+
+    /** Beside the events the photo of who touched, none without it. */
+    @Test
+    fun thePhotosInTheEvents() {
+        val (team, match) = servedMatch()
+        val server = core { c ->
+            c.videoReview(team, match, MatchSide.A, null).events().firstNotNullOf { it.event.event.player?.id }
+        }
+        val png = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).let { bitmap ->
+            bitmap.eraseColor(android.graphics.Color.RED)
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        core { it.setPersonPhoto(server, png) }
+        linkVideo(team, match)
+        rule.setContent { Scout4AllTheme { VideoScreen(VideoRequest.Match(team, match), onBack = {}) } }
+        // rotated, the events are in a panel beside the video, opened by hand
+        if (screen.toString() == "landscape") {
+            val events = hasContentDescription(string(R.string.video_events))
+            rule.waitFor { rule.onAllNodes(events).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(events).performClick()
+        }
+        rule.waitFor { rule.onAllNodesWithTag(SHOWN_IMAGE, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.shot("video-photos-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
     /** The actions picked, the strip of their clips under the bar. */

@@ -253,6 +253,8 @@ pub struct VideoScreen {
     the_match: MatchEntry,
     /// beside the names over the video: ours, then the opponent's
     pictures: [ui::TeamPicture; 2],
+    /// beside who touched in the events, by player id: only who has one
+    photos: std::collections::HashMap<String, image::Handle>,
     /// the match of B: its events told by the touches (`Scout4All::
     /// origins_of_b`) the profile of A keeps them by
     of_b: Option<Origins>,
@@ -394,6 +396,7 @@ impl VideoScreen {
             match_id,
             the_match,
             pictures,
+            photos: Default::default(),
             of_b,
             profile,
             player: None,
@@ -431,6 +434,11 @@ impl VideoScreen {
         // the durations of the files first: the events in them
         screen.open_player();
         screen.load_events()?;
+        let players = screen.all_events.iter();
+        screen.photos = crate::editors::person_photos(
+            &screen.core,
+            players.filter_map(|e| Some(e.event.event.player.as_ref()?.id.clone())),
+        );
         screen.after_start();
         Ok(screen)
     }
@@ -1664,6 +1672,7 @@ impl VideoScreen {
             None => space::vertical().height(0).into(),
         };
         let video = column![notice, screen, controls, file_line].spacing(10);
+        let beside = Length::Fixed(list::width(!self.photos.is_empty()));
         let events: Element<'a, Message> = match (self.events.is_empty(), &self.clips) {
             (true, None) => space::horizontal().width(0).into(),
             (true, Some(_)) => iced::widget::container(ui::panel(
@@ -1671,11 +1680,11 @@ impl VideoScreen {
                 ui::body(s.clips_none).color(c.muted),
                 c,
             ))
-            .width(Length::Fixed(400.0))
+            .width(beside)
             .into(),
             (false, None) => {
                 iced::widget::container(ui::panel(Some(s.match_events), self.events_view(s, c), c))
-                    .width(Length::Fixed(400.0))
+                    .width(beside)
                     .into()
             }
             (false, Some(clips)) => iced::widget::container(ui::panel(
@@ -1693,7 +1702,7 @@ impl VideoScreen {
                 .spacing(6),
                 c,
             ))
-            .width(Length::Fixed(400.0))
+            .width(beside)
             .into(),
         };
         row![video.width(Length::Fill), events].spacing(14).into()
@@ -1787,7 +1796,15 @@ impl VideoScreen {
         let anchored = self.anchored();
         column![
             said,
-            list::view(&self.events, self.selected, anchored, duration, s, c),
+            list::view(
+                &self.events,
+                &self.photos,
+                self.selected,
+                anchored,
+                duration,
+                s,
+                c,
+            ),
         ]
         .spacing(10)
         .height(Length::Fill)
@@ -2720,6 +2737,33 @@ pub(crate) mod screen_tests {
             board.emblems,
             [montage::Emblem::Initials(_), montage::Emblem::Logo(..)]
         ));
+    }
+
+    /// Beside the events the photo of who touched, read for who has one.
+    #[test]
+    fn the_photos_of_the_players_in_the_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team, m) = imported_with(&dir, DvwOpponent::NewTeam);
+        let open = || {
+            VideoScreen::new(
+                core.clone(),
+                dir.path().to_path_buf(),
+                team.clone(),
+                m.clone(),
+                MatchSide::A,
+            )
+            .unwrap()
+        };
+        let screen = open();
+        assert!(screen.photos.is_empty());
+        let player = screen
+            .events
+            .iter()
+            .find_map(|e| Some(e.event.event.player.as_ref()?.id.clone()))
+            .unwrap();
+        core.set_person_photo(player.clone(), Some(crate::scouting::tests::PNG.to_vec()))
+            .unwrap();
+        assert_eq!(open().photos.keys().collect::<Vec<_>>(), vec![&player]);
     }
 
     fn with_file(dir: &tempfile::TempDir, name: &str) -> VideoScreen {
