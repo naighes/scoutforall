@@ -71,7 +71,7 @@ class TeamBarTest {
     fun theAnalysisAndTheTrainingPlanAreInTheBar() {
         show()
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performClick()
-        rule.waitForText(string(R.string.agenda_week))
+        rule.waitForText("Cortona")
         // not buttons among the matches any more: icons, found by their description
         rule.onAllNodesWithText(string(R.string.analysis)).assertCountEquals(0)
         rule.onAllNodesWithText(string(R.string.tr_programming)).assertCountEquals(0)

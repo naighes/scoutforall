@@ -1,6 +1,8 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.performScrollToNode
@@ -78,16 +80,15 @@ class ScreensLayoutTest(private val screen: Size) {
         }
         rule.waitForText("Monica De Gennaro")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        // today, always in the week, may push the match below a short screen
-        rule.waitForText(string(R.string.agenda_week))
+        rule.waitUntil(10_000) { rule.onAllNodes(hasScrollToNodeAction()).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Cortona"))
         rule.waitForText("Cortona")
         rule.shot("screen-team-matches-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
-    /** A training today: in the home and in the team, in the week (above
-     * the matches in the team), in the block of today. */
+    /** A training today: in the week of the home, and over the tabs of the
+     * team, in the block of today. */
     private fun planTraining(team: String): String {
         val start = testDay().toString() + "T18:00"
         core { it.saveSession(team, null, it.newSessionDraft().copy(start = start, duration = "90", title = "Ricezione")) }
@@ -120,7 +121,7 @@ class ScreensLayoutTest(private val screen: Size) {
     }
 
     @Test
-    fun theWeekOfTheTeam() {
+    fun theTodayOfTheTeam() {
         val team = saveNationalTeam()
         val title = planTraining(team)
         rule.setContent {
@@ -129,9 +130,10 @@ class ScreensLayoutTest(private val screen: Size) {
             }
         }
         rule.waitForText("Monica De Gennaro")
-        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        // over the tabs: there before choosing one
         rule.waitForText(title)
-        rule.shot("screen-team-week-$screen")
+        rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText(title))).assertExists()
+        rule.shot("screen-team-today-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
@@ -153,6 +155,37 @@ class ScreensLayoutTest(private val screen: Size) {
             core { it.saveActivity(session.id, null, it.newActivityDraft().copy(name = name, planned = "20")) }
         }
         return session.id
+    }
+
+    /** Today's official match in the block of today, the one after it in
+     * the matches, with the way to the calendar: never the same twice, a
+     * friendly never the next one. */
+    @Test
+    fun theNextOfficialMatchOfTheTeam() {
+        val team = saveNationalTeam()
+        fun plan(opponent: String, days: Long, friendly: Boolean = false) = core {
+            val date = "${testDay().plusDays(days)}T18:00:00+01:00"
+            it.saveMatch(team, null, MatchForm(opponent, date, true, "6", friendly = friendly))
+        }
+        plan("Serbia", 0)
+        plan("Brasile", 2, friendly = true)
+        plan("Polonia", 5)
+        var calendar = 0
+        rule.setContent {
+            Scout4AllTheme {
+                TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {}, onTraining = { calendar++ })
+            }
+        }
+        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText("Serbia"))).assertExists()
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.agenda_next_match))
+        rule.onNode(hasTestTag(NEXT_MATCH_TAG) and hasAnyDescendant(hasText("Polonia"))).assertExists()
+        rule.onAllNodesWithText(string(R.string.agenda_week)).assertCountEquals(0)
+        rule.shot("screen-team-next-match-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.onNodeWithText(string(R.string.agenda_see_calendar)).performClick()
+        assertEquals(1, calendar)
     }
 
     @Test

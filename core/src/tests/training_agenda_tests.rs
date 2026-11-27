@@ -22,7 +22,9 @@ mod tests {
         tests::Sqlite,
         training::{
             SessionInput, SessionStatus,
-            agenda::{AgendaEvent, AgendaItem, MatchState, Period, by_day, hours, lanes},
+            agenda::{
+                AgendaEvent, AgendaItem, MatchState, Period, appointments, by_day, hours, lanes,
+            },
             form::SessionForm,
         },
     };
@@ -203,6 +205,77 @@ mod tests {
         let days = by_day(&Period::week(day(25)), &events);
         assert_eq!(days[0].1.len(), 1);
         assert_eq!(days[3].1.len(), 1);
+    }
+
+    fn event(start: NaiveDateTime, item: AgendaItem) -> AgendaEvent {
+        AgendaEvent {
+            team_id: Uuid::nil(),
+            team_name: "A".into(),
+            start,
+            minutes: 90,
+            item,
+            venue: None,
+            shared_venue: false,
+        }
+    }
+
+    fn match_item(friendly: bool, played: bool) -> AgendaItem {
+        AgendaItem::Match {
+            id: Uuid::new_v4(),
+            opponent: "Others".into(),
+            opponent_team: None,
+            state: match played {
+                true => MatchState::Played(None),
+                false => MatchState::Scheduled,
+            },
+            friendly,
+        }
+    }
+
+    fn training() -> AgendaItem {
+        AgendaItem::Session {
+            id: Uuid::new_v4(),
+            title: "Serve".into(),
+            status: SessionStatus::Planned,
+            to_close: false,
+        }
+    }
+
+    #[test]
+    fn today_has_its_sessions_friendlies_and_official_matches_to_play() {
+        let events = [
+            event(at(25, 21, 0), match_item(false, false)),
+            event(at(25, 9, 0), match_item(false, true)),
+            event(at(25, 11, 0), match_item(true, true)),
+            event(at(25, 18, 0), training()),
+            event(at(24, 18, 0), training()),
+            event(at(26, 18, 0), training()),
+        ];
+        let found = appointments(day(25), &events);
+        let starts: Vec<_> = found.today.iter().map(|e| e.start).collect();
+        assert_eq!(starts, [at(25, 11, 0), at(25, 18, 0), at(25, 21, 0)]);
+    }
+
+    #[test]
+    fn the_next_match_is_official_and_the_later_one_is_never_of_today() {
+        let events = [
+            event(at(28, 20, 0), match_item(false, false)),
+            event(at(26, 20, 0), match_item(true, false)),
+            event(at(25, 21, 0), match_item(false, false)),
+            event(at(24, 21, 0), match_item(false, false)),
+            event(at(26, 9, 0), training()),
+        ];
+        let found = appointments(day(25), &events);
+        let start = |e: Option<AgendaEvent>| e.map(|e| e.start);
+        assert_eq!(start(found.next_match), Some(at(25, 21, 0)));
+        assert_eq!(start(found.later_match), Some(at(28, 20, 0)));
+        // without one today they are the same
+        let found = appointments(day(26), &events);
+        assert_eq!(start(found.next_match), Some(at(28, 20, 0)));
+        assert_eq!(start(found.later_match), Some(at(28, 20, 0)));
+        // nothing ahead
+        let found = appointments(day(29), &events);
+        assert_eq!(found, Default::default());
     }
 
     #[tokio::test]

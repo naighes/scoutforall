@@ -65,6 +65,8 @@ pub enum AgendaItem {
         opponent: String,
         opponent_team: Option<Uuid>,
         state: MatchState,
+        /// Not an official match.
+        friendly: bool,
     },
 }
 
@@ -143,6 +145,64 @@ pub fn busy_days(events: &[AgendaEvent]) -> Vec<(NaiveDate, Vec<AgendaEvent>)> {
         }
         days
     })
+}
+
+/// What a team has ahead.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Appointments {
+    /// Today's sessions and matches, the official ones only still to play.
+    pub today: Vec<AgendaEvent>,
+    /// The first official match still to play, from today on.
+    pub next_match: Option<AgendaEvent>,
+    /// The first one after today: shown beside `today`, it is never one of it.
+    pub later_match: Option<AgendaEvent>,
+}
+
+impl AgendaEvent {
+    /// An official match without sets yet: never a friendly, nor a session.
+    pub fn official_to_play(&self) -> bool {
+        matches!(
+            self.item,
+            AgendaItem::Match {
+                friendly: false,
+                state: MatchState::Scheduled,
+                ..
+            }
+        )
+    }
+
+    fn official_played(&self) -> bool {
+        matches!(
+            self.item,
+            AgendaItem::Match {
+                friendly: false,
+                state: MatchState::Played(_),
+                ..
+            }
+        )
+    }
+}
+
+/// The appointments of `today` and the official matches ahead, from the
+/// events of one team from `today` on.
+pub fn appointments(today: NaiveDate, events: &[AgendaEvent]) -> Appointments {
+    let mut ahead: Vec<&AgendaEvent> = events.iter().filter(|e| e.start.date() >= today).collect();
+    ahead.sort_by_key(|e| (e.start, e.minutes));
+    let first_official = |after: bool| {
+        ahead
+            .iter()
+            .find(|e| e.official_to_play() && (!after || e.start.date() > today))
+            .map(|e| (*e).clone())
+    };
+    Appointments {
+        today: ahead
+            .iter()
+            .filter(|e| e.start.date() == today && !e.official_played())
+            .map(|e| (*e).clone())
+            .collect(),
+        next_match: first_official(false),
+        later_match: first_official(true),
+    }
 }
 
 /// The hours a week drawn by the hour shows at least: from 7 to midnight

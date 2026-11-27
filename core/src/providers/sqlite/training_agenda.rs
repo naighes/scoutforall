@@ -89,6 +89,7 @@ struct MatchRow {
     wins: Option<(u8, u8)>,
     span: Option<(NaiveDateTime, NaiveDateTime)>,
     venue: Option<VenueRef>,
+    friendly: bool,
 }
 
 fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError> {
@@ -103,7 +104,7 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
                 (SELECT MAX(e.timestamp) FROM events e JOIN sets s
                    ON s.match_id = e.match_id AND s.number = e.set_number
                   WHERE e.match_id = m.id AND e.deleted = 0 AND s.deleted = 0),
-                v.id, v.name, v.deleted
+                v.id, v.name, v.deleted, m.friendly
          FROM matches m
            LEFT JOIN venues v ON v.id = m.venue_id
            JOIN teams ta ON ta.id = m.team_a
@@ -145,6 +146,7 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
             wins,
             span,
             venue: venue_ref(row, 13)?,
+            friendly: row.get(16)?,
         })
     })
     .map_err(sqlite)?
@@ -175,6 +177,7 @@ fn event_of(m: &MatchRow, me: &Side, a_side: bool, other: Option<&Side>) -> Agen
                 .unwrap_or_default(),
             opponent_team: other.map(|o| o.0),
             state,
+            friendly: m.friendly,
         },
         venue: m.venue.clone(),
         shared_venue: false,

@@ -46,6 +46,9 @@
     <string name="home_recent">Ostatnie mecze</string>
     <string name="agenda_today">Dziś</string>
     <string name="agenda_week">Tydzień</string>
+    <string name="agenda_next_match">Najbliższy mecz</string>
+    <string name="agenda_see_calendar">Zobacz kalendarz</string>
+    <string name="agenda_official_match">Mecz oficjalny</string>
     <string name="agenda_training">Trening</string>
     <string name="agenda_cancelled">odwołany</string>
     <string name="agenda_to_close">do zamknięcia</string>

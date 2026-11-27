@@ -24,6 +24,7 @@ use {
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         MatchListing, MobileError, PlayerProfile, Scout4All, TeamDetails, TeamRemovalCounts,
+        training::{AgendaEventRecord, AgendaItemRecord},
     },
     std::sync::Arc,
 };
@@ -85,6 +86,8 @@ pub enum Message {
     /// the delete button of a match of the list
     DeleteMatch(usize),
     Week(agenda::Message),
+    /// the next official match, clicked
+    NextMatch,
     Import,
     Export,
     Analysis,
@@ -143,6 +146,8 @@ pub struct TeamScreen {
     details: TeamDetails,
     matches: Vec<MatchListing>,
     week: Agenda,
+    /// the next official match still to play, today's too
+    next: Option<AgendaEventRecord>,
     panel: Panel,
     player: usize,
     game: usize,
@@ -175,6 +180,7 @@ impl TeamScreen {
         let details = core.team(team_id.clone())?;
         let matches = core.matches(team_id.clone())?;
         let week = Agenda::week(&core, Some(team_id.clone()), core.clock().today());
+        let next = core.team_appointments(team_id.clone())?.next_match;
         let logo = TeamScreen::logo_of(&core, &team_id);
         let photos = TeamScreen::photos_of(&core, &details);
         Ok(TeamScreen {
@@ -185,6 +191,7 @@ impl TeamScreen {
             details,
             matches,
             week,
+            next,
             panel: Panel::Players,
             player: 0,
             game: 0,
@@ -336,12 +343,14 @@ impl TeamScreen {
 
     /// Read again after a change.
     fn reload(&mut self) {
-        let read = self
-            .core
-            .team(self.team_id.clone())
-            .and_then(|d| Ok((d, self.core.matches(self.team_id.clone())?)));
+        let read = self.core.team(self.team_id.clone()).and_then(|d| {
+            let matches = self.core.matches(self.team_id.clone())?;
+            let ahead = self.core.team_appointments(self.team_id.clone())?;
+            Ok((d, matches, ahead.next_match))
+        });
         match read {
-            Ok((details, matches)) => {
+            Ok((details, matches, next)) => {
+                self.next = next;
                 let chosen = self.details.players.get(self.player).map(|p| p.id.clone());
                 self.details = details;
                 self.matches = matches;
@@ -423,6 +432,45 @@ impl TeamScreen {
     }
 
     /// What the row picked in the week opens: a match or a session.
+    /// What a click on the next match opens.
+    fn next_pick(&self) -> Option<Pick> {
+        self.next.as_ref().and_then(|e| match &e.item {
+            AgendaItemRecord::Match { id, .. } => Some(Pick::Match {
+                team_id: e.team_id.clone(),
+                id: id.clone(),
+            }),
+            AgendaItemRecord::Session { .. } => None,
+        })
+    }
+
+    /// The next official match over the week, when there is one: a click
+    /// opens it, the keys reach it in the list of the matches.
+    fn next_match<'a>(&'a self, s: &'static Strings, c: Colors) -> Option<Element<'a, Message>> {
+        self.next.as_ref().map(|event| {
+            let date = crate::calendar::day_of(&event.start)
+                .map(|d| format!("{} {}", s.weekday(d), s.short_date(d)));
+            let told = agenda::Told {
+                with_team: false,
+                times: None,
+                unrecorded: false,
+            };
+            let body = Column::new()
+                .push(date.map(|d| text(d).size(SIZE_SMALL).color(c.accent)))
+                .push(agenda::event_box(
+                    event,
+                    s,
+                    c,
+                    told,
+                    false,
+                    Message::NextMatch,
+                ))
+                .spacing(3);
+            container(ui::panel_with(s.upcoming_match, vec![], body, c))
+                .height(Length::Shrink)
+                .into()
+        })
+    }
+
     fn picked(pick: Option<Pick>) -> Outcome {
         use crate::training::screen::Open;
         match pick {
@@ -623,6 +671,7 @@ impl TeamScreen {
                 | Message::Match(_)
                 | Message::DeleteMatch(_)
                 | Message::Week(_)
+                | Message::NextMatch
                 | Message::Import
                 | Message::Export
                 | Message::Analysis
@@ -675,6 +724,7 @@ impl TeamScreen {
                 self.panel = Panel::Week;
                 TeamScreen::picked(self.week.update(&self.core, m))
             }
+            (Message::NextMatch, Mode::Browse, None) => TeamScreen::picked(self.next_pick()),
             (Message::Import, Mode::Browse, None) => Outcome::Import,
             (Message::Export, Mode::Browse, None) => Outcome::Export,
             (Message::Analysis, Mode::Browse, None) => Outcome::Analysis,
@@ -910,17 +960,19 @@ impl TeamScreen {
             Mode::Browse if self.profile.is_none() => row![
                 container(self.info(s, c)).width(Length::FillPortion(2)),
                 container(self.players(s, c)).width(Length::FillPortion(3)),
-                column![
-                    container(
-                        self.week
-                            .view(s, c, self.panel == Panel::Week, false)
-                            .map(Message::Week)
+                Column::new()
+                    .push(self.next_match(s, c))
+                    .push(
+                        container(
+                            self.week
+                                .view(s, c, self.panel == Panel::Week, false)
+                                .map(Message::Week)
+                        )
+                        .height(Length::FillPortion(1)),
                     )
-                    .height(Length::FillPortion(1)),
-                    container(self.matches(s, c)).height(Length::FillPortion(1)),
-                ]
-                .spacing(14)
-                .width(Length::FillPortion(3)),
+                    .push(container(self.matches(s, c)).height(Length::FillPortion(1)))
+                    .spacing(14)
+                    .width(Length::FillPortion(3)),
             ]
             .spacing(14)
             .height(Length::Fill)
@@ -2275,6 +2327,24 @@ mod tests {
         draft.title = "Palleggio".into();
         core.save_session(team_id.to_string(), None, draft).unwrap();
         m
+    }
+
+    /// The next official match stands over the week: today's too, a click
+    /// opens it; without one there is nothing.
+    #[test]
+    fn the_next_official_match_is_over_the_week_and_opens() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team_id = core.tutorial_team().unwrap();
+        let mut team = TeamScreen::new(core.clone(), team_id.clone()).unwrap();
+        assert!(team.next_match(s, crate::theme::colors(true)).is_none());
+        let m = plan_today(&core, &team_id);
+        team.reload();
+        assert!(matches!(
+            team.update(s, Message::NextMatch),
+            Outcome::OpenMatch(id) if id == m
+        ));
     }
 
     /// The week of the team: ← → reach it between the players and the

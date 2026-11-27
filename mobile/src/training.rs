@@ -22,7 +22,10 @@ use scout4all_core::{
     training::{
         Activity, ActivityHit, ActivityStatus, AttendanceInput, AttendanceRow, AttendanceStatus,
         Move, SessionInput, SessionStatus, TrainingSession,
-        agenda::{AgendaEvent, AgendaItem, MatchState, Period, busy_days, by_day, hours, lanes},
+        agenda::{
+            AgendaEvent, AgendaItem, MatchState, Period, appointments, busy_days, by_day, hours,
+            lanes,
+        },
         cycles::{
             Child, Cycle, CycleForm, Level, Span, Window, proposed_container, proposed_microcycle,
         },
@@ -333,7 +336,19 @@ pub enum AgendaItemRecord {
         /// the points sets of the team and of the opponent, once played
         ours: Option<u8>,
         theirs: Option<u8>,
+        friendly: bool,
     },
+}
+
+/// What a team has ahead.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AppointmentsRecord {
+    /// today's sessions and matches, the official ones only still to play
+    pub today: Vec<AgendaEventRecord>,
+    /// the first official match still to play, from today on
+    pub next_match: Option<AgendaEventRecord>,
+    /// the first one after today, never one of `today`
+    pub later_match: Option<AgendaEventRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -677,6 +692,7 @@ fn event_record(e: &AgendaEvent) -> AgendaEventRecord {
                 opponent,
                 opponent_team,
                 state,
+                friendly,
             } => AgendaItemRecord::Match {
                 id: id.to_string(),
                 opponent: opponent.clone(),
@@ -690,6 +706,7 @@ fn event_record(e: &AgendaEvent) -> AgendaEventRecord {
                     MatchState::Played(Some((_, theirs))) => Some(*theirs),
                     MatchState::Played(None) | MatchState::Scheduled => None,
                 },
+                friendly: *friendly,
             },
         },
         venue: e.venue.as_ref().map(|v| VenueRefRecord {
@@ -1460,6 +1477,26 @@ impl Scout4All {
                 events: events.iter().map(event_record).collect(),
             })
             .collect())
+    }
+
+    /// Today's appointments of the team and its next official matches.
+    pub fn team_appointments(&self, team_id: String) -> Result<AppointmentsRecord, MobileError> {
+        let now = self.clock.now();
+        let today = now.date();
+        let period = Period {
+            from: today,
+            to: NaiveDate::from_ymd_opt(9999, 12, 31).unwrap_or(NaiveDate::MAX),
+        };
+        let team = parse_id(&team_id)?;
+        let events = self
+            .runtime
+            .block_on(self.training().agenda(Some(&team), period, now))?;
+        let found = appointments(today, &events);
+        Ok(AppointmentsRecord {
+            today: found.today.iter().map(event_record).collect(),
+            next_match: found.next_match.as_ref().map(event_record),
+            later_match: found.later_match.as_ref().map(event_record),
+        })
     }
 
     pub fn training_totals(

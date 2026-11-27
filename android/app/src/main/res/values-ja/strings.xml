@@ -46,6 +46,9 @@
     <string name="home_recent">最近の試合</string>
     <string name="agenda_today">今日</string>
     <string name="agenda_week">週</string>
+    <string name="agenda_next_match">次の公式戦</string>
+    <string name="agenda_see_calendar">カレンダーを見る</string>
+    <string name="agenda_official_match">公式戦</string>
     <string name="agenda_training">練習</string>
     <string name="agenda_cancelled">中止</string>
     <string name="agenda_to_close">要完了</string>

@@ -3,7 +3,6 @@ package io.github.naighes.scout4all
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
-import io.github.naighes.scout4all.core.AgendaSpan
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -51,6 +50,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
+import io.github.naighes.scout4all.core.AgendaEventRecord
 import io.github.naighes.scout4all.core.MatchListing
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
@@ -119,6 +119,7 @@ fun TeamScreen(
         }
     }
     var tab by rememberSaveable { mutableIntStateOf(PLAYERS_TAB) }
+    val appointments by rememberAppointments(id, matches)
     val loaded = state is TeamState.Loaded
     unreadable?.let { folder ->
         Deletion(
@@ -205,6 +206,10 @@ fun TeamScreen(
                         style = MaterialTheme.typography.bodyLarge,
                     )
                 }
+                // what the team has today, over the tabs
+                appointments?.today?.takeIf { it.isNotEmpty() }?.let { events ->
+                    TodayAppointments(events, { _, m -> onMatch(m) }, { _, s -> onSession(s) })
+                }
                 PrimaryTabRow(selectedTabIndex = tab) {
                     val players = s.team.players.size
                     Tab(
@@ -222,7 +227,8 @@ fun TeamScreen(
                 val content = Modifier.fillMaxSize()
                 when (tab) {
                     PLAYERS_TAB -> Players(s.team, onPlayer, content)
-                    else -> Matches(id, matches, onMatch, onSession, content, onUnreadable = { unreadable = it })
+                    // the calendar is where the programming opens
+                    else -> Matches(matches, appointments?.laterMatch, onTraining, onMatch, content, onUnreadable = { unreadable = it })
                 }
             }
         }
@@ -249,36 +255,23 @@ private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, modifier: Mod
 
 @Composable
 private fun Matches(
-    teamId: String,
     state: MatchesState,
+    next: AgendaEventRecord?,
+    onCalendar: () -> Unit,
     onMatch: (String) -> Unit,
-    onSession: (String) -> Unit,
     modifier: Modifier,
     onUnreadable: (String) -> Unit,
 ) = when (state) {
     MatchesState.Loading -> Centered(modifier) { CircularProgressIndicator() }
     is MatchesState.Failed -> LoadFailed(state.message, modifier)
     // room at the bottom: the button doesn't cover the last match
-    is MatchesState.Loaded -> {
-        val clock = clock()
-        val today = clock.today()
-        var day by rememberSaveable { mutableStateOf(today) }
-        val week by rememberAgenda(teamId, AgendaSpan.WEEK, day, state)
-        LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
-            // the week above the matches
-            agendaWeek(
-                week, today, withTeam = false,
-                onPrevious = { day = day.minusWeeks(1) },
-                onNext = { day = day.plusWeeks(1) },
-                onToday = { day = clock.today() },
-                onMatch = { _, m -> onMatch(m) },
-                onSession = { _, s -> onSession(s) },
-            )
-            if (state.matches.isEmpty()) {
-                item { Text(stringResource(R.string.no_matches), Modifier.padding(16.dp)) }
-            } else {
-                items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
-            }
+    is MatchesState.Loaded -> LazyColumn(modifier, contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp)) {
+        // the next official match above the matches, when there is one
+        next?.let { item(key = "next-match") { NextMatch(it, onCalendar) { _, m -> onMatch(m) } } }
+        if (state.matches.isEmpty()) {
+            item { Text(stringResource(R.string.no_matches), Modifier.padding(16.dp)) }
+        } else {
+            items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
         }
     }
 }

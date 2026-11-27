@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
@@ -31,6 +32,7 @@ internal fun BoxRow(
     modifier: Modifier = Modifier,
     head: @Composable BoxScope.() -> Unit,
     tail: @Composable () -> Unit = {},
+    border: BorderStroke? = null,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     val box = modifier.fillMaxWidth()
@@ -49,8 +51,8 @@ internal fun BoxRow(
         }
     }
     when (onClick) {
-        null -> Surface(box, ROW_SHAPE, color, contentColor, content = row)
-        else -> Surface(onClick, box, shape = ROW_SHAPE, color = color, contentColor = contentColor, content = row)
+        null -> Surface(box, ROW_SHAPE, color, contentColor, border = border, content = row)
+        else -> Surface(onClick, box, shape = ROW_SHAPE, color = color, contentColor = contentColor, border = border, content = row)
     }
 }
 

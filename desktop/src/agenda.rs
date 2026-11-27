@@ -601,6 +601,7 @@ mod tests {
             to_close: false,
         });
         let game = event(AgendaItemRecord::Match {
+            friendly: false,
             id: "m".into(),
             opponent: "Leoni".into(),
             opponent_team: None,

@@ -47,6 +47,9 @@
     <string name="home_recent">Recent matches</string>
     <string name="agenda_today">Today</string>
     <string name="agenda_week">This week</string>
+    <string name="agenda_next_match">Next match</string>
+    <string name="agenda_see_calendar">See calendar</string>
+    <string name="agenda_official_match">Official match</string>
     <string name="agenda_training">Training</string>
     <string name="agenda_cancelled">cancelled</string>
     <string name="agenda_to_close">to close</string>

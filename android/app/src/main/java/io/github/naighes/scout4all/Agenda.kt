@@ -1,15 +1,19 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -36,6 +40,7 @@ import io.github.naighes.scout4all.core.AgendaDay
 import io.github.naighes.scout4all.core.AgendaEventRecord
 import io.github.naighes.scout4all.core.AgendaItemRecord
 import io.github.naighes.scout4all.core.AgendaSpan
+import io.github.naighes.scout4all.core.AppointmentsRecord
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.SessionStatus
 import java.time.LocalDate
@@ -127,6 +132,68 @@ fun LazyListScope.agendaWeek(
     }
 }
 
+/** Today's appointments of the team and its next official matches; null
+ * until read, and when they can't be. */
+@Composable
+fun rememberAppointments(teamId: String, refresh: Any?): State<AppointmentsRecord?> {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+    return produceState<AppointmentsRecord?>(null, teamId, refresh) {
+        value = try {
+            app.core { it.teamAppointments(teamId) }
+        } catch (_: MobileException) {
+            null
+        }
+    }
+}
+
+/** What the team has today, in a small box of its own: an official match
+ * stands out. Several events scroll in it, the list below keeps its room. */
+@Composable
+internal fun TodayAppointments(
+    events: List<AgendaEventRecord>,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+    onSession: (teamId: String, sessionId: String) -> Unit,
+) = TodayBox {
+    Text(
+        stringResource(R.string.agenda_today),
+        Modifier.padding(start = 16.dp, top = 6.dp).title(),
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Column(Modifier.heightIn(max = TODAY_MAX).verticalScroll(rememberScrollState())) {
+        events.forEach { EventRow(it, false, onMatch, onSession, lit = true, featured = it.official()) }
+    }
+}
+
+/** The next official match, with the way to the calendar. */
+@Composable
+internal fun NextMatch(
+    match: AgendaEventRecord,
+    onCalendar: () -> Unit,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+) = Column(Modifier.testTag(NEXT_MATCH_TAG)) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            stringResource(R.string.agenda_next_match),
+            // the button right after it: at the end the + would cover it
+            Modifier.weight(1f, fill = false).title(),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        TextButton(onClick = onCalendar) { Text(stringResource(R.string.agenda_see_calendar)) }
+    }
+    DayHeader(LocalDate.parse(match.start.substringBefore('T')), false)
+    EventRow(match, false, onMatch, { _, _ -> }, featured = true)
+}
+
+/** The test tag of the box of the next match. */
+const val NEXT_MATCH_TAG = "agenda-next-match"
+
+private val TODAY_MAX = 168.dp
+
+private fun AgendaEventRecord.official() = (item as? AgendaItemRecord.Match)?.friendly == false
+
 /** The line of a day, or a week, without anything. */
 @Composable
 internal fun NothingPlanned() = Text(
@@ -181,6 +248,8 @@ internal fun EventRow(
     lit: Boolean = false,
     unrecorded: Boolean = false,
     mark: Pair<Boolean, () -> Unit>? = null,
+    // an official match told apart: in words and with a frame
+    featured: Boolean = false,
 ) {
     val item = e.item
     val session = item as? AgendaItemRecord.Session
@@ -207,10 +276,14 @@ internal fun EventRow(
         },
         // today's block has a margin of its own: the rows stay aligned
         modifier = Modifier.padding(horizontal = if (lit) 4.dp else 12.dp, vertical = 4.dp),
+        border = BorderStroke(2.dp, BreakPoint).takeIf { featured },
         head = { EventHead(e.start.substringAfter('T', "").take(5), session != null) },
         tail = { EventTail(e, title, mark) },
     ) {
         team?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (featured) {
+            Text(stringResource(R.string.agenda_official_match), style = MaterialTheme.typography.labelMedium, color = BreakPoint)
+        }
         Text(
             title,
             style = MaterialTheme.typography.bodyLarge,
