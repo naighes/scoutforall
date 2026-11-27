@@ -52,6 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
 import io.github.naighes.scout4all.core.AgendaEventRecord
 import io.github.naighes.scout4all.core.MatchListing
+import io.github.naighes.scout4all.core.MatchStanding
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
 import io.github.naighes.scout4all.core.TeamDetails
@@ -295,27 +296,27 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (
             },
             // the sets of the team first, green when it won, red when it lost
             tail = {
-                TailFigure(
-                    "${m.won}-${m.lost}",
-                    when {
-                        !m.finished -> MaterialTheme.colorScheme.onSurface
-                        m.won > m.lost -> Won
-                        else -> Lost
-                    },
-                    Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
-                )
+                // nothing to show of a match not started
+                if (m.standing != MatchStanding.TO_PLAY) {
+                    TailFigure(
+                        "${m.won}-${m.lost}",
+                        resultColor(m.standing == MatchStanding.OVER, m.won.toInt(), m.lost.toInt()),
+                        Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
+                    )
+                }
             },
         ) {
             Text(m.opponent, style = MaterialTheme.typography.bodyLarge)
             Row {
                 Text(matchDate(m.date), style = MaterialTheme.typography.bodyMedium, color = grey)
-                if (!m.finished) {
+                val state = when (m.standing) {
+                    MatchStanding.TO_PLAY -> R.string.to_play to grey
+                    MatchStanding.IN_PROGRESS -> R.string.in_progress to MaterialTheme.colorScheme.primary
+                    MatchStanding.OVER -> null
+                }
+                state?.let { (label, color) ->
                     Text(" · ", Modifier.notRead(), style = MaterialTheme.typography.bodyMedium, color = grey)
-                    Text(
-                        stringResource(R.string.in_progress),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
+                    Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, color = color)
                 }
             }
             // B of a match scouted by A: only its result here

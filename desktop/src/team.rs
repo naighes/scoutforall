@@ -23,7 +23,8 @@ use {
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
-        MatchListing, MobileError, PlayerProfile, Scout4All, TeamDetails, TeamRemovalCounts,
+        MatchListing, MatchStanding, MobileError, PlayerProfile, Scout4All, TeamDetails,
+        TeamRemovalCounts,
         training::{AgendaEventRecord, AgendaItemRecord},
     },
     std::sync::Arc,
@@ -1183,7 +1184,7 @@ impl TeamScreen {
                     date,
                     won,
                     lost,
-                    finished,
+                    standing,
                     scouted_by,
                     ..
                 } => {
@@ -1194,7 +1195,13 @@ impl TeamScreen {
                     // the date, then what else there is to know
                     let facts = [
                         Some((s.day(date), c.muted)),
-                        (!finished).then(|| (format!("· {}", s.in_progress), c.accent)),
+                        match standing {
+                            MatchStanding::ToPlay => Some((format!("· {}", s.to_play), c.muted)),
+                            MatchStanding::InProgress => {
+                                Some((format!("· {}", s.in_progress), c.accent))
+                            }
+                            MatchStanding::Over => None,
+                        },
                         scouted_by
                             .as_ref()
                             .map(|_| (format!("· {}", s.scouted_by_opponent), c.muted)),
@@ -1210,11 +1217,19 @@ impl TeamScreen {
                         ]
                         .spacing(2)
                         .width(Length::Fill),
+                    ]
+                    .extend((*standing != MatchStanding::ToPlay).then(|| {
                         text(format!("{won}–{lost}"))
                             .size(20)
                             .font(theme::fonts().bold)
-                            .color(ui::score_color(*won, *lost, *finished, c)),
-                    ]
+                            .color(ui::score_color(
+                                *won,
+                                *lost,
+                                *standing == MatchStanding::Over,
+                                c,
+                            ))
+                            .into()
+                    }))
                     .spacing(8)
                     .align_y(Alignment::Center);
                     // home or away at a glance, as on Android

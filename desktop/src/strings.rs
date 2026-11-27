@@ -6,6 +6,7 @@ use scout4all_core::shapes::enums::{EventTypeEnum, LanguageEnum};
 
 pub struct Strings {
     pub in_progress: &'static str,
+    pub to_play: &'static str,
     pub recent: &'static str,
     pub teams: &'static str,
     pub no_matches: &'static str,
@@ -774,6 +775,7 @@ pub struct Strings {
 
 const EN: Strings = Strings {
     in_progress: "In progress",
+    to_play: "To play",
     recent: "Recent",
     teams: "Teams",
     no_matches: "No matches",
@@ -1514,6 +1516,7 @@ What did you expect instead?
 
 const IT: Strings = Strings {
     in_progress: "In corso",
+    to_play: "Da giocare",
     recent: "Recenti",
     teams: "Squadre",
     no_matches: "Nessuna partita",
@@ -2259,6 +2262,7 @@ Cosa ti aspettavi invece?
 
 const PT: Strings = Strings {
     in_progress: "Em andamento",
+    to_play: "A jogar",
     recent: "Recentes",
     teams: "Equipes",
     no_matches: "Nenhuma partida",
@@ -3005,6 +3009,7 @@ O que você esperava?
 
 const PL: Strings = Strings {
     in_progress: "W toku",
+    to_play: "Do rozegrania",
     recent: "Ostatnie",
     teams: "Drużyny",
     no_matches: "Brak meczów",
@@ -3750,6 +3755,7 @@ Czego się spodziewałeś(-aś)?
 
 const JA: Strings = Strings {
     in_progress: "進行中",
+    to_play: "試合前",
     recent: "最近",
     teams: "チーム",
     no_matches: "試合なし",

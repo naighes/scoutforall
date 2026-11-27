@@ -2,7 +2,7 @@
 //! attendance, series, duplicates, cycles, the agenda, the totals and the
 //! sheets. The dates travel as text: `YYYY-MM-DD` a day, `YYYY-MM-DDTHH:MM`
 //! a moment (local, without offset, as the core keeps them).
-use super::{MobileError, Scout4All, failed, parse_id};
+use super::{MatchStanding, MobileError, Scout4All, failed, parse_id};
 use crate::clock::ClockExt;
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use scout4all_core::{
@@ -332,8 +332,8 @@ pub enum AgendaItemRecord {
         id: String,
         opponent: String,
         opponent_team: Option<String>,
-        played: bool,
-        /// the points sets of the team and of the opponent, once played
+        standing: MatchStanding,
+        /// the sets of the team and of the opponent, once it has some
         ours: Option<u8>,
         theirs: Option<u8>,
         friendly: bool,
@@ -669,6 +669,22 @@ fn child_record(c: &Child) -> ChildRecord {
     }
 }
 
+fn standing_of(state: &MatchState) -> MatchStanding {
+    match state {
+        MatchState::Scheduled => MatchStanding::ToPlay,
+        MatchState::InProgress(_) => MatchStanding::InProgress,
+        MatchState::Over(..) => MatchStanding::Over,
+    }
+}
+
+fn sets_of(state: &MatchState) -> Option<(u8, u8)> {
+    match *state {
+        MatchState::InProgress(sets) => sets,
+        MatchState::Over(ours, theirs) => Some((ours, theirs)),
+        MatchState::Scheduled => None,
+    }
+}
+
 fn event_record(e: &AgendaEvent) -> AgendaEventRecord {
     AgendaEventRecord {
         team_id: e.team_id.to_string(),
@@ -697,15 +713,9 @@ fn event_record(e: &AgendaEvent) -> AgendaEventRecord {
                 id: id.to_string(),
                 opponent: opponent.clone(),
                 opponent_team: opponent_team.map(|t| t.to_string()),
-                played: matches!(state, MatchState::Played(_)),
-                ours: match state {
-                    MatchState::Played(Some((ours, _))) => Some(*ours),
-                    MatchState::Played(None) | MatchState::Scheduled => None,
-                },
-                theirs: match state {
-                    MatchState::Played(Some((_, theirs))) => Some(*theirs),
-                    MatchState::Played(None) | MatchState::Scheduled => None,
-                },
+                standing: standing_of(state),
+                ours: sets_of(state).map(|(ours, _)| ours),
+                theirs: sets_of(state).map(|(_, theirs)| theirs),
                 friendly: *friendly,
             },
         },

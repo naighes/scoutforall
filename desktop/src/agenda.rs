@@ -21,7 +21,7 @@ use {
     scout4all_core::training::SessionStatus,
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{
-        Scout4All,
+        MatchStanding, Scout4All,
         training::{AgendaDay, AgendaEventRecord, AgendaItemRecord, AgendaSpan},
     },
 };
@@ -392,7 +392,7 @@ pub fn event_box<'a, M: Clone + 'a>(
             opponent,
             ours,
             theirs,
-            played,
+            standing,
             ..
         } => (
             theme::icons::VOLLEYBALL,
@@ -400,8 +400,12 @@ pub fn event_box<'a, M: Clone + 'a>(
             format!("– {opponent}"),
             vec![],
             // won or lost in its color, once over
-            ours.zip(*theirs)
-                .map(|(o, t)| (format!("{o}–{t}"), ui::score_color(o, t, *played, c))),
+            ours.zip(*theirs).map(|(o, t)| {
+                (
+                    format!("{o}–{t}"),
+                    ui::score_color(o, t, *standing == MatchStanding::Over, c),
+                )
+            }),
             false,
         ),
     };
@@ -605,7 +609,7 @@ mod tests {
             id: "m".into(),
             opponent: "Leoni".into(),
             opponent_team: None,
-            played: false,
+            standing: MatchStanding::ToPlay,
             ours: None,
             theirs: None,
         });

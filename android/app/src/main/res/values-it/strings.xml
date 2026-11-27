@@ -42,6 +42,7 @@
     <string name="home">in casa</string>
     <string name="away">in trasferta</string>
     <string name="in_progress">in corso</string>
+    <string name="to_play">da giocare</string>
     <string name="home_in_progress">In corso</string>
     <string name="home_recent">Ultime partite</string>
     <string name="agenda_today">Oggi</string>

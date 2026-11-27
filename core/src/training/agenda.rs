@@ -82,9 +82,11 @@ impl AgendaItem {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchState {
     Scheduled,
-    /// Played (it has sets): sets won by the team of the event and by the
-    /// opponent; none when the summary isn't there.
-    Played(Option<(u8, u8)>),
+    /// It has sets and isn't over: sets won by the team of the event and by
+    /// the opponent; none when the summary isn't there.
+    InProgress(Option<(u8, u8)>),
+    /// Over, with the sets won as above.
+    Over(u8, u8),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -176,7 +178,7 @@ impl AgendaEvent {
             self.item,
             AgendaItem::Match {
                 friendly: false,
-                state: MatchState::Played(_),
+                state: MatchState::InProgress(_) | MatchState::Over(..),
                 ..
             }
         )

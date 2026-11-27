@@ -882,6 +882,25 @@ pub enum TeamListing {
 
 /// A match as the team page lists it: one that can't be read, or whose sets
 /// don't replay, keeps its folder.
+/// How far a match is: see `core`'s `MatchStanding`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum MatchStanding {
+    ToPlay,
+    InProgress,
+    Over,
+}
+
+impl From<scout4all_core::shapes::r#match::MatchStanding> for MatchStanding {
+    fn from(standing: scout4all_core::shapes::r#match::MatchStanding) -> Self {
+        use scout4all_core::shapes::r#match::MatchStanding as Core;
+        match standing {
+            Core::ToPlay => MatchStanding::ToPlay,
+            Core::InProgress => MatchStanding::InProgress,
+            Core::Over => MatchStanding::Over,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, uniffi::Enum)]
 pub enum MatchListing {
     Match {
@@ -894,7 +913,7 @@ pub enum MatchListing {
         /// the sets won by the team and by the opponent
         won: u8,
         lost: u8,
-        finished: bool,
+        standing: MatchStanding,
         /// team A, when the team is B of a match scouted from A's side
         /// only: the result as B sees it, nothing to scout from here
         scouted_by: Option<String>,
@@ -4077,13 +4096,13 @@ impl Scout4All {
                     summary: m,
                     scouted_by,
                 }) => MatchListing::Match {
+                    standing: m.standing().into(),
                     date: m.date.to_rfc3339(),
                     id: m.id,
                     opponent: m.opponent,
                     home: m.home,
                     won: m.us_wins,
                     lost: m.them_wins,
-                    finished: m.finished,
                     scouted_by: scouted_by.map(|a| a.to_string()),
                 },
                 Err(unreadable) => MatchListing::Unreadable {
@@ -6530,9 +6549,9 @@ mod tests {
                                 date,
                                 won,
                                 lost,
-                                finished,
+                                standing,
                                 ..
-                            } => (opponent, date, won, lost, finished),
+                            } => (opponent, date, won, lost, standing == MatchStanding::Over),
                             other => panic!("{other:?}"),
                         })
                         .collect(),
@@ -7536,7 +7555,7 @@ mod tests {
                     date: "2026-10-11T21:00:00+02:00".into(),
                     won: 0,
                     lost: 0,
-                    finished: false,
+                    standing: MatchStanding::ToPlay,
                     scouted_by: None,
                 },
                 MatchListing::Match {
@@ -7546,7 +7565,7 @@ mod tests {
                     date: "2026-10-04T18:00:00+02:00".into(),
                     won: 0,
                     lost: 0,
-                    finished: false,
+                    standing: MatchStanding::ToPlay,
                     scouted_by: None,
                 },
                 MatchListing::Unreadable {
@@ -8120,7 +8139,7 @@ mod tests {
                     home: true,
                     won: 0,
                     lost: 1,
-                    finished: false,
+                    standing: MatchStanding::InProgress,
                     scouted_by: Some(a),
                     ..
                 },
@@ -11276,7 +11295,7 @@ mod tests {
         assert!(
             matches!(
                 &matches[..],
-                [MatchListing::Match { id, opponent, home: true, won: 3, lost: 0, finished: true, .. }]
+                [MatchListing::Match { id, opponent, home: true, won: 3, lost: 0, standing: MatchStanding::Over, .. }]
                     if *id == imported.match_id && opponent == "Visiting"
             ),
             "{matches:?}"

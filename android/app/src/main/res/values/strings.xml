@@ -43,6 +43,7 @@
     <string name="home">home</string>
     <string name="away">away</string>
     <string name="in_progress">in progress</string>
+    <string name="to_play">to play</string>
     <string name="home_in_progress">In progress</string>
     <string name="home_recent">Recent matches</string>
     <string name="agenda_today">Today</string>

@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.AgendaDay
 import io.github.naighes.scout4all.core.AgendaEventRecord
 import io.github.naighes.scout4all.core.AgendaItemRecord
+import io.github.naighes.scout4all.core.MatchStanding
 import io.github.naighes.scout4all.core.AgendaSpan
 import io.github.naighes.scout4all.core.AppointmentsRecord
 import io.github.naighes.scout4all.core.MobileException
@@ -320,13 +321,13 @@ private fun EventTail(e: AgendaEventRecord, title: String, mark: Pair<Boolean, (
         val match = e.item as? AgendaItemRecord.Match
         val ours = match?.ours
         val theirs = match?.theirs
-        if (match?.played == true && ours != null && theirs != null) {
+        if (match != null && ours != null && theirs != null) {
             Text(
                 "$ours–$theirs",
                 Modifier.padding(start = 8.dp).readAs(stringResource(R.string.sets_score, ours.toInt(), theirs.toInt())),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.SemiBold,
-                color = resultColor(true, ours.toInt(), theirs.toInt()),
+                color = resultColor(match.standing == MatchStanding.OVER, ours.toInt(), theirs.toInt()),
             )
         }
     }

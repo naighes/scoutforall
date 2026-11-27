@@ -42,6 +42,7 @@
     <string name="home">u siebie</string>
     <string name="away">na wyjeździe</string>
     <string name="in_progress">w trakcie</string>
+    <string name="to_play">do rozegrania</string>
     <string name="home_in_progress">W toku</string>
     <string name="home_recent">Ostatnie mecze</string>
     <string name="agenda_today">Dziś</string>

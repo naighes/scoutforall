@@ -86,7 +86,8 @@ struct MatchRow {
     b: Option<Side>,
     b_name: Option<String>,
     played: bool,
-    wins: Option<(u8, u8)>,
+    /// the sets won and whether the match is over
+    summary: Option<(u8, u8, bool)>,
     span: Option<(NaiveDateTime, NaiveDateTime)>,
     venue: Option<VenueRef>,
     friendly: bool,
@@ -104,7 +105,7 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
                 (SELECT MAX(e.timestamp) FROM events e JOIN sets s
                    ON s.match_id = e.match_id AND s.number = e.set_number
                   WHERE e.match_id = m.id AND e.deleted = 0 AND s.deleted = 0),
-                v.id, v.name, v.deleted, m.friendly
+                v.id, v.name, v.deleted, m.friendly, ms.finished
          FROM matches m
            LEFT JOIN venues v ON v.id = m.venue_id
            JOIN teams ta ON ta.id = m.team_a
@@ -120,8 +121,12 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
                 .get::<_, Option<Sql<DateTime<FixedOffset>>>>(i)?
                 .map(|t| t.0.naive_local()))
         };
-        let wins = match (row.get::<_, Option<u8>>(9)?, row.get::<_, Option<u8>>(10)?) {
-            (Some(a), Some(b)) => Some((a, b)),
+        let summary = match (
+            row.get::<_, Option<u8>>(9)?,
+            row.get::<_, Option<u8>>(10)?,
+            row.get::<_, Option<bool>>(17)?,
+        ) {
+            (Some(a), Some(b), Some(finished)) => Some((a, b, finished)),
             _ => None,
         };
         let b = match (
@@ -143,7 +148,7 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
             b,
             b_name: row.get(7)?,
             played: row.get(8)?,
-            wins,
+            summary,
             span,
             venue: venue_ref(row, 13)?,
             friendly: row.get(16)?,
@@ -156,9 +161,14 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
 
 /// The match as an event of the team `me` (`a_side`: it is A), against `other`.
 fn event_of(m: &MatchRow, me: &Side, a_side: bool, other: Option<&Side>) -> AgendaEvent {
-    let state = match m.played {
-        false => MatchState::Scheduled,
-        true => MatchState::Played(m.wins.map(|(a, b)| score_of(a_side, a, b))),
+    let state = match (m.played, m.summary) {
+        (false, _) => MatchState::Scheduled,
+        (true, None) => MatchState::InProgress(None),
+        (true, Some((a, b, false))) => MatchState::InProgress(Some(score_of(a_side, a, b))),
+        (true, Some((a, b, true))) => {
+            let (ours, theirs) = score_of(a_side, a, b);
+            MatchState::Over(ours, theirs)
+        }
     };
     let minutes = match (m.played, m.span) {
         (true, Some((first, last))) => played_minutes(first, last),

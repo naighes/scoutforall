@@ -104,6 +104,18 @@ class TalkBackTest {
     }
 
     @Test
+    fun aMatchNotStartedIsToPlayWithoutAScore() {
+        core { it.saveMatch(team, null, MatchForm("Cortona", "2026-10-25T18:00:00+02:00", true, "6")) }
+        show("Ekaterina") {
+            TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
+        }
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("${string(R.string.home)}, Cortona, ") } }
+        val row = spoken().first { it.startsWith("${string(R.string.home)}, Cortona") }
+        assertTrue(row, row.endsWith(string(R.string.to_play)))
+    }
+
+    @Test
     fun anEmptyPositionSaysSo() {
         val match = core { it.saveMatch(team, null, MatchForm("Cortona", "2026-10-25T18:00:00+02:00", true, "6")) }
         show(string(R.string.start_set)) { SetStartScreen(team, match, onBack = {}, onStarted = {}) }

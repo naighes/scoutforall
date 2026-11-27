@@ -25,6 +25,16 @@ pub struct MatchStatus {
     pub last_set: Option<SetEntry>,
 }
 
+/// How far a match is, as every list tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchStanding {
+    /// no set scouted yet
+    ToPlay,
+    /// some sets, also between one and the next
+    InProgress,
+    Over,
+}
+
 /// What a list shows of a match: kept in the cache of the database (see
 /// `providers::sqlite::summary`), so a list doesn't read nor replay its
 /// sets.
@@ -50,6 +60,14 @@ pub struct MatchSummary {
 }
 
 impl MatchSummary {
+    pub fn standing(&self) -> MatchStanding {
+        match (self.finished, self.sets) {
+            (true, _) => MatchStanding::Over,
+            (false, 0) => MatchStanding::ToPlay,
+            (false, _) => MatchStanding::InProgress,
+        }
+    }
+
     pub fn of(m: &MatchEntry, status: &MatchStatus) -> Self {
         MatchSummary {
             id: m.id.clone(),

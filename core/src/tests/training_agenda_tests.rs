@@ -225,7 +225,7 @@ mod tests {
             opponent: "Others".into(),
             opponent_team: None,
             state: match played {
-                true => MatchState::Played(None),
+                true => MatchState::InProgress(None),
                 false => MatchState::Scheduled,
             },
             friendly,
@@ -383,10 +383,32 @@ mod tests {
             AgendaItem::Session { .. } => unreachable!(),
         };
         let for_a = agenda(&t, Some(&a.id), Period::week(day(25))).await;
-        assert_eq!(state(&for_a), MatchState::Played(Some((3, 1))));
+        assert_eq!(state(&for_a), MatchState::Over(3, 1));
         assert_eq!(for_a[0].minutes, 90);
         let for_b = agenda(&t, Some(&b.id), Period::week(day(25))).await;
-        assert_eq!(state(&for_b), MatchState::Played(Some((1, 3))));
+        assert_eq!(state(&for_b), MatchState::Over(1, 3));
+    }
+
+    #[tokio::test]
+    async fn a_match_going_on_has_a_score_and_is_not_over() {
+        let (p, t) = world();
+        let a = team(&p, "A").await;
+        let m = the_match(&p, &a, None, when(24, 20)).await;
+        let at = "2026-11-24T20:00:00+09:00";
+        play(&p, m, at, at, Some((1, 0)));
+        p.db.write(|tx| {
+            tx.execute("UPDATE match_summary SET finished = 0", [])
+                .map_err(sqlite)
+        })
+        .unwrap();
+        let events = agenda(&t, Some(&a.id), Period::day(day(24))).await;
+        assert!(matches!(
+            events[0].item,
+            AgendaItem::Match {
+                state: MatchState::InProgress(Some((1, 0))),
+                ..
+            }
+        ));
     }
 
     #[tokio::test]
@@ -405,7 +427,7 @@ mod tests {
         assert!(matches!(
             events[0].item,
             AgendaItem::Match {
-                state: MatchState::Played(None),
+                state: MatchState::InProgress(None),
                 ..
             }
         ));

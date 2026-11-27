@@ -42,6 +42,7 @@
     <string name="home">ホーム</string>
     <string name="away">アウェイ</string>
     <string name="in_progress">進行中</string>
+    <string name="to_play">試合前</string>
     <string name="home_in_progress">進行中</string>
     <string name="home_recent">最近の試合</string>
     <string name="agenda_today">今日</string>
