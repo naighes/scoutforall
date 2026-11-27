@@ -12,7 +12,6 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.createComposeRule
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.isToggleable
@@ -372,8 +371,15 @@ class TrainingScreensTest {
         press(string(R.string.tr_weekly_series))
         press(string(R.string.tr_continue_entry))
         rule.waitForText(string(R.string.tr_entry_invalid))
-        // told as a note, as the other fields to correct
-        rule.onNodeWithTag(FIELD_NOTE_TAG, useUnmergedTree = true).assertExists()
+        // told as a note under the field to correct: the last day
+        rule.onNode(hasText(string(R.string.tr_until)) and hasText(string(R.string.tr_entry_invalid))).assertExists()
+        // the minutes missing: the note moves under them
+        val minutes = hasText(string(R.string.tr_session_duration)) and hasSetTextAction()
+        rule.onNode(minutes).performScrollTo().performTextReplacement("")
+        press(string(R.string.tr_continue_entry))
+        rule.waitForText(string(R.string.tr_entry_invalid))
+        rule.onNode(minutes and hasText(string(R.string.tr_entry_invalid))).assertExists()
+        rule.onNode(minutes).performScrollTo().performTextReplacement("120")
         pickDay(string(R.string.tr_until), monday.plusWeeks(2))
         press(string(R.string.tr_continue_entry))
         rule.waitForText(string(R.string.tr_series_entry, 2), substring = true)

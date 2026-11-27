@@ -73,6 +73,9 @@ import java.time.LocalTime
 import java.time.format.TextStyle
 import java.util.Locale
 
+/** What an entry of a series may miss, each on its field. */
+private enum class EntryField { DAY, TIME, DURATION, UNTIL }
+
 /** The text under the field an error is about, or at the bottom. */
 internal class Failure(val field: TrainingField?, val text: String)
 
@@ -191,7 +194,8 @@ private fun SessionFields(
     var micro by rememberSaveable { mutableStateOf(draft.microcycle) }
     var touched by rememberSaveable { mutableStateOf(false) }
     var failure by remember { mutableStateOf<Failure?>(null) }
-    var entryInvalid by remember { mutableStateOf(false) }
+    // the field to correct for the entry of a series to be whole
+    var wrong by remember { mutableStateOf<EntryField?>(null) }
     var conflicts by remember { mutableStateOf<List<SeriesConflictRecord>?>(null) }
     // the draft of a session of a series, waiting for where it goes
     var asking by remember { mutableStateOf<SessionDraft?>(null) }
@@ -203,7 +207,7 @@ private fun SessionFields(
     }
     fun edit(change: () -> Unit) {
         change()
-        entryInvalid = false
+        wrong = null
         onChanged()
     }
     fun current(): SessionDraft = draft.copy(
@@ -267,24 +271,24 @@ private fun SessionFields(
             busy = false
         }
     }
-    // the entry in the form, if whole
+    // the entry in the form, if whole: else its first field to correct
     fun entry(): SeriesDraft? {
-        val d = day ?: return null
-        val t = time ?: return null
-        val m = duration.trim().toUShortOrNull()?.takeIf { it > 0u } ?: return null
-        val last = until?.takeIf { !it.isBefore(d) } ?: return null
+        fun refused(field: EntryField): Nothing? {
+            wrong = field
+            return null
+        }
+        val d = day ?: return refused(EntryField.DAY)
+        val t = time ?: return refused(EntryField.TIME)
+        val m = duration.trim().toUShortOrNull()?.takeIf { it > 0u } ?: return refused(EntryField.DURATION)
+        val last = until?.takeIf { !it.isBefore(d) } ?: return refused(EntryField.UNTIL)
         return SeriesDraft(d.toString(), last.toString(), listOf(SeriesBand(d.dayOfWeek.value.toUByte(), t.format(HOUR_MINUTE), m, venue)))
     }
     // Continue: the entry kept, the form ready for the next (the day after)
     fun next() {
-        val e = entry()
-        if (e == null) {
-            entryInvalid = true
-            return
-        }
+        val e = entry() ?: return
         entries.add(e)
         day = day?.plusDays(1)
-        entryInvalid = false
+        wrong = null
         onChanged()
     }
     fun make(all: List<SeriesDraft>, others: Boolean, confirmed: Boolean) {
@@ -312,13 +316,11 @@ private fun SessionFields(
     }
     // Finish: all the entries, the one in the form last
     fun finish(others: Boolean = false, confirmed: Boolean = false) {
-        val e = entry()
-        if (e == null) {
-            entryInvalid = true
-            return
-        }
+        val e = entry() ?: return
         make(entries + e, others, confirmed)
     }
+    val entryNote = stringResource(R.string.tr_entry_invalid)
+    fun noteFor(field: EntryField): String? = entryNote.takeIf { series && wrong == field }
     clashes?.let {
         ClashDialog(it, onConfirm = {
             clashes = null
@@ -377,14 +379,14 @@ private fun SessionFields(
                 stringResource(R.string.date),
                 day,
                 onDay = { d -> edit { day = d } },
-                error = ErrorFor(failure, TrainingField.START),
+                error = noteFor(EntryField.DAY) ?: ErrorFor(failure, TrainingField.START),
                 busy = busyDays,
             )
-            TimeField(stringResource(R.string.tr_time), time, onTime = { t -> edit { time = t } })
-            NumberField(R.string.tr_session_duration, duration, ErrorFor(failure, TrainingField.DURATION)) { edit { duration = it } }
+            TimeField(stringResource(R.string.tr_time), time, onTime = { t -> edit { time = t } }, error = noteFor(EntryField.TIME))
+            NumberField(R.string.tr_session_duration, duration, noteFor(EntryField.DURATION) ?: ErrorFor(failure, TrainingField.DURATION)) { edit { duration = it } }
             VenueChoice(teamId, venue, onVenue = { v -> edit { venue = v } })
             if (series) {
-                DayField(stringResource(R.string.tr_until), until, onDay = { d -> edit { until = d } }, busy = busyDays)
+                DayField(stringResource(R.string.tr_until), until, onDay = { d -> edit { until = d } }, error = noteFor(EntryField.UNTIL), busy = busyDays)
             } else {
                 OutlinedTextField(
                     title,
@@ -406,7 +408,6 @@ private fun SessionFields(
                 NumberField(R.string.tr_session_actual, actual, ErrorFor(failure, TrainingField.ACTUAL_DURATION)) { edit { actual = it } }
             }
         }
-        if (entryInvalid) FieldNote(stringResource(R.string.tr_entry_invalid), Modifier.padding(horizontal = 16.dp))
         FailureDialog(failure.elsewhere(TrainingField.START, TrainingField.DURATION, TrainingField.ACTUAL_DURATION)) { failure = null }
         // big and at the bottom, where the thumb is
         if (series) {
