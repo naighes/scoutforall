@@ -33,7 +33,7 @@
     <string name="irreversible">L\'eliminazione è PERMANENTE: non si può annullare.</string>
     <string name="delete_team_text">La squadra %1$s sarà eliminata con le sue partite (%2$d): scouting, report e statistiche. I suoi giocatori restano nell\'anagrafica.</string>
     <string name="delete_match_text">La partita %1$s sarà eliminata con tutti i suoi set: scouting, report e statistiche.</string>
-    <string name="delete_player_text">Il giocatore %1$s sarà tolto dalla squadra. Resta nelle partite già giocate e nell\'anagrafica, da cui si può aggiungere di nuovo.</string>
+    <string name="delete_player_text">Il giocatore %1$s sarà rimosso dalla squadra. Resta nelle partite già giocate e nell\'anagrafica, da cui si può aggiungere di nuovo.</string>
     <string name="unreadable_match_delete">Tocca per eliminarla.</string>
     <string name="cancel">Annulla</string>
     <string name="matches">Partite</string>
@@ -109,8 +109,6 @@
     <string name="set_lost">Set %d perso</string>
     <string name="match_won">Partita vinta</string>
     <string name="match_lost">Partita persa</string>
-    <string name="match_won_cheer">Complimenti a tutta la squadra!</string>
-    <string name="match_lost_cheer">Testa alla prossima!</string>
     <string name="ok">OK</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">CAMBIO PALLA</string>
@@ -199,7 +197,7 @@
     <string name="trend_direct">Errori diretti</string>
     <string name="point_sequence">Successione dei punti</string>
     <string name="trend_errors_said">%1$d errori diretti</string>
-    <string name="set_team_level">Imposta livello e sesso della squadra per vedere i colori</string>
+    <string name="set_team_level">Imposta livello e genere della squadra per vedere i colori</string>
     <string name="stats_detail">Dettaglio</string>
     <string name="rotations">Rotazioni</string>
     <string name="side_out_by_possession">Cambio palla per possesso</string>
@@ -732,7 +730,7 @@
     <string name="right_hand">Destra</string>
     <string name="left_hand">Sinistra</string>
     <string name="federation_id">Matricola federale</string>
-    <string name="notice_error">Qualcosa non ha funzionato</string>
+    <string name="notice_error">Si è verificato un problema</string>
     <string name="notice_warning">Attenzione</string>
     <string name="notice_info">Fatto</string>
 </resources>

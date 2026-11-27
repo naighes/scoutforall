@@ -110,8 +110,6 @@
     <string name="set_lost">Set %d przegrany</string>
     <string name="match_won">Mecz wygrany</string>
     <string name="match_lost">Mecz przegrany</string>
-    <string name="match_won_cheer">Gratulacje dla całej drużyny!</string>
-    <string name="match_lost_cheer">Głowa do góry, następnym razem!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">odwr. R1</string>
@@ -744,7 +742,7 @@
     <string name="right_hand">Prawa</string>
     <string name="left_hand">Lewa</string>
     <string name="federation_id">Numer federacyjny</string>
-    <string name="notice_error">Coś poszło nie tak</string>
+    <string name="notice_error">Wystąpił problem</string>
     <string name="notice_warning">Uwaga</string>
     <string name="notice_info">Gotowe</string>
 </resources>

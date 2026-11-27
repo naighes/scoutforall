@@ -33,7 +33,7 @@
     <string name="irreversible">A exclusão é PERMANENTE: não pode ser desfeita.</string>
     <string name="delete_team_text">A equipe %1$s será excluída com as suas partidas (%2$d): scout, relatórios e estatísticas. Os jogadores continuam no cadastro.</string>
     <string name="delete_match_text">A partida %1$s será excluída com todos os seus sets: scout, relatório e estatísticas.</string>
-    <string name="delete_player_text">O jogador %1$s será tirado da equipe. Ele continua nas partidas já jogadas e no cadastro, de onde pode ser adicionado de novo.</string>
+    <string name="delete_player_text">O jogador %1$s será removido da equipe. Ele continua nas partidas já jogadas e no cadastro, de onde pode ser adicionado de novo.</string>
     <string name="unreadable_match_delete">Toque para excluí-la.</string>
     <string name="cancel">Cancelar</string>
     <string name="matches">Partidas</string>
@@ -110,8 +110,6 @@
     <string name="set_lost">Set %d perdido</string>
     <string name="match_won">Partida ganha</string>
     <string name="match_lost">Partida perdida</string>
-    <string name="match_won_cheer">Parabéns a toda a equipe!</string>
-    <string name="match_lost_cheer">Cabeça erguida, vamos à próxima!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">P1 inv.</string>
@@ -732,7 +730,7 @@
     <string name="right_hand">Direita</string>
     <string name="left_hand">Esquerda</string>
     <string name="federation_id">Registro federativo</string>
-    <string name="notice_error">Algo deu errado</string>
+    <string name="notice_error">Ocorreu um problema</string>
     <string name="notice_warning">Atenção</string>
     <string name="notice_info">Concluído</string>
 </resources>

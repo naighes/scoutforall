@@ -397,7 +397,6 @@ class ScoutingTest {
         rule.waitForText(string(R.string.match_won))
         rule.waitForText(string(R.string.sets_score, 3, 0))
         rule.waitForText(List(3) { string(R.string.score_to, 25, 0) }.joinToString(", "))
-        rule.waitForText(string(R.string.match_won_cheer))
         rule.shot("match-won")
         rule.onNode(hasText(string(R.string.ok)) and hasClickAction()).performClick()
         rule.waitFor { back == 1 }
@@ -408,9 +407,7 @@ class ScoutingTest {
         lastSet({ theirPoint(it) }) { touch(string(R.string.their_point)) }
         rule.waitForText(string(R.string.match_lost))
         rule.waitForText(string(R.string.sets_score, 0, 3))
-        rule.waitForText(string(R.string.match_lost_cheer))
         rule.shot("match-lost")
-        assertEquals(0, rule.onAllNodesWithText(string(R.string.match_won_cheer)).fetchSemanticsNodes().size)
         // a mistake: the last point goes back, the match goes on
         rule.onNode(hasText(string(R.string.undo)) and hasClickAction()).performClick()
         rule.waitFor { score(saved()) == 0 to 24 }

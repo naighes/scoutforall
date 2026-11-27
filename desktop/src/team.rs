@@ -2041,7 +2041,7 @@ mod tests {
         };
         assert_eq!(
             team.deletion_text(s, deletion),
-            "Il giocatore 10 Anna Rossi sarà tolto dalla squadra. Resta nelle partite già \
+            "Il giocatore 10 Anna Rossi sarà rimosso dalla squadra. Resta nelle partite già \
              giocate e nell'anagrafica, da cui si può aggiungere di nuovo.\nGioca anche in: \
              Cortona (2025)\n\nEliminato dall'anagrafica, sparisce da tutte le squadre e i \
              suoi dati si cancellano; nelle partite giocate resta come «#10, giocatore \
