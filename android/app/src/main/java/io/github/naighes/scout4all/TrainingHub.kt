@@ -436,22 +436,20 @@ private fun CalendarTab(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
-            IconButton(onClick = {
-                if (view == CalendarView.WEEK) onSelected(selected.minusWeeks(1).also { month = YearMonth.from(it) })
-                else month = month.minusMonths(1)
-            }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
-            }
-            TextButton(onClick = {
-                month = YearMonth.from(today)
-                onSelected(today)
-            }) { Text(stringResource(R.string.agenda_today)) }
-            IconButton(onClick = {
-                if (view == CalendarView.WEEK) onSelected(selected.plusWeeks(1).also { month = YearMonth.from(it) })
-                else month = month.plusMonths(1)
-            }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
-            }
+            PeriodButtons(
+                onPrevious = {
+                    if (view == CalendarView.WEEK) onSelected(selected.minusWeeks(1).also { month = YearMonth.from(it) })
+                    else month = month.minusMonths(1)
+                },
+                onToday = {
+                    month = YearMonth.from(today)
+                    onSelected(today)
+                },
+                onNext = {
+                    if (view == CalendarView.WEEK) onSelected(selected.plusWeeks(1).also { month = YearMonth.from(it) })
+                    else month = month.plusMonths(1)
+                },
+            )
         }
     }
     // the views, a separator, then whose and where: each an icon over its

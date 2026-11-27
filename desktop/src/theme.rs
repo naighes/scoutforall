@@ -256,6 +256,7 @@ pub mod icons {
     pub const WON: &[u8] = include_bytes!("../assets/icons/emoji_events.svg");
     pub const LOST: &[u8] = include_bytes!("../assets/icons/cancel.svg");
     pub const COIN: &[u8] = include_bytes!("../assets/icons/toll.svg");
+    pub const TODAY: &[u8] = include_bytes!("../assets/icons/today.svg");
     pub const CALENDAR: &[u8] = include_bytes!("../assets/icons/event.svg");
     /// a hall with an arched roof: the gyms
     pub const GYM: &[u8] = include_bytes!("../assets/icons/gym.svg");

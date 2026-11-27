@@ -1,5 +1,9 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
@@ -100,13 +104,7 @@ fun LazyListScope.agendaWeek(
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
-            IconButton(onClick = onPrevious) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
-            }
-            TextButton(onClick = onToday) { Text(stringResource(R.string.agenda_today)) }
-            IconButton(onClick = onNext) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
-            }
+            PeriodButtons(onPrevious, onToday, onNext)
         }
     }
     // the phone is narrow: only the days with something and today, or a
@@ -132,6 +130,24 @@ fun LazyListScope.agendaWeek(
         }
     }
 }
+
+/** The way back to today, looking like a button, and the arrows that move
+ * the period shown. */
+@Composable
+internal fun PeriodButtons(onPrevious: () -> Unit, onToday: () -> Unit, onNext: () -> Unit) =
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onToday, contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
+            Icon(painterResource(R.drawable.ic_today), contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.agenda_today))
+        }
+        IconButton(onClick = onPrevious) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
+        }
+        IconButton(onClick = onNext) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
+        }
+    }
 
 /** Today's appointments of the team and its next official matches; null
  * until read, and when they can't be. */

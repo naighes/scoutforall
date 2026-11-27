@@ -267,6 +267,11 @@ fn pill_of<'a, M: Clone + 'a>(
         .into()
 }
 
+/// The way back to the day it is, before the arrows that move a period.
+pub fn today_pill<'a, M: Clone + 'a>(label: &str, message: M, c: Colors) -> Element<'a, M> {
+    icon_pill(crate::theme::icons::TODAY, label, message, c)
+}
+
 /// The room of `mark_box`, kept by the rows that can't be marked.
 pub const MARK_WIDTH: f32 = 28.0;
 

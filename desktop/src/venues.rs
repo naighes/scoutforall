@@ -658,7 +658,7 @@ impl VenuesScreen {
             }
         });
         let actions = vec![
-            ui::pill(s.today, false, Some(Message::Today), c),
+            ui::today_pill(s.today, Message::Today, c),
             ui::tip(
                 ui::pill("‹", false, Some(Message::Previous), c),
                 s.previous_week,

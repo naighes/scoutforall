@@ -279,9 +279,7 @@ impl Agenda {
         };
         let mut actions: Vec<Element<'a, Message>> =
             vec![text(self.range(s)).size(SIZE_SMALL).color(c.muted).into()];
-        if self.anchor != self.today {
-            actions.push(ui::pill(s.today, false, Some(Message::Today), c));
-        }
+        actions.push(ui::today_pill(s.today, Message::Today, c));
         // the arrows stay side by side where the actions wrap
         let arrows = row![
             ui::tip(

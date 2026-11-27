@@ -391,13 +391,11 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                    IconButton(onClick = { day = day.minusWeeks(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
-                    }
-                    TextButton(onClick = { day = app.clock.today() }) { Text(stringResource(R.string.agenda_today)) }
-                    IconButton(onClick = { day = day.plusWeeks(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
-                    }
+                    PeriodButtons(
+                        onPrevious = { day = day.minusWeeks(1) },
+                        onToday = { day = app.clock.today() },
+                        onNext = { day = day.plusWeeks(1) },
+                    )
                 }
             }
             // as in the agendas: the days with something and today, lit

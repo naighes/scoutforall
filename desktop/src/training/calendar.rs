@@ -1193,21 +1193,18 @@ impl CalendarTab {
         };
         if let Some((previous, next)) = moves {
             controls.extend([
+                ui::today_pill(s.today, Message::Today, c),
                 ui::tip(
                     ui::pill("‹", false, Some(Message::Previous), c),
                     previous,
                     c,
                 ),
+                ui::tip(ui::pill("›", false, Some(Message::Next), c), next, c),
                 text(self.title(s))
                     .size(SIZE_BODY)
                     .font(theme::fonts().bold)
                     .into(),
-                ui::tip(ui::pill("›", false, Some(Message::Next), c), next, c),
             ]);
-            let (first, last) = period(self.view, self.anchor);
-            if first > self.today || last < self.today {
-                controls.push(ui::pill(s.today, false, Some(Message::Today), c));
-            }
         }
         let actions = row![
             ui::bar_action(theme::icons::CALENDAR, s.new_session, Message::New, c),
