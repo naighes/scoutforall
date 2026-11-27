@@ -93,7 +93,7 @@ fun CompetitionsScreen(onBack: () -> Unit, onCompetition: (String) -> Unit) {
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             CompetitionsState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is CompetitionsState.Failed -> Centered(modifier) { Text(s.message) }
+            is CompetitionsState.Failed -> LoadFailed(s.message, modifier)
             is CompetitionsState.Loaded -> {
                 when {
                     s.competitions.isEmpty() -> Centered(modifier.padding(16.dp)) {
@@ -238,7 +238,7 @@ fun CompetitionFormScreen(id: String, onBack: () -> Unit, onSaved: () -> Unit) {
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             CompetitionFormState.Loading, CompetitionFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
-            is CompetitionFormState.Failed -> Centered(modifier) { Text(s.message) }
+            is CompetitionFormState.Failed -> LoadFailed(s.message, modifier)
             is CompetitionFormState.Editing -> CompetitionFormContent(s, model, modifier)
         }
     }

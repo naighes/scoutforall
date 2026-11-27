@@ -144,7 +144,7 @@ fun TeamsScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             TeamsState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is TeamsState.Failed -> Centered(modifier) { Text(s.message) }
+            is TeamsState.Failed -> LoadFailed(s.message, modifier)
             is TeamsState.Loaded -> when {
                 s.home.teams.isEmpty() -> Centered(modifier) { Text(stringResource(R.string.no_teams)) }
                 // room at the bottom: the button doesn't cover the last team

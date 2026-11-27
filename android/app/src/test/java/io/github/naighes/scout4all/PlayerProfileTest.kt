@@ -71,6 +71,8 @@ class PlayerProfileTest {
         core { it.removePlayer(team, player) }
         show(player)
         rule.waitForText(string(R.string.no_players))
+        // as the other failed loads: a banner, not text alone
+        rule.onNodeWithTag(BANNER_TAG, useUnmergedTree = true).assertExists()
     }
 
     @Test

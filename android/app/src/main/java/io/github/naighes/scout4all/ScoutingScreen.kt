@@ -486,7 +486,7 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
         val modifier = Modifier.fillMaxSize()
         when (val s = state) {
             ScoutingUi.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is ScoutingUi.Failed -> Centered(modifier) { Text(s.message) }
+            is ScoutingUi.Failed -> LoadFailed(s.message, modifier)
             is ScoutingUi.Choosing -> ScoutingContent(s.view, model, system, modifier)
             is ScoutingUi.SetOver -> {
                 ScoutingContent(s.view, model, system, modifier)

@@ -212,7 +212,7 @@ fun NewSeasonScreen(teamId: String, onBack: () -> Unit, onSaved: (String) -> Uni
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             SeasonState.Loading, is SeasonState.Saved -> Centered(modifier) { CircularProgressIndicator() }
-            is SeasonState.Failed -> Centered(modifier) { Text(s.message) }
+            is SeasonState.Failed -> LoadFailed(s.message, modifier)
             is SeasonState.Editing -> {
                 when (s.onPlayers) {
                     true -> SeasonPlayers(s, model, modifier)

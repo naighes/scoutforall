@@ -95,7 +95,7 @@ fun SetScreen(teamId: String, matchId: String, setNumber: Int, onBack: () -> Uni
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             SetState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is SetState.Failed -> Centered(modifier) { Text(s.message) }
+            is SetState.Failed -> LoadFailed(s.message, modifier)
             is SetState.Loaded -> SetEventsList(s.set, modifier) { event ->
                 scope.launch {
                     try {

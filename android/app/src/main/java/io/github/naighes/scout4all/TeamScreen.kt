@@ -199,7 +199,7 @@ fun TeamScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             TeamState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is TeamState.Failed -> Centered(modifier) { Text(s.message) }
+            is TeamState.Failed -> LoadFailed(s.message, modifier)
             is TeamState.Loaded -> Column(modifier) {
                 Row(
                     Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
@@ -275,7 +275,7 @@ private fun Matches(
     onUnreadable: (String) -> Unit,
 ) = when (state) {
     MatchesState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-    is MatchesState.Failed -> Centered(modifier) { Text(state.message) }
+    is MatchesState.Failed -> LoadFailed(state.message, modifier)
     // room at the bottom: the button doesn't cover the last match
     is MatchesState.Loaded -> {
         val clock = clock()

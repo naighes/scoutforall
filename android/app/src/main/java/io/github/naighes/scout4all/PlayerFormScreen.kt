@@ -315,7 +315,7 @@ fun PlayerFormScreen(teamId: String, playerId: String?, onBack: () -> Unit, onDo
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             PlayerFormState.Loading, PlayerFormState.Done -> Centered(modifier) { CircularProgressIndicator() }
-            is PlayerFormState.Failed -> Centered(modifier) { Text(s.message) }
+            is PlayerFormState.Failed -> LoadFailed(s.message, modifier)
             is PlayerFormState.Editing -> {
                 PlayerFormContent(s, model, modifier)
                 if (s.confirmingRemoval) {

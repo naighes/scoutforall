@@ -204,7 +204,7 @@ internal fun AnalysisScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         val a = analysis
         when {
-            a == null && failed != null -> Centered(modifier) { Text(failed.orEmpty()) }
+            a == null && failed != null -> LoadFailed(failed.orEmpty(), modifier)
             a == null -> Centered(modifier) { CircularProgressIndicator() }
             else -> Column(modifier) {
                 val pages = AnalysisPage.entries

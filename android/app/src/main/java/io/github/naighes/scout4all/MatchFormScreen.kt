@@ -570,7 +570,7 @@ fun MatchFormScreen(
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             MatchFormState.Loading, is MatchFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
-            is MatchFormState.Failed -> Centered(modifier) { Text(s.message) }
+            is MatchFormState.Failed -> LoadFailed(s.message, modifier)
             is MatchFormState.Editing -> {
                 when {
                     s.b != null || s.onRoster -> RosterContent(s, model, modifier)

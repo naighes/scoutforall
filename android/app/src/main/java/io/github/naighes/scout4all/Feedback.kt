@@ -115,6 +115,13 @@ fun Banner(level: Level, text: String, modifier: Modifier = Modifier) = Callout(
     modifier.fillMaxWidth().testTag(BANNER_TAG),
 )
 
+/** In place of a page that couldn't be loaded: why, as the banner of the
+ * pages that stay, at its top. */
+@Composable
+fun LoadFailed(message: String, modifier: Modifier = Modifier) = Box(modifier) {
+    Banner(Level.ERROR, message, Modifier.padding(16.dp))
+}
+
 /** The notice in the middle: the icon of its level in a disc of its tint,
  * the title, the text, OK. Back closes it too. */
 @Composable

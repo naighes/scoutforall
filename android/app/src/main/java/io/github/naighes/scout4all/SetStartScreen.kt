@@ -281,7 +281,7 @@ fun SetStartScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             SetStartState.Loading, SetStartState.Started -> Centered(modifier) { CircularProgressIndicator() }
-            is SetStartState.Failed -> Centered(modifier) { Text(s.message) }
+            is SetStartState.Failed -> LoadFailed(s.message, modifier)
             is SetStartState.Choosing -> SetStartContent(s, model, modifier)
         }
     }

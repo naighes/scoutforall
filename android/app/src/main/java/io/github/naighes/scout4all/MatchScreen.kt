@@ -111,7 +111,7 @@ fun MatchScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             MatchState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is MatchState.Failed -> Centered(modifier) { Text(s.message) }
+            is MatchState.Failed -> LoadFailed(s.message, modifier)
             is MatchState.Loaded -> when (val a = s.match.scoutedBy) {
                 null -> MatchContent(s.match, onStartSet, onResumeSet, onSet, onStats, onVideo, modifier)
                 else -> SeenByB(s.match, a, s.team, onStatsOfB, onOpenAs, modifier)

@@ -134,7 +134,7 @@ internal fun PlayerProfileScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             ProfileState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is ProfileState.Failed -> Centered(modifier) { Text(s.message) }
+            is ProfileState.Failed -> LoadFailed(s.message, modifier)
             // the header scrolls too: a phone on its side is short
             is ProfileState.Loaded -> LazyColumn(modifier) {
                 item { ProfileHeader(s.data) }

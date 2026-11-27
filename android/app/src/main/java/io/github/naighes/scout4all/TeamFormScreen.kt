@@ -210,7 +210,7 @@ fun TeamFormScreen(id: String?, onBack: () -> Unit, onSaved: () -> Unit) {
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             TeamFormState.Loading, TeamFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
-            is TeamFormState.Failed -> Centered(modifier) { Text(s.message) }
+            is TeamFormState.Failed -> LoadFailed(s.message, modifier)
             is TeamFormState.Editing -> TeamFormContent(s, model, modifier)
         }
     }

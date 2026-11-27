@@ -349,7 +349,7 @@ fun DvwImportScreen(file: DvwOpened?, onBack: () -> Unit, onTeam: (String) -> Un
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val step = state.step) {
             DvwStep.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is DvwStep.Failed -> Centered(modifier) { Text(step.message, Modifier.padding(16.dp)) }
+            is DvwStep.Failed -> LoadFailed(step.message, modifier)
             else -> DvwContent(state, model, onBack, onTeam, modifier)
         }
     }
