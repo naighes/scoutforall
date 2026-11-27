@@ -739,4 +739,12 @@
     <string name="notice_error">A problem occurred</string>
     <string name="notice_warning">Heads up</string>
     <string name="notice_info">Done</string>
+    <string name="birth_place">Birth place</string>
+    <string name="contacts">Contacts</string>
+    <string name="email">Email</string>
+    <string name="phone_prefix">Prefix</string>
+    <string name="phone">Phone</string>
+    <string name="write_email">Write email</string>
+    <string name="call">Call</string>
+    <string name="include_contacts">Include contacts (email, phone, birth place)</string>
 </resources>

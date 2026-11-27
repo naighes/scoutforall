@@ -1,5 +1,7 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -94,5 +96,17 @@ class TeamBarTest {
         rule.onAllNodesWithText(string(R.string.delete_team)).assertCountEquals(1)
         rule.onAllNodesWithText(string(R.string.edit_team)).onFirst().performClick()
         assertEquals(1, edited)
+    }
+
+    /** Off at first, ticked in the menu and remembered by the core. */
+    @Test
+    fun theContactsGoInTheArchivesOnceTickedInTheMenu() {
+        show()
+        rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick()
+        val box = rule.onNodeWithText(string(R.string.include_contacts))
+        box.assertIsOff()
+        box.performClick()
+        rule.waitFor { core { it.archiveContacts() } }
+        box.assertIsOn()
     }
 }

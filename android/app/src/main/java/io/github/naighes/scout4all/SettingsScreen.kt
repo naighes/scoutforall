@@ -248,7 +248,7 @@ fun Context.report(title: String, body: String) = open(
 private fun Context.browse(url: String) = open(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
 
 /** Another app opens it: false when there's none. */
-private fun Context.open(intent: Intent): Boolean = try {
+internal fun Context.open(intent: Intent): Boolean = try {
     startActivity(intent)
     true
 } catch (_: ActivityNotFoundException) {

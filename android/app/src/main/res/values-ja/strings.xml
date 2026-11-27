@@ -731,4 +731,12 @@
     <string name="notice_error">問題が発生しました</string>
     <string name="notice_warning">ご注意ください</string>
     <string name="notice_info">完了</string>
+    <string name="birth_place">出生地</string>
+    <string name="contacts">連絡先</string>
+    <string name="email">メール</string>
+    <string name="phone_prefix">国番号</string>
+    <string name="phone">電話番号</string>
+    <string name="write_email">メールを書く</string>
+    <string name="call">電話する</string>
+    <string name="include_contacts">連絡先を含める（メール、電話番号、出生地）</string>
 </resources>

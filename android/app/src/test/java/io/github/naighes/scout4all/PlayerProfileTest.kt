@@ -1,6 +1,9 @@
 package io.github.naighes.scout4all
 
+import android.content.Intent
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.performScrollTo
+import org.robolectric.Shadows.shadowOf
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -63,6 +66,30 @@ class PlayerProfileTest {
         rule.waitFor { deleted == 1 }
         assertEquals(0, core { it.team(team) }.players.size)
         assertEquals(0, core { it.existingPlayers(saveTeam("Altra")) }.size)
+    }
+
+    @Test
+    fun thePlayerIsReachedFromTheProfile() {
+        val player = core {
+            it.savePlayer(
+                team,
+                null,
+                PlayerForm(
+                    "Paola Egonu", RoleEnum.OPPOSITE_HITTER, "7",
+                    email = "paola@example.com", phoneCountry = "IT", phone = "333 123 4567",
+                    birthPlace = "Cittadella",
+                ),
+            )
+        }
+        show(player)
+        rule.waitForText("Cittadella")
+        val opened = { button: String ->
+            rule.onNodeWithText(button).performScrollTo().performClick()
+            shadowOf(app).nextStartedActivity.let { it.action to it.dataString }
+        }
+        assertEquals(Intent.ACTION_SENDTO to "mailto:paola@example.com", opened(string(R.string.write_email)))
+        assertEquals(Intent.ACTION_DIAL to "tel:+393331234567", opened(string(R.string.call)))
+        assertEquals(Intent.ACTION_VIEW to "https://wa.me/393331234567", opened("WhatsApp"))
     }
 
     @Test

@@ -737,4 +737,12 @@
     <string name="notice_error">Si è verificato un problema</string>
     <string name="notice_warning">Attenzione</string>
     <string name="notice_info">Fatto</string>
+    <string name="birth_place">Luogo di nascita</string>
+    <string name="contacts">Contatti</string>
+    <string name="email">Email</string>
+    <string name="phone_prefix">Prefisso</string>
+    <string name="phone">Telefono</string>
+    <string name="write_email">Scrivi email</string>
+    <string name="call">Chiama</string>
+    <string name="include_contacts">Includi i contatti (email, telefono, luogo di nascita)</string>
 </resources>

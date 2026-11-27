@@ -749,4 +749,12 @@
     <string name="notice_error">Wystąpił problem</string>
     <string name="notice_warning">Uwaga</string>
     <string name="notice_info">Gotowe</string>
+    <string name="birth_place">Miejsce urodzenia</string>
+    <string name="contacts">Kontakty</string>
+    <string name="email">E-mail</string>
+    <string name="phone_prefix">Kierunkowy</string>
+    <string name="phone">Telefon</string>
+    <string name="write_email">Napisz e-mail</string>
+    <string name="call">Zadzwoń</string>
+    <string name="include_contacts">Dołącz kontakty (e-mail, telefon, miejsce urodzenia)</string>
 </resources>

@@ -121,6 +121,9 @@ sealed interface PlayerFormState {
         val photo: PhotoEdit = PhotoEdit.Keep,
         /** the photo being read: the face is looked for */
         val finding: Boolean = false,
+        /** the prefix is the one of a stored number or was chosen: it
+         * doesn't follow the nationality any more */
+        val prefixChosen: Boolean = form.phone.isNotEmpty(),
     ) : PlayerFormState {
         /** the person of the registry chosen, while the name is theirs */
         val chosen: ExistingPlayer? get() = form.person?.let { p -> existing.firstOrNull { it.id == p } }
@@ -166,7 +169,7 @@ class PlayerFormViewModel(
                     }
                     PlayerFormState.Editing(
                         // a new one: the first number free
-                        form = player?.form ?: core.newPlayerForm(teamId),
+                        form = core.proposing(player?.form ?: core.newPlayerForm(teamId)),
                         roles = core.roles(),
                         savedName = player?.name.orEmpty(),
                         savedNumber = player?.number?.toInt() ?: 0,
@@ -179,6 +182,35 @@ class PlayerFormViewModel(
                 PlayerFormState.Failed(e.reason)
             }
         }
+    }
+
+    /** A form without a phone, with the prefix the core proposes. */
+    private fun Scout4All.proposing(form: PlayerForm) = when {
+        form.phone.isEmpty() -> form.copy(phoneCountry = proposedPhoneCountry(teamId, form.nationality))
+        else -> form
+    }
+
+    /** The nationality chosen: the prefix follows it until another one is
+     * chosen or a number is written. */
+    fun nationality(code: String) {
+        change(null) { it.copy(nationality = code) }
+        viewModelScope.launch {
+            val proposed = try {
+                app.core { it.proposedPhoneCountry(teamId, code) }
+            } catch (e: MobileException) {
+                return@launch
+            }
+            update { s ->
+                when {
+                    s.prefixChosen || s.form.phone.isNotBlank() || s.form.nationality != code -> s
+                    else -> s.copy(form = s.form.copy(phoneCountry = proposed))
+                }
+            }
+        }
+    }
+
+    fun prefix(code: String) = update { s ->
+        s.copy(form = s.form.copy(phoneCountry = code), prefixChosen = true, invalid = s.invalid?.takeIf { it.first != PlayerField.PHONE })
     }
 
     private fun update(edit: (PlayerFormState.Editing) -> PlayerFormState.Editing) = mutableState.update { s ->
@@ -209,15 +241,22 @@ class PlayerFormViewModel(
      * details, the number and the role of their most recent team. */
     fun pickExisting(label: String) {
         val choice = (mutableState.value as? PlayerFormState.Editing)?.existing?.firstOrNull { it.label == label } ?: return
-        update { s -> s.copy(form = choice.form, stored = null, invalid = null, error = null) }
+        update { s ->
+            s.copy(form = choice.form, stored = null, invalid = null, error = null, prefixChosen = choice.form.phone.isNotEmpty())
+        }
         // the photo of the person, shown as the preview
         viewModelScope.launch {
-            val photo = try {
-                app.core { core -> core.personPhoto(choice.id.toString()) }
+            val (photo, form) = try {
+                app.core { core -> core.personPhoto(choice.id.toString()) to core.proposing(choice.form) }
             } catch (e: MobileException) {
-                null
+                null to choice.form
             }
-            update { s -> if (s.form.person == choice.id) s.copy(stored = photo) else s }
+            update { s ->
+                when (s.form.person) {
+                    choice.id -> s.copy(stored = photo, form = s.form.copy(phoneCountry = s.form.phoneCountry ?: form.phoneCountry))
+                    else -> s
+                }
+            }
         }
     }
 
@@ -410,6 +449,14 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 opensAt = today.minusYears(BIRTH_YEARS_SHOWN),
                 firstYear = FIRST_BIRTH_YEAR,
             )
+            OutlinedTextField(
+                value = form.birthPlace,
+                onValueChange = { value -> model.change(null) { it.copy(birthPlace = value) } },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text(stringResource(R.string.birth_place)) },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
+            )
             val nationalityName by produceState("", form.nationality) {
                 value = form.nationality?.let { code -> app.core { it.countryName(code) } }.orEmpty()
             }
@@ -420,7 +467,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
             if (choosingNationality) CountryDialog(
                 stringResource(R.string.nationality), form.nationality,
                 onPick = { choice ->
-                    model.change(null) { it.copy(nationality = choice.value) }
+                    model.nationality(choice.value)
                     choosingNationality = false
                 },
                 onDismiss = { choosingNationality = false },
@@ -455,6 +502,7 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
                 singleLine = true,
             )
             NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
+            ContactFields(form, model, error)
         }
         state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         // big and at the bottom, where the thumb is
@@ -464,6 +512,52 @@ private fun PlayerFormContent(state: PlayerFormState.Editing, model: PlayerFormV
             modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
         ) { Text(stringResource(R.string.save)) }
     }
+
+/** The email and the phone, its prefix chosen from the countries. */
+@Composable
+private fun ContactFields(form: PlayerForm, model: PlayerFormViewModel, error: (PlayerField) -> String?) {
+    var choosingPrefix by rememberSaveable { mutableStateOf(false) }
+    val app = LocalContext.current.applicationContext as Scout4AllApplication
+    val prefix by produceState<CountryChoice?>(null, form.phoneCountry) {
+        value = form.phoneCountry?.let { code -> app.core { it.prefixed(CountryChoice(code, it.countryName(code))) } }
+    }
+    FieldTitle(stringResource(R.string.contacts), null)
+    OutlinedTextField(
+        value = form.email,
+        onValueChange = { email -> model.change(PlayerField.EMAIL) { it.copy(email = email) } },
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(stringResource(R.string.email)) },
+        singleLine = true,
+        isError = error(PlayerField.EMAIL) != null,
+        supportingText = noteOf(error(PlayerField.EMAIL)),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Next),
+    )
+    CountryField(stringResource(R.string.phone_prefix), prefix, null) { choosingPrefix = true }
+    if (choosingPrefix) CountryDialog(
+        stringResource(R.string.phone_prefix), form.phoneCountry,
+        onPick = { choice ->
+            model.prefix(choice.value)
+            choosingPrefix = false
+        },
+        onDismiss = { choosingPrefix = false },
+        // the countries with phones of their own
+        choices = { query -> countries(query).mapNotNull { prefixed(it) } },
+    )
+    OutlinedTextField(
+        value = form.phone,
+        onValueChange = { phone -> model.change(PlayerField.PHONE) { it.copy(phone = phone) } },
+        modifier = Modifier.fillMaxWidth(),
+        label = { Text(stringResource(R.string.phone)) },
+        singleLine = true,
+        isError = error(PlayerField.PHONE) != null,
+        supportingText = noteOf(error(PlayerField.PHONE)),
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Done),
+    )
+}
+
+/** A country as the prefix of a phone, "Italia +39"; null without one. */
+private fun Scout4All.prefixed(country: CountryChoice): CountryChoice? =
+    dialCode(country.value)?.let { CountryChoice(country.value, "${country.name} +$it") }
 
 /** The photo with its preview, the buttons to choose it (gallery, files),
  * take it with the camera or remove it. */

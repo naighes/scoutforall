@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import io.github.naighes.scout4all.core.CountryChoice
+import io.github.naighes.scout4all.core.Scout4All
 
 /** The flag of a country, from its ISO code: the two letters as regional
  * indicators, which the system draws as the flag. Not a letter code: none. */
@@ -89,12 +90,18 @@ fun CountryField(label: String, country: CountryChoice?, error: String?, onClick
  * them (the core searches the name and the code), the chosen one ticked. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun CountryDialog(title: String, current: String?, onPick: (CountryChoice) -> Unit, onDismiss: () -> Unit) =
+fun CountryDialog(
+    title: String,
+    current: String?,
+    onPick: (CountryChoice) -> Unit,
+    onDismiss: () -> Unit,
+    choices: Scout4All.(query: String) -> List<CountryChoice> = { countries(it) },
+) =
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         val app = LocalContext.current.applicationContext as Scout4AllApplication
         var query by rememberSaveable { mutableStateOf("") }
         val countries by produceState(emptyList<CountryChoice>(), query) {
-            value = app.core { it.countries(query) }
+            value = app.core { it.choices(query) }
         }
         val focus = remember { FocusRequester() }
         val list = rememberLazyListState()

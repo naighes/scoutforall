@@ -18,6 +18,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -26,6 +27,11 @@ import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -58,7 +64,14 @@ const val ZIP = "application/zip"
 /** What shares the archive `export` makes (Quick Share, WhatsApp, e-mail…)
  * or saves it to a file the user chooses (Download, Drive, a USB stick). The
  * archive is made again for each, so it has the latest data. */
-class Exporter(val share: () -> Unit, val save: () -> Unit)
+class Exporter(
+    val share: () -> Unit,
+    val save: () -> Unit,
+    /** whether the archives carry the contacts of the persons, remembered
+     * by the core */
+    val contacts: Boolean,
+    val setContacts: (Boolean) -> Unit,
+)
 
 /** The `Exporter` of `export`, with the dialog of what goes wrong. */
 @Composable
@@ -68,6 +81,8 @@ fun rememberExporter(export: (Scout4All) -> ExportedArchive): Exporter {
     val scope = rememberCoroutineScope()
     var error by rememberSaveable { mutableStateOf<String?>(null) }
     FailureDialog(error) { error = null }
+    var contacts by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { contacts = app.core { it.archiveContacts() } }
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(ZIP)) { uri ->
         uri?.let {
             scope.launch {
@@ -96,14 +111,32 @@ fun rememberExporter(export: (Scout4All) -> ExportedArchive): Exporter {
                 }
             }
         },
+        contacts = contacts,
+        setContacts = { included ->
+            scope.launch {
+                context.report({ error = it }) {
+                    app.core { it.setArchiveContacts(included) }
+                    contacts = included
+                    null
+                }
+            }
+        },
     )
 }
 
-/** The entries of a `MoreMenu` that export: share, or save to a file. */
+/** The entries of a `MoreMenu` that export: share, or save to a file, with
+ * the contacts or without. */
 @Composable
 fun ColumnScope.ExportEntries(exporter: Exporter, close: () -> Unit) {
     MenuEntry(stringResource(R.string.share), Icons.Filled.Share, close, exporter.share)
     MenuEntry(stringResource(R.string.save_to_file), painterResource(R.drawable.ic_save), close, exporter.save)
+    // ticked or not, the menu stays open to export
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.include_contacts)) },
+        leadingIcon = { Checkbox(checked = exporter.contacts, onCheckedChange = null) },
+        onClick = { exporter.setContacts(!exporter.contacts) },
+        modifier = Modifier.semantics { toggleableState = ToggleableState(exporter.contacts) },
+    )
 }
 
 /** Exports from a button of the top bar: a menu to share or save. */

@@ -1,5 +1,7 @@
 package io.github.naighes.scout4all
 
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -22,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.naighes.scout4all.core.Contacts
 import io.github.naighes.scout4all.core.DominantHand
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
@@ -254,6 +257,7 @@ private fun fields(d: ProfileData): List<ProfileItem> {
     val centimetres = stringResource(R.string.centimetres)
     return listOf(
         R.string.birth_date to birth,
+        R.string.birth_place to form.birthPlace.takeIf { it.isNotBlank() },
         R.string.nationality to d.country,
         R.string.height to form.heightCm.takeIf { it.isNotBlank() }?.let { "$it $centimetres" },
         R.string.dominant_hand to hand,
@@ -267,13 +271,16 @@ private fun ProfileDetails(d: ProfileData, onTeam: (String) -> Unit) {
     val numbers = numbers(s)
     val fields = fields(d)
     val notes = d.player.form.notes.takeIf { it.isNotBlank() }
+    val contacts = d.player.contacts
+    val reachable = contacts.email != null || contacts.phone != null
     Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {
         if (s.matchesPlayed == 0u) {
             Text(stringResource(R.string.no_matches_played), color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         ProfileGrid(numbers, 30.sp)
-        if (fields.isNotEmpty() || notes != null || s.otherTeams.isNotEmpty()) HorizontalDivider()
+        if (fields.isNotEmpty() || reachable || notes != null || s.otherTeams.isNotEmpty()) HorizontalDivider()
         ProfileGrid(fields, 18.sp)
+        ContactLines(contacts)
         notes?.let { ProfileValue(ProfileItem(stringResource(R.string.notes), it), 18.sp) }
         if (s.otherTeams.isNotEmpty()) {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -285,6 +292,40 @@ private fun ProfileDetails(d: ProfileData, onTeam: (String) -> Unit) {
         }
     }
 }
+
+/** The email and the phone, each with what can be done with it: another
+ * app writes, calls or opens the conversation. */
+@Composable
+private fun ContactLines(contacts: Contacts) {
+    val context = LocalContext.current
+    val opened = noAppDialog()
+    val to = { action: String, link: String -> { opened(context.open(Intent(action, Uri.parse(link)))) } }
+    contacts.email?.let { email ->
+        ContactLine(
+            ProfileItem(stringResource(R.string.email), email.address),
+            listOf(stringResource(R.string.write_email) to to(Intent.ACTION_SENDTO, email.link)),
+        )
+    }
+    contacts.phone?.let { phone ->
+        ContactLine(
+            ProfileItem(stringResource(R.string.phone), phone.shown),
+            listOfNotNull(
+                // the dialer, which needs no permission
+                phone.callLink?.let { stringResource(R.string.call) to to(Intent.ACTION_DIAL, it) },
+                phone.whatsappLink?.let { "WhatsApp" to to(Intent.ACTION_VIEW, it) },
+            ),
+        )
+    }
+}
+
+@Composable
+private fun ContactLine(item: ProfileItem, actions: List<Pair<String, () -> Unit>>) =
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        ProfileValue(item, 18.sp)
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            actions.forEach { (label, act) -> OutlinedButton(onClick = act) { Text(label) } }
+        }
+    }
 
 /** The items in columns of the same width, row by row. */
 @Composable

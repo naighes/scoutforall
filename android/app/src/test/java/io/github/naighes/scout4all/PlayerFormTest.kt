@@ -11,6 +11,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import io.github.naighes.scout4all.core.PlayerField
 import io.github.naighes.scout4all.core.PlayerForm
 import io.github.naighes.scout4all.core.RoleEnum
 import org.junit.Assert.assertEquals
@@ -174,6 +175,44 @@ class PlayerFormTest {
         rule.save()
         rule.waitFor { done == 1 }
         assertEquals("", players().single().form.birthDate)
+    }
+
+    /** The prefix of the team, then of the nationality, until a number is
+     * written; the contacts are saved. */
+    @Test
+    fun theContactsOfAPlayerWithThePrefixProposed() {
+        val italian = core { it.saveTeam(null, it.team(team).form.copy(country = "IT")) }
+        val model = rule.runOnUiThread { PlayerFormViewModel(app, italian, null) }
+        rule.waitFor { model.state.value is PlayerFormState.Editing }
+        assertEquals("IT", editing(model).form.phoneCountry)
+        assertEquals(false, editing(model).changed)
+        rule.runOnUiThread { model.nationality("PL") }
+        rule.waitFor { editing(model).form.phoneCountry == "PL" }
+        rule.runOnUiThread {
+            model.change(PlayerField.PHONE) { it.copy(phone = "333 123 4567") }
+            model.prefix("IT")
+            model.nationality("FR")
+            model.name("Paola Egonu")
+            model.change(PlayerField.ROLE) { it.copy(role = RoleEnum.OPPOSITE_HITTER, birthPlace = "Cittadella") }
+            model.change(PlayerField.EMAIL) { it.copy(email = "paola@example.com") }
+            model.save()
+        }
+        rule.waitFor { model.state.value == PlayerFormState.Done }
+        val saved = core { it.team(italian) }.players.single()
+        assertEquals("Cittadella", saved.form.birthPlace)
+        assertEquals("paola@example.com", saved.contacts.email?.address)
+        assertEquals("tel:+393331234567", saved.contacts.phone?.callLink)
+    }
+
+    @Test
+    fun anEmailNotValidIsRejectedUnderItsField() {
+        show()
+        rule.type(string(R.string.name), "Paola Egonu")
+        rule.onNodeWithText(role(RoleEnum.OPPOSITE_HITTER)).performScrollTo().performClick()
+        rule.type(string(R.string.email), "paola")
+        rule.save()
+        rule.assertInvalid(string(R.string.email))
+        assertEquals(0, players().size)
     }
 
     private fun fixture(name: String) = javaClass.classLoader!!.getResourceAsStream(name)!!.use { it.readBytes() }
