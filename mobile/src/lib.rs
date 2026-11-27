@@ -906,6 +906,8 @@ pub enum MatchListing {
     Match {
         id: String,
         opponent: String,
+        /// the team the opponent is, for its logo: none for a name only
+        opponent_team: Option<String>,
         home: bool,
         /// RFC 3339, with the offset of where it was played: the app formats
         /// it in its language
@@ -4101,6 +4103,7 @@ impl Scout4All {
                     date: m.date.to_rfc3339(),
                     id: m.id,
                     opponent: m.opponent,
+                    opponent_team: m.opponent_team.map(|b| b.to_string()),
                     home: m.home,
                     won: m.us_wins,
                     lost: m.them_wins,
@@ -5782,6 +5785,12 @@ pub enum LogoBackdrop {
     None,
     Dark,
     Light,
+}
+
+/// The initials of a name, in place of the logo of a team that has none.
+#[uniffi::export]
+pub fn initials(name: String) -> String {
+    names::initials(&name)
 }
 
 /// The tone of the logo the bytes hold, to decide its backdrop once per
@@ -7554,6 +7563,7 @@ mod tests {
                 MatchListing::Match {
                     id: ids[1].clone(),
                     opponent: "Siena".into(),
+                    opponent_team: None,
                     home: false,
                     date: "2026-10-11T21:00:00+02:00".into(),
                     won: 0,
@@ -7564,6 +7574,7 @@ mod tests {
                 MatchListing::Match {
                     id: ids[0].clone(),
                     opponent: "Arezzo".into(),
+                    opponent_team: None,
                     home: true,
                     date: "2026-10-04T18:00:00+02:00".into(),
                     won: 0,
@@ -8144,9 +8155,13 @@ mod tests {
                     lost: 1,
                     standing: MatchStanding::InProgress,
                     scouted_by: Some(a),
+                    opponent_team,
                     ..
                 },
-            ] => assert_eq!((id, opponent.as_str(), a), (&m, "Cortona", &team)),
+            ] => assert_eq!(
+                (id, opponent.as_str(), a, opponent_team.as_ref()),
+                (&m, "Cortona", &team, Some(&team))
+            ),
             other => unreachable!("{other:?}"),
         }
         // A's list: the match of the set and this one, its own
@@ -8162,6 +8177,31 @@ mod tests {
             "{listed:?}"
         );
         assert_eq!(listed.len(), 2);
+        // the team of the opponent, none for a name only; the same when the
+        // summaries come from the cache
+        let opponents = |listed: &[MatchListing]| -> Vec<(String, Option<String>)> {
+            let mut found: Vec<(String, Option<String>)> = listed
+                .iter()
+                .filter_map(|l| match l {
+                    MatchListing::Match {
+                        id, opponent_team, ..
+                    } => Some((id.clone(), opponent_team.clone())),
+                    MatchListing::Unreadable { .. } => None,
+                })
+                .collect();
+            found.sort_by_key(|(id, _)| *id != m);
+            found
+        };
+        let found = opponents(&listed);
+        assert!(
+            matches!(
+                found.as_slice(),
+                [(_, Some(b)), (_, None)] if *b == livorno
+            ),
+            "{found:?}"
+        );
+        assert_eq!(opponents(&app.matches(team.clone()).unwrap()), found);
+        assert_eq!(initials("volley livorno".into()), "VL");
         // a match of Livorno not scouted by it: not in its statistics
         let analysis = app.team_analysis(
             livorno.clone(),

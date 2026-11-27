@@ -146,6 +146,8 @@ pub struct TeamScreen {
     pub team_id: String,
     details: TeamDetails,
     matches: Vec<MatchListing>,
+    /// the pictures of the opponents of the matches, in their order
+    opponents: Vec<ui::TeamPicture>,
     week: Agenda,
     /// the next official match still to play, today's too
     next: Option<AgendaEventRecord>,
@@ -182,11 +184,13 @@ impl TeamScreen {
         let matches = core.matches(team_id.clone())?;
         let week = Agenda::week(&core, Some(team_id.clone()), core.clock().today());
         let next = core.team_appointments(team_id.clone())?.next_match;
-        let logo = TeamScreen::logo_of(&core, &team_id);
+        let logo = ui::TeamLogo::of(&core, &team_id);
+        let opponents = TeamScreen::opponents_of(&core, &matches);
         let photos = TeamScreen::photos_of(&core, &details);
         Ok(TeamScreen {
             logo,
             photos,
+            opponents,
             core,
             team_id,
             details,
@@ -202,11 +206,19 @@ impl TeamScreen {
         })
     }
 
-    fn logo_of(core: &Scout4All, team_id: &str) -> Option<ui::TeamLogo> {
-        core.team_logo(team_id.to_string())
-            .ok()
-            .flatten()
-            .and_then(|png| ui::TeamLogo::from_png(&png))
+    /// The pictures of the opponents; an unreadable match has none to show.
+    fn opponents_of(core: &Scout4All, matches: &[MatchListing]) -> Vec<ui::TeamPicture> {
+        matches
+            .iter()
+            .map(|m| match m {
+                MatchListing::Match {
+                    opponent,
+                    opponent_team,
+                    ..
+                } => ui::TeamPicture::of(core, opponent_team.as_deref(), opponent),
+                MatchListing::Unreadable { .. } => ui::TeamPicture::Initials(String::new()),
+            })
+            .collect()
     }
 
     fn photos_of(
@@ -373,7 +385,8 @@ impl TeamScreen {
                 }
                 self.game = self.game.min(self.matches.len().saturating_sub(1));
                 self.week.reload(&self.core);
-                self.logo = TeamScreen::logo_of(&self.core, &self.team_id);
+                self.logo = ui::TeamLogo::of(&self.core, &self.team_id);
+                self.opponents = TeamScreen::opponents_of(&self.core, &self.matches);
                 self.photos = TeamScreen::photos_of(&self.core, &self.details);
             }
             Err(e) => self.error = Some(e.to_string()),
@@ -1192,7 +1205,8 @@ impl TeamScreen {
                         true => (theme::icons::HOME, s.home_game),
                         false => (theme::icons::AWAY, s.away_game),
                     };
-                    // the date, then what else there is to know
+                    // home or away at a glance, then the date and what else
+                    // there is to know
                     let facts = [
                         Some((s.day(date), c.muted)),
                         match standing {
@@ -1209,9 +1223,19 @@ impl TeamScreen {
                     let content = row![
                         column![
                             ui::body(opponent.clone()).font(theme::fonts().bold),
-                            Row::with_children(facts.into_iter().flatten().map(|(fact, color)| {
-                                text(fact).size(SIZE_SMALL).color(color).into()
-                            }))
+                            Row::with_children(
+                                std::iter::once(ui::tip(
+                                    ui::icon(icon, SIZE_SMALL + 2.0, c.muted),
+                                    place,
+                                    c
+                                ))
+                                .chain(
+                                    facts.into_iter().flatten().map(|(fact, color)| {
+                                        text(fact).size(SIZE_SMALL).color(color).into()
+                                    })
+                                )
+                            )
+                            .align_y(Alignment::Center)
                             .spacing(6)
                             .wrap(),
                         ]
@@ -1232,9 +1256,11 @@ impl TeamScreen {
                     }))
                     .spacing(8)
                     .align_y(Alignment::Center);
-                    // home or away at a glance, as on Android
                     ui::box_row(
-                        ui::tip(ui::icon(icon, 22.0, c.muted), place, c),
+                        match self.opponents.get(i) {
+                            Some(picture) => ui::team_picture(picture, 36.0, c),
+                            None => ui::initials(String::new(), c),
+                        },
                         content,
                         chosen,
                         Message::Match(i),
@@ -1366,6 +1392,20 @@ mod tests {
             .unwrap();
         core.save_match(a.clone(), None, form("Arezzo", None))
             .unwrap();
+        // the logo of the opponent that is a team, the initials of a name
+        core.set_team_logo(b.clone(), Some(PNG.to_vec())).unwrap();
+        let of_a = TeamScreen::new(core.clone(), a.clone()).unwrap();
+        let shown: Vec<(bool, Option<String>)> = of_a
+            .opponents
+            .iter()
+            .map(|p| match p {
+                ui::TeamPicture::Logo(_) => (true, None),
+                ui::TeamPicture::Initials(letters) => (false, Some(letters.clone())),
+            })
+            .collect();
+        assert_eq!(shown.len(), 2);
+        assert!(shown.contains(&(true, None)), "{shown:?}");
+        assert!(shown.contains(&(false, Some("A".into()))), "{shown:?}");
 
         let mut team = TeamScreen::new(core.clone(), b.clone()).unwrap();
         assert!(matches!(
@@ -1973,6 +2013,7 @@ mod tests {
             &[form::Suggestion {
                 label: "Anna Rossi (Cortona 2025)".into(),
                 value: "Anna Rossi".into(),
+                picture: None
             }]
         );
         // "ross" isn't the beginning: ↓ lights it, Enter takes it

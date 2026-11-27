@@ -46,6 +46,7 @@ fun SuggestField(
     modifier: Modifier = Modifier,
     hint: String? = null,
     placeholder: String? = null,
+    leading: (@Composable (String) -> Unit)? = null,
 ) {
     var open by remember { mutableStateOf(false) }
     var field by remember { mutableStateOf(TextFieldValue(value, TextRange(value.length))) }
@@ -87,6 +88,7 @@ fun SuggestField(
             shown.forEach { name ->
                 DropdownMenuItem(
                     text = { Text(name) },
+                    leadingIcon = leading?.let { { it(name) } },
                     onClick = {
                         onPick(name)
                         open = false

@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
@@ -97,6 +98,15 @@ class MatchFormTest {
         rule.save()
         rule.waitFor { saved.size == 1 }
         assertEquals("12", core { it.matchForm(team, match) }.maxSubstitutions)
+    }
+
+    /** A team offered as the opponent has its initials, without a logo. */
+    @Test
+    fun theOpponentsAreOfferedWithTheirPictures() {
+        saveTeam("Zeta Volley")
+        show()
+        rule.type(string(R.string.opponent), "Zet")
+        rule.waitFor { rule.onAllNodesWithTag(initialsTag("ZV"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
     }
 
     @Test

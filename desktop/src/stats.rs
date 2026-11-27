@@ -234,6 +234,9 @@ pub struct StatsScreen {
     team_name: String,
     /// the opponents scouted on both sides, to analyse from their side
     opponents: Vec<ScoutedOpponent>,
+    /// the pictures of the team and of the opponents, in their order
+    team_picture: ui::TeamPicture,
+    opponent_pictures: Vec<ui::TeamPicture>,
     /// the opponent analysed, none for the team
     opponent: Option<uuid::Uuid>,
     choice: PeriodChoice,
@@ -697,6 +700,13 @@ impl StatsScreen {
             .core
             .analysis_opponents(screen.team_id.clone())
             .unwrap_or_default();
+        screen.team_picture =
+            ui::TeamPicture::of(&screen.core, Some(&screen.team_id), &screen.team_name);
+        screen.opponent_pictures = screen
+            .opponents
+            .iter()
+            .map(|o| ui::TeamPicture::of(&screen.core, Some(&o.id.to_string()), &o.name))
+            .collect();
         screen.load();
         match &screen.error {
             Some(e) if screen.analysis.is_none() => Err(MobileError::Failed { reason: e.clone() }),
@@ -741,6 +751,8 @@ impl StatsScreen {
             competition: None,
             team_name: String::new(),
             opponents: vec![],
+            team_picture: ui::TeamPicture::Initials(String::new()),
+            opponent_pictures: vec![],
             opponent: None,
             choice: PeriodChoice::new(Kind::LastMonth, today),
             played: vec![],
@@ -1833,27 +1845,35 @@ impl StatsScreen {
                     .vertical_spacing(4)
                     .into();
             }
-            Filter::Opponent => (
-                s.stats_team,
-                [pill(
-                    self.team_name.clone(),
-                    self.opponent.is_none(),
-                    Message::Opponent(None),
-                )]
-                .into_iter()
-                .chain(self.opponents.iter().map(|o| {
-                    pill(
-                        o.name.clone(),
-                        self.opponent == Some(o.id) && !self.compare,
-                        Message::Opponent(Some(o.id)),
+            Filter::Opponent => {
+                (
+                    s.stats_team,
+                    [ui::team_pill(
+                        &self.team_picture,
+                        &self.team_name,
+                        self.opponent.is_none(),
+                        Message::Opponent(None),
+                        c,
+                    )]
+                    .into_iter()
+                    .chain(self.opponents.iter().zip(&self.opponent_pictures).map(
+                        |(o, picture)| {
+                            ui::team_pill(
+                                picture,
+                                &o.name,
+                                self.opponent == Some(o.id) && !self.compare,
+                                Message::Opponent(Some(o.id)),
+                                c,
+                            )
+                        },
+                    ))
+                    .chain(
+                        (self.opponent.is_some() && self.current() == Page::Summary)
+                            .then(|| pill(s.compare.to_string(), self.compare, Message::Versus)),
                     )
-                }))
-                .chain(
-                    (self.opponent.is_some() && self.current() == Page::Summary)
-                        .then(|| pill(s.compare.to_string(), self.compare, Message::Versus)),
+                    .collect(),
                 )
-                .collect(),
-            ),
+            }
             Filter::Competition => {
                 return period::competition_line(
                     on,
@@ -3824,6 +3844,20 @@ pub(crate) mod tests {
             )
             .unwrap();
         let mut screen = StatsScreen::team(core, imported.team_id, s).unwrap();
+        // every team of the choice with its picture
+        assert!(!screen.opponents.is_empty());
+        assert_eq!(
+            screen.opponent_pictures,
+            screen
+                .opponents
+                .iter()
+                .map(|o| ui::TeamPicture::Initials(scout4all_core::names::initials(&o.name)))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            screen.team_picture,
+            ui::TeamPicture::Initials(scout4all_core::names::initials(&screen.team_name))
+        );
         screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
         assert_eq!(screen.filters().first(), Some(&Filter::Opponent));
         let ours = aces(&screen);

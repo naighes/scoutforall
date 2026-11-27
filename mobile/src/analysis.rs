@@ -575,7 +575,7 @@ impl Scout4All {
             .filter_map(|m| {
                 against
                     .get(&m.id)
-                    .map(|home_b| m.seen_by_b(team.name.clone(), *home_b))
+                    .map(|home_b| m.seen_by_b(team.id, team.name.clone(), *home_b))
             })
             .collect();
         let chosen = period

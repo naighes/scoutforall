@@ -6,6 +6,7 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::shapes::r#match::MatchSummary;
     use crate::{
         analytics::queue::{PendingUpload, UploadQueue},
         constants::DEFAULT_MAX_SUBSTITUTIONS,
@@ -493,6 +494,16 @@ mod tests {
                 TeamSideEnum::Us
             )]
         );
+        // the same summaries, the opponent now a name with no team
+        let summaries: Vec<_> = summaries
+            .into_iter()
+            .map(|listed| {
+                listed.map(|summary| MatchSummary {
+                    opponent_team: None,
+                    ..summary
+                })
+            })
+            .collect();
         assert_eq!(p.matches.read_summaries(&a).await.unwrap(), summaries);
         let id = &m.id;
         for (sql, expected) in [

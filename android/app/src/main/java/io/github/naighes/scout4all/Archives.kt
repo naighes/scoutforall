@@ -273,18 +273,26 @@ private fun TeamChoices(teams: List<io.github.naighes.scout4all.core.TeamChoice>
         style = MaterialTheme.typography.labelLarge,
     )
     when (teams.size) {
-        1 -> Text(teams[0].name)
+        1 -> TeamLine(teams[0])
         else -> teams.forEach { team ->
             Row(
                 Modifier.fillMaxWidth().selectable(selected = team.id == chosen, onClick = { onChoose(team.id) }),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 RadioButton(selected = team.id == chosen, onClick = null)
-                Text(team.name, modifier = Modifier.padding(start = 8.dp))
+                TeamLine(team, Modifier.padding(start = 8.dp))
             }
         }
     }
 }
+
+/** A team to choose: its picture and its name. */
+@Composable
+private fun TeamLine(team: io.github.naighes.scout4all.core.TeamChoice, modifier: Modifier = Modifier) =
+    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
+        TeamPicture(team.id, team.name, 32.dp)
+        Text(team.name, modifier = Modifier.padding(start = 8.dp))
+    }
 
 /** The content of the file and its name, when the app that has it says. */
 private suspend fun Context.read(uri: Uri): Pair<ByteArray, String?> = withContext(Dispatchers.IO) {

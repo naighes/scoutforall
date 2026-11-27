@@ -6,6 +6,8 @@ import androidx.compose.foundation.Image
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -277,6 +279,7 @@ private fun Matches(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (String) -> Unit) {
     val modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
@@ -285,15 +288,7 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (
         is MatchListing.Match -> BoxRow(
             onClick = { onMatch(m.id) },
             modifier = modifier,
-            // home or away at a glance
-            head = {
-                val place = stringResource(if (m.home) R.string.home else R.string.away)
-                // read as a text: a description would hide the rest of the row
-                when {
-                    m.home -> Icon(Icons.Outlined.Home, contentDescription = null, Modifier.size(32.dp).readAs(place), tint = grey)
-                    else -> Icon(painterResource(R.drawable.ic_away), contentDescription = null, Modifier.size(32.dp).readAs(place), tint = grey)
-                }
-            },
+            head = { TeamPicture(m.opponentTeam, m.opponent) },
             // the sets of the team first, green when it won, red when it lost
             tail = {
                 // nothing to show of a match not started
@@ -307,16 +302,29 @@ private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (
             },
         ) {
             Text(m.opponent, style = MaterialTheme.typography.bodyLarge)
-            Row {
-                Text(matchDate(m.date), style = MaterialTheme.typography.bodyMedium, color = grey)
+            // the state under the date when both don't fit
+            FlowRow(itemVerticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // home or away at a glance
+                    val place = stringResource(if (m.home) R.string.home else R.string.away)
+                    // read as a text: a description would hide the rest of the row
+                    val icon = Modifier.padding(end = 6.dp).size(18.dp).readAs(place)
+                    when {
+                        m.home -> Icon(Icons.Outlined.Home, contentDescription = null, icon, tint = grey)
+                        else -> Icon(painterResource(R.drawable.ic_away), contentDescription = null, icon, tint = grey)
+                    }
+                    Text(matchDate(m.date), style = MaterialTheme.typography.bodyMedium, color = grey)
+                }
                 val state = when (m.standing) {
                     MatchStanding.TO_PLAY -> R.string.to_play to grey
                     MatchStanding.IN_PROGRESS -> R.string.in_progress to MaterialTheme.colorScheme.primary
                     MatchStanding.OVER -> null
                 }
                 state?.let { (label, color) ->
-                    Text(" · ", Modifier.notRead(), style = MaterialTheme.typography.bodyMedium, color = grey)
-                    Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, color = color)
+                    Row {
+                        Text(" · ", Modifier.notRead(), style = MaterialTheme.typography.bodyMedium, color = grey)
+                        Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, color = color)
+                    }
                 }
             }
             // B of a match scouted by A: only its result here

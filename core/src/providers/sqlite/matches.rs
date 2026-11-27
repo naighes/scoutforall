@@ -20,7 +20,7 @@ use crate::{
             },
             sets::numbered,
             sqlite,
-            summary::{cached, competition_of, forget, refresh, save},
+            summary::{cached, competition_of, forget, opponent_of, refresh, save},
             teams::read_team,
             training::check_match,
             venues::find_or_create,
@@ -259,6 +259,7 @@ impl SqliteMatchReader {
                         Ok((m, status)) => {
                             let summary = MatchSummary {
                                 competition_id: competition_of(tx, match_uuid(id)?)?,
+                                opponent_team: opponent_of(tx, match_uuid(id)?)?,
                                 ..MatchSummary::of(&m, &status)
                             };
                             save(tx, match_uuid(id)?, &summary).map(|()| Ok(summary))
@@ -305,7 +306,7 @@ impl SqliteMatchReader {
                 .zip(&readable)
                 .map(|(listed, (a, _, home))| {
                     listed.map(|summary| PlayedMatch {
-                        summary: summary.seen_by_b(a.name.clone(), home.is_b()),
+                        summary: summary.seen_by_b(a.id, a.name.clone(), home.is_b()),
                         scouted_by: Some(a.id),
                     })
                 });
@@ -347,7 +348,7 @@ impl SqliteMatchReader {
                 .zip(as_b)
                 .filter_map(|(listed, (a, _, home))| {
                     listed.ok().map(|summary| ScoutedSummary {
-                        summary: summary.seen_by_b(a.name.clone(), home.is_b()),
+                        summary: summary.seen_by_b(a.id, a.name.clone(), home.is_b()),
                         team_a: Some(a),
                     })
                 });

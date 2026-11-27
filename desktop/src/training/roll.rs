@@ -174,10 +174,12 @@ impl Roll {
                             .join(", ")
                     ),
                     value: c.name.clone(),
+                    picture: None,
                 })
                 .chain((!written.is_empty()).then(|| Suggestion {
                     label: ui::fill(s.new_person, std::slice::from_ref(&written)),
                     value: written.clone(),
+                    picture: None,
                 }))
                 .collect(),
         );

@@ -923,6 +923,7 @@ impl CopyEditor {
                     h.session_start.get(..10).unwrap_or_default()
                 ),
                 value: h.name.clone(),
+                picture: None,
             })
             .collect();
         self.form.suggest(QUERY, offered);

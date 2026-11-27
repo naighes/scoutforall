@@ -28,6 +28,7 @@ pub fn offered(core: &Scout4All, written: &str, browsing: bool) -> Vec<Suggestio
             .map(|c| Suggestion {
                 label: format!("{}  {}", flag(c.value), c.name),
                 value: c.name,
+                picture: None,
             })
             .collect(),
         false => suggestions(core, written),
@@ -56,6 +57,7 @@ pub fn suggestions(core: &Scout4All, written: &str) -> Vec<Suggestion> {
         .map(|c| Suggestion {
             label: format!("{}  {}", flag(c.value), c.name),
             value: c.name,
+            picture: None,
         })
         .collect(),
     }

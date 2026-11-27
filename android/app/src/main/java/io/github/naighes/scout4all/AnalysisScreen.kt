@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -220,6 +221,7 @@ internal fun AnalysisScreen(
                 ) {
                     if (opponents.isNotEmpty()) {
                         SeenFromChooser(
+                            teamId,
                             ours,
                             opponents,
                             opponent,
@@ -319,6 +321,7 @@ internal object DayMask : VisualTransformation {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SeenFromChooser(
+    oursId: String,
     ours: String,
     opponents: List<ScoutedOpponent>,
     chosen: String?,
@@ -329,9 +332,19 @@ private fun SeenFromChooser(
 ) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Text(stringResource(R.string.seen_from), style = MaterialTheme.typography.labelLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected = chosen == null, onClick = { onChoose(null) }, label = { Text(ours) })
+        FilterChip(
+            selected = chosen == null,
+            onClick = { onChoose(null) },
+            label = { Text(ours) },
+            leadingIcon = { TeamPicture(oursId, ours, FilterChipDefaults.IconSize) },
+        )
         opponents.forEach {
-            FilterChip(selected = chosen == it.id && !compare, onClick = { onChoose(it.id) }, label = { Text(it.name) })
+            FilterChip(
+                selected = chosen == it.id && !compare,
+                onClick = { onChoose(it.id) },
+                label = { Text(it.name) },
+                leadingIcon = { TeamPicture(it.id, it.name, FilterChipDefaults.IconSize) },
+            )
         }
         // the opponent chosen and the team side by side, on the summary
         if (chosen != null && comparable) {

@@ -211,6 +211,8 @@ pub struct Importing {
     team_id: Option<String>,
     preview: ArchivePreview,
     team: usize,
+    /// the pictures of the teams to choose, in their order
+    pictures: Vec<ui::TeamPicture>,
 }
 
 impl Importing {
@@ -224,11 +226,19 @@ impl Importing {
             Some(picked.name.clone()),
             team_id.clone(),
         )?;
+        let pictures = match &preview {
+            ArchivePreview::Match { teams, .. } => teams
+                .iter()
+                .map(|t| ui::TeamPicture::of(core, Some(&t.id), &t.name))
+                .collect(),
+            ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => vec![],
+        };
         Ok(Importing {
             picked,
             team_id,
             preview,
             team: 0,
+            pictures,
         })
     }
 
@@ -237,6 +247,27 @@ impl Importing {
             ArchivePreview::Match { teams, .. } => teams,
             ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => &[],
         }
+    }
+
+    #[cfg(test)]
+    pub fn pictures(&self) -> &[ui::TeamPicture] {
+        &self.pictures
+    }
+
+    /// The `i`th team to choose: its picture and its name.
+    fn team_line<'a, M: 'a>(
+        &self,
+        i: usize,
+        team: &scout4all_mobile::TeamChoice,
+        c: Colors,
+    ) -> Element<'a, M> {
+        let picture = self.pictures.get(i);
+        iced::widget::Row::new()
+            .push(picture.map(|p| ui::team_picture(p, 24.0, c)))
+            .push(ui::body(team.name.clone()))
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into()
     }
 
     /// Imports it, once confirmed.
@@ -362,14 +393,14 @@ impl Importing {
         };
         let teams: Element<'a, Message> = match (&self.team_id, self.teams()) {
             (Some(_), _) | (None, []) => column![].into(),
-            (None, [team]) => column![ui::section(s.into_team, c), ui::body(team.name.clone())]
+            (None, [team]) => column![ui::section(s.into_team, c), self.team_line(0, team, c)]
                 .spacing(6)
                 .into(),
             (None, teams) => column![
                 ui::section(s.into_team, c),
                 Column::with_children(teams.iter().enumerate().map(|(i, t)| {
                     ui::list_row(
-                        ui::body(t.name.clone()),
+                        self.team_line(i, t, c),
                         i == self.team,
                         Some(Message::Team(i)),
                         c,

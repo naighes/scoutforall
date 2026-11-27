@@ -1,5 +1,9 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.onNodeWithTag
+import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -50,6 +54,33 @@ class SeenByBTest {
         rule.onNodeWithText("Italia").assertExists()
         rule.onNodeWithText("Italia").performClick()
         assertEquals(match, opened)
+    }
+
+    /** At the head of a match: the logo of the opponent, or the initials of
+     * one that is a name only. */
+    @Test
+    fun theOpponentOfAMatchShowsItsLogoOrItsInitials() {
+        val png = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).let { bitmap ->
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        core { c ->
+            c.setTeamLogo(serbia, png)
+            c.saveMatch(italia, null, MatchForm("Zeta Volley", "2026-10-18T18:00:00+02:00", true, "6"))
+        }
+        rule.setContent {
+            Scout4AllTheme {
+                TeamScreen(italia, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
+            }
+        }
+        rule.waitForText("Italia")
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performClick()
+        rule.waitForText("Zeta Volley")
+        rule.onNodeWithTag(initialsTag("ZV"), useUnmergedTree = true).assertExists()
+        // the only logo: Italia has none
+        rule.waitFor {
+            listOf(LOGO_AS_IT_IS, LOGO_BACKDROP)
+                .sumOf { rule.onAllNodesWithTag(it, useUnmergedTree = true).fetchSemanticsNodes().size } == 1
+        }
     }
 
     @Test

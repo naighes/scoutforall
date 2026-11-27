@@ -987,7 +987,12 @@ mod tests {
             unreachable!("the team is imported")
         };
         assert_eq!(imported, team_id);
+        // the team to choose with its picture
         let importing = Importing::new(&other, game, None).unwrap();
+        assert!(matches!(
+            importing.pictures(),
+            [crate::ui::TeamPicture::Initials(_)]
+        ));
         let Ok(Imported::Match(into, m, None)) = importing.import(&other) else {
             unreachable!("the match is imported")
         };

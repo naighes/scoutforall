@@ -1,5 +1,9 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.testTag
+import androidx.compose.material3.Text
+import io.github.naighes.scout4all.core.initials
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -61,6 +65,30 @@ fun TeamLogo(
     when {
         bytes == null && none != null -> none()
         else -> TeamLogoBox(bytes, size, modifier)
+    }
+}
+
+/** The tag of the initials of a `TeamPicture`, for the tests. */
+fun initialsTag(letters: String) = "initials-$letters"
+
+/** What stands for a team beside its name, in a square: its logo, or its
+ * initials, not read as the name says it. `teamId` is null for a name
+ * only. */
+@Composable
+fun TeamPicture(teamId: String?, name: String, size: Dp = 48.dp, modifier: Modifier = Modifier) {
+    val letters: @Composable () -> Unit = {
+        val shown = initials(name)
+        Box(modifier.size(size).clearAndSetSemantics { testTag = initialsTag(shown) }, contentAlignment = Alignment.Center) {
+            Text(
+                shown,
+                style = if (size < 40.dp) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    when (teamId) {
+        null -> letters()
+        else -> TeamLogo(teamId, size, modifier, none = letters)
     }
 }
 

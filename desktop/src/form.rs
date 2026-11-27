@@ -89,6 +89,8 @@ pub enum Value {
 pub struct Suggestion {
     pub label: String,
     pub value: String,
+    /// shown before the label, when it's a team
+    pub picture: Option<ui::TeamPicture>,
 }
 
 /// What a guided field is.
@@ -834,6 +836,15 @@ impl Form {
     }
 
     /// Whether the field the keys are on shows its suggestions.
+    /// What the search `field` was given to offer.
+    #[cfg(test)]
+    pub fn suggested(&self, field: usize) -> &[Suggestion] {
+        match self.fields.get(field).map(|f| &f.value) {
+            Some(Value::Search { suggestions, .. }) => suggestions,
+            _ => &[],
+        }
+    }
+
     pub fn offering(&self) -> bool {
         self.fields
             .get(self.focused)
@@ -1510,12 +1521,15 @@ impl Form {
                         .skip(first)
                         .take(rows)
                         .map(|(n, s)| {
-                            ui::list_row(
-                                ui::body(s.label.clone()).shaping(text::Shaping::Advanced),
-                                Some(n) == lit,
-                                Some(on(Message::Take(i, n))),
-                                c,
-                            )
+                            let label = ui::body(s.label.clone()).shaping(text::Shaping::Advanced);
+                            let content: Element<'a, M> = match &s.picture {
+                                Some(picture) => row![ui::team_picture(picture, 24.0, c), label]
+                                    .spacing(8)
+                                    .align_y(iced::Alignment::Center)
+                                    .into(),
+                                None => label.into(),
+                            };
+                            ui::list_row(content, Some(n) == lit, Some(on(Message::Take(i, n))), c)
                         })
                         .collect(),
                     _ => vec![],
@@ -1954,6 +1968,7 @@ mod tests {
             .map(|n| Suggestion {
                 label: format!("country {n:02}"),
                 value: format!("country {n:02}"),
+                picture: None,
             })
             .collect()
     }
@@ -2104,6 +2119,7 @@ mod tests {
             .map(|v| Suggestion {
                 label: format!("· {v}"),
                 value: v.to_string(),
+                picture: None,
             })
             .to_vec();
         f.suggest(0, offered);
@@ -2165,6 +2181,7 @@ mod tests {
             vec![Suggestion {
                 label: "Anna Rossi (Cortona 2025)".into(),
                 value: "Anna Rossi".into(),
+                picture: None,
             }],
         );
         f.key(key!(down));
@@ -2188,6 +2205,7 @@ mod tests {
             vec![Suggestion {
                 label: "Haiti".into(),
                 value: "Haiti".into(),
+                picture: None,
             }],
         );
         assert!(f.offering());

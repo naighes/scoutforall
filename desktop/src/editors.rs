@@ -4,6 +4,7 @@
 //! takes the keys to its field.
 
 use scout4all_mobile::clock::ClockExt;
+use std::collections::HashMap;
 use {
     crate::{
         countries,
@@ -213,6 +214,8 @@ pub struct MatchEditor {
     roster: Vec<RosterPlayer>,
     /// the other teams and the names met, offered as team B is written
     opponents: Vec<OpponentChoice>,
+    /// the logos of the teams among them
+    logos: HashMap<uuid::Uuid, ui::TeamLogo>,
     competitions: Vec<CompetitionChoice>,
     formats: Vec<FormatChoice>,
     stages: Vec<StageChoice>,
@@ -380,6 +383,18 @@ fn court_of(form: &MatchForm) -> usize {
         (false, true) => COURT_HOME,
         (false, false) => COURT_AWAY,
     }
+}
+
+/// The logos of the teams team B may be.
+fn opponent_logos(
+    core: &Scout4All,
+    choices: &[OpponentChoice],
+) -> HashMap<uuid::Uuid, ui::TeamLogo> {
+    choices
+        .iter()
+        .filter_map(|c| c.team)
+        .filter_map(|id| ui::TeamLogo::of(core, &id.to_string()).map(|logo| (id, logo)))
+        .collect()
 }
 
 /// The name of a team or a competition as written, to compare.
@@ -791,6 +806,7 @@ impl Editor {
             .map(|e| Suggestion {
                 label: e.label.clone(),
                 value: e.name.clone(),
+                picture: None,
             })
             .collect();
         p.offered = taken;
@@ -1016,6 +1032,7 @@ impl Editor {
                 id,
                 data,
                 roster: vec![],
+                logos: opponent_logos(core, &opponents),
                 opponents,
                 competitions,
                 formats,
@@ -1563,6 +1580,7 @@ impl Editor {
                     m.data.roster = None;
                     m.data.numbers.clear();
                     m.opponents = core.opponent_choices(team.clone()).unwrap_or_default();
+                    m.logos = opponent_logos(core, &m.opponents);
                 }
                 self.linked();
                 if let Err(e) = self.toggle(core, None) {
@@ -1575,13 +1593,25 @@ impl Editor {
                     scout4all_mobile::offered_names(names, self.form.text(MATCH_OPPONENT))
                         .into_iter()
                         .map(|name| {
-                            let label = m
-                                .opponents
-                                .iter()
-                                .find(|o| o.name == name)
+                            // the first of the name, the one `linked` takes
+                            let choice = m.opponents.iter().find(|o| o.name == name);
+                            let label = choice
                                 .and_then(|o| o.year)
                                 .map_or_else(|| name.clone(), |year| format!("{name} ({year})"));
-                            Suggestion { label, value: name }
+                            let logo = choice.and_then(|o| o.team).and_then(|id| m.logos.get(&id));
+                            let picture = logo.cloned().map_or_else(
+                                || {
+                                    ui::TeamPicture::Initials(scout4all_core::names::initials(
+                                        &name,
+                                    ))
+                                },
+                                ui::TeamPicture::Logo,
+                            );
+                            Suggestion {
+                                label,
+                                value: name,
+                                picture: Some(picture),
+                            }
                         })
                         .collect();
                 self.form.suggest(MATCH_OPPONENT, offered);
@@ -1602,7 +1632,11 @@ impl Editor {
                                     || name.clone(),
                                     |season| format!("{name} ({season})"),
                                 );
-                            Suggestion { label, value: name }
+                            Suggestion {
+                                label,
+                                value: name,
+                                picture: None,
+                            }
                         })
                         .collect();
                 self.form.suggest(MATCH_COMPETITION, offered);
@@ -3133,6 +3167,17 @@ mod tests {
         let cortona = team(&core, "Cortona", 7);
         let arezzo = team(&core, "Arezzo", 8);
         let mut e = new_match(&core, &cortona);
+        // offered with its picture: the initials, without a logo
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Are".into()));
+        assert_eq!(
+            e.form
+                .suggested(MATCH_OPPONENT)
+                .iter()
+                .map(|s| (s.value.as_str(), s.picture.clone()))
+                .collect::<Vec<_>>(),
+            [("Arezzo", Some(ui::TeamPicture::Initials("A".into())))]
+        );
+        send(&mut e, &core, Input(MATCH_OPPONENT, String::new()));
         let Kind::Match(m) = &e.kind else {
             unreachable!("a match")
         };

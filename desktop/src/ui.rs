@@ -748,7 +748,7 @@ pub fn logo<'a, M: 'a>(handle: &iced::widget::image::Handle, size: f32) -> Eleme
 
 /// The logo of a team ready to draw, with its tone: a backdrop goes behind
 /// it when it would vanish on the theme (TODO/011 R8.6).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct TeamLogo {
     pub handle: iced::widget::image::Handle,
     pub tone: scout4all_core::assets::LogoTone,
@@ -762,6 +762,68 @@ impl TeamLogo {
             tone: scout4all_core::assets::logo_tone(png),
         })
     }
+
+    /// The logo of the team, if it has one that can be read.
+    pub fn of(core: &scout4all_mobile::Scout4All, team_id: &str) -> Option<TeamLogo> {
+        core.team_logo(team_id.to_string())
+            .ok()
+            .flatten()
+            .and_then(|png| TeamLogo::from_png(&png))
+    }
+}
+
+/// What stands for a team beside its name: its logo, or its initials.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TeamPicture {
+    Logo(TeamLogo),
+    Initials(String),
+}
+
+impl TeamPicture {
+    /// The picture of the team `name`: `team_id` none for a name only.
+    pub fn of(
+        core: &scout4all_mobile::Scout4All,
+        team_id: Option<&str>,
+        name: &str,
+    ) -> TeamPicture {
+        team_id.and_then(|id| TeamLogo::of(core, id)).map_or_else(
+            || TeamPicture::Initials(scout4all_core::names::initials(name)),
+            TeamPicture::Logo,
+        )
+    }
+}
+
+/// The picture of a team in a square of `size`.
+pub fn team_picture<'a, M: 'a>(picture: &TeamPicture, size: f32, c: Colors) -> Element<'a, M> {
+    match picture {
+        TeamPicture::Logo(logo) => team_logo(logo, size, c),
+        TeamPicture::Initials(letters) => container(initials(letters.clone(), c))
+            .center_x(Length::Fixed(size))
+            .center_y(Length::Fixed(size))
+            .into(),
+    }
+}
+
+/// A `pill` of a team, its picture before its name.
+pub fn team_pill<'a, M: Clone + 'a>(
+    picture: &TeamPicture,
+    label: &str,
+    chosen: bool,
+    message: M,
+    c: Colors,
+) -> Element<'a, M> {
+    pill_of(
+        row![
+            team_picture(picture, SIZE_SMALL + 6.0, c),
+            text(label.to_string()).size(SIZE_SMALL)
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .into(),
+        chosen,
+        Some(message),
+        c,
+    )
 }
 
 /// The backdrop the logo has on the theme, if any: the colors of the

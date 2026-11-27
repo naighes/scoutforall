@@ -105,11 +105,7 @@ impl HomeScreen {
             .teams
             .iter()
             .map(|t| match t {
-                TeamListing::Team { id, .. } => core
-                    .team_logo(id.clone())
-                    .ok()
-                    .flatten()
-                    .and_then(|png| ui::TeamLogo::from_png(&png)),
+                TeamListing::Team { id, .. } => ui::TeamLogo::of(core, id),
                 TeamListing::Unreadable { .. } => None,
             })
             .collect();
@@ -467,10 +463,11 @@ impl HomeScreen {
 
 /// At the head of a box: the logo of the team, or its initials.
 fn logo_head<'a>(logo: Option<&ui::TeamLogo>, initials: &str, c: Colors) -> Element<'a, Message> {
-    match logo {
-        Some(logo) => ui::team_logo(logo, 36.0, c),
-        None => ui::initials(initials.to_string(), c),
-    }
+    let picture = logo.cloned().map_or_else(
+        || ui::TeamPicture::Initials(initials.to_string()),
+        ui::TeamPicture::Logo,
+    );
+    ui::team_picture(&picture, 36.0, c)
 }
 
 fn match_row<'a>(

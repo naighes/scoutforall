@@ -110,8 +110,8 @@ class TalkBackTest {
             TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
         }
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("${string(R.string.home)}, Cortona, ") } }
-        val row = spoken().first { it.startsWith("${string(R.string.home)}, Cortona") }
+        rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("Cortona, ${string(R.string.home)}, ") } }
+        val row = spoken().first { it.startsWith("Cortona, ${string(R.string.home)}") }
         assertTrue(row, row.endsWith(string(R.string.to_play)))
     }
 
@@ -153,8 +153,8 @@ class TalkBackTest {
             TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
         }
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("${string(R.string.home)}, Cortona, ") } }
-        val row = spoken().first { it.startsWith("${string(R.string.home)}, Cortona") }
+        rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("Cortona, ${string(R.string.home)}, ") } }
+        val row = spoken().first { it.startsWith("Cortona, ${string(R.string.home)}") }
         assertTrue(row, row.endsWith("${string(R.string.in_progress)}, ${string(R.string.sets_score, 0, 0)}"))
         assertTitle("Italia")
     }

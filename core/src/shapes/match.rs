@@ -57,6 +57,10 @@ pub struct MatchSummary {
     /// without one; read from the match each time, not cached
     #[serde(default)]
     pub competition_id: Option<Uuid>,
+    /// the team the opponent is, none for a name only; read as
+    /// `competition_id`
+    #[serde(default)]
+    pub opponent_team: Option<Uuid>,
 }
 
 impl MatchSummary {
@@ -81,15 +85,17 @@ impl MatchSummary {
             resume: status.last_incomplete_set.as_ref().map(|s| s.set_number),
             next_set_number: status.next_set_number,
             competition_id: None,
+            opponent_team: None,
         }
     }
 
     /// The summary of A's side as team B sees it: `opponent` is A, `home`
     /// whether B plays at home, the sets won the other way; nothing to go
     /// on with, as B isn't scouted.
-    pub fn seen_by_b(self, opponent: String, home: bool) -> Self {
+    pub fn seen_by_b(self, team_a: Uuid, opponent: String, home: bool) -> Self {
         MatchSummary {
             opponent,
+            opponent_team: Some(team_a),
             home,
             us_wins: self.them_wins,
             them_wins: self.us_wins,

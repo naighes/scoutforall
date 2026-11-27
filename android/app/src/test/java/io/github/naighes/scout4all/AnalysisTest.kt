@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -167,6 +168,8 @@ class AnalysisTest {
         open(both)
         rule.waitForText(string(R.string.seen_from))
         val chip = { name: String -> rule.onNode(hasText(name) and hasClickAction()) }
+        // each with its picture: the initials, without a logo
+        rule.waitFor { rule.onAllNodesWithTag(initialsTag("A"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         chip("Arezzo").performClick()
         rule.waitFor { runCatching { chip("Arezzo").assertIsSelected() }.isSuccess }
         rule.waitForText(string(R.string.matches_count, 1), substring = true)

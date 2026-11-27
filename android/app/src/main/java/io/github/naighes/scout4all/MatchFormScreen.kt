@@ -613,6 +613,7 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                     onSelect = model::chooseTeam,
                 )
             }
+            val choices = remember(state.opponents) { state.opponents.associateBy { it.label() } }
             val opponents = remember(state.opponents) { state.opponents.map { it.label() } }
             SuggestField(
                 form.opponent,
@@ -621,6 +622,9 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 error(MatchField.OPPONENT),
                 onChange = { opponent -> model.change(MatchField.OPPONENT) { it.copy(opponent = opponent) } },
                 onPick = model::pickOpponent,
+                leading = { label ->
+                    choices[label]?.let { TeamPicture(it.team, it.name, 32.dp) }
+                },
             )
             // a name, not a team: it may become one
             if (form.opponent.isNotBlank() && form.opponentTeam == null) {
