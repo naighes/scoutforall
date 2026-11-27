@@ -381,7 +381,7 @@ impl SqliteMatchReader {
     /// unreadable ones are left out, as in the analysis.
     pub async fn read_scouted(&self, team: &TeamEntry) -> Result<Vec<MatchEntry>, AppError> {
         let as_a = self.read_all(team).await?;
-        let as_b = self.db.read(|tx| matches_as_b(tx, team.id))?;
+        let as_b = self.db.read(|tx| matches_scouted_as_b(tx, team.id))?;
         let as_b = as_b.into_iter().filter_map(|(id, a, _)| {
             self.db
                 .read(|tx| read_team(tx, &a))
