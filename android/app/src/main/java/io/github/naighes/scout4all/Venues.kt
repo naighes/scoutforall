@@ -282,18 +282,26 @@ fun VenuesScreen(onBack: () -> Unit, onVenue: (String) -> Unit, onNew: () -> Uni
             null -> Centered(modifier) { CircularProgressIndicator() }
             else -> if (list.isEmpty()) Centered(modifier.padding(16.dp)) { Text(stringResource(R.string.venue_none)) }
             else LazyColumn(modifier, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 88.dp)) {
-                items(list, key = { it.id }) { v ->
-                    ListItem(
-                        modifier = Modifier.clickable { onVenue(v.id) },
-                        headlineContent = { Text(v.name) },
-                        supportingContent = v.address.takeIf { it.isNotBlank() }?.let { { Text(it) } },
-                        trailingContent = if (v.pinned) {
-                            { Icon(Icons.Filled.Star, contentDescription = stringResource(R.string.venue_pinned)) }
-                        } else null,
-                    )
-                }
+                items(list, key = { it.id }) { v -> VenueRow(v) { onVenue(v.id) } }
             }
         }
+    }
+}
+
+@Composable
+private fun VenueRow(v: VenueRecord, onClick: () -> Unit) = BoxRow(
+    onClick = onClick,
+    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+    head = { Initials(v.initials) },
+    tail = {
+        if (v.pinned) {
+            Icon(Icons.Filled.Star, contentDescription = stringResource(R.string.venue_pinned), Modifier.padding(end = 16.dp))
+        }
+    },
+) {
+    Text(v.name, style = MaterialTheme.typography.bodyLarge)
+    if (v.address.isNotBlank()) {
+        Text(v.address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

@@ -491,43 +491,69 @@ impl VenuesScreen {
 
     fn list<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let rows = self.listed.iter().enumerate().map(|(i, v)| {
-            let detail = [v.address.clone()]
-                .into_iter()
-                .filter(|d| !d.is_empty())
-                .collect::<Vec<_>>()
-                .join(" · ");
             row![
-                ui::list_row(
-                    column![
-                        text(format!("{}{}", if v.pinned { "★ " } else { "" }, v.name))
-                            .size(SIZE_BODY)
-                            .font(theme::fonts().bold),
-                        text(detail).size(SIZE_SMALL).color(c.muted),
+                ui::box_row(
+                    ui::initials(v.initials.clone(), c),
+                    row![
+                        Column::new()
+                            .push(
+                                text(v.name.clone())
+                                    .size(SIZE_BODY)
+                                    .font(theme::fonts().bold)
+                            )
+                            // no empty line: the name stays in the middle
+                            .push((!v.address.is_empty()).then(|| {
+                                text(v.address.clone()).size(SIZE_SMALL).color(c.muted)
+                            }))
+                            .spacing(2)
+                            .width(Length::Fill),
+                        text(match v.pinned {
+                            true => "★",
+                            false => "",
+                        })
+                        .size(SIZE_BODY)
+                        .color(c.accent),
                     ]
-                    .spacing(2),
+                    .spacing(10)
+                    .align_y(Alignment::Center),
                     i == self.selected,
-                    Some(Message::Open(i)),
+                    Message::Open(i),
                     c,
                 ),
-                ui::icon_button(theme::icons::EDIT, s.edit_venue, Message::Edit(i), false, c),
-                ui::icon_button(
-                    theme::icons::DELETE,
+                ui::tip(
+                    ui::icon_button(theme::icons::EDIT, s.edit_venue, Message::Edit(i), false, c),
+                    s.edit_venue,
+                    c,
+                ),
+                ui::tip(
+                    ui::icon_button(
+                        theme::icons::DELETE,
+                        s.delete_venue,
+                        Message::Delete(i),
+                        false,
+                        c,
+                    ),
                     s.delete_venue,
-                    Message::Delete(i),
-                    false,
-                    c
+                    c,
                 ),
             ]
-            .spacing(6)
+            .spacing(4)
             .align_y(Alignment::Center)
             .into()
         });
-        let list: Element<'a, Message> = match self.listed.is_empty() {
-            true => ui::body(s.no_venues).color(c.muted).into(),
-            false => scrollable(Column::with_children(rows).spacing(3))
+        let list: Element<'a, Message> =
+            match self.listed.is_empty() {
+                true => ui::body(s.no_venues).color(c.muted).into(),
+                // the scrollbar beside the rows, not over their bins
+                false => scrollable(Column::with_children(rows).spacing(4).padding(
+                    iced::Padding {
+                        right: 14.0,
+                        ..iced::Padding::ZERO
+                    },
+                ))
                 .height(Length::Fill)
                 .into(),
-        };
+            };
         container(
             container(ui::panel_with(
                 s.venues,
@@ -759,6 +785,14 @@ mod tests {
             screen.listed.iter().map(|v| v.name.clone()).collect()
         };
         assert_eq!(names(&screen), vec!["Montecchio", "Terontola"]);
+        assert_eq!(
+            screen
+                .listed
+                .iter()
+                .map(|v| v.initials.as_str())
+                .collect::<Vec<_>>(),
+            vec!["M", "T"]
+        );
         // the key of the pin says what it does to the one chosen
         let pin_hint = |screen: &VenuesScreen| -> String {
             screen

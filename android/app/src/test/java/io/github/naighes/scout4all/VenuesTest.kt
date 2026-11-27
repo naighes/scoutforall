@@ -109,6 +109,10 @@ class VenuesTest {
         core { it.setVenuePinned(z, true) }
         rule.setContent { Scout4AllTheme { VenuesScreen(onBack = {}, onVenue = {}, onNew = {}) } }
         rule.waitForText("Zagabria")
+        // the initials at the head of each row
+        listOf("Z" to "Zagabria", "A" to "Arezzo", "T" to "Terontola").forEach { (initials, name) ->
+            rule.onNode(hasText(initials) and hasText(name) and hasClickAction()).assertExists()
+        }
         assertEquals(listOf("Zagabria", "Arezzo", "Terontola"), core { it.venues() }.map { it.name })
         assertNull(core { it.venue(a) }.latitude)
     }

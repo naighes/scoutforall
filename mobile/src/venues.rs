@@ -9,6 +9,7 @@ use super::{
 };
 use scout4all_core::{
     errors::AppError,
+    names,
     providers::sqlite::{persons::SqlitePersons, venues::SqliteVenues},
     training::{
         agenda::Period,
@@ -26,6 +27,8 @@ use uuid::Uuid;
 pub struct VenueRecord {
     pub id: String,
     pub name: String,
+    /// of the name, at the head of its row
+    pub initials: String,
     pub address: String,
     pub map_url: String,
     pub latitude: Option<f64>,
@@ -40,6 +43,7 @@ pub(crate) fn venue_record(v: &Venue) -> VenueRecord {
     VenueRecord {
         id: v.id.to_string(),
         name: v.name.clone(),
+        initials: names::initials(&v.name),
         address: v.address.clone(),
         map_url: v.map_url.clone(),
         latitude: v.coordinates.map(|(lat, _)| lat),
