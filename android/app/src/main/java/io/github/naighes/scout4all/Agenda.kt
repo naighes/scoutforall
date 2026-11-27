@@ -1,12 +1,12 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -16,8 +16,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,7 +25,9 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -170,7 +170,8 @@ internal fun DayHeader(date: LocalDate, today: Boolean) = Text(
 internal fun fullDayText(date: LocalDate): String =
     date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(java.util.Locale.getDefault()))
 
-/** A session or a match: the time, what, where; the match opens. */
+/** A session or a match: the time at its head over the icon, what, where,
+ * the score of a match at its tail; a touch opens it. */
 @Composable
 internal fun EventRow(
     e: AgendaEventRecord,
@@ -181,67 +182,81 @@ internal fun EventRow(
     unrecorded: Boolean = false,
     mark: Pair<Boolean, () -> Unit>? = null,
 ) {
-    // on today's background the rows are clear, to let it show
-    val colors = if (lit) ListItemDefaults.colors(containerColor = Color.Transparent) else ListItemDefaults.colors()
-    val time = e.start.substringAfter('T', "").take(5)
-    when (val i = e.item) {
-        is AgendaItemRecord.Session -> {
-            val cancelled = i.status == SessionStatus.CANCELLED
-            ListItem(
-                colors = colors,
-                modifier = Modifier.clickable { onSession(e.teamId, i.id) },
-                overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam && i.title.isNotBlank() }).joinToString(" · ")) },
-                headlineContent = {
-                    Text(
-                        i.title.ifBlank { e.teamName },
-                        textDecoration = if (cancelled) TextDecoration.LineThrough else null,
-                    )
-                },
-                supportingContent = {
-                    val note = when {
-                        cancelled -> stringResource(R.string.agenda_cancelled)
-                        i.toClose -> stringResource(R.string.agenda_to_close)
-                        else -> null
-                    }
-                    val missing = stringResource(R.string.tr_attendance_not_recorded).takeIf { unrecorded }
-                    val line = listOfNotNull(e.venueText(), note, missing).joinToString(" · ")
-                    if (line.isNotEmpty()) Text(line, color = e.clashColor())
-                },
-                // the box on the right: the rows without it (matches,
-                // sessions already in a microcycle) stay aligned
-                trailingContent = if (e.sharedVenue || mark != null) {
-                    {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (e.sharedVenue) ClashMark()
-                            mark?.let { (marked, toggle) -> MarkBox(i.title.ifBlank { e.teamName }, marked, toggle) }
-                        }
-                    }
-                } else null,
+    val item = e.item
+    val session = item as? AgendaItemRecord.Session
+    val cancelled = session?.status == SessionStatus.CANCELLED
+    val title = when (item) {
+        is AgendaItemRecord.Session -> item.title.ifBlank { e.teamName }
+        is AgendaItemRecord.Match -> item.opponent
+    }
+    // a session without a title is already called by its team
+    val team = e.teamName.takeIf { withTeam && session?.title?.isBlank() != true }
+    val note = when {
+        cancelled -> stringResource(R.string.agenda_cancelled)
+        session?.toClose == true -> stringResource(R.string.agenda_to_close)
+        else -> null
+    }
+    val missing = stringResource(R.string.tr_attendance_not_recorded).takeIf { unrecorded }
+    val detail = listOfNotNull(e.venueText(), note, missing).joinToString(" · ")
+    BoxRow(
+        onClick = {
+            when (item) {
+                is AgendaItemRecord.Session -> onSession(e.teamId, item.id)
+                is AgendaItemRecord.Match -> onMatch(e.teamId, item.id)
+            }
+        },
+        // today's block has a margin of its own: the rows stay aligned
+        modifier = Modifier.padding(horizontal = if (lit) 4.dp else 12.dp, vertical = 4.dp),
+        head = { EventHead(e.start.substringAfter('T', "").take(5), session != null) },
+        tail = { EventTail(e, title, mark) },
+    ) {
+        team?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyLarge,
+            textDecoration = if (cancelled) TextDecoration.LineThrough else null,
+        )
+        if (detail.isNotEmpty()) {
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodyMedium,
+                color = e.clashColor().takeOrElse { MaterialTheme.colorScheme.onSurfaceVariant },
             )
         }
-        is AgendaItemRecord.Match -> ListItem(
-            colors = colors,
-            modifier = Modifier.clickable { onMatch(e.teamId, i.id) },
-            overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam }).joinToString(" · ")) },
-            headlineContent = { Text(i.opponent) },
-            supportingContent = e.venueText()?.let { { Text(it, color = e.clashColor()) } },
-            trailingContent = {
-                if (e.sharedVenue) ClashMark()
-                val ours = i.ours
-                val theirs = i.theirs
-                if (i.played && ours != null && theirs != null) {
-                    Text(
-                        "$ours–$theirs",
-                        Modifier.readAs(stringResource(R.string.sets_score, ours.toInt(), theirs.toInt())),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = resultColor(true, ours.toInt(), theirs.toInt()),
-                    )
-                }
-            },
-        )
     }
 }
+
+/** The time of an event over the icon that tells a session from a match. */
+@Composable
+private fun EventHead(time: String, session: Boolean) = Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Text(time, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    Icon(
+        painterResource(if (session) R.drawable.ic_calendar else R.drawable.ic_ball),
+        contentDescription = null,
+        Modifier.size(20.dp),
+        tint = if (session) MaterialTheme.colorScheme.primary else BreakPoint,
+    )
+}
+
+/** The sign of a shared gym, the box of a free session, the score. */
+@Composable
+private fun EventTail(e: AgendaEventRecord, title: String, mark: Pair<Boolean, () -> Unit>?) =
+    Row(Modifier.padding(end = if (mark == null) 12.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (e.sharedVenue) ClashMark()
+        mark?.let { (marked, toggle) -> MarkBox(title, marked, toggle) }
+        val match = e.item as? AgendaItemRecord.Match
+        val ours = match?.ours
+        val theirs = match?.theirs
+        if (match?.played == true && ours != null && theirs != null) {
+            Text(
+                "$ours–$theirs",
+                Modifier.padding(start = 8.dp).readAs(stringResource(R.string.sets_score, ours.toInt(), theirs.toInt())),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = resultColor(true, ours.toInt(), theirs.toInt()),
+            )
+        }
+    }
 
 /** The name of the gym of an event, "deleted gym" for a removed one. */
 @Composable

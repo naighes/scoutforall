@@ -1323,21 +1323,27 @@ impl CalendarTab {
                 c,
             );
             let events = Column::with_children(day.events.iter().enumerate().map(|(i, e)| {
-                event_card(
-                    e,
-                    s,
-                    c,
-                    Look {
-                        compact: false,
-                        with_team: self.all_teams,
-                        chosen: date == self.anchor && i == self.slot,
-                        span: true,
-                        unrecorded: self.unrecorded(e),
-                    },
-                    Some(Message::Event(date, i)),
-                    self.mark_of(e),
-                    LIST_EVENT,
-                )
+                let told = crate::agenda::Told {
+                    with_team: self.all_teams,
+                    // the end of a session; a match is told by its start
+                    times: matches!(e.item, AgendaItemRecord::Session { .. })
+                        .then(|| crate::calendar::time_span(&e.start, e.minutes)),
+                    unrecorded: self.unrecorded(e),
+                };
+                let chosen = date == self.anchor && i == self.slot;
+                let boxed =
+                    crate::agenda::event_box(e, s, c, told, chosen, Message::Event(date, i));
+                // a place for the mark in every row: they stay aligned
+                row![
+                    boxed,
+                    container(match self.mark_of(e) {
+                        Some((marked, toggle)) => mark_button(marked, toggle, LIST_MARK_SIZE, c),
+                        None => space::horizontal().width(0).into(),
+                    })
+                    .width(Length::Fixed(LIST_MARK))
+                ]
+                .align_y(Alignment::Center)
+                .into()
             }))
             .spacing(3)
             .width(Length::Fill);
@@ -1574,8 +1580,6 @@ impl CalendarTab {
                         compact: tall < TWO_LINES,
                         with_team: self.all_teams,
                         chosen: here && i == self.slot,
-                        span: false,
-                        unrecorded: false,
                     },
                     date.map(|d| Message::Event(d, i)),
                     self.mark_of(event),
@@ -1682,8 +1686,6 @@ impl CalendarTab {
                     compact: true,
                     with_team: self.all_teams,
                     chosen: false,
-                    span: false,
-                    unrecorded: false,
                 },
                 Some(Message::Event(day, i)),
                 self.mark_of(e),
@@ -1739,8 +1741,10 @@ const MONTH_EVENT: f32 = 20.0;
 /// The height of a day of the month.
 const CELL_HEIGHT: f32 = 112.0;
 
-/// The height of an event in the list: room for its details.
-const LIST_EVENT: f32 = 44.0;
+/// The width of the place of the mark beside an event of the list.
+const LIST_MARK: f32 = 30.0;
+/// The size of that mark: as large as the rows ask.
+const LIST_MARK_SIZE: f32 = 22.0;
 
 /// The width of the date on the left of the list.
 const LIST_DATE: f32 = 96.0;
@@ -1753,10 +1757,6 @@ struct Look {
     with_team: bool,
     /// the one of the cursor
     chosen: bool,
-    /// the time it ends too (the list, where its height doesn't tell)
-    span: bool,
-    /// a completed session whose attendance isn't written
-    unrecorded: bool,
 }
 
 /// The date of a day of the list: a click chooses it, the one of the
@@ -1774,13 +1774,13 @@ fn button_day<'a>(
 
 /// The box of a free session in its event: a click marks it (the event
 /// itself opens the session).
-fn mark_button<'a>(marked: bool, message: Message, c: Colors) -> Element<'a, Message> {
+fn mark_button<'a>(marked: bool, message: Message, size: f32, c: Colors) -> Element<'a, Message> {
     iced::widget::button(
         text(match marked {
             true => "☑",
             false => "☐",
         })
-        .size(SIZE_SMALL),
+        .size(size),
     )
     .padding(Padding::from([0, 2]))
     .on_press(message)
@@ -1851,7 +1851,7 @@ fn event_card<'a>(
     let inside: Element<'a, Message> = match mark {
         Some((marked, toggle)) => row![
             stripe,
-            container(mark_button(marked, toggle, c))
+            container(mark_button(marked, toggle, SIZE_SMALL, c))
                 .padding(Padding::ZERO.left(2))
                 .height(Length::Fill)
                 .align_y(Alignment::Center),
@@ -1900,10 +1900,7 @@ fn event_text<'a>(
     look: &Look,
 ) -> Element<'a, Message> {
     let (compact, with_team) = (look.compact, look.with_team);
-    let time = match look.span {
-        true => crate::calendar::time_span(&event.start, event.minutes),
-        false => event.start.get(11..16).unwrap_or_default().to_string(),
-    };
+    let time = event.start.get(11..16).unwrap_or_default().to_string();
     let (icon, color, title, detail) = match &event.item {
         AgendaItemRecord::Session {
             title,
@@ -1917,9 +1914,6 @@ fn event_text<'a>(
             }
             if *to_close {
                 flags.push(s.to_close.to_string());
-            }
-            if look.unrecorded {
-                flags.push(s.attendance_not_recorded.to_string());
             }
             (
                 theme::icons::CALENDAR,

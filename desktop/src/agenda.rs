@@ -335,74 +335,132 @@ fn event_row<'a>(
     chosen: bool,
     index: usize,
 ) -> Element<'a, Message> {
+    let told = Told {
+        with_team,
+        times: None,
+        unrecorded: false,
+    };
+    event_box(event, s, c, told, chosen, Message::Row(index))
+}
+
+/// What the box of an event tells besides the event itself.
+pub struct Told {
+    /// the name of its team (the events of all the teams)
+    pub with_team: bool,
+    /// when it starts and ends, where the end matters
+    pub times: Option<String>,
+    /// a completed session whose attendance isn't written
+    pub unrecorded: bool,
+}
+
+/// An event of a list: the time at its head over the icon (a session and a
+/// match apart by it and by its color), what and where, the score of a
+/// match and the sign of a gym held by two teams at its tail.
+pub fn event_box<'a, M: Clone + 'a>(
+    event: &AgendaEventRecord,
+    s: &'static Strings,
+    c: Colors,
+    told: Told,
+    chosen: bool,
+    message: M,
+) -> Element<'a, M> {
     let bold = theme::fonts().bold;
     let time = event.start.get(11..16).unwrap_or_default().to_string();
-    let (icon, title, detail, trailing) = match &event.item {
+    let (icon, color, title, flags, score, cancelled) = match &event.item {
         AgendaItemRecord::Session {
             title,
             status,
             to_close,
             ..
         } => {
-            let mut flags = vec![];
-            if *status == SessionStatus::Cancelled {
-                flags.push(s.cancelled.to_string());
-            }
-            if *to_close {
-                flags.push(s.to_close.to_string());
-            }
+            let cancelled = *status == SessionStatus::Cancelled;
+            let flags = [
+                cancelled.then_some(s.cancelled),
+                to_close.then_some(s.to_close),
+                told.unrecorded.then_some(s.attendance_not_recorded),
+            ];
             (
                 theme::icons::CALENDAR,
+                c.accent,
                 title.clone(),
-                [event
-                    .venue
-                    .as_ref()
-                    .map(|v| crate::venue_choice::venue_label(s, &v.name, v.deleted))
-                    .unwrap_or_default()]
-                .into_iter()
-                .chain(flags)
-                .filter(|d| !d.is_empty())
-                .collect::<Vec<_>>(),
-                String::new(),
+                flags.into_iter().flatten().collect::<Vec<_>>(),
+                None,
+                cancelled,
             )
         }
         AgendaItemRecord::Match {
             opponent,
             ours,
             theirs,
+            played,
             ..
         } => (
             theme::icons::VOLLEYBALL,
+            c.break_point,
             format!("– {opponent}"),
             vec![],
-            match (ours, theirs) {
-                (Some(o), Some(t)) => format!("{o}–{t}"),
-                _ => String::new(),
-            },
+            // won or lost in its color, once over
+            ours.zip(*theirs)
+                .map(|(o, t)| (format!("{o}–{t}"), ui::score_color(o, t, *played, c))),
+            false,
         ),
     };
-    let heading = heading(event, title, with_team);
-    let body = row![
-        ui::icon(icon, 18.0, c.muted),
-        column![
-            text(heading).size(SIZE_BODY).font(bold),
-            text(
-                [time]
-                    .into_iter()
-                    .chain(detail)
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-            )
-            .size(SIZE_SMALL)
-            .color(c.muted),
-        ]
-        .spacing(1)
-        .width(Length::Fill),
-        text(trailing).size(SIZE_BODY).font(bold),
+    let head = column![
+        text(time).size(SIZE_SMALL).font(bold),
+        ui::icon(icon, 16.0, color),
     ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-    ui::list_row(body, chosen, Some(Message::Row(index)), c)
+    .spacing(2)
+    .align_x(Alignment::Center);
+    // another team holds the gym then: the error color and an icon
+    let shared = event.shared_venue && !cancelled;
+    let detail = told
+        .times
+        .into_iter()
+        .chain(
+            event
+                .venue
+                .as_ref()
+                .map(|v| crate::venue_choice::venue_label(s, &v.name, v.deleted)),
+        )
+        .chain(flags.into_iter().map(str::to_string))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let what = Column::new()
+        .push(
+            text(heading(event, title, told.with_team))
+                .size(SIZE_BODY)
+                .font(bold)
+                .color(match cancelled {
+                    true => c.muted,
+                    false => c.text,
+                }),
+        )
+        // no empty line: the title stays in the middle
+        .push((!detail.is_empty()).then(|| {
+            text(detail).size(SIZE_SMALL).color(match shared {
+                true => c.danger,
+                false => c.muted,
+            })
+        }))
+        .spacing(1)
+        .width(Length::Fill);
+    let body = row![what]
+        .push(shared.then(|| {
+            ui::tip(
+                ui::icon(theme::icons::WARNING, 16.0, c.danger),
+                s.venue_busy_mark,
+                c,
+            )
+        }))
+        .push(score.map(|(score, color)| {
+            text(score)
+                .size(crate::theme::SIZE_TITLE)
+                .font(bold)
+                .color(color)
+        }))
+        .spacing(8)
+        .align_y(Alignment::Center);
+    ui::box_row(head, body, chosen, message, c)
 }
 
 #[cfg(test)]
