@@ -617,6 +617,55 @@ mod tests {
         assert_eq!(rows(&db), 0);
     }
 
+    /// A finished match whose row a write of the team forgot is over in the
+    /// agenda, with its score, not in progress: the agenda writes the row
+    /// again.
+    #[tokio::test]
+    async fn the_agenda_writes_again_the_row_a_team_forgot() {
+        use crate::{
+            providers::{sqlite::training::SqliteTraining, training_agenda::TrainingAgenda},
+            training::agenda::{AgendaItem, MatchState, Period},
+        };
+        let db = database();
+        let (team, m) = finished_match().await;
+        let p = sqlite(&db);
+        p.team_writer
+            .save(TeamInput::Existing(team.clone()))
+            .await
+            .unwrap();
+        let new = scout_again(&p, &team, &m).await;
+        let over = p.match_reader.read_summaries(&team).await.unwrap();
+        let Some(Ok(over)) = over.first() else {
+            panic!("the match listed: {over:?}");
+        };
+        assert!(over.finished);
+        p.team_writer
+            .save(TeamInput::Existing(team.clone()))
+            .await
+            .unwrap();
+        assert_eq!(rows(&db), 0);
+
+        let training = SqliteTraining::new(db.clone());
+        let day = new.date.date_naive();
+        let events = training
+            .agenda(
+                Some(&team.id),
+                Period::day(day),
+                day.and_hms_opt(23, 0, 0).unwrap(),
+            )
+            .await
+            .unwrap();
+        let states: Vec<MatchState> = events
+            .iter()
+            .filter_map(|e| match e.item {
+                AgendaItem::Match { state, .. } => Some(state),
+                AgendaItem::Session { .. } => None,
+            })
+            .collect();
+        assert_eq!(states, [MatchState::Over(over.us_wins, over.them_wins)]);
+        assert_eq!(rows(&db), 1);
+    }
+
     /// The opponent is the name of team B as the match reads it: when B is
     /// a team, its name now, also when the team is renamed after the row
     /// was written.

@@ -1,11 +1,12 @@
 //! The agenda of a team, or of all, from the tables: the matches are read
-//! as rows of `matches` and a summary, never replayed.
+//! as rows of `matches` and a summary, replayed only when the summary is
+//! missing (forgotten by an edit of the team, say), to be written again.
 
 use crate::{
     domain::sql::Sql,
     errors::AppError,
     providers::{
-        sqlite::{sqlite, training::SqliteTraining, venues::occupations},
+        sqlite::{sqlite, summary, training::SqliteTraining, venues::occupations},
         training_agenda::TrainingAgenda,
     },
     training::{
@@ -91,6 +92,25 @@ struct MatchRow {
     span: Option<(NaiveDateTime, NaiveDateTime)>,
     venue: Option<VenueRef>,
     friendly: bool,
+}
+
+/// The matches of the period with sets and no summary.
+fn unsummarized(tx: &Transaction, period: &Period) -> Result<Vec<Uuid>, AppError> {
+    tx.prepare(
+        "SELECT m.id FROM matches m
+         WHERE m.deleted = 0
+           AND substr(m.start, 1, 10) >= ?1 AND substr(m.start, 1, 10) < ?2
+           AND EXISTS (SELECT 1 FROM sets s WHERE s.match_id = m.id AND s.deleted = 0)
+           AND NOT EXISTS (SELECT 1 FROM match_summary ms WHERE ms.match_id = m.id)",
+    )
+    .and_then(|mut statement| {
+        statement
+            .query_map(params![Sql(period.from), Sql(period.to)], |row| {
+                row.get::<_, Sql<Uuid>>(0).map(|id| id.0)
+            })?
+            .collect::<Result<_, _>>()
+    })
+    .map_err(sqlite)
 }
 
 fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError> {
@@ -216,6 +236,14 @@ impl TrainingAgenda for SqliteTraining {
         period: Period,
         now: NaiveDateTime,
     ) -> Result<Vec<AgendaEvent>, AppError> {
+        // a match played without its summary would read as in progress
+        let missing = self.db().read(|tx| unsummarized(tx, &period))?;
+        match missing.is_empty() {
+            true => Ok(()),
+            false => self
+                .db()
+                .write(|tx| missing.iter().try_for_each(|id| summary::refresh(tx, *id))),
+        }?;
         self.db().read(|tx| {
             let mut events = sessions(tx, team_id, &period, now)?;
             events.extend(match_events(&matches(tx, &period)?, team_id));
