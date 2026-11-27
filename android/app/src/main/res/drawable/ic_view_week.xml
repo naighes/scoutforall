@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The week: three days side by side. As desktop/assets/icons/view_week.svg. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000" android:fillType="evenOdd"
+        android:pathData="M6,3h12a3,3 0,0 1,3,3v12a3,3 0,0 1,-3,3h-12a3,3 0,0 1,-3,-3v-12a3,3 0,0 1,3,-3zM6.0,4.5h12.0a1.5,1.5 0,0 1,1.5,1.5v12.0a1.5,1.5 0,0 1,-1.5,1.5h-12.0a1.5,1.5 0,0 1,-1.5,-1.5v-12.0a1.5,1.5 0,0 1,1.5,-1.5zM7.25,8h1.5v8h-1.5zM11.25,8h1.5v8h-1.5zM15.25,8h1.5v8h-1.5z" />
+</vector>

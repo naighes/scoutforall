@@ -228,6 +228,11 @@ pub const WORDMARK: &[u8] = include_bytes!("../assets/wordmark.svg");
 
 /// The icons, the ones of the Android app (`assets/icons`).
 pub mod icons {
+    pub const VIEW_WEEK: &[u8] = include_bytes!("../assets/icons/view_week.svg");
+    pub const VIEW_MONTH: &[u8] = include_bytes!("../assets/icons/view_month.svg");
+    pub const VIEW_LIST: &[u8] = include_bytes!("../assets/icons/view_list.svg");
+    pub const THIS_TEAM: &[u8] = include_bytes!("../assets/icons/this_team.svg");
+    pub const ALL_TEAMS: &[u8] = include_bytes!("../assets/icons/all_teams.svg");
     pub const HOME: &[u8] = include_bytes!("../assets/icons/home.svg");
     pub const AWAY: &[u8] = include_bytes!("../assets/icons/away.svg");
     pub const BACK: &[u8] = include_bytes!("../assets/icons/back.svg");

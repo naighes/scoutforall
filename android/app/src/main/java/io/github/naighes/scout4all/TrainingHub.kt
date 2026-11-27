@@ -1,6 +1,11 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.foundation.background
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -418,59 +423,36 @@ private fun CalendarTab(
             }
         }
     }
+    // the views, a separator, then whose and where: each an icon over its
+    // name, as the bar of the calendars of the mail
     val views: @Composable () -> Unit = {
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            FilterChip(
-                selected = view == CalendarView.WEEK,
-                onClick = { onView(CalendarView.WEEK) },
-                label = { Text(stringResource(R.string.tr_calendar_week)) },
-            )
-            FilterChip(
-                selected = view == CalendarView.MONTH,
-                onClick = {
-                    month = YearMonth.from(selected)
-                    onView(CalendarView.MONTH)
-                },
-                label = { Text(stringResource(R.string.tr_calendar_month)) },
-            )
-            FilterChip(
-                selected = view == CalendarView.LIST,
-                onClick = { onView(CalendarView.LIST) },
-                label = { Text(stringResource(R.string.tr_calendar_list)) },
-            )
-            if (view == CalendarView.LIST) {
-                Box {
-                    FilterChip(
-                        selected = period != ListPeriod.ANY,
-                        onClick = { periods = true },
-                        label = { Text(period.label()) },
-                    )
-                    androidx.compose.material3.DropdownMenu(expanded = periods, onDismissRequest = { periods = false }) {
-                        ListPeriod.entries.forEach { p ->
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(p.label()) },
-                                onClick = { period = p; periods = false },
-                            )
-                        }
-                    }
-                }
+            BarItem(R.drawable.ic_view_week, stringResource(R.string.tr_calendar_week), view == CalendarView.WEEK) {
+                onView(CalendarView.WEEK)
             }
-            FilterChip(
-                selected = allTeams,
-                onClick = { allTeams = !allTeams },
-                label = { Text(stringResource(if (allTeams) R.string.venue_all_teams else R.string.venue_this_team)) },
-            )
+            BarItem(R.drawable.ic_view_month, stringResource(R.string.tr_calendar_month), view == CalendarView.MONTH) {
+                month = YearMonth.from(selected)
+                onView(CalendarView.MONTH)
+            }
+            BarItem(R.drawable.ic_view_list, stringResource(R.string.tr_calendar_list), view == CalendarView.LIST) {
+                onView(CalendarView.LIST)
+            }
+            VerticalDivider(Modifier.height(40.dp).align(Alignment.CenterVertically))
+            BarItem(
+                if (allTeams) R.drawable.ic_all_teams else R.drawable.ic_this_team,
+                stringResource(if (allTeams) R.string.venue_all_teams else R.string.venue_this_team),
+                allTeams,
+            ) { allTeams = !allTeams }
             if (venues.isNotEmpty()) {
                 Box {
-                    FilterChip(
-                        selected = venue != null,
-                        onClick = { picking = true },
-                        label = { Text(venues.firstOrNull { it.id == venue }?.name ?: stringResource(R.string.venue_all)) },
-                    )
+                    BarItem(
+                        R.drawable.ic_gym,
+                        venues.firstOrNull { it.id == venue }?.name ?: stringResource(R.string.venue_all),
+                        venue != null,
+                    ) { picking = true }
                     androidx.compose.material3.DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(stringResource(R.string.venue_all)) },
@@ -555,13 +537,36 @@ private fun CalendarTab(
             CalendarView.LIST -> {
                 // only the days with something, the filter too
                 val days = shown(listDays).filter { it.events.isNotEmpty() }
+                // the period is not a view: it heads the list it bounds
                 item(key = "count") {
-                    Text(
-                        countText(null, days.sumOf { d -> d.events.count { it.item is AgendaItemRecord.Session } }),
-                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box {
+                            FilterChip(
+                                selected = period != ListPeriod.ANY,
+                                onClick = { periods = true },
+                                label = { Text(period.label()) },
+                            )
+                            androidx.compose.material3.DropdownMenu(expanded = periods, onDismissRequest = { periods = false }) {
+                                ListPeriod.entries.forEach { p ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(p.label()) },
+                                        onClick = { period = p; periods = false },
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            countText(null, days.sumOf { d -> d.events.count { it.item is AgendaItemRecord.Session } }),
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                        )
+                    }
                 }
                 if (days.isEmpty()) {
                     item(key = "nothing") {
@@ -579,6 +584,33 @@ private fun CalendarTab(
                 }
             }
         }
+    }
+}
+
+/** A choice of the calendar's bar: the icon over its name, lit when
+ * chosen. A long name goes on a second line, then is cut. */
+@Composable
+private fun BarItem(icon: Int, label: String, chosen: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val color = if (chosen) colors.onSecondaryContainer else colors.onSurfaceVariant
+    Column(
+        Modifier
+            .widthIn(min = 64.dp, max = 88.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(if (chosen) colors.secondaryContainer else colors.surface)
+            .selectable(selected = chosen, onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(androidx.compose.ui.res.painterResource(icon), contentDescription = null, tint = color)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

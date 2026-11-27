@@ -159,6 +159,45 @@ pub fn icon_pill<'a, M: Clone + 'a>(
     )
 }
 
+/// A choice of a bar with its icon over its words, as in the calendars of
+/// the mail: filled when chosen.
+pub fn bar_item<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    chosen: bool,
+    message: M,
+    c: Colors,
+) -> Element<'a, M> {
+    let color = match chosen {
+        true => c.on_accent,
+        false => c.text,
+    };
+    button(
+        column![
+            icon(icon_bytes, 22.0, color),
+            text(label.to_string()).size(SIZE_SMALL)
+        ]
+        .spacing(2)
+        .align_x(Alignment::Center),
+    )
+    .padding(Padding::from([4, 10]))
+    .on_press(message)
+    .style(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: match (chosen, hovered) {
+                (true, _) => Some(c.accent.into()),
+                (false, true) => Some(c.button.into()),
+                (false, false) => None,
+            },
+            text_color: color,
+            border: border(Color::TRANSPARENT, 0.0, 8.0),
+            ..button::Style::default()
+        }
+    })
+    .into()
+}
+
 fn pill_of<'a, M: Clone + 'a>(
     content: Element<'a, M>,
     chosen: bool,

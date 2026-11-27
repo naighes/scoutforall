@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasAnyAncestor
@@ -477,6 +478,21 @@ class TrainingScreensTest {
         rule.waitFor({ "still planned" }) { rule.onAllNodes(hasText("Ricezione")).fetchSemanticsNodes().isEmpty() }
         rule.onNode(hasText("Battuta")).assertExists()
         assertEquals(first, core { it.trainingSessions(team) }.first { s -> s.title == "Ricezione" }.id)
+    }
+
+    /** The period is not a view of the bar: it heads the list, under the
+     * filters, and only there. */
+    @Test
+    fun thePeriodHeadsTheListUnderTheFilters() {
+        session(testDay().plusDays(1), "Ricezione")
+        hub(Part.CALENDAR)
+        rule.waitForText(string(R.string.agenda_today))
+        assertEquals(0, rule.onAllNodes(hasText(string(R.string.tr_period_any))).fetchSemanticsNodes().size)
+        press(string(R.string.tr_calendar_list))
+        rule.waitForText("Ricezione")
+        rule.onNode(hasText(string(R.string.tr_calendar_list)) and hasClickAction()).assertIsSelected()
+        val top = { text: Int -> rule.onNode(hasText(string(text)) and hasClickAction()).fetchSemanticsNode().boundsInRoot }
+        assertTrue(top(R.string.tr_period_any).top >= top(R.string.tr_events_all).bottom)
     }
 
     /** What is to close is in the past: the list looks at any date for it,

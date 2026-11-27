@@ -27,7 +27,7 @@ use {
     chrono::{Datelike, Days, Duration, Months, NaiveDate, NaiveTime},
     iced::{
         Alignment, Background, Element, Length, Padding,
-        widget::{Column, Id, Row, column, container, row, scrollable, space, text},
+        widget::{Column, Id, Row, column, container, row, rule, scrollable, space, text},
     },
     scout4all_core::{
         training::SessionStatus,
@@ -1145,33 +1145,51 @@ impl CalendarTab {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let mut controls: Vec<Element<'a, Message>> = [
-            (View::Week, s.week),
-            (View::Month, s.calendar_month),
-            (View::List, s.calendar_list),
+        // the views, a separator, then whose and where
+        let mut bar: Vec<Element<'a, Message>> = [
+            (View::Week, theme::icons::VIEW_WEEK, s.week),
+            (View::Month, theme::icons::VIEW_MONTH, s.calendar_month),
+            (View::List, theme::icons::VIEW_LIST, s.calendar_list),
         ]
         .into_iter()
-        .map(|(view, label)| ui::pill(label, self.view == view, Some(Message::View(view)), c))
+        .map(|(view, icon, label)| {
+            ui::bar_item(icon, label, self.view == view, Message::View(view), c)
+        })
         .collect();
-        // the list holds a period of its own, chosen below: nothing to move
+        bar.push(
+            container(rule::vertical(1))
+                .height(Length::Fixed(34.0))
+                .padding([0, 6])
+                .into(),
+        );
+        let (whose_icon, whose) = match self.all_teams {
+            true => (theme::icons::ALL_TEAMS, s.all_teams),
+            false => (theme::icons::THIS_TEAM, s.this_team),
+        };
+        bar.push(ui::bar_item(
+            whose_icon,
+            whose,
+            self.all_teams,
+            Message::AllTeams,
+            c,
+        ));
+        // without gyms there is nothing to filter by
+        if !self.venues.is_empty() {
+            bar.push(ui::bar_item(
+                theme::icons::GYM,
+                self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
+                self.venue.is_some(),
+                Message::NextVenue,
+                c,
+            ));
+        }
+        let mut controls: Vec<Element<'a, Message>> = Vec::new();
+        // the list holds a period of its own, at its head: nothing to move
         let moves = match self.view {
             View::Week => Some((s.previous_week, s.next_week)),
             View::Month => Some((s.previous_month, s.next_month)),
             View::List => None,
         };
-        // one pill that goes round the periods: the row has room for it
-        if self.view == View::List {
-            controls.push(ui::tip(
-                ui::pill(
-                    period_name(s, self.period),
-                    self.period != Period::Any,
-                    Some(Message::NextPeriod),
-                    c,
-                ),
-                s.period,
-                c,
-            ));
-        }
         if let Some((previous, next)) = moves {
             controls.extend([
                 ui::tip(
@@ -1193,9 +1211,8 @@ impl CalendarTab {
         controls.push(space::horizontal().width(Length::Fill).into());
         controls.push(ui::pill(s.new_session, false, Some(Message::New), c));
         controls.push(ui::pill(s.new_match, false, Some(Message::NewMatch), c));
-        // the filter in every view, then whose and where (a row that goes
-        // on below when it's narrow); the count of the list; the
-        // microcycle only once sessions are marked
+        // the filter in every view (a row that goes on below when it's
+        // narrow); the microcycle only once sessions are marked
         let mut choices: Vec<Element<'a, Message>> = FILTERS
             .iter()
             .map(|f| {
@@ -1207,40 +1224,6 @@ impl CalendarTab {
                 )
             })
             .collect();
-        choices.push(space::horizontal().width(Length::Fixed(12.0)).into());
-        choices.push(ui::pill(
-            match self.all_teams {
-                true => s.all_teams,
-                false => s.this_team,
-            },
-            self.all_teams,
-            Some(Message::AllTeams),
-            c,
-        ));
-        // without gyms there is nothing to filter by
-        if !self.venues.is_empty() {
-            choices.push(ui::pill(
-                self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
-                self.venue.is_some(),
-                Some(Message::NextVenue),
-                c,
-            ));
-        }
-        if self.view == View::List {
-            let sessions = self
-                .days
-                .iter()
-                .flat_map(|d| &d.events)
-                .filter(|e| matches!(e.item, AgendaItemRecord::Session { .. }))
-                .count();
-            choices.push(space::horizontal().width(Length::Fixed(12.0)).into());
-            choices.push(
-                text(s.count(s.sessions_of, sessions))
-                    .size(SIZE_SMALL)
-                    .color(c.muted)
-                    .into(),
-            );
-        }
         if !self.marked.is_empty() {
             choices.push(ui::pill(
                 &format!("{} ({})", s.create_microcycle, self.marked.len()),
@@ -1255,9 +1238,16 @@ impl CalendarTab {
                 .id(Id::new(MONTH))
                 .height(Length::Fill)
                 .into(),
-            View::List => self.list(s, c),
+            View::List => column![self.list_head(s, c), self.list(s, c)]
+                .spacing(10)
+                .height(Length::Fill)
+                .into(),
         };
         column![
+            Row::with_children(bar)
+                .spacing(4)
+                .align_y(Alignment::Center)
+                .wrap(),
             Row::with_children(controls)
                 .spacing(6)
                 .align_y(Alignment::Center),
@@ -1269,6 +1259,35 @@ impl CalendarTab {
         ]
         .spacing(10)
         .height(Length::Fill)
+        .into()
+    }
+
+    /// The period is not a view: it heads the list it bounds, with its
+    /// count. One pill that goes round the periods.
+    fn list_head<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let sessions = self
+            .days
+            .iter()
+            .flat_map(|d| &d.events)
+            .filter(|e| matches!(e.item, AgendaItemRecord::Session { .. }))
+            .count();
+        row![
+            ui::tip(
+                ui::pill(
+                    period_name(s, self.period),
+                    self.period != Period::Any,
+                    Some(Message::NextPeriod),
+                    c,
+                ),
+                s.period,
+                c,
+            ),
+            text(s.count(s.sessions_of, sessions))
+                .size(SIZE_SMALL)
+                .color(c.muted)
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center)
         .into()
     }
 
