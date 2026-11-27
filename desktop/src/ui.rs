@@ -718,17 +718,6 @@ pub fn team_logo<'a, M: 'a>(logo: &TeamLogo, size: f32, c: Colors) -> Element<'a
     }
 }
 
-/// `team_logo`, an empty box when the team has none: the names line up.
-pub fn team_logo_slot<'a, M: 'a>(logo: Option<&TeamLogo>, size: f32, c: Colors) -> Element<'a, M> {
-    match logo {
-        Some(l) => team_logo(l, size, c),
-        None => space::horizontal()
-            .width(Length::Fixed(size))
-            .height(Length::Fixed(size))
-            .into(),
-    }
-}
-
 /// The box of the logo of a team, empty when it has none: the names line up.
 pub fn logo_slot<'a, M: 'a>(
     handle: Option<&iced::widget::image::Handle>,

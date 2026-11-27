@@ -123,6 +123,16 @@ impl HomeScreen {
         }
     }
 
+    /// The logo of a team of the list.
+    fn logo_of(&self, id: &str) -> Option<&ui::TeamLogo> {
+        self.home
+            .teams
+            .iter()
+            .zip(&self.logos)
+            .find(|(t, _)| matches!(t, TeamListing::Team { id: team, .. } if team == id))
+            .and_then(|(_, logo)| logo.as_ref())
+    }
+
     pub fn focus_id(&self) -> Option<Id> {
         self.editor.as_ref().map(|e| e.focus_id())
     }
@@ -328,6 +338,7 @@ impl HomeScreen {
             .map(|(i, m)| {
                 match_row(
                     m,
+                    self.logo_of(&m.team_id),
                     s,
                     self.is_selected(IN_PROGRESS, i),
                     openable(m).map(Message::Scout),
@@ -343,6 +354,7 @@ impl HomeScreen {
             .map(|(i, m)| {
                 match_row(
                     m,
+                    self.logo_of(&m.team_id),
                     s,
                     self.is_selected(RECENT, i),
                     Some(Message::Match(m.team_id.clone(), m.id.clone())),
@@ -364,10 +376,7 @@ impl HomeScreen {
                     pinned,
                     initials,
                 } => ui::box_row(
-                    match self.logos.get(i).and_then(Option::as_ref) {
-                        Some(logo) => ui::team_logo(logo, 36.0, c),
-                        None => ui::initials(initials.clone(), c),
-                    },
+                    logo_head(self.logos.get(i).and_then(Option::as_ref), initials, c),
                     row![
                         column![
                             ui::body(name.clone()).font(theme::fonts().bold),
@@ -456,33 +465,42 @@ impl HomeScreen {
     }
 }
 
+/// At the head of a box: the logo of the team, or its initials.
+fn logo_head<'a>(logo: Option<&ui::TeamLogo>, initials: &str, c: Colors) -> Element<'a, Message> {
+    match logo {
+        Some(logo) => ui::team_logo(logo, 36.0, c),
+        None => ui::initials(initials.to_string(), c),
+    }
+}
+
 fn match_row<'a>(
     m: &HomeMatch,
+    logo: Option<&ui::TeamLogo>,
     s: &'static Strings,
     selected: bool,
     message: Option<Message>,
     c: Colors,
 ) -> Element<'a, Message> {
+    // what a match not over goes on with
     let next = match m.next {
-        NextSetKind::Resume { set_number } => format!("{} · {} {set_number}", s.resume, s.set_n),
-        NextSetKind::Start { set_number } => format!("{} · {} {set_number}", s.start, s.set_n),
-        NextSetKind::Over => s.match_over.to_string(),
+        NextSetKind::Resume { set_number } => {
+            Some(format!("{} · {} {set_number}", s.resume, s.set_n))
+        }
+        NextSetKind::Start { set_number } => {
+            Some(format!("{} · {} {set_number}", s.start, s.set_n))
+        }
+        NextSetKind::Over => None,
     };
     let bold = theme::fonts().bold;
+    // the opponent first, as on Android: the head already tells the team
     let body = row![
         column![
-            row![
-                text(m.team_name.clone()).size(SIZE_BODY).font(bold),
-                text(format!("– {}", m.opponent))
-                    .size(SIZE_BODY)
-                    .color(c.muted),
-            ]
-            .spacing(6)
-            .wrap(),
-            text(format!("{} · {next}", s.day(&m.date)))
+            ui::body(m.opponent.clone()).font(bold),
+            text(format!("{} · {}", m.team_name, s.day(&m.date)))
                 .size(SIZE_SMALL)
                 .color(c.muted),
         ]
+        .push(next.map(|next| text(next).size(SIZE_SMALL).color(c.accent)))
         .spacing(2)
         .width(Length::Fill),
         text(format!("{}–{}", m.won, m.lost))
@@ -497,7 +515,13 @@ fn match_row<'a>(
     ]
     .align_y(Alignment::Center)
     .spacing(10);
-    ui::list_row(body, selected, message, c)
+    ui::box_row(
+        logo_head(logo, &m.team_initials, c),
+        body,
+        selected,
+        message,
+        c,
+    )
 }
 
 fn list<'a>(

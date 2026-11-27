@@ -136,6 +136,19 @@ class TeamsScreenTest {
         rule.onNodeWithText("CV", useUnmergedTree = true).assertIsDisplayed()
     }
 
+    /** Without a logo, the initials of the team head its matches too. */
+    @Test
+    fun theMatchesOfTheHomeHaveTheInitialsOfTheirTeam() {
+        val team = saveNationalTeam()
+        winMatch(team, "Serbia")
+        core { it.saveMatch(team, null, MatchForm("Arezzo", "2026-10-20T18:00:00+02:00", true, "6")) }
+        val initials = (core { it.teams() }.single() as TeamListing.Team).initials
+        show()
+        rule.waitForText(string(R.string.home_recent))
+        // the match in progress, the one over, the team
+        rule.onAllNodesWithText(initials, useUnmergedTree = true).assertCountEquals(3)
+    }
+
     /** The teams created by hand start pinned; a touch on the pin moves
      * the team below the pinned ones, saved for the next start. */
     @Test

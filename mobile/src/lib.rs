@@ -936,6 +936,8 @@ fn next_of(m: &MatchSummary) -> NextSetKind {
 pub struct HomeMatch {
     pub team_id: String,
     pub team_name: String,
+    /// in place of a missing logo of the team
+    pub team_initials: String,
     pub id: String,
     pub opponent: String,
     pub home: bool,
@@ -4237,6 +4239,7 @@ impl Scout4All {
                     HomeMatch {
                         team_id: team.id.to_string(),
                         team_name: team.name.clone(),
+                        team_initials: names::initials(&team.name),
                         date: m.date.to_rfc3339(),
                         id: m.id,
                         opponent: m.opponent,
@@ -9314,6 +9317,7 @@ mod tests {
             ]
         );
         assert_eq!(home.in_progress[2].team_name, "Siena");
+        assert_eq!(home.in_progress[2].team_initials, "S");
         // the five most recent over, the oldest left out
         assert_eq!(
             opponents(&home.recent),

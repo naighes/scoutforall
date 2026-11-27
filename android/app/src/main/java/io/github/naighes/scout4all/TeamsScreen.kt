@@ -1,7 +1,6 @@
 package io.github.naighes.scout4all
 
 import android.app.Application
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -20,7 +19,6 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -45,7 +43,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -204,41 +201,42 @@ private fun SectionTitle(title: Int) = Text(
     color = MaterialTheme.colorScheme.primary,
 )
 
-/** Against whom, of which team, when. */
+/** A match of the home: the logo of its team at the head, then against
+ * whom, of which team and when. */
 @Composable
-private fun MatchSupporting(m: HomeMatch) = Text("${m.teamName} · ${matchDate(m.date)}")
+private fun HomeMatchRow(m: HomeMatch, onOpen: () -> Unit, tail: @Composable () -> Unit) = BoxRow(
+    onClick = onOpen,
+    modifier = HOME_ROW,
+    head = { TeamLogo(m.teamId, 48.dp) { Initials(m.teamInitials) } },
+    tail = tail,
+) {
+    Text(m.opponent, style = MaterialTheme.typography.bodyLarge)
+    Text(
+        "${m.teamName} · ${matchDate(m.date)}",
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+}
 
 /** A match not over: touched, its page; the button goes on scouting it. */
 @Composable
-private fun InProgressRow(m: HomeMatch, onOpen: () -> Unit, onResume: () -> Unit) = ListItem(
-    modifier = Modifier.clickable(onClick = onOpen),
-    headlineContent = { Text(m.opponent) },
-    supportingContent = { MatchSupporting(m) },
-    trailingContent = {
-        // not started yet: its first set
-        val first = (m.next as? NextSetKind.Start)?.setNumber?.toInt() == 1
-        FilledTonalButton(onClick = onResume) {
-            Text(stringResource(if (first) R.string.start else R.string.resume))
-        }
-    },
-)
+private fun InProgressRow(m: HomeMatch, onOpen: () -> Unit, onResume: () -> Unit) = HomeMatchRow(m, onOpen) {
+    // not started yet: its first set
+    val first = (m.next as? NextSetKind.Start)?.setNumber?.toInt() == 1
+    FilledTonalButton(onClick = onResume, Modifier.padding(end = 12.dp)) {
+        Text(stringResource(if (first) R.string.start else R.string.resume))
+    }
+}
 
 /** A match over, with the sets won and lost. */
 @Composable
-private fun RecentRow(m: HomeMatch, onOpen: () -> Unit) = ListItem(
-    modifier = Modifier.clickable(onClick = onOpen),
-    headlineContent = { Text(m.opponent) },
-    supportingContent = { MatchSupporting(m) },
-    trailingContent = {
-        Text(
-            "${m.won}–${m.lost}",
-            Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.SemiBold,
-            color = resultColor(true, m.won.toInt(), m.lost.toInt()),
-        )
-    },
-)
+private fun RecentRow(m: HomeMatch, onOpen: () -> Unit) = HomeMatchRow(m, onOpen) {
+    TailFigure(
+        "${m.won}-${m.lost}",
+        resultColor(true, m.won.toInt(), m.lost.toInt()),
+        Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
+    )
+}
 
 @Composable
 private fun TeamRow(
@@ -249,7 +247,7 @@ private fun TeamRow(
     is TeamListing.Team -> BoxRow(
         onClick = { onTeam(team.id) },
         // the bar clipped to the corners of the box
-        modifier = TEAM_ROW.tutorial("team:${team.id}").clip(ROW_SHAPE).pinnedRow(team.pinned),
+        modifier = HOME_ROW.tutorial("team:${team.id}").clip(ROW_SHAPE).pinnedRow(team.pinned),
         head = { TeamLogo(team.id, 48.dp) { Initials(team.initials) } },
         // full when pinned, at the top of the list: a touch changes it
         tail = {
@@ -272,7 +270,7 @@ private fun TeamRow(
     }
     is TeamListing.Unreadable -> BoxRow(
         onClick = null,
-        modifier = TEAM_ROW,
+        modifier = HOME_ROW,
         head = { Icon(painterResource(Level.ERROR.icon), contentDescription = null, Modifier.size(32.dp), tint = Level.ERROR.color) },
     ) {
         Text(stringResource(R.string.unreadable_team), style = MaterialTheme.typography.bodyLarge)
@@ -280,7 +278,7 @@ private fun TeamRow(
     }
 }
 
-private val TEAM_ROW = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+private val HOME_ROW = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
 
 /** A pinned row: an amber bar along its start edge, above the box. */
 @Composable
