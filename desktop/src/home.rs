@@ -362,36 +362,40 @@ impl HomeScreen {
                     year,
                     players,
                     pinned,
-                } => ui::list_row(
+                } => ui::box_row(
+                    ui::team_logo_slot(self.logos.get(i).and_then(Option::as_ref), 36.0, c),
                     row![
+                        column![
+                            ui::body(name.clone()).font(theme::fonts().bold),
+                            text(format!("{year} · {players} {}", s.players))
+                                .size(SIZE_SMALL)
+                                .color(c.muted),
+                        ]
+                        .spacing(2)
+                        .width(Length::Fill),
                         text(match pinned {
                             true => "★",
                             false => "☆",
                         })
-                        .size(SIZE_BODY)
+                        .size(20)
                         .color(match pinned {
                             true => c.accent,
                             false => c.muted,
-                        })
-                        .width(Length::Fixed(22.0)),
-                        ui::team_logo_slot(self.logos.get(i).and_then(Option::as_ref), 28.0, c),
-                        text(name.clone())
-                            .size(SIZE_BODY)
-                            .font(theme::fonts().bold)
-                            .width(Length::Fill),
-                        text(format!("{year} · {players} {}", s.players))
-                            .size(SIZE_SMALL)
-                            .color(c.muted),
+                        }),
                     ]
-                    .spacing(6)
+                    .spacing(8)
                     .align_y(Alignment::Center),
                     self.is_selected(TEAMS, i),
-                    Some(Message::Team(id.clone())),
+                    Message::Team(id.clone()),
                     c,
                 ),
-                TeamListing::Unreadable { folder } => {
-                    text(folder.clone()).size(SIZE_SMALL).color(c.muted).into()
-                }
+                TeamListing::Unreadable { folder } => ui::box_row(
+                    ui::icon(theme::icons::ERROR_OUTLINE, 22.0, c.danger),
+                    ui::body(folder.clone()).font(theme::fonts().bold),
+                    false,
+                    None,
+                    c,
+                ),
             })
             .collect();
         let actions = vec![

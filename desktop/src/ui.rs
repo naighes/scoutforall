@@ -305,12 +305,12 @@ pub fn portrait_row<'a, M: Clone + 'a>(
 const ROW_RADIUS: f32 = 8.0;
 
 /// The box of a row of a list, as on Android (`BoxRow`): a square at its
-/// head holding `head`, then `content`.
+/// head holding `head`, then `content`; without a `message` it only shows.
 pub fn box_row<'a, M: Clone + 'a>(
     head: impl Into<Element<'a, M>>,
     content: impl Into<Element<'a, M>>,
     chosen: bool,
-    message: M,
+    message: impl Into<Option<M>>,
     c: Colors,
 ) -> Element<'a, M> {
     let corners = iced::border::Radius::default().left(ROW_RADIUS);
@@ -336,7 +336,7 @@ pub fn box_row<'a, M: Clone + 'a>(
         .width(Length::Fill)
         // the border of the chosen one around the portrait
         .padding(1)
-        .on_press(message)
+        .on_press_maybe(message.into())
         .style(move |_, status| {
             let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
             button::Style {

@@ -2,6 +2,7 @@ package io.github.naighes.scout4all
 
 import android.app.Application
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,7 +21,6 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import io.github.naighes.scout4all.core.AgendaSpan
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
@@ -245,21 +246,14 @@ private fun TeamRow(
     onTeam: (String) -> Unit,
     onPin: (teamId: String, pinned: Boolean) -> Unit,
 ) = when (team) {
-    is TeamListing.Team -> ListItem(
-        modifier = Modifier.clickable { onTeam(team.id) }.tutorial("team:${team.id}").pinnedRow(team.pinned),
-        // pinned: on a tile, as the pinned chats of the messaging apps
-        colors = ListItemDefaults.colors(
-            containerColor = if (team.pinned) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface,
-        ),
-        leadingContent = { TeamLogo(team.id, 40.dp) },
-        headlineContent = { Text(team.name) },
-        supportingContent = {
-            val players = team.players.toInt()
-            Text("${team.year} · ${pluralStringResource(R.plurals.players, players, players)}")
-        },
+    is TeamListing.Team -> BoxRow(
+        onClick = { onTeam(team.id) },
+        // the bar clipped to the corners of the box
+        modifier = TEAM_ROW.tutorial("team:${team.id}").clip(ROW_SHAPE).pinnedRow(team.pinned),
+        head = { TeamLogo(team.id, 48.dp) },
         // full when pinned, at the top of the list: a touch changes it
-        trailingContent = {
-            IconButton(onClick = { onPin(team.id, !team.pinned) }) {
+        tail = {
+            IconButton(onClick = { onPin(team.id, !team.pinned) }, Modifier.padding(end = 4.dp)) {
                 Icon(
                     painterResource(if (team.pinned) R.drawable.ic_pin else R.drawable.ic_pin_outline),
                     contentDescription = stringResource(if (team.pinned) R.string.unpin_team else R.string.pin_team),
@@ -267,14 +261,28 @@ private fun TeamRow(
                 )
             }
         },
-    )
-    is TeamListing.Unreadable -> ListItem(
-        headlineContent = { Text(stringResource(R.string.unreadable_team)) },
-        supportingContent = { Text(team.folder) },
-    )
+    ) {
+        val players = team.players.toInt()
+        Text(team.name, style = MaterialTheme.typography.bodyLarge)
+        Text(
+            "${team.year} · ${pluralStringResource(R.plurals.players, players, players)}",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+    is TeamListing.Unreadable -> BoxRow(
+        onClick = null,
+        modifier = TEAM_ROW,
+        head = { Icon(painterResource(Level.ERROR.icon), contentDescription = null, Modifier.size(32.dp), tint = Level.ERROR.color) },
+    ) {
+        Text(stringResource(R.string.unreadable_team), style = MaterialTheme.typography.bodyLarge)
+        Text(team.folder, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
 }
 
-/** A pinned row: an amber bar along its start edge, above the tile. */
+private val TEAM_ROW = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+
+/** A pinned row: an amber bar along its start edge, above the box. */
 @Composable
 private fun Modifier.pinnedRow(pinned: Boolean): Modifier {
     if (!pinned) return this
