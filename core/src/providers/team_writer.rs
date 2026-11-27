@@ -34,6 +34,10 @@ pub struct PlayerDetails {
     pub nationality: Option<CountryCode>,
     pub dominant_hand: Option<DominantHand>,
     pub federation_id: String,
+    pub email: String,
+    /// in E.164
+    pub phone: String,
+    pub birth_place: String,
 }
 
 pub enum PlayerInput {

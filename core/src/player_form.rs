@@ -14,10 +14,11 @@ use crate::{
     },
 };
 use chrono::{Datelike, NaiveDate};
+use phonenumber::{Mode, PhoneNumber, country, metadata::DATABASE};
 use uuid::Uuid;
 
 /// What the user filled in: the number, the birth date (YYYY-MM-DD) and the
-/// height (centimetres) are text, as typed; the last three may be empty.
+/// height (centimetres) are text, as typed; all but the first three may be empty.
 /// A new player may be a person of the registry already (D5): the same
 /// person, in one more team.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -31,6 +32,12 @@ pub struct PlayerForm {
     pub nationality: Option<CountryCode>,
     pub dominant_hand: Option<DominantHand>,
     pub federation_id: String,
+    pub email: String,
+    /// the country of the prefix of `phone`
+    pub phone_country: Option<CountryCode>,
+    /// the number as typed; one starting with `+` needs no country
+    pub phone: String,
+    pub birth_place: String,
     /// the person of the registry the new player is, chosen by name
     pub person: Option<Uuid>,
 }
@@ -47,6 +54,10 @@ pub enum PlayerFormError {
     InvalidBirthDate,
     /// not a number of centimetres from 100 to 250
     InvalidHeight,
+    /// not an address as `name@domain.tld`
+    InvalidEmail,
+    /// not a phone number of the country chosen
+    InvalidPhone,
 }
 
 impl PlayerFormError {
@@ -59,6 +70,8 @@ impl PlayerFormError {
             NumberInUse => labels.number_already_in_use,
             InvalidBirthDate => labels.invalid_birth_date,
             InvalidHeight => labels.invalid_height,
+            InvalidEmail => labels.invalid_email,
+            InvalidPhone => labels.invalid_phone,
         }
         .to_string()
     }
@@ -67,7 +80,12 @@ impl PlayerFormError {
 impl PlayerForm {
     /// The form of a player being edited.
     pub fn of(player: &PlayerEntry) -> Self {
+        let (phone_country, phone) = split_phone(&player.phone);
         Self {
+            email: player.email.clone(),
+            phone_country,
+            phone,
+            birth_place: player.birth_place.clone(),
             name: player.name.clone(),
             role: player.role,
             number: player.number.to_string(),
@@ -100,20 +118,31 @@ impl PlayerForm {
         let number = parse_number(&self.number);
         let birth_date = optional(&self.birth_date, |d| parse_birth_date(d, today));
         let height_cm = optional(&self.height_cm, parse_height);
+        let email = optional(&self.email, parse_email);
+        let phone = optional(&self.phone, |p| parse_phone(p, self.phone_country));
         let existing_id = existing.map(|p| p.id).or(self.person);
         let in_use = |number: u8| {
             team.active_players()
                 .iter()
                 .any(|p| p.number == number && Some(p.id) != existing_id)
         };
-        match (name.is_empty(), self.role, number, birth_date, height_cm) {
-            (true, _, _, _, _) => Err(PlayerFormError::EmptyName),
-            (_, None, _, _, _) => Err(PlayerFormError::MissingRole),
-            (_, _, None, _, _) => Err(PlayerFormError::InvalidNumber),
-            (_, _, Some(number), _, _) if in_use(number) => Err(PlayerFormError::NumberInUse),
-            (_, _, _, Err(()), _) => Err(PlayerFormError::InvalidBirthDate),
-            (_, _, _, _, Err(())) => Err(PlayerFormError::InvalidHeight),
-            (false, Some(role), Some(number), Ok(birth_date), Ok(height_cm)) => {
+        let fields = (name.is_empty(), self.role, number, birth_date, height_cm);
+        match (fields, email, phone) {
+            ((true, _, _, _, _), _, _) => Err(PlayerFormError::EmptyName),
+            ((_, None, _, _, _), _, _) => Err(PlayerFormError::MissingRole),
+            ((_, _, None, _, _), _, _) => Err(PlayerFormError::InvalidNumber),
+            ((_, _, Some(number), _, _), _, _) if in_use(number) => {
+                Err(PlayerFormError::NumberInUse)
+            }
+            ((_, _, _, Err(()), _), _, _) => Err(PlayerFormError::InvalidBirthDate),
+            ((_, _, _, _, Err(())), _, _) => Err(PlayerFormError::InvalidHeight),
+            (_, Err(()), _) => Err(PlayerFormError::InvalidEmail),
+            (_, _, Err(())) => Err(PlayerFormError::InvalidPhone),
+            (
+                (false, Some(role), Some(number), Ok(birth_date), Ok(height_cm)),
+                Ok(email),
+                Ok(phone),
+            ) => {
                 let details = PlayerDetails {
                     birth_date,
                     height_cm,
@@ -121,6 +150,9 @@ impl PlayerForm {
                     nationality: self.nationality,
                     dominant_hand: self.dominant_hand,
                     federation_id: self.federation_id.trim().to_string(),
+                    email: email.unwrap_or_default(),
+                    phone: phone.unwrap_or_default(),
+                    birth_place: self.birth_place.trim().to_string(),
                 };
                 Ok(match (existing, self.person) {
                     (Some(player), _) => PlayerInput::Existing(PlayerEntry {
@@ -133,6 +165,9 @@ impl PlayerForm {
                         nationality: details.nationality,
                         dominant_hand: details.dominant_hand,
                         federation_id: details.federation_id,
+                        email: details.email,
+                        phone: details.phone,
+                        birth_place: details.birth_place,
                         // a player removed from the team comes back
                         deleted: false,
                         ..player.clone()
@@ -149,6 +184,9 @@ impl PlayerForm {
                         nationality: details.nationality,
                         dominant_hand: details.dominant_hand,
                         federation_id: details.federation_id,
+                        email: details.email,
+                        phone: details.phone,
+                        birth_place: details.birth_place,
                     }),
                     (None, None) => PlayerInput::New {
                         name,
@@ -218,6 +256,59 @@ fn parse_height(height: &str) -> Option<u16> {
     }
 }
 
+/// `name@domain.tld`, without spaces: what a mail client can be asked to
+/// write to, not the whole of RFC 5322.
+fn parse_email(email: &str) -> Option<String> {
+    let spaced = email.chars().any(|c| c.is_whitespace() || c.is_control());
+    match (spaced, email.split_once('@')) {
+        (false, Some((name, domain)))
+            if !name.is_empty()
+                && !domain.contains('@')
+                && domain.contains('.')
+                && domain.split('.').all(|label| !label.is_empty()) =>
+        {
+            Some(email.to_string())
+        }
+        _ => None,
+    }
+}
+
+/// A valid number of `country`, or of the prefix typed with it, in E.164.
+fn parse_phone(phone: &str, country: Option<CountryCode>) -> Option<String> {
+    let country = country.and_then(|c| c.as_str().parse::<country::Id>().ok());
+    phonenumber::parse(country, phone)
+        .ok()
+        .filter(phonenumber::is_valid)
+        .map(|number| number.format().mode(Mode::E164).to_string())
+}
+
+/// The country and the number to show in the form for a stored phone; what
+/// can't be read stays as it is, with no country.
+pub fn split_phone(phone: &str) -> (Option<CountryCode>, String) {
+    let number = phonenumber::parse(None, phone).ok();
+    match number.and_then(|n| country_of(&n).zip(Some(n.national().to_string()))) {
+        // `to_string` keeps the leading zero of the countries that dial it
+        Some((country, national)) => (Some(country), national),
+        None => (None, phone.to_string()),
+    }
+}
+
+/// The country of a number; the main one of its prefix when the crate can't
+/// tell which (it drops the leading zero of the Italian landlines).
+fn country_of(number: &PhoneNumber) -> Option<CountryCode> {
+    let main = || {
+        DATABASE
+            .region(&number.country().code())
+            .and_then(|regions| regions.first().copied())
+            .and_then(CountryCode::known)
+    };
+    number
+        .country()
+        .id()
+        .and_then(|id| CountryCode::known(id.as_ref()))
+        .or_else(main)
+}
+
 /// One or two digits, surrounding spaces aside.
 pub(crate) fn parse_number(number: &str) -> Option<u8> {
     let number = number.trim();
@@ -239,6 +330,9 @@ pub fn removed(player: &PlayerEntry) -> PlayerEntry {
         nationality: None,
         dominant_hand: None,
         federation_id: String::new(),
+        email: String::new(),
+        phone: String::new(),
+        birth_place: String::new(),
         ..player.clone()
     }
 }

@@ -107,6 +107,9 @@ fn person(player: &PlayerEntry) -> Person {
         nationality: player.nationality,
         dominant_hand: player.dominant_hand,
         federation_id: player.federation_id.clone(),
+        email: player.email.clone(),
+        phone: player.phone.clone(),
+        birth_place: player.birth_place.clone(),
         deleted: false,
     }
 }

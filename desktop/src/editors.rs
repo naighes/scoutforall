@@ -1743,6 +1743,10 @@ impl Editor {
                         .and_then(|i| HANDS.get(i))
                         .copied(),
                     federation_id: f.text(PLAYER_FEDERATION_ID),
+                    email: String::new(),
+                    phone_country: None,
+                    phone: String::new(),
+                    birth_place: String::new(),
                     person: p.person.as_ref().map(|person| person.id),
                 };
                 let id =
@@ -1786,6 +1790,7 @@ impl Editor {
                 PlayerField::BirthDate => PLAYER_BIRTH,
                 PlayerField::Height => PLAYER_HEIGHT,
                 PlayerField::Nationality => PLAYER_NATIONALITY,
+                PlayerField::Email | PlayerField::Phone => PLAYER_NOTES,
             }),
             MobileError::InvalidCompetition { field, .. } => Some(match field {
                 CompetitionField::Name => COMPETITION_NAME,

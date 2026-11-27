@@ -441,6 +441,8 @@
 - harfrust 0.3.2
     Copyright (c) HarfBuzz developers
     Copyright (c) 2020 Yevhenii Reizner
+- hash32 0.2.1
+    Copyright (c) 2018 Jorge Aparicio
 - hashbrown 0.15.5, 0.16.1, 0.17.1
     Copyright (c) 2016 Amanieu d'Antras
 - hayagriva 0.10.1
@@ -465,6 +467,8 @@
     Copyright (c) The Hayro Authors
 - hayro-write 0.7.0
     Copyright (c) The Hayro Authors
+- heapless 0.7.17
+    Copyright (c) 2017 Jorge Aparicio
 - heck 0.5.0
     Copyright (c) 2015 The Rust Project Developers
 - hex 0.4.3
@@ -619,6 +623,8 @@
     Copyright (c) 2014 The Rust Project Developers
 - lru 0.16.4
     Copyright (c) 2016 Jerome Froelich
+- lru-cache 0.1.2
+    Copyright (c) 2015 The Rust Project Developers
 - lyon 1.0.19
     Nicolas Silva
 - lyon_algorithms 1.0.22
@@ -727,6 +733,8 @@
     Steven Sheldon
 - once_cell 1.21.4
     Aleksey Kladov
+- oncemutex 0.1.1
+    Jonathan Reem
 - opaque-debug 0.3.1
     Copyright (c) 2018-2024 The RustCrypto Project Developers
 - open 5.4.5
@@ -868,7 +876,9 @@
     Copyright (c) 2014 The Rust Project Developers
 - regex-automata 0.4.18
     Copyright (c) 2014 The Rust Project Developers
-- regex-syntax 0.8.11
+- regex-cache 0.2.1
+    Copyright 2017 1aim GmbH
+- regex-syntax 0.6.29, 0.8.11
     Copyright (c) 2014 The Rust Project Developers
 - renderdoc-sys 1.1.0
     Copyright (c) 2022 Eyal Kalderon
@@ -1479,6 +1489,8 @@ SOFTWARE.
     l1npengtul
 - owned_ttf_parser 0.25.1
     Alex Butler
+- phonenumber 0.3.10+9.0.33
+    Gabriel Féron, Ruben De Smet, meh.
 - pic-scale 0.7.12
     Copyright 2024 Radzivon Bartoshyk
     Copyright (c) Radzivon Bartoshyk. All rights reserved.

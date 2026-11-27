@@ -334,6 +334,9 @@ pub(crate) mod tests {
             nationality: None,
             dominant_hand: None,
             federation_id: String::new(),
+            email: String::new(),
+            phone: String::new(),
+            birth_place: String::new(),
         })
         .collect()
     }

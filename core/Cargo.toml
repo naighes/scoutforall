@@ -41,6 +41,7 @@ typst-pdf.workspace = true
 unicode-normalization.workspace = true
 uuid.workspace = true
 zip.workspace = true
+phonenumber = "0.3.10"
 
 # Android has its own verifier of certificates, which needs the context of
 # the app (JNI): the roots of Mozilla, built in, instead

@@ -139,6 +139,9 @@ impl TeamWriter for SqliteTeamWriter {
                 nationality: details.nationality,
                 dominant_hand: details.dominant_hand,
                 federation_id: details.federation_id,
+                email: details.email,
+                phone: details.phone,
+                birth_place: details.birth_place,
                 ..Default::default()
             },
             PlayerInput::Existing(existing) => existing,

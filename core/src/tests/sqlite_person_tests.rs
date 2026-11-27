@@ -69,6 +69,9 @@ mod tests {
             nationality: crate::shapes::country::CountryCode::parse("IT"),
             dominant_hand: Some(crate::shapes::player::DominantHand::Left),
             federation_id: format!("{name} 42"),
+            email: format!("{}@example.com", name.to_lowercase().replace(' ', ".")),
+            phone: "+393331234567".into(),
+            birth_place: format!("{name} town"),
         }
     }
 

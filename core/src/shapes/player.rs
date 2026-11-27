@@ -34,6 +34,13 @@ pub struct PlayerEntry {
     pub dominant_hand: Option<DominantHand>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub federation_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub email: String,
+    /// in E.164 (`+393331234567`)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub phone: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub birth_place: String,
 }
 
 impl Default for PlayerEntry {
@@ -50,6 +57,9 @@ impl Default for PlayerEntry {
             nationality: None,
             dominant_hand: None,
             federation_id: String::new(),
+            email: String::new(),
+            phone: String::new(),
+            birth_place: String::new(),
         }
     }
 }

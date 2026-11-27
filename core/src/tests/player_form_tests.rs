@@ -5,7 +5,7 @@ mod tests {
     use crate::{
         player_form::{PlayerForm, PlayerFormError, namesake, namesake_message, removed},
         providers::team_writer::{PlayerDetails, PlayerInput},
-        shapes::{enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
+        shapes::{country::CountryCode, enums::RoleEnum, player::PlayerEntry, team::TeamEntry},
         tests::EN,
     };
     use chrono::NaiveDate;
@@ -346,6 +346,103 @@ mod tests {
         assert_eq!(
             namesake_message(&team().players[0], EN),
             "Anna, number 7, is already in the team."
+        );
+    }
+
+    fn calling(country: Option<&str>, phone: &str) -> PlayerForm {
+        PlayerForm {
+            phone_country: country.and_then(CountryCode::parse),
+            phone: phone.into(),
+            ..form("12")
+        }
+    }
+
+    #[test]
+    fn the_contacts_are_trimmed_and_the_phone_has_its_prefix() {
+        let saved = details(PlayerForm {
+            email: " carla.b@example.co.uk ".into(),
+            birth_place: " Cortona ".into(),
+            ..calling(Some("IT"), " 333 123-4567 ")
+        });
+        assert_eq!(saved.email, "carla.b@example.co.uk");
+        assert_eq!(saved.phone, "+393331234567");
+        assert_eq!(saved.birth_place, "Cortona");
+    }
+
+    #[test]
+    fn a_number_with_its_prefix_needs_no_country_and_keeps_its_own() {
+        for country in [None, Some("IT")] {
+            assert_eq!(
+                details(calling(country, "+44 7400 123456")).phone,
+                "+447400123456"
+            );
+        }
+    }
+
+    #[test]
+    fn an_email_without_a_name_or_a_domain_is_not_valid() {
+        for email in [
+            "carla",
+            "@example.com",
+            "carla@",
+            "carla@example",
+            "carla@example.",
+            "carla@@example.com",
+            "carla b@example.com",
+        ] {
+            let form = PlayerForm {
+                email: email.into(),
+                ..form("12")
+            };
+            assert_eq!(error(form), PlayerFormError::InvalidEmail, "{email}");
+        }
+    }
+
+    #[test]
+    fn a_phone_that_is_not_a_number_of_the_country_is_not_valid() {
+        for (country, phone) in [
+            (Some("IT"), "12"),
+            (Some("IT"), "mum"),
+            (None, "333 123 4567"),
+            (Some("IT"), "+1 000"),
+        ] {
+            let found = error(calling(country, phone));
+            assert_eq!(found, PlayerFormError::InvalidPhone, "{phone}");
+        }
+    }
+
+    #[test]
+    fn a_player_edited_shows_the_country_and_the_number_saved() {
+        // a mobile and a landline, which keeps its leading zero
+        for phone in ["+393331234567", "+390612345678", "+447400123456"] {
+            let team = team();
+            let saved = PlayerEntry {
+                phone: phone.into(),
+                email: "anna@example.com".into(),
+                birth_place: "Cortona".into(),
+                ..team.players[0].clone()
+            };
+            let form = PlayerForm::of(&saved);
+            assert!(!form.phone.starts_with('+'), "{}", form.phone);
+            assert!(form.phone_country.is_some());
+            match form.validate(&team, Some(&saved), today()) {
+                Ok(PlayerInput::Existing(updated)) => assert_eq!(updated, saved),
+                _ => unreachable!("expected the existing player"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_removed_player_has_no_contacts() {
+        let gone = removed(&PlayerEntry {
+            email: "anna@example.com".into(),
+            phone: "+393331234567".into(),
+            birth_place: "Cortona".into(),
+            ..player("Anna", 7, false)
+        });
+        assert_eq!(
+            (gone.email, gone.phone, gone.birth_place),
+            Default::default()
         );
     }
 }

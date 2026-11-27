@@ -351,6 +351,14 @@ pub struct PlayerForm {
     pub dominant_hand: Option<DominantHand>,
     #[uniffi(default = "")]
     pub federation_id: String,
+    #[uniffi(default = "")]
+    pub email: String,
+    #[uniffi(default = None)]
+    pub phone_country: Option<CountryCode>,
+    #[uniffi(default = "")]
+    pub phone: String,
+    #[uniffi(default = "")]
+    pub birth_place: String,
     #[uniffi(default = None)]
     pub person: Option<Uuid>,
 }
@@ -603,6 +611,8 @@ pub enum PlayerField {
     /// a country the app couldn't find among the ones it offers (the core
     /// takes it chosen)
     Nationality,
+    Email,
+    Phone,
 }
 
 #[uniffi::remote(Enum)]
@@ -619,6 +629,8 @@ impl From<PlayerFormError> for PlayerField {
             PlayerFormError::InvalidNumber | PlayerFormError::NumberInUse => PlayerField::Number,
             PlayerFormError::InvalidBirthDate => PlayerField::BirthDate,
             PlayerFormError::InvalidHeight => PlayerField::Height,
+            PlayerFormError::InvalidEmail => PlayerField::Email,
+            PlayerFormError::InvalidPhone => PlayerField::Phone,
         }
     }
 }
@@ -4976,6 +4988,7 @@ impl Scout4All {
                     false => format!("{} ({})", c.person.name, teams.join(", ")),
                 };
                 let latest = c.teams.first();
+                let (phone_country, phone) = player_form::split_phone(&c.person.phone);
                 ExistingPlayer {
                     id: c.person.id,
                     name: c.person.name.clone(),
@@ -4998,6 +5011,10 @@ impl Scout4All {
                         nationality: c.person.nationality,
                         dominant_hand: c.person.dominant_hand,
                         federation_id: c.person.federation_id,
+                        email: c.person.email,
+                        phone_country,
+                        phone,
+                        birth_place: c.person.birth_place,
                         person: Some(c.person.id),
                     },
                 }
@@ -7297,6 +7314,10 @@ pub(crate) mod tests {
             nationality: None,
             dominant_hand: None,
             federation_id: String::new(),
+            email: String::new(),
+            phone_country: None,
+            phone: String::new(),
+            birth_place: String::new(),
             person: None,
         }
     }

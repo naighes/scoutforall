@@ -266,6 +266,9 @@ mod tests {
                     "nationality",
                     "dominant_hand",
                     "federation_id",
+                    "email",
+                    "phone",
+                    "birth_place",
                 ],
             ),
             (
