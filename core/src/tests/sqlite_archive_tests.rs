@@ -19,8 +19,9 @@ pub(crate) mod tests {
             sqlite::{
                 Database,
                 archive::{
-                    FORMAT, Imported, Kind, MANIFEST, Manifest, MatchPreview, Merged, Preview,
-                    Subject, TrainingMerged, export, import, manifest, preview, zip_files,
+                    Contacts, FORMAT, Imported, Kind, MANIFEST, Manifest, MatchPreview, Merged,
+                    Preview, Subject, TrainingMerged, export, export_with, import, manifest,
+                    preview, zip_files,
                 },
                 matches::{SqliteMatchReader, SqliteMatchWriter},
                 sets::SqliteSetWriter,
@@ -486,6 +487,107 @@ pub(crate) mod tests {
         let there = database();
         import(&there, &detailed_archive(&detailed(false)), &en()).unwrap();
         assert_eq!(details(&there), "IT|left|42");
+    }
+
+    const CONTACT_VALUES: [(&str, &str); 3] = [
+        ("email", "p@example.com"),
+        ("phone", "+393331234567"),
+        ("birth_place", "Cortona"),
+    ];
+
+    /// The player of `detailed`, with the contacts too.
+    fn with_contacts(removed: bool) -> Database {
+        let db = detailed(removed);
+        execute(
+            &db,
+            "UPDATE persons SET email = 'p@example.com', phone = '+393331234567',
+                 birth_place = 'Cortona'",
+        );
+        db
+    }
+
+    fn contacts(db: &Database) -> String {
+        db.read(|tx| {
+            tx.query_row(
+                "SELECT concat_ws('|', email, phone, birth_place) FROM persons",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(crate::providers::sqlite::sqlite)
+        })
+        .unwrap()
+    }
+
+    fn team_archive(db: &Database, contacts: Contacts) -> Vec<u8> {
+        let team = Uuid::parse_str(DETAILED_TEAM).unwrap();
+        export_with(
+            db,
+            Subject::Team(team),
+            contacts,
+            crate::tests::clock::now(),
+        )
+        .unwrap()
+    }
+
+    fn exported_contacts(archive: &[u8]) -> Vec<Json> {
+        let mut files = files(archive);
+        let person = &table(&mut files, "persons")[0];
+        CONTACT_VALUES
+            .iter()
+            .map(|(column, _)| person[*column].clone())
+            .collect()
+    }
+
+    #[test]
+    fn the_contacts_go_only_when_asked_for() {
+        let db = with_contacts(false);
+        let left = detailed_archive(&db);
+        assert_eq!(exported_contacts(&left), vec![Json::from(""); 3]);
+        let included = team_archive(&db, Contacts::Included);
+        assert_eq!(
+            exported_contacts(&included),
+            CONTACT_VALUES.map(|(_, value)| Json::from(value)).to_vec()
+        );
+        let there = database();
+        import(&there, &included, &en()).unwrap();
+        assert_eq!(contacts(&there), "p@example.com|+393331234567|Cortona");
+    }
+
+    /// An archive without the contacts agrees with the person here, and
+    /// leaves them.
+    #[test]
+    fn importing_without_the_contacts_keeps_those_here() {
+        let here = with_contacts(false);
+        let persons = import(&here, &detailed_archive(&here), &en())
+            .unwrap()
+            .persons;
+        assert_eq!((persons.same, persons.kept_local), (1, 0));
+        assert_eq!(contacts(&here), "p@example.com|+393331234567|Cortona");
+    }
+
+    /// Removed from the team, the contacts don't go even when asked for.
+    #[test]
+    fn a_removed_player_shows_no_contacts() {
+        let db = with_contacts(true);
+        execute(
+            &db,
+            &format!(
+                "INSERT INTO training_sessions (id, team_id, start_local, duration_min, status)
+                     VALUES ('cccccccc-0000-4000-8000-00000000000c', '{DETAILED_TEAM}',
+                             '2026-11-10T18:00', 90, 'completed');
+                 INSERT INTO training_attendance (session_id, person_id, status)
+                     VALUES ('cccccccc-0000-4000-8000-00000000000c', '{DETAILED}', 'present');"
+            ),
+        );
+        let team = Uuid::parse_str(DETAILED_TEAM).unwrap();
+        let archive = export_with(
+            &db,
+            Subject::Training(team),
+            Contacts::Included,
+            crate::tests::clock::now(),
+        )
+        .unwrap();
+        assert_eq!(exported_contacts(&archive), vec![Json::from(""); 3]);
     }
 
     /// A player removed from the team, still told of by the training,

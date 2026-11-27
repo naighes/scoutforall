@@ -147,6 +147,19 @@ pub struct ActivitySearch {
     pub activity_search_team_only: bool,
 }
 
+/// Whether the archives exported carry the contacts of the persons (email,
+/// phone, birth place): off unless chosen. A preference of the device,
+/// remembered; missing or unreadable it's off.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ArchiveContacts {
+    #[serde(
+        default,
+        deserialize_with = "lenient_flag",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub archive_contacts: bool,
+}
+
 fn lenient_flag<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
     Ok(Option::<serde_json::Value>::deserialize(deserializer)?
         .as_ref()

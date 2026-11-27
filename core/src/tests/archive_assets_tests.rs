@@ -210,11 +210,18 @@ mod tests {
         let old = rewritten(&archive, |name, json| match name {
             "manifest.json" => json["schema"] = Json::from(4),
             "persons.json" => each_row(json, |row| {
-                ["nationality", "dominant_hand", "federation_id"]
-                    .iter()
-                    .for_each(|c| {
-                        row.remove(*c);
-                    })
+                [
+                    "nationality",
+                    "dominant_hand",
+                    "federation_id",
+                    "email",
+                    "phone",
+                    "birth_place",
+                ]
+                .iter()
+                .for_each(|c| {
+                    row.remove(*c);
+                })
             }),
             // no table of the gyms in v4
             "venues.json" => assert_eq!(json, &Json::Array(vec![])),
@@ -277,11 +284,18 @@ mod tests {
             }),
             "persons.json" => each_row(json, |row| {
                 row.insert("photo_asset_id".into(), pointer.clone());
-                ["nationality", "dominant_hand", "federation_id"]
-                    .iter()
-                    .for_each(|c| {
-                        row.remove(*c);
-                    })
+                [
+                    "nationality",
+                    "dominant_hand",
+                    "federation_id",
+                    "email",
+                    "phone",
+                    "birth_place",
+                ]
+                .iter()
+                .for_each(|c| {
+                    row.remove(*c);
+                })
             }),
             _ => {}
         });

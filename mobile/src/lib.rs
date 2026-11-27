@@ -71,7 +71,7 @@ use scout4all_core::{
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     season::{self, SeasonError, SeasonMember},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::{ActivitySearch, Consent, PinnedTeams, TeamDefaults, VideoSeconds},
+    settings::{ActivitySearch, ArchiveContacts, Consent, PinnedTeams, TeamDefaults, VideoSeconds},
     shapes::{
         country::CountryCode,
         court_zone::{
@@ -5192,12 +5192,29 @@ impl Scout4All {
         )?)
     }
 
+    /// Whether the archives exported carry the contacts of the persons
+    /// (email, phone, birth place).
+    pub fn archive_contacts(&self) -> bool {
+        self.read_config()
+            .map(|config| config.archive_contacts.archive_contacts)
+            .unwrap_or_default()
+    }
+
+    pub fn set_archive_contacts(&self, included: bool) -> Result<(), MobileError> {
+        self.update_config(|config| AppConfig {
+            archive_contacts: ArchiveContacts {
+                archive_contacts: included,
+            },
+            ..config
+        })
+    }
+
     /// The archive of the team, its players without its matches.
     pub fn export_team(&self, team_id: String) -> Result<ExportedArchive, MobileError> {
         let id = parse_id(&team_id)?;
         // a team removed or not there: not exported
         self.read_team(&team_id)?;
-        let bytes = archives::export(&self.db, archives::Subject::Team(id), self.clock.utc())?;
+        let bytes = self.export_archive(archives::Subject::Team(id))?;
         Ok(ExportedArchive {
             file_name: format!("{id}.zip"),
             bytes,
@@ -5212,7 +5229,7 @@ impl Scout4All {
     ) -> Result<ExportedArchive, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let id = Uuid::parse_str(&m.id).map_err(failed)?;
-        let bytes = archives::export(&self.db, archives::Subject::Match(id), self.clock.utc())?;
+        let bytes = self.export_archive(archives::Subject::Match(id))?;
         Ok(ExportedArchive {
             file_name: format!("{id}.zip"),
             bytes,
@@ -5911,6 +5928,8 @@ struct AppConfig {
     #[serde(flatten)]
     activity_search: ActivitySearch,
     #[serde(flatten)]
+    archive_contacts: ArchiveContacts,
+    #[serde(flatten)]
     other: Map<String, Value>,
 }
 
@@ -5943,6 +5962,21 @@ fn failed(e: impl std::fmt::Display) -> MobileError {
 }
 
 impl Scout4All {
+    /// The archive of `subject`, with the contacts if chosen
+    /// (`archive_contacts`).
+    fn export_archive(&self, subject: archives::Subject) -> Result<Vec<u8>, MobileError> {
+        let contacts = match self.archive_contacts() {
+            true => archives::Contacts::Included,
+            false => archives::Contacts::Left,
+        };
+        Ok(archives::export_with(
+            &self.db,
+            subject,
+            contacts,
+            self.clock.utc(),
+        )?)
+    }
+
     /// Where the scouting sends a finished match: the queue, if the user
     /// allows the statistics.
     fn finished_matches(&self) -> Arc<dyn FinishedMatches> {
@@ -10592,6 +10626,32 @@ pub(crate) mod tests {
             Err(MobileError::Failed { reason }) => reason,
             other => panic!("expected a failure, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_contacts_go_in_the_archive_once_chosen() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = app(&dir, "it");
+        let team = from.save_team(None, form("Cortona")).unwrap();
+        let reached = PlayerForm {
+            email: "p@example.com".into(),
+            ..player("p", "7")
+        };
+        from.save_player(team.clone(), None, reached, false)
+            .unwrap();
+        let email_there = |from: &Scout4All| {
+            let to_dir = tempfile::tempdir().unwrap();
+            let to = app(&to_dir, "it");
+            let archive = from.export_team(team.clone()).unwrap();
+            to.import_team(archive.bytes, None).unwrap();
+            to.team(team.clone()).unwrap().players[0].form.email.clone()
+        };
+        assert!(!from.archive_contacts());
+        assert_eq!(email_there(&from), "");
+        from.set_archive_contacts(true).unwrap();
+        assert_eq!(email_there(&from), "p@example.com");
+        // kept across a restart
+        assert!(app(&dir, "it").archive_contacts());
     }
 
     #[test]

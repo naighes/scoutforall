@@ -619,6 +619,27 @@ mod tests {
         );
     }
 
+    /// The contacts of the persons stay on the device (TODO/037).
+    #[tokio::test]
+    async fn the_contacts_do_not_go_in_the_upload() {
+        let db = migrated_v018().await;
+        let team = id(TEAM);
+        let m = in_database(&db).await[0].1.clone();
+        let source = SqliteUploads::new(db.clone(), en());
+        let before = archive(&source.read(&team, &m).await.unwrap());
+        execute(
+            &db,
+            "UPDATE persons SET email = 'secret@example.com', phone = '+393330000000',
+                 birth_place = 'secret town'",
+        );
+        let after = archive(&source.read(&team, &m).await.unwrap());
+        assert_eq!(after, before);
+        assert!(after.iter().all(|(_, data)| {
+            let text = String::from_utf8_lossy(data);
+            !text.contains("secret") && !text.contains("+393330000000")
+        }));
+    }
+
     /// Team B scouted too (`"both"`), and a neutral venue: A's files are
     /// as before (B's touches leave A's stream as it was), `home` is false,
     /// `neutral` true; B goes in files of its own, by its random id, with

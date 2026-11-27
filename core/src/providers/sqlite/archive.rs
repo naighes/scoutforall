@@ -20,6 +20,9 @@
 //! - the **training** of a team is an archive of its own (`contents:
 //!   "training"` in the manifest, `training_archive`): the training rows of
 //!   the team, its row, the persons of the attendance;
+//! - the contacts of the persons (email, phone, birth place) only when
+//!   asked for (`Contacts`): without them they're empty, and importing
+//!   leaves those here as they are;
 //! - not the video (paths of a computer), the upload queue (of a device),
 //!   the cache of the lists (derived).
 //!
@@ -126,6 +129,18 @@ pub enum Subject {
     /// the training of the team, apart (`training_archive`)
     Training(Uuid),
 }
+
+/// Whether the contacts of the persons (email, phone, birth place) go in
+/// an archive: data of people often under age, left out unless asked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Contacts {
+    Included,
+    #[default]
+    Left,
+}
+
+/// The columns of `persons` that are contacts.
+const CONTACTS: [&str; 3] = ["email", "phone", "birth_place"];
 
 /// What an import did with the rows of a kind already here or not.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -237,8 +252,19 @@ pub(crate) fn invalid(labels: &Labels, why: impl std::fmt::Display) -> AppError 
     AppError::IO(IOError::Msg(format!("{}: {why}", labels.invalid_archive)))
 }
 
-/// The archive of `subject`, as zip bytes, exported `now`.
+/// The archive of `subject` without the contacts, as zip bytes, exported
+/// `now`.
 pub fn export(db: &Database, subject: Subject, now: DateTime<Utc>) -> Result<Vec<u8>, AppError> {
+    export_with(db, subject, Contacts::Left, now)
+}
+
+/// The archive of `subject`, as `export`, with the contacts or not.
+pub fn export_with(
+    db: &Database,
+    subject: Subject,
+    contacts: Contacts,
+    now: DateTime<Utc>,
+) -> Result<Vec<u8>, AppError> {
     let (kind, id, contents) = match subject {
         Subject::Match(id) => (Kind::Match, id, None),
         Subject::Team(id) | Subject::TeamWithMatches(id) => (Kind::Team, id, None),
@@ -257,6 +283,10 @@ pub fn export(db: &Database, subject: Subject, now: DateTime<Utc>) -> Result<Vec
             let images = archive_assets::gather(tx, &mut tables)?;
             Ok((tables, images))
         })?,
+    };
+    let tables: Vec<(&str, Vec<Row>)> = match contacts {
+        Contacts::Included => tables,
+        Contacts::Left => tables.into_iter().map(without_contacts).collect(),
     };
     let manifest = Manifest {
         format: FORMAT,
@@ -442,14 +472,34 @@ pub(crate) fn dump(
     }
 }
 
+/// The rows of the table, those of the persons with no contacts.
+fn without_contacts((table, rows): (&str, Vec<Row>)) -> (&str, Vec<Row>) {
+    let rows = match table {
+        "persons" => rows
+            .into_iter()
+            .map(|mut row| {
+                for column in CONTACTS {
+                    row.insert(column.into(), Json::from(""));
+                }
+                row
+            })
+            .collect(),
+        _ => rows,
+    };
+    (table, rows)
+}
+
 /// The details of a person: the columns, empty text or null when not given.
-const DETAILS: [(&str, Option<&str>); 6] = [
+const DETAILS: [(&str, Option<&str>); 9] = [
     ("birth_date", None),
     ("height_cm", None),
     ("notes", Some("")),
     ("nationality", None),
     ("dominant_hand", None),
     ("federation_id", Some("")),
+    ("email", Some("")),
+    ("phone", Some("")),
+    ("birth_place", Some("")),
 ];
 
 fn empty_detail(empty: Option<&str>) -> Json {
