@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -16,7 +17,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /** The bar of a team: the analysis and the training plan as icons, the
- * rare actions (export, edit, delete) in the menu, nothing of them left
+ * rare actions (export, edit, new season, delete) in the menu, nothing of them left
  * among the matches. */
 @RunWith(RobolectricTestRunner::class)
 class TeamBarTest {
@@ -25,19 +26,45 @@ class TeamBarTest {
     private var analysis = 0
     private var training = 0
     private var edited = 0
+    private var seasons = 0
 
     private fun show() {
         val team = saveNationalTeam()
         startFirstSet(team)
+        show(team)
+        rule.waitForText("Ekaterina Antropova")
+    }
+
+    private fun show(team: String) {
         rule.setContent {
             Scout4AllTheme {
                 TeamScreen(
                     team, onBack = {}, onEdit = { edited++ }, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {},
                     onAnalysis = { analysis++ }, onTraining = { training++ },
+                    onNewSeason = { seasons++ },
                 )
             }
         }
-        rule.waitForText("Ekaterina Antropova")
+    }
+
+    /** The new season from the menu, not a button after the players. */
+    @Test
+    fun theNewSeasonIsInTheMenu() {
+        show()
+        rule.onAllNodesWithText(string(R.string.new_season)).assertCountEquals(0)
+        rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick()
+        rule.onNodeWithText(string(R.string.new_season)).performClick()
+        assertEquals(1, seasons)
+    }
+
+    @Test
+    fun aTeamWithoutPlayersHasTheNewSeasonToo() {
+        show(saveTeam("Italia U19"))
+        rule.waitForText(string(R.string.no_players))
+        rule.onAllNodesWithText(string(R.string.new_season)).assertCountEquals(0)
+        rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick()
+        rule.onNodeWithText(string(R.string.new_season)).performClick()
+        assertEquals(1, seasons)
     }
 
     @Test

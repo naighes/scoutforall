@@ -20,6 +20,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,8 +28,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -169,6 +168,7 @@ fun TeamScreen(
                         MoreMenu { close ->
                             ExportEntries(exporter, close)
                             MenuEntry(stringResource(R.string.edit_team), Icons.Filled.Edit, close, onEdit)
+                            MenuEntry(stringResource(R.string.new_season), Icons.Filled.Refresh, close, onNewSeason)
                             MenuEntry(stringResource(R.string.delete_team), Icons.Filled.Delete, close, delete)
                         }
                     }
@@ -221,7 +221,7 @@ fun TeamScreen(
                 }
                 val content = Modifier.fillMaxSize()
                 when (tab) {
-                    PLAYERS_TAB -> Players(s.team, onPlayer, onNewSeason, content)
+                    PLAYERS_TAB -> Players(s.team, onPlayer, content)
                     else -> Matches(id, matches, onMatch, onSession, content, onUnreadable = { unreadable = it })
                 }
             }
@@ -229,20 +229,11 @@ fun TeamScreen(
     }
 }
 
-/** The players, then the new season of the team (D15): last, the players
- * first in sight. */
 @Composable
-private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, onNewSeason: () -> Unit, modifier: Modifier) {
-    val season = @Composable {
-        FilledTonalButton(
-            onClick = onNewSeason,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        ) { Text(stringResource(R.string.new_season)) }
-    }
+private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, modifier: Modifier) {
     when {
-        team.players.isEmpty() -> Column(modifier, verticalArrangement = Arrangement.Center) {
-            Text(stringResource(R.string.no_players), Modifier.align(Alignment.CenterHorizontally).padding(16.dp))
-            season()
+        team.players.isEmpty() -> Centered(modifier) {
+            Text(stringResource(R.string.no_players), Modifier.padding(16.dp))
         }
         // room at the bottom: the button doesn't cover the last player
         else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
@@ -252,7 +243,6 @@ private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, onNewSeason: 
                     Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                 )
             }
-            item(key = "season") { season() }
         }
     }
 }
