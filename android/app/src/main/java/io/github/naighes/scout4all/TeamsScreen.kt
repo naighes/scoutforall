@@ -48,6 +48,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import io.github.naighes.scout4all.core.Home
 import io.github.naighes.scout4all.core.HomeMatch
+import io.github.naighes.scout4all.core.MatchStanding
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.NextSetKind
 import io.github.naighes.scout4all.core.TeamListing
@@ -211,8 +212,9 @@ private fun HomeMatchRow(m: HomeMatch, onOpen: () -> Unit, tail: @Composable () 
     tail = tail,
 ) {
     Text(m.opponent, style = MaterialTheme.typography.bodyLarge)
+    val toPlay = stringResource(R.string.to_play).takeIf { m.standing == MatchStanding.TO_PLAY }
     Text(
-        "${m.teamName} · ${matchDate(m.date)}",
+        listOfNotNull(m.teamName, matchDate(m.date), toPlay).joinToString(" · "),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
@@ -221,10 +223,8 @@ private fun HomeMatchRow(m: HomeMatch, onOpen: () -> Unit, tail: @Composable () 
 /** A match not over: touched, its page; the button goes on scouting it. */
 @Composable
 private fun InProgressRow(m: HomeMatch, onOpen: () -> Unit, onResume: () -> Unit) = HomeMatchRow(m, onOpen) {
-    // not started yet: its first set
-    val first = (m.next as? NextSetKind.Start)?.setNumber?.toInt() == 1
     FilledTonalButton(onClick = onResume, Modifier.padding(end = 12.dp)) {
-        Text(stringResource(if (first) R.string.start else R.string.resume))
+        Text(stringResource(if (m.standing == MatchStanding.TO_PLAY) R.string.start else R.string.resume))
     }
 }
 

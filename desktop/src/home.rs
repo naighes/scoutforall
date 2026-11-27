@@ -18,7 +18,7 @@ use {
         widget::{Column, Id, column, container, row, scrollable, text},
     },
     scout4all_keys::{KeyCombination, key},
-    scout4all_mobile::{Home, HomeMatch, NextSetKind, Scout4All, TeamListing},
+    scout4all_mobile::{Home, HomeMatch, MatchStanding, NextSetKind, Scout4All, TeamListing},
 };
 
 #[derive(Debug, Clone)]
@@ -496,23 +496,37 @@ fn match_row<'a>(
     let body = row![
         column![
             ui::body(m.opponent.clone()).font(bold),
-            text(format!("{} · {}", m.team_name, s.day(&m.date)))
-                .size(SIZE_SMALL)
-                .color(c.muted),
+            text(
+                [
+                    Some(m.team_name.clone()),
+                    Some(s.day(&m.date)),
+                    (m.standing == MatchStanding::ToPlay).then(|| s.to_play.to_string()),
+                ]
+                .into_iter()
+                .flatten()
+                .collect::<Vec<_>>()
+                .join(" · ")
+            )
+            .size(SIZE_SMALL)
+            .color(c.muted),
         ]
         .push(next.map(|next| text(next).size(SIZE_SMALL).color(c.accent)))
         .spacing(2)
         .width(Length::Fill),
+    ]
+    // no score for a match not started
+    .extend((m.standing != MatchStanding::ToPlay).then(|| {
         text(format!("{}–{}", m.won, m.lost))
             .size(22)
             .font(bold)
             .color(ui::score_color(
                 m.won,
                 m.lost,
-                matches!(m.next, NextSetKind::Over),
+                m.standing == MatchStanding::Over,
                 c,
-            )),
-    ]
+            ))
+            .into()
+    }))
     .align_y(Alignment::Center)
     .spacing(10);
     ui::box_row(

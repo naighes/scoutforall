@@ -966,6 +966,7 @@ pub struct HomeMatch {
     pub date: String,
     pub won: u8,
     pub lost: u8,
+    pub standing: MatchStanding,
     pub next: NextSetKind,
 }
 
@@ -4256,6 +4257,7 @@ impl Scout4All {
                 .block_on(self.match_reader.read_summaries(&team))?;
             matches.extend(read.into_iter().flatten().map(|m| {
                 let next = next_of(&m);
+                let standing = m.standing().into();
                 (
                     m.date,
                     HomeMatch {
@@ -4268,6 +4270,7 @@ impl Scout4All {
                         home: m.home,
                         won: m.us_wins,
                         lost: m.them_wins,
+                        standing,
                         next,
                     },
                 )
@@ -9336,6 +9339,17 @@ mod tests {
                 &NextSetKind::Start { set_number: 1 },
                 &NextSetKind::Resume { set_number: 1 },
                 &NextSetKind::Start { set_number: 2 },
+            ]
+        );
+        assert_eq!(
+            home.in_progress
+                .iter()
+                .map(|m| m.standing)
+                .collect::<Vec<_>>(),
+            [
+                MatchStanding::ToPlay,
+                MatchStanding::InProgress,
+                MatchStanding::InProgress,
             ]
         );
         assert_eq!(home.in_progress[2].team_name, "Siena");

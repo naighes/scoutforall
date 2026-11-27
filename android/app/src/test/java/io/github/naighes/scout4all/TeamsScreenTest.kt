@@ -80,6 +80,8 @@ class TeamsScreenTest {
         val new = core { it.saveMatch(team, null, MatchForm("Arezzo", "2026-10-20T18:00:00+02:00", true, "6")) }
         show()
         rule.waitForText(string(R.string.home_in_progress))
+        // only the one without sets is said to play
+        rule.onAllNodesWithText(string(R.string.to_play), substring = true).assertCountEquals(1)
         rule.onNodeWithText(string(R.string.resume)).performClick()
         rule.onNodeWithText(string(R.string.start)).performClick()
         assertEquals(
