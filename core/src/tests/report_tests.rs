@@ -5,6 +5,7 @@
 mod tests {
     use crate::constants::DEFAULT_MAX_SUBSTITUTIONS;
     use crate::localization::labels;
+    use crate::reporting::logo::{Logo, MatchLogos};
     use crate::reporting::model::{Cell, Point, Report, build_report, build_report_of_both};
     use crate::reporting::pdf::{render_both_pdf, render_match_pdf, render_report_pdf};
     use crate::shapes::{
@@ -17,6 +18,7 @@ mod tests {
         team::TeamEntry,
     };
     use crate::tests::EN;
+    use crate::tests::logos::{image_count, logo};
     use EvalEnum::*;
     use EventTypeEnum::*;
 
@@ -584,7 +586,7 @@ mod tests {
         assert!(report.sets.rows.is_empty());
         // only the total of the team
         assert_eq!(report.players.rows.len(), 1);
-        render_match_pdf(&m, EN).expect("expected the report");
+        render_match_pdf(&m, EN, MatchLogos::default()).expect("expected the report");
     }
 
     /// The report in every language, with the names in the same one.
@@ -593,7 +595,7 @@ mod tests {
         let t = Team::new();
         for language in LanguageEnum::ALL {
             let m = match_entry(t.team("東京"), "Łódź São", true, vec![t.rallies()]);
-            render_match_pdf(&m, labels(language))
+            render_match_pdf(&m, labels(language), MatchLogos::default())
                 .unwrap_or_else(|e| panic!("expected the report in {language}: {e}"));
         }
     }
@@ -618,9 +620,60 @@ mod tests {
         let theirs = report.opponent.as_ref().expect("expected the opponent");
         assert_eq!(sideout.values[1][2], theirs.kpis[0].value);
         assert_eq!(theirs.header.teams[1].name, "them");
-        let pdf = render_both_pdf(&a, &b, EN).expect("expected the report");
-        let alone = render_match_pdf(&a, EN).expect("expected the report");
+        let pdf = render_both_pdf(&a, &b, EN, MatchLogos::default()).expect("expected the report");
+        let alone = render_match_pdf(&a, EN, MatchLogos::default()).expect("expected the report");
         // longer than ours alone
         assert!(pdf.len() > alone.len());
+    }
+
+    /// Each logo next to its team, whoever plays at home, in the pages of
+    /// the opponent too; no image without logos.
+    #[test]
+    fn the_logos_go_next_to_their_teams() {
+        let t = Team::new();
+        let a = match_entry(t.team("us"), "them", false, vec![t.rallies()]);
+        let b = match_entry(t.team("them"), "us", true, vec![t.rallies()]);
+        let logos = MatchLogos {
+            team: Some(logo([200, 0, 0, 255])),
+            opponent: Some(logo([255, 255, 255, 255])),
+        };
+        let report = build_report_of_both(&a, &b, EN)
+            .expect("expected the report")
+            .with_logos(logos.clone());
+        let shown = |r: &Report| -> Vec<(String, Option<Logo>)> {
+            r.header
+                .teams
+                .iter()
+                .map(|t| (t.name.clone(), t.logo.clone()))
+                .collect()
+        };
+        let teams = vec![
+            ("them".to_string(), logos.opponent.clone()),
+            ("us".to_string(), logos.team.clone()),
+        ];
+        assert_eq!(shown(&report), teams);
+        let theirs = report.opponent.as_deref().expect("expected the opponent");
+        assert_eq!(shown(theirs), teams);
+        let pdf = render_report_pdf(&report).expect("expected the report");
+        assert!(image_count(&pdf) > 0);
+        let plain = render_match_pdf(&a, EN, MatchLogos::default()).expect("expected the report");
+        assert_eq!(image_count(&plain), 0);
+        let one = render_match_pdf(
+            &a,
+            EN,
+            MatchLogos {
+                team: None,
+                ..logos
+            },
+        )
+        .expect("expected the report");
+        assert!(image_count(&one) > 0);
+    }
+
+    /// A light logo would vanish on the paper.
+    #[test]
+    fn a_light_logo_goes_on_a_dark_patch() {
+        assert!(logo([255, 255, 255, 255]).dark_backdrop);
+        assert!(!logo([200, 0, 0, 255]).dark_backdrop);
     }
 }

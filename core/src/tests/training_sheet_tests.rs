@@ -7,6 +7,7 @@ mod tests {
     use crate::reporting::pdf::render_training_pdf;
     use crate::reporting::training::{Context, SessionOptions, microcycle_sheet, session_sheet};
     use crate::shapes::enums::LanguageEnum;
+    use crate::tests::logos::{image_count, logo};
     use crate::training::cycles::{Cycle, Level, Span, Window};
     use crate::training::venue::Venue;
     use crate::training::{
@@ -70,6 +71,7 @@ mod tests {
     fn ctx() -> Context<'static> {
         Context {
             team: "東京 Volley",
+            logo: None,
             year: 2026,
             printed: at(22, 9),
             venues: Box::leak(Box::new(vec![Venue {
@@ -237,5 +239,21 @@ mod tests {
             render_training_pdf(&plan)
                 .unwrap_or_else(|e| panic!("expected the microcycle plan in {language}: {e}"));
         }
+    }
+
+    #[test]
+    fn the_sheets_show_the_logo_of_the_team() {
+        let l = labels(LanguageEnum::En);
+        let s = session(23, SessionStatus::Planned);
+        let with = Context {
+            logo: Some(logo([200, 0, 0, 255])),
+            ..ctx()
+        };
+        let images = |ctx: &Context| {
+            let sheet = session_sheet(l, ctx, &s, &[], None, SessionOptions::default());
+            image_count(&render_training_pdf(&sheet).expect("expected the sheet"))
+        };
+        assert_eq!(images(&ctx()), 0);
+        assert!(images(&with) > 0);
     }
 }

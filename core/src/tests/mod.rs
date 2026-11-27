@@ -48,6 +48,7 @@ mod libero_for_tests;
 mod libero_out_tests;
 mod lineup_scenario_tests;
 mod lineup_tests;
+pub(crate) mod logos;
 mod match_form_tests;
 mod migrate_tests;
 mod pinned_teams_tests;

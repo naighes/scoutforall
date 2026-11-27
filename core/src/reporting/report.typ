@@ -45,14 +45,27 @@
 // the match: the teams, the sets won, the date
 #let header(h) = {
   let (first, second) = h.teams
+  // the logo on the outer side of the name
+  let named(t, leading) = {
+    let name = text(15pt, weight: "semibold", t.name)
+    if t.logo == none { name } else {
+      let cells = (team-logo(t.logo, 28pt), name)
+      grid(
+        columns: (auto, auto),
+        column-gutter: 8pt,
+        align: horizon,
+        ..if leading { cells } else { cells.rev() },
+      )
+    }
+  }
   let sets(t) = text(28pt, weight: "semibold", fill: if t.us { accent } else { ink }, str(t.sets))
   grid(
     columns: (1fr, auto, 1fr),
     column-gutter: 16pt,
     align: (right + horizon, center + horizon, left + horizon),
-    text(15pt, weight: "semibold", first.name),
+    named(first, true),
     stack(dir: ltr, spacing: 10pt, sets(first), text(22pt, fill: muted, "–"), sets(second)),
-    text(15pt, weight: "semibold", second.name),
+    named(second, false),
   )
   v(-6pt)
   align(center, text(8pt, fill: muted, h.date))

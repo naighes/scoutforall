@@ -2,6 +2,7 @@
 //! microcycle, laid out by `training.typ`. Pure: the caller reads the data.
 
 use crate::localization::Labels;
+use crate::reporting::logo::Logo;
 use crate::training::cycles::Cycle;
 use crate::training::venue::Venue;
 use crate::training::{Activity, AttendanceRow, AttendanceStatus, SessionStatus, TrainingSession};
@@ -30,6 +31,7 @@ pub struct Sheet {
     /// "Training session" or "Microcycle plan"
     pub kind: &'static str,
     pub team: String,
+    pub logo: Option<Logo>,
     pub season: String,
     /// the title of the session or of the microcycle
     pub title: String,
@@ -83,6 +85,7 @@ pub struct SessionOptions {
 /// Who and when: the same on every sheet.
 pub struct Context<'a> {
     pub team: &'a str,
+    pub logo: Option<Logo>,
     pub year: u16,
     pub printed: NaiveDateTime,
     /// the gyms the sessions may hold, to name them
@@ -192,6 +195,7 @@ fn base(labels: &Labels, ctx: &Context, kind: &'static str) -> Sheet {
         labels: sheet_labels(labels),
         kind,
         team: ctx.team.to_string(),
+        logo: ctx.logo.clone(),
         season: ctx.year.to_string(),
         title: String::new(),
         subtitle: String::new(),

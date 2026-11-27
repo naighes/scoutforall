@@ -1613,6 +1613,7 @@ impl Scout4All {
             self.language.labels(),
             &Context {
                 team: &team.name,
+                logo: self.pdf_logo(&team.id.to_string())?,
                 year: team.year,
                 printed: self.clock.now(),
                 venues: &venues,
@@ -1655,6 +1656,7 @@ impl Scout4All {
             self.language.labels(),
             &Context {
                 team: &team.name,
+                logo: self.pdf_logo(&team.id.to_string())?,
                 year: team.year,
                 printed: self.clock.now(),
                 venues: &venues,
@@ -1786,6 +1788,21 @@ mod tests {
         team_form::TeamForm,
     };
     use std::sync::Arc;
+
+    /// The images a PDF draws from.
+    fn image_count(pdf: &[u8]) -> usize {
+        let image = b"/Subtype/Image";
+        pdf.windows(image.len()).filter(|w| w == image).count()
+    }
+
+    /// A 1×1 PNG.
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x38,
+        0x21, 0x27, 0xf7, 0x1f, 0x00, 0x04, 0xba, 0x02, 0x04, 0x3e, 0x57, 0x1f, 0xc7, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
         app_in(dir)
@@ -2584,11 +2601,12 @@ mod tests {
         let app = app(&dir);
         let team = team(&app, "Cortona");
         let s = session(&app, &team, "2030-03-04T18:30");
+        let s_id = s.id.clone();
         let pdf = app.session_pdf(s.id.clone(), true, true).unwrap();
         assert!(pdf.starts_with(b"%PDF"));
         let micro = app
             .save_cycle(
-                team,
+                team.clone(),
                 Level::Microcycle,
                 None,
                 CycleDraft {
@@ -2601,6 +2619,12 @@ mod tests {
                 false,
             )
             .unwrap();
-        assert!(app.microcycle_pdf(micro.id).unwrap().starts_with(b"%PDF"));
+        let plan = || app.microcycle_pdf(micro.id.clone()).unwrap();
+        let sheet = || app.session_pdf(s_id.clone(), false, false).unwrap();
+        assert!(plan().starts_with(b"%PDF"));
+        assert_eq!((image_count(&plan()), image_count(&sheet())), (0, 0));
+        // the logo of the team on both
+        app.set_team_logo(team, Some(PNG.to_vec())).unwrap();
+        assert!(image_count(&plan()) > 0 && image_count(&sheet()) > 0);
     }
 }

@@ -7,6 +7,7 @@
 use crate::errors::AppError;
 use crate::localization::Labels;
 use crate::overview::{balance, side_out_possessions};
+use crate::reporting::logo::{Logo, MatchLogos};
 use crate::shapes::enums::{
     EvalEnum, EventTypeEnum, FriendlyName, PhaseEnum, TeamSideEnum, ZoneEnum,
 };
@@ -122,6 +123,7 @@ pub struct TeamHeader {
     pub name: String,
     pub sets: u8,
     pub us: bool,
+    pub logo: Option<Logo>,
 }
 
 /// A key figure of the match, with the numbers behind it.
@@ -259,7 +261,12 @@ pub fn build_report(m: &MatchEntry, labels: &Labels) -> Result<Report, AppError>
         (m.team.name.clone(), status.us_wins, true),
         (m.opponent.clone(), status.them_wins, false),
     )
-    .map(|(name, sets, us)| TeamHeader { name, sets, us });
+    .map(|(name, sets, us)| TeamHeader {
+        name,
+        sets,
+        us,
+        logo: None,
+    });
     Ok(Report {
         labels: ReportLabels {
             created_with: labels.created_with,
@@ -289,6 +296,22 @@ pub fn build_report(m: &MatchEntry, labels: &Labels) -> Result<Report, AppError>
         versus: None,
         opponent: None,
     })
+}
+
+impl Report {
+    /// Each logo next to its team, in the pages of the opponent too.
+    pub fn with_logos(mut self, logos: MatchLogos) -> Report {
+        self.header.teams.iter_mut().for_each(|team| {
+            team.logo = match team.us {
+                true => logos.team.clone(),
+                false => logos.opponent.clone(),
+            }
+        });
+        self.opponent = self
+            .opponent
+            .map(|r| Box::new(r.with_logos(logos.swapped())));
+        self
+    }
 }
 
 /// The report of a match scouted on both sides: ours, the two teams side by

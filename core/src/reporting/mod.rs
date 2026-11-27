@@ -1,3 +1,4 @@
+pub mod logo;
 pub mod model;
 pub mod pdf;
 pub mod training;

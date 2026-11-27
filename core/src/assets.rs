@@ -314,6 +314,30 @@ pub fn team_logo(db: &Database, team_id: &str) -> Result<Option<Image>, AppError
     })
 }
 
+/// The logo of the team `team_id` plays against in the match, if the
+/// opponent is a team with one.
+pub fn opponent_logo(
+    db: &Database,
+    match_id: &str,
+    team_id: &str,
+) -> Result<Option<Image>, AppError> {
+    db.read(|tx| {
+        let id: Option<String> = tx
+            .query_row(
+                "SELECT t.logo_asset_id FROM matches m
+                 JOIN teams t
+                   ON t.id = CASE m.team_a WHEN ?2 THEN m.team_b ELSE m.team_a END
+                 WHERE m.id = ?1",
+                [match_id, team_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::IO(e.into()))?
+            .flatten();
+        id.map(|id| load(tx, &id)).transpose().map(Option::flatten)
+    })
+}
+
 /// `set_team_logo` in one transaction on the shared database.
 pub fn store_team_logo(db: &Database, team_id: &str, bytes: Option<&[u8]>) -> Result<(), AppError> {
     db.write(|tx| set_team_logo(tx, team_id, bytes))

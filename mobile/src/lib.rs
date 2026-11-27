@@ -5205,9 +5205,15 @@ impl Scout4All {
     /// The report of the match as a PDF, in the language of the app: the
     /// file to save or print, as the TUI opens it.
     pub fn match_pdf(&self, team_id: String, match_id: String) -> Result<Vec<u8>, MobileError> {
+        use scout4all_core::assets;
+        use scout4all_core::reporting::logo::{Logo, MatchLogos};
         use scout4all_core::reporting::pdf::{render_both_pdf, render_match_pdf};
         let m = self.read_match(&team_id, &match_id)?;
         let labels = self.language.labels();
+        let logos = MatchLogos {
+            team: self.pdf_logo(&team_id)?,
+            opponent: assets::opponent_logo(&self.db, &match_id, &team_id)?.map(Logo::from),
+        };
         // a match scouted on both sides has the opponent's pages too
         match self
             .match_reader
@@ -5215,9 +5221,9 @@ impl Scout4All {
         {
             Ok(Some(mut b)) => {
                 name_the_removed(&mut b.team, labels);
-                Ok(render_both_pdf(&m, &b, labels)?)
+                Ok(render_both_pdf(&m, &b, labels, logos)?)
             }
-            Ok(None) => Ok(render_match_pdf(&m, labels)?),
+            Ok(None) => Ok(render_match_pdf(&m, labels, logos)?),
             Err(e) => Err(unreadable(&e, labels.unreadable_match)),
         }
     }
@@ -6222,6 +6228,14 @@ impl Scout4All {
     }
 
     /// The match, a player removed from the registry named as such.
+    /// The logo of the team as the PDFs show it.
+    fn pdf_logo(
+        &self,
+        team_id: &str,
+    ) -> Result<Option<scout4all_core::reporting::logo::Logo>, MobileError> {
+        Ok(scout4all_core::assets::team_logo(&self.db, team_id)?.map(Into::into))
+    }
+
     fn read_match(&self, team_id: &str, match_id: &str) -> Result<MatchEntry, MobileError> {
         let team = self.read_team(team_id)?;
         let labels = self.language.labels();
@@ -11085,6 +11099,45 @@ mod tests {
         let (one, both) = (report(DvwOpponent::Name), report(DvwOpponent::NewTeam));
         assert!(one.starts_with(b"%PDF") && both.starts_with(b"%PDF"));
         assert!(both.len() > one.len());
+    }
+
+    /// The report shows the logos of the match: ours and the one of an
+    /// opponent that is a team.
+    #[test]
+    fn the_report_of_a_match_has_the_logos_of_its_teams() {
+        // a 1×1 PNG
+        const PNG: &[u8] = &[
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9c, 0x63, 0x38, 0x21, 0x27, 0xf7, 0x1f, 0x00, 0x04, 0xba, 0x02, 0x04, 0x3e, 0x57,
+            0x1f, 0xc7, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice).unwrap();
+        let (team, id) = (imported.team_id, imported.match_id);
+        let opponent = match app.matches(team.clone()).unwrap().into_iter().next() {
+            Some(MatchListing::Match { opponent_team, .. }) => opponent_team.unwrap(),
+            other => panic!("no match: {other:?}"),
+        };
+        let images = || {
+            let pdf = app.match_pdf(team.clone(), id.clone()).unwrap();
+            let image = b"/Subtype/Image";
+            pdf.windows(image.len()).filter(|w| w == image).count()
+        };
+        assert_eq!(images(), 0);
+        app.set_team_logo(opponent, Some(PNG.to_vec())).unwrap();
+        let theirs = images();
+        assert!(theirs > 0);
+        app.set_team_logo(team.clone(), Some(PNG.to_vec())).unwrap();
+        assert!(images() >= theirs);
+        app.set_team_logo(team.clone(), None).unwrap();
+        assert!(images() > 0);
     }
 
     /// The analysis of the opponent over the matches scouted on both
