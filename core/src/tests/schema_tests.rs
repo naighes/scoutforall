@@ -144,7 +144,7 @@ mod tests {
     #[test]
     fn a_new_database_has_the_tables_of_this_version() {
         let db = db::open_in_memory().unwrap();
-        assert_eq!(db::schema_version(), 8);
+        assert_eq!(db::schema_version(), 9);
         let expected: &[(&str, &[&str])] = &[
             ("assets", &["id", "kind", "mime", "width", "height", "data"]),
             (
@@ -758,7 +758,8 @@ mod tests {
         let persons: Vec<String> = db
             .prepare(
                 "SELECT concat_ws('|', name, birth_date, height_cm, notes, deleted,
-                     ifnull(nationality, '-'), ifnull(dominant_hand, '-'), federation_id)
+                     ifnull(nationality, '-'), ifnull(dominant_hand, '-'), federation_id,
+                     email, phone, birth_place)
                  FROM persons ORDER BY id",
             )
             .unwrap()
@@ -766,7 +767,34 @@ mod tests {
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(persons, ["kept|2004-03-01|171|x|0|-|-|", "||1|-|-|"]);
+        assert_eq!(persons, ["kept|2004-03-01|171|x|0|-|-||||", "||1|-|-||||"]);
+    }
+
+    /// A database of v8 (the development before the contacts): its persons
+    /// keep their details and get the contacts empty.
+    #[test]
+    fn the_persons_of_a_database_of_v8_get_empty_contacts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scout4all.db");
+        let old = db::open_with(&path, &db::MIGRATIONS[..8]).unwrap();
+        old.execute_batch(&format!(
+            "INSERT INTO persons (id, name, nationality, dominant_hand, federation_id)
+                 VALUES ('{}', 'kept', 'IT', 'left', 'F1');",
+            person(1)
+        ))
+        .unwrap();
+        drop(old);
+        let db = db::open(&path).unwrap();
+        let person: String = db
+            .query_row(
+                "SELECT concat_ws('|', name, nationality, dominant_hand, federation_id,
+                     email, phone, birth_place)
+                 FROM persons",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(person, "kept|IT|left|F1|||");
     }
 
     /// A database of v2: its sets keep their scouting rules when the

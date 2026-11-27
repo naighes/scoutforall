@@ -10,12 +10,3 @@ ALTER TABLE persons ADD COLUMN dominant_hand TEXT CHECK (
 ALTER TABLE persons ADD COLUMN federation_id TEXT NOT NULL DEFAULT '' CHECK (
     deleted = 0 OR federation_id = ''
 );
-ALTER TABLE persons ADD COLUMN email TEXT NOT NULL DEFAULT '' CHECK (
-    deleted = 0 OR email = ''
-);
-ALTER TABLE persons ADD COLUMN phone TEXT NOT NULL DEFAULT '' CHECK (
-    deleted = 0 OR phone = ''
-);
-ALTER TABLE persons ADD COLUMN birth_place TEXT NOT NULL DEFAULT '' CHECK (
-    deleted = 0 OR birth_place = ''
-);
