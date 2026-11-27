@@ -1,17 +1,11 @@
 package io.github.naighes.scout4all
 
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.material3.Surface
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.Image
 import io.github.naighes.scout4all.core.AgendaSpan
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -35,7 +29,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -56,7 +49,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.size
@@ -302,56 +294,67 @@ private fun Matches(
 }
 
 @Composable
-private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (String) -> Unit) = when (m) {
-    is MatchListing.Match -> ListItem(
-        modifier = Modifier.clickable { onMatch(m.id) },
-        // home or away at a glance, in the grey of the secondary text
-        leadingContent = {
-            val place = stringResource(if (m.home) R.string.home else R.string.away)
-            // read as a text: a description would hide the rest of the row
-            when {
-                m.home -> Icon(Icons.Outlined.Home, contentDescription = null, Modifier.readAs(place))
-                else -> Icon(painterResource(R.drawable.ic_away), contentDescription = null, Modifier.readAs(place))
-            }
-        },
-        headlineContent = { Text(m.opponent) },
-        supportingContent = {
-            Column {
-                Row {
-                    Text(matchDate(m.date))
-                    if (!m.finished) {
-                        Text(" · ", Modifier.notRead())
-                        Text(stringResource(R.string.in_progress), color = MaterialTheme.colorScheme.primary)
-                    }
+private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (String) -> Unit) {
+    val modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+    val grey = MaterialTheme.colorScheme.onSurfaceVariant
+    when (m) {
+        is MatchListing.Match -> BoxRow(
+            onClick = { onMatch(m.id) },
+            modifier = modifier,
+            // home or away at a glance
+            head = {
+                val place = stringResource(if (m.home) R.string.home else R.string.away)
+                // read as a text: a description would hide the rest of the row
+                when {
+                    m.home -> Icon(Icons.Outlined.Home, contentDescription = null, Modifier.size(32.dp).readAs(place), tint = grey)
+                    else -> Icon(painterResource(R.drawable.ic_away), contentDescription = null, Modifier.size(32.dp).readAs(place), tint = grey)
                 }
-                // B of a match scouted by A: only its result here
-                if (m.scoutedBy != null) Text(stringResource(R.string.scouted_by_opponent))
+            },
+            // the sets of the team first, green when it won, red when it lost
+            tail = {
+                TailFigure(
+                    "${m.won}-${m.lost}",
+                    when {
+                        !m.finished -> MaterialTheme.colorScheme.onSurface
+                        m.won > m.lost -> Won
+                        else -> Lost
+                    },
+                    Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
+                )
+            },
+        ) {
+            Text(m.opponent, style = MaterialTheme.typography.bodyLarge)
+            Row {
+                Text(matchDate(m.date), style = MaterialTheme.typography.bodyMedium, color = grey)
+                if (!m.finished) {
+                    Text(" · ", Modifier.notRead(), style = MaterialTheme.typography.bodyMedium, color = grey)
+                    Text(
+                        stringResource(R.string.in_progress),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
             }
-        },
-        // the sets of the team first, green when it won, red when it lost
-        trailingContent = {
+            // B of a match scouted by A: only its result here
+            if (m.scoutedBy != null) {
+                Text(stringResource(R.string.scouted_by_opponent), style = MaterialTheme.typography.bodyMedium, color = grey)
+            }
+        }
+        // why, when it's known: e.g. a set this version doesn't replay
+        // a touch deletes it, once confirmed
+        is MatchListing.Unreadable -> BoxRow(
+            onClick = { onUnreadable(m.folder) },
+            modifier = modifier,
+            head = { Icon(painterResource(Level.ERROR.icon), contentDescription = null, Modifier.size(32.dp), tint = Level.ERROR.color) },
+        ) {
+            Text(stringResource(R.string.unreadable_match), style = MaterialTheme.typography.bodyLarge)
             Text(
-                "${m.won}-${m.lost}",
-                Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = when {
-                    !m.finished -> MaterialTheme.colorScheme.onSurface
-                    m.won > m.lost -> Won
-                    else -> Lost
-                },
+                listOfNotNull(m.folder, m.reason, stringResource(R.string.unreadable_match_delete)).joinToString("\n"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = grey,
             )
-        },
-    )
-    // why, when it's known: e.g. a set this version doesn't replay
-    // a touch deletes it, once confirmed
-    is MatchListing.Unreadable -> ListItem(
-        modifier = Modifier.clickable { onUnreadable(m.folder) },
-        headlineContent = { Text(stringResource(R.string.unreadable_match)) },
-        supportingContent = {
-            Text(listOfNotNull(m.folder, m.reason, stringResource(R.string.unreadable_match_delete)).joinToString("\n"))
-        },
-    )
+        }
+    }
 }
 
 /** The date in the language of the phone, as it was where the match was
@@ -362,9 +365,9 @@ fun matchDate(date: String): String = try {
     date
 }
 
-/** A box of a list of players: the square portrait at its head, as tall as
- * the row (the initials without a photo), the name and the role if any, the
- * number at its tail. The team's list, who comes in. */
+/** A box of a list of players: the square portrait at its head (the
+ * initials without a photo), the name and the role if any, the number at its
+ * tail. The team's list, who comes in. */
 @Composable
 internal fun PortraitRow(
     id: String,
@@ -374,45 +377,25 @@ internal fun PortraitRow(
     number: Int,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-) = Surface(
+) = BoxRow(
     onClick = onClick,
-    modifier = modifier.fillMaxWidth(),
-    shape = RoundedCornerShape(12.dp),
-    color = MaterialTheme.colorScheme.surfaceVariant,
-    // the grey is also the primary container: its content would be amber
-    contentColor = MaterialTheme.colorScheme.onSurface,
+    modifier = modifier,
+    head = { Portrait(id, initials) },
+    tail = { TailFigure(number.toString(), MaterialTheme.colorScheme.primary) },
 ) {
-    Row(Modifier.heightIn(min = PORTRAIT), verticalAlignment = Alignment.CenterVertically) {
-        Portrait(id, initials)
-        Column(Modifier.weight(1f).padding(horizontal = 12.dp, vertical = 6.dp)) {
-            Text(name, style = MaterialTheme.typography.bodyLarge)
-            role?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-        }
-        Text(
-            number.toString(),
-            Modifier.padding(end = 16.dp),
-            style = MaterialTheme.typography.headlineMedium,
-            fontWeight = FontWeight.Bold,
-            fontStyle = FontStyle.Italic,
-            color = MaterialTheme.colorScheme.primary,
-        )
+    Text(name, style = MaterialTheme.typography.bodyLarge)
+    role?.let {
+        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
 /** A transparent photo shows the grey of the box, an old one fills the
  * square. */
 @Composable
-private fun Portrait(id: String, initials: String) = Box(Modifier.size(PORTRAIT), contentAlignment = Alignment.Center) {
-    when (val photo = photoOf(id)) {
-        null -> Text(initials, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        else -> Image(photo, contentDescription = null, Modifier.fillMaxSize().testTag(SHOWN_IMAGE), contentScale = ContentScale.Crop)
-    }
+private fun Portrait(id: String, initials: String) = when (val photo = photoOf(id)) {
+    null -> Text(initials, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    else -> Image(photo, contentDescription = null, Modifier.fillMaxSize().testTag(SHOWN_IMAGE), contentScale = ContentScale.Crop)
 }
-
-/** The height of a row of the players, and the side of its portrait. */
-private val PORTRAIT = 72.dp
 
 @Composable
 fun BackButton(onBack: () -> Unit) = IconButton(onClick = onBack) {

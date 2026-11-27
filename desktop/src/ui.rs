@@ -274,11 +274,11 @@ pub fn tail_number<'a, M: 'a>(number: u8, c: Colors) -> Element<'a, M> {
         .into()
 }
 
-/// The height of a row with a portrait.
+/// The height of a `box_row`, and the side of its head.
 const PORTRAIT: f32 = 48.0;
 
-/// A box of a list of persons: the square portrait at its head, as tall as
-/// the row (the initials without a photo), then `content`.
+/// A box of a list of persons: the square portrait at its head (the
+/// initials without a photo), then `content`.
 pub fn portrait_row<'a, M: Clone + 'a>(
     photo: Option<&iced::widget::image::Handle>,
     initials: String,
@@ -287,8 +287,7 @@ pub fn portrait_row<'a, M: Clone + 'a>(
     message: M,
     c: Colors,
 ) -> Element<'a, M> {
-    const RADIUS: f32 = 8.0;
-    let corners = iced::border::Radius::default().left(RADIUS);
+    let corners = iced::border::Radius::default().left(ROW_RADIUS);
     let picture: Element<'a, M> = match photo {
         // a transparent one shows the grey, an old one fills the square
         Some(photo) => iced::widget::image(photo.clone())
@@ -297,19 +296,35 @@ pub fn portrait_row<'a, M: Clone + 'a>(
             .content_fit(iced::ContentFit::Cover)
             .border_radius(corners)
             .into(),
-        None => container(text(initials).size(SIZE_SMALL).color(c.muted))
-            .center_x(Length::Fixed(PORTRAIT))
-            .center_y(Length::Fixed(PORTRAIT))
-            .into(),
+        None => text(initials).size(SIZE_SMALL).color(c.muted).into(),
     };
-    let head = container(picture).style(move |_| container::Style {
-        background: Some(c.button.into()),
-        border: iced::Border {
-            radius: corners,
-            ..iced::Border::default()
-        },
-        ..container::Style::default()
-    });
+    box_row(picture, content, chosen, message, c)
+}
+
+/// The corners of a `box_row`.
+const ROW_RADIUS: f32 = 8.0;
+
+/// The box of a row of a list, as on Android (`BoxRow`): a square at its
+/// head holding `head`, then `content`.
+pub fn box_row<'a, M: Clone + 'a>(
+    head: impl Into<Element<'a, M>>,
+    content: impl Into<Element<'a, M>>,
+    chosen: bool,
+    message: M,
+    c: Colors,
+) -> Element<'a, M> {
+    let corners = iced::border::Radius::default().left(ROW_RADIUS);
+    let head = container(head)
+        .center_x(Length::Fixed(PORTRAIT))
+        .center_y(Length::Fixed(PORTRAIT))
+        .style(move |_| container::Style {
+            background: Some(c.button.into()),
+            border: iced::Border {
+                radius: corners,
+                ..iced::Border::default()
+            },
+            ..container::Style::default()
+        });
     let body = row![
         head,
         container(content.into())
@@ -345,7 +360,7 @@ pub fn portrait_row<'a, M: Clone + 'a>(
                         false => Color::TRANSPARENT,
                     },
                     1.0,
-                    RADIUS,
+                    ROW_RADIUS,
                 ),
                 ..button::Style::default()
             }

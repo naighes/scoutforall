@@ -1122,51 +1122,40 @@ impl TeamScreen {
 
     fn matches<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let active = self.panel == Panel::Matches;
-        let rows = self.matches.iter().enumerate().map(|(i, m)| match m {
-            MatchListing::Match {
-                opponent,
-                home,
-                date,
-                won,
-                lost,
-                finished,
-                scouted_by,
-                ..
-            } => row![
-                ui::list_row(
-                    row![
-                        // home or away at a glance, as on Android
-                        ui::tip(
-                            ui::icon(
-                                match home {
-                                    true => theme::icons::HOME,
-                                    false => theme::icons::AWAY,
-                                },
-                                22.0,
-                                c.muted,
-                            ),
-                            match home {
-                                true => s.home_game,
-                                false => s.away_game,
-                            },
-                            c,
-                        ),
+        let rows = self.matches.iter().enumerate().map(|(i, m)| {
+            let chosen = active && i == self.game;
+            let row = match m {
+                MatchListing::Match {
+                    opponent,
+                    home,
+                    date,
+                    won,
+                    lost,
+                    finished,
+                    scouted_by,
+                    ..
+                } => {
+                    let (icon, place) = match home {
+                        true => (theme::icons::HOME, s.home_game),
+                        false => (theme::icons::AWAY, s.away_game),
+                    };
+                    // the date, then what else there is to know
+                    let facts = [
+                        Some((s.day(date), c.muted)),
+                        (!finished).then(|| (format!("· {}", s.in_progress), c.accent)),
+                        scouted_by
+                            .as_ref()
+                            .map(|_| (format!("· {}", s.scouted_by_opponent), c.muted)),
+                    ];
+                    let content = row![
                         column![
                             ui::body(opponent.clone()).font(theme::fonts().bold),
-                            row![
-                                text(s.day(date)).size(SIZE_SMALL).color(c.muted),
-                                text(match finished {
-                                    true => String::new(),
-                                    false => format!("· {}", s.in_progress),
-                                })
-                                .size(SIZE_SMALL)
-                                .color(c.accent),
-                            ]
-                            .spacing(6),
+                            Row::with_children(facts.into_iter().flatten().map(|(fact, color)| {
+                                text(fact).size(SIZE_SMALL).color(color).into()
+                            }))
+                            .spacing(6)
+                            .wrap(),
                         ]
-                        .push(scouted_by.as_ref().map(|_| {
-                            text(s.scouted_by_opponent).size(SIZE_SMALL).color(c.muted)
-                        }))
                         .spacing(2)
                         .width(Length::Fill),
                         text(format!("{won}–{lost}"))
@@ -1175,11 +1164,32 @@ impl TeamScreen {
                             .color(ui::score_color(*won, *lost, *finished, c)),
                     ]
                     .spacing(8)
-                    .align_y(Alignment::Center),
-                    active && i == self.game,
-                    Some(Message::Match(i)),
+                    .align_y(Alignment::Center);
+                    // home or away at a glance, as on Android
+                    ui::box_row(
+                        ui::tip(ui::icon(icon, 22.0, c.muted), place, c),
+                        content,
+                        chosen,
+                        Message::Match(i),
+                        c,
+                    )
+                }
+                MatchListing::Unreadable { folder, reason } => ui::box_row(
+                    ui::icon(theme::icons::ERROR_OUTLINE, 22.0, c.danger),
+                    column![ui::body(folder.clone()).font(theme::fonts().bold)]
+                        .push(
+                            reason
+                                .as_ref()
+                                .map(|r| text(r.clone()).size(SIZE_SMALL).color(c.danger)),
+                        )
+                        .spacing(2),
+                    chosen,
+                    Message::Match(i),
                     c,
                 ),
+            };
+            row![
+                row,
                 ui::tip(
                     ui::icon_button(
                         theme::icons::DELETE,
@@ -1194,24 +1204,20 @@ impl TeamScreen {
             ]
             .spacing(4)
             .align_y(Alignment::Center)
-            .into(),
-            MatchListing::Unreadable { folder, reason } => text(format!(
-                "{folder}{}",
-                reason
-                    .as_ref()
-                    .map(|r| format!(": {r}"))
-                    .unwrap_or_default()
-            ))
-            .size(SIZE_SMALL)
-            .color(c.danger)
-            .into(),
+            .into()
         });
-        let list: Element<'a, Message> = match self.matches.is_empty() {
-            true => ui::body(s.no_matches_yet).color(c.muted).into(),
-            false => scrollable(Column::with_children(rows).spacing(3))
+        let list: Element<'a, Message> =
+            match self.matches.is_empty() {
+                true => ui::body(s.no_matches_yet).color(c.muted).into(),
+                false => scrollable(Column::with_children(rows).spacing(4).padding(
+                    iced::Padding {
+                        right: 14.0,
+                        ..iced::Padding::ZERO
+                    },
+                ))
                 .height(Length::Fill)
                 .into(),
-        };
+            };
         ui::panel_with(
             s.matches,
             vec![ui::add_button(s.new_match, Message::NewMatch, c)],
