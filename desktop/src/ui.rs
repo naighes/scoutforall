@@ -198,6 +198,36 @@ pub fn bar_item<'a, M: Clone + 'a>(
     .into()
 }
 
+/// What a bar makes, shaped as its choices ([`bar_item`]) but framed: it
+/// is done, not chosen.
+pub fn bar_action<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    message: M,
+    c: Colors,
+) -> Element<'a, M> {
+    button(
+        column![
+            icon(icon_bytes, 22.0, c.accent),
+            text(label.to_string()).size(SIZE_SMALL)
+        ]
+        .spacing(2)
+        .align_x(Alignment::Center),
+    )
+    .padding(Padding::from([4, 10]))
+    .on_press(message)
+    .style(move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        button::Style {
+            background: hovered.then(|| c.button.into()),
+            text_color: c.text,
+            border: border(c.accent, 1.0, 8.0),
+            ..button::Style::default()
+        }
+    })
+    .into()
+}
+
 fn pill_of<'a, M: Clone + 'a>(
     content: Element<'a, M>,
     chosen: bool,

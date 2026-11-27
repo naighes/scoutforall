@@ -542,6 +542,7 @@
     <string name="tr_programming">Training plan</string>
     <string name="tr_sessions">Sessions</string>
     <string name="tr_new_session">New session</string>
+    <string name="tr_new_event">New event</string>
     <string name="tr_edit_session">Edit the session</string>
     <string name="tr_session_title">Title</string>
     <string name="tr_session_duration">Planned duration (min)</string>

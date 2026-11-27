@@ -540,6 +540,7 @@
     <string name="tr_programming">Programmazione</string>
     <string name="tr_sessions">Sedute</string>
     <string name="tr_new_session">Nuova seduta</string>
+    <string name="tr_new_event">Nuovo evento</string>
     <string name="tr_edit_session">Modifica la seduta</string>
     <string name="tr_session_title">Titolo</string>
     <string name="tr_session_duration">Durata prevista (min)</string>

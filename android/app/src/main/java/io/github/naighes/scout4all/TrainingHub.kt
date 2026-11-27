@@ -33,6 +33,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -201,7 +205,7 @@ internal fun TrainingScreen(
                         // added from here too, not only from the home
                         IconButton(onClick = onVenues) {
                             Icon(
-                                androidx.compose.ui.res.painterResource(R.drawable.ic_gym),
+                                painterResource(R.drawable.ic_gym),
                                 contentDescription = stringResource(R.string.venues),
                             )
                         }
@@ -236,8 +240,7 @@ internal fun TrainingScreen(
                             sessions = emptyList()
                         }
                     },
-                    stringResource(R.string.tr_new_session),
-                ) { onNewOn(day) }
+                ) { NewEventFab({ onNewOn(day) }, { onNewMatch(day) }) }
                 Part.CYCLES -> Fabs(
                     up?.takeIf { cycles.isNotEmpty() }?.let { u ->
                         "${stringResource(u.createName())} (${cycles.size})" to {
@@ -245,8 +248,7 @@ internal fun TrainingScreen(
                             cycles = emptyList()
                         }
                     },
-                    stringResource(level.createName()),
-                ) { onNewCycle(level) }
+                ) { NewCycleFab(stringResource(level.createName())) { onNewCycle(level) } }
                 else -> {}
             }
         },
@@ -282,9 +284,9 @@ internal fun TrainingScreen(
 }
 
 /** The + of the part, and above it the cycle of what is marked, when
- * something is: both said in words. */
+ * something is. */
 @Composable
-private fun Fabs(create: Pair<String, () -> Unit>?, add: String, onAdd: () -> Unit) =
+private fun Fabs(create: Pair<String, () -> Unit>?, add: @Composable () -> Unit) =
     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         create?.let { (label, onCreate) ->
             ExtendedFloatingActionButton(
@@ -294,12 +296,41 @@ private fun Fabs(create: Pair<String, () -> Unit>?, add: String, onAdd: () -> Un
                 text = { Text(label) },
             )
         }
-        ExtendedFloatingActionButton(
-            onClick = onAdd,
-            icon = { Icon(Icons.Filled.Add, contentDescription = add) },
-            text = { Text(add) },
-        )
+        add()
     }
+
+/** Said in words: the same + makes a different cycle on each level. */
+@Composable
+private fun NewCycleFab(add: String, onAdd: () -> Unit) = ExtendedFloatingActionButton(
+    onClick = onAdd,
+    icon = { Icon(Icons.Filled.Add, contentDescription = add) },
+    text = { Text(add) },
+)
+
+/** One + for what the calendar holds: a session or a match, two alike
+ * entries under the icons their rows wear. */
+@Composable
+private fun NewEventFab(onSession: () -> Unit, onMatch: () -> Unit) = Box {
+    var open by remember { mutableStateOf(false) }
+    FloatingActionButton(onClick = { open = true }) {
+        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tr_new_event))
+    }
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        listOf(
+            Triple(R.string.tr_new_session, R.drawable.ic_calendar, onSession),
+            Triple(R.string.new_match, R.drawable.ic_ball, onMatch),
+        ).forEach { (name, icon, onPick) ->
+            DropdownMenuItem(
+                text = { Text(stringResource(name)) },
+                leadingIcon = { Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp)) },
+                onClick = {
+                    open = false
+                    onPick()
+                },
+            )
+        }
+    }
+}
 
 /** Room under a list for the buttons over it: one, or two with something
  * marked. */
@@ -525,14 +556,6 @@ private fun CalendarTab(
                     }
                 }
                 items(events, key = { "${it.teamId}/${it.start}/${it.id()}" }) { open(it) }
-                // a match on the day chosen, right under it, named as on the
-                // desktop; the session on it is the floating button's
-                item(key = "add") {
-                    TextButton(onClick = { onNewMatch(selected) }, Modifier.padding(horizontal = 8.dp)) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Text(stringResource(R.string.new_match), Modifier.padding(start = 8.dp))
-                    }
-                }
             }
             CalendarView.LIST -> {
                 // only the days with something, the filter too

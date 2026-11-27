@@ -1145,7 +1145,8 @@ impl CalendarTab {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        // the views, a separator, then whose and where
+        // the views, a separator, then whose and where; what can be added
+        // stays at the right end
         let mut bar: Vec<Element<'a, Message>> = [
             (View::Week, theme::icons::VIEW_WEEK, s.week),
             (View::Month, theme::icons::VIEW_MONTH, s.calendar_month),
@@ -1208,9 +1209,18 @@ impl CalendarTab {
                 controls.push(ui::pill(s.today, false, Some(Message::Today), c));
             }
         }
-        controls.push(space::horizontal().width(Length::Fill).into());
-        controls.push(ui::pill(s.new_session, false, Some(Message::New), c));
-        controls.push(ui::pill(s.new_match, false, Some(Message::NewMatch), c));
+        let actions = row![
+            ui::bar_action(theme::icons::CALENDAR, s.new_session, Message::New, c),
+            ui::bar_action(theme::icons::VOLLEYBALL, s.new_match, Message::NewMatch, c),
+        ]
+        .spacing(6);
+        // the list has nothing to move: no empty row under the bar
+        let moves = (!controls.is_empty()).then(|| {
+            Row::with_children(controls)
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into()
+        });
         // the filter in every view (a row that goes on below when it's
         // narrow); the microcycle only once sessions are marked
         let mut choices: Vec<Element<'a, Message>> = FILTERS
@@ -1243,23 +1253,31 @@ impl CalendarTab {
                 .height(Length::Fill)
                 .into(),
         };
-        column![
-            Row::with_children(bar)
-                .spacing(4)
-                .align_y(Alignment::Center)
-                .wrap(),
-            Row::with_children(controls)
-                .spacing(6)
-                .align_y(Alignment::Center),
-            Row::with_children(choices)
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .wrap(),
-            body
+        // the choices wrap in what the actions leave them
+        let head = row![
+            container(
+                Row::with_children(bar)
+                    .spacing(4)
+                    .align_y(Alignment::Center)
+                    .wrap()
+            )
+            .width(Length::Fill),
+            actions
         ]
-        .spacing(10)
-        .height(Length::Fill)
-        .into()
+        .spacing(8)
+        .align_y(Alignment::Center);
+        column![head]
+            .extend(moves)
+            .push(
+                Row::with_children(choices)
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .wrap(),
+            )
+            .push(body)
+            .spacing(10)
+            .height(Length::Fill)
+            .into()
     }
 
     /// The period is not a view: it heads the list it bounds, with its

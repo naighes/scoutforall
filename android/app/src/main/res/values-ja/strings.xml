@@ -538,6 +538,7 @@
     <string name="tr_programming">計画</string>
     <string name="tr_sessions">セッション</string>
     <string name="tr_new_session">新しいセッション</string>
+    <string name="tr_new_event">新しい予定</string>
     <string name="tr_edit_session">セッションを編集</string>
     <string name="tr_session_title">タイトル</string>
     <string name="tr_session_duration">予定時間（分）</string>

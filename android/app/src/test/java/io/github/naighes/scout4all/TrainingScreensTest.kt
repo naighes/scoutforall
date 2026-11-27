@@ -303,23 +303,26 @@ class TrainingScreensTest {
     fun theCalendarOpensANewSessionOnTheDay() {
         val days = mutableListOf<LocalDate>()
         hub(Part.CALENDAR, onNewOn = { days += it })
-        rule.waitForText(string(R.string.agenda_today))
-        // the + says what it makes
-        rule.onNode(hasContentDescription(string(R.string.tr_new_session)) and hasClickAction()).performClick()
-        rule.onNodeWithText(string(R.string.tr_new_session), useUnmergedTree = true).assertExists()
+        newEvent(R.string.tr_new_session)
         assertEquals(listOf(testDay()), days)
-        // only there: the day chosen doesn't offer it again
-        rule.onNodeWithText("Add a session").assertDoesNotExist() // the old link, gone
     }
 
-    /** The day chosen in the month offers a match on it too. */
     @Test
     fun theCalendarOpensANewMatchOnTheDay() {
         val days = mutableListOf<LocalDate>()
         hub(Part.CALENDAR, onNewMatch = { days += it })
-        rule.waitForText(string(R.string.agenda_today))
-        rule.onNode(hasText(string(R.string.new_match)) and hasClickAction()).performScrollTo().performClick()
+        newEvent(R.string.new_match)
         assertEquals(listOf(testDay()), days)
+    }
+
+    /** The one + of the calendar, then what it makes: neither is on the
+     * screen before it. */
+    private fun newEvent(name: Int) {
+        rule.waitForText(string(R.string.agenda_today))
+        rule.onNodeWithText(string(name)).assertDoesNotExist()
+        rule.onNode(hasContentDescription(string(R.string.tr_new_event)) and hasClickAction()).performClick()
+        rule.onNodeWithText(string(name)).performClick()
+        rule.onNodeWithText(string(name)).assertDoesNotExist()
     }
 
     /** The month fills its weeks with the days of the months around, in
