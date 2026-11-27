@@ -99,7 +99,7 @@ fun LazyListScope.agendaWeek(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                stringResource(R.string.agenda_week),
+                weekRange(days.map { it.date }),
                 Modifier.weight(1f).title(),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,

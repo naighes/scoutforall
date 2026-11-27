@@ -386,7 +386,7 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
             item(key = "nav") {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        stringResource(R.string.agenda_week),
+                        weekRange(week.map { it.date }),
                         Modifier.weight(1f).title(),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,

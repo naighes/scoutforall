@@ -47,7 +47,6 @@
     <string name="home_in_progress">In progress</string>
     <string name="home_recent">Recent matches</string>
     <string name="agenda_today">Today</string>
-    <string name="agenda_week">This week</string>
     <string name="agenda_next_match">Next match</string>
     <string name="agenda_see_calendar">See calendar</string>
     <string name="agenda_official_match">Official match</string>

@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
@@ -181,7 +182,7 @@ class ScreensLayoutTest(private val screen: Size) {
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.agenda_next_match))
         rule.onNode(hasTestTag(NEXT_MATCH_TAG) and hasAnyDescendant(hasText("Polonia"))).assertExists()
-        rule.onAllNodesWithText(string(R.string.agenda_week)).assertCountEquals(0)
+        rule.onAllNodes(hasContentDescription(string(R.string.agenda_next_week))).assertCountEquals(0)
         rule.shot("screen-team-next-match-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
         rule.onNodeWithText(string(R.string.agenda_see_calendar)).performClick()
