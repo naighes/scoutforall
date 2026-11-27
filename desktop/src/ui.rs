@@ -838,8 +838,13 @@ pub fn team_pill<'a, M: Clone + 'a>(
 /// The backdrop the logo has on the theme, if any: the colors of the
 /// background of the other theme.
 pub fn backdrop_color(logo: &TeamLogo, c: Colors) -> Option<Color> {
+    backdrop_fill(logo.tone, c.dark)
+}
+
+/// The backdrop a logo of `tone` has on a dark or light background.
+pub fn backdrop_fill(tone: scout4all_core::assets::LogoTone, dark: bool) -> Option<Color> {
     use scout4all_core::assets::LogoBackdrop;
-    match logo.tone.backdrop(c.dark) {
+    match tone.backdrop(dark) {
         LogoBackdrop::None => None,
         LogoBackdrop::Dark => Some(theme::DARK.background),
         LogoBackdrop::Light => Some(theme::LIGHT.background),

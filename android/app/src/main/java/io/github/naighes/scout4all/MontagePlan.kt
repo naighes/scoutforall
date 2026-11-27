@@ -3,6 +3,7 @@ package io.github.naighes.scout4all
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.MontagePiece
 import io.github.naighes.scout4all.core.TeamClipMatch
+import io.github.naighes.scout4all.core.VideoLogos
 import io.github.naighes.scout4all.core.VideoReview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,6 +15,8 @@ data class MontageMatch(
     val pieces: List<MontagePiece>,
     val team: String,
     val opponent: String,
+    /** of the two teams, for how it stands; null when they can't be read */
+    val logos: VideoLogos?,
     /** the opponent, then the day and which match of how many */
     val title: List<String>?,
 )
@@ -63,12 +66,18 @@ suspend fun montagePlan(
     var n = 0
     val matches = kept.mapIndexed { i, (m, review, pieces) ->
         val (team, opponent) = app.onCore { review.team() to review.opponent() }
+        val logos = try {
+            app.core { review.logos() }
+        } catch (_: MobileException) {
+            null
+        }
         val actions = pieces.sumOf { it.actions.toInt() }
         MontageMatch(
             review = review,
             pieces = pieces.map { it.copy(number = (++n).toUInt(), count = count.toUInt()) },
             team = team,
             opponent = opponent,
+            logos = logos,
             title = when (several) {
                 true -> listOf(
                     opponent,

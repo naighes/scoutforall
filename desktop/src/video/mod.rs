@@ -598,6 +598,7 @@ impl VideoScreen {
         self.margins.overlay.then(|| montage::Board {
             team: the_match.team.name.clone(),
             opponent: the_match.opponent.clone(),
+            emblems: emblems(&self.core, the_match),
             set_n: s.set_n,
             side_out: s.side_out_phase,
             break_point: s.break_phase,
@@ -2368,6 +2369,15 @@ fn team_pictures(core: &Scout4All, the_match: &MatchEntry) -> [ui::TeamPicture; 
     ]
 }
 
+/// `team_pictures` as drawn on the video made.
+fn emblems(core: &Scout4All, the_match: &MatchEntry) -> [montage::Emblem; 2] {
+    let logos = core.video_logos(the_match).unwrap_or_default();
+    [
+        montage::Emblem::of(logos.team.as_deref(), &the_match.team.name),
+        montage::Emblem::of(logos.opponent.as_deref(), &the_match.opponent),
+    ]
+}
+
 /// How the match stands, over the corner of the video: on a veil, not a
 /// box, the letters as large as the body's or more. A line a team, ours
 /// first, as on TV: the ball by the one to serve, its name, the sets won
@@ -2700,6 +2710,16 @@ pub(crate) mod screen_tests {
             .unwrap();
         assert_eq!(logos(&open(MatchSide::A)), [false, true]);
         assert_eq!(logos(&open(MatchSide::B)), [true, false]);
+        // and on the video made
+        let screen = open(MatchSide::A);
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let board = screen
+            .board(&screen.the_match, screen.all_events.clone(), s)
+            .unwrap();
+        assert!(matches!(
+            board.emblems,
+            [montage::Emblem::Initials(_), montage::Emblem::Logo(..)]
+        ));
     }
 
     fn with_file(dir: &tempfile::TempDir, name: &str) -> VideoScreen {
