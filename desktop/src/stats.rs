@@ -216,6 +216,9 @@ pub struct StatsScreen {
     /// the points of the sets shown, under the chart
     points: Vec<scout4all_mobile::SetPoints>,
     event: EventTypeEnum,
+    /// the fundamental chosen: `event`, the one of the detail, is another
+    /// while the phase asked doesn't have it
+    asked: EventTypeEnum,
     filter: DetailFilter,
     /// the zones of the detail by efficiency, not by how many
     efficiency: bool,
@@ -740,6 +743,7 @@ impl StatsScreen {
             trend: Trend::of_stats(None, 0, false),
             points: vec![],
             event: EventTypeEnum::S,
+            asked: EventTypeEnum::S,
             filter: DetailFilter::default(),
             efficiency: false,
             row: 0,
@@ -887,7 +891,7 @@ impl StatsScreen {
                             m.clone(),
                             side,
                             self.scope,
-                            self.event,
+                            self.asked,
                             self.filter.clone(),
                         ),
                     )
@@ -919,14 +923,14 @@ impl StatsScreen {
                         opponent,
                         self.period.clone(),
                         self.competition,
-                        self.event,
+                        self.asked,
                         self.filter.clone(),
                     ),
                     None => self.core.team_analysis(
                         team,
                         self.period.clone(),
                         self.competition,
-                        self.event,
+                        self.asked,
                         self.filter.clone(),
                     ),
                 };
@@ -938,7 +942,7 @@ impl StatsScreen {
                             opponent,
                             self.period.clone(),
                             self.competition,
-                            self.event,
+                            self.asked,
                             self.filter.clone(),
                         )
                         .ok(),
@@ -958,6 +962,13 @@ impl StatsScreen {
                     Err(e) => self.error = Some(e.to_string()),
                 }
             }
+        }
+        // the phase asked may not have the fundamental asked for: the
+        // detail is of another one
+        let detailed = self.detail.as_ref().map(|d| d.event);
+        if let Some(event) = detailed.filter(|e| *e != self.event) {
+            self.event = event;
+            self.clear_pick();
         }
         self.recount();
         self.retrend();
@@ -1483,6 +1494,7 @@ impl StatsScreen {
                 self.retrend();
             }
             Message::Event(event) => {
+                self.asked = event;
                 self.event = event;
                 self.clear_pick();
                 self.load();
@@ -3103,18 +3115,25 @@ fn summary<'a>(
         .align_y(Alignment::Center)
         .into()
     });
-    // the figures of the team, its rallies: none with players chosen
+    // the figures of the team, its rallies: none with players chosen; of
+    // the phases in the figures, one or both
     let nothing = || -> Element<'a, Message> { space::vertical().height(0).into() };
+    let side_out = live.phases.contains(&PhaseEnum::SideOut);
+    let at_break = live.phases.contains(&PhaseEnum::Break);
     let phases: Element<'a, Message> = match live.team_figures {
-        true => column![
-            phase(s.side_out, &live.side_out),
-            phase(s.break_point, &live.break_points),
-        ]
+        true => Column::with_children(
+            [
+                side_out.then(|| phase(s.side_out, &live.side_out)),
+                at_break.then(|| phase(s.break_point, &live.break_points)),
+            ]
+            .into_iter()
+            .flatten(),
+        )
         .spacing(6)
         .into(),
         false => nothing(),
     };
-    let by_possession: Element<'a, Message> = match live.team_figures {
+    let by_possession: Element<'a, Message> = match live.team_figures && side_out {
         true => column![
             gap(tall),
             ui::section(s.side_out_by_possession, c),
@@ -3154,7 +3173,9 @@ fn summary<'a>(
             .width(Length::FillPortion(2))
             .into()
     };
-    let rotations = live.rotations.iter().map(|r| {
+    // one phase has the figures of all the rallies already
+    let both = side_out && at_break;
+    let rotations = live.rotations.iter().map(move |r| {
         // the points won minus lost, then the rallies won
         let side = |p: &Option<PhaseStats>| {
             cell(
@@ -3171,29 +3192,39 @@ fn summary<'a>(
                 p.as_ref().map(played).unwrap_or_default(),
             )
         };
-        let total = cell(
-            text(
-                r.total
-                    .as_ref()
-                    .map_or("-".to_string(), |t| signed(t.balance)),
+        let total = || {
+            cell(
+                text(
+                    r.total
+                        .as_ref()
+                        .map_or("-".to_string(), |t| signed(t.balance)),
+                )
+                .size(SIZE_BODY)
+                .font(theme::fonts().bold)
+                .color(match r.total.as_ref().map(|t| t.balance) {
+                    Some(1..) => c.won,
+                    Some(..=-1) => c.lost,
+                    _ => c.text,
+                })
+                .into(),
+                r.total.as_ref().map(played).unwrap_or_default(),
             )
-            .size(SIZE_BODY)
-            .font(theme::fonts().bold)
-            .color(match r.total.as_ref().map(|t| t.balance) {
-                Some(1..) => c.won,
-                Some(..=-1) => c.lost,
-                _ => c.text,
-            })
-            .into(),
-            r.total.as_ref().map(played).unwrap_or_default(),
-        );
+        };
         share(
-            row![
-                ui::body(r.name.clone()).width(Length::Fixed(ROTATION_NAME)),
-                side(&r.side_out),
-                side(&r.break_points),
-                total,
-            ]
+            Row::with_children(
+                [
+                    Some(
+                        ui::body(r.name.clone())
+                            .width(Length::Fixed(ROTATION_NAME))
+                            .into(),
+                    ),
+                    side_out.then(|| side(&r.side_out)),
+                    at_break.then(|| side(&r.break_points)),
+                    both.then(total),
+                ]
+                .into_iter()
+                .flatten(),
+            )
             .spacing(12)
             .align_y(Alignment::Center),
             tall,
@@ -3207,12 +3238,20 @@ fn summary<'a>(
     let second = ui::panel(
         Some(s.rotations),
         column![
-            row![
-                space::horizontal().width(Length::Fixed(ROTATION_NAME)),
-                header(s.side_out),
-                header(s.break_point),
-                header(s.total),
-            ]
+            Row::with_children(
+                [
+                    Some(
+                        space::horizontal()
+                            .width(Length::Fixed(ROTATION_NAME))
+                            .into()
+                    ),
+                    side_out.then(|| header(s.side_out).into()),
+                    at_break.then(|| header(s.break_point).into()),
+                    both.then(|| header(s.total).into()),
+                ]
+                .into_iter()
+                .flatten()
+            )
             .spacing(12),
             Column::with_children(rotations)
                 .spacing(6)
@@ -3297,14 +3336,17 @@ fn summary<'a>(
         ]
         .spacing(6)
     };
+    // ours come at break point, theirs in side out
     let aces = || {
-        tile(
-            s.aces,
-            format!("{} – {}", live.aces, live.aces_against),
-            c.text,
-            Some(s.ours_theirs.to_string()),
-            c,
-        )
+        let (value, whose) = match (at_break, side_out) {
+            (true, true) => (
+                format!("{} – {}", live.aces, live.aces_against),
+                s.ours_theirs,
+            ),
+            (true, false) => (live.aces.to_string(), s.ours),
+            (false, _) => (live.aces_against.to_string(), s.theirs),
+        };
+        tile(s.aces, value, c.text, Some(whose.to_string()), c)
     };
     // theirs: of the team, not with players chosen
     let counts = match live.team_figures {
@@ -4234,8 +4276,17 @@ pub(crate) mod tests {
         let live = screen.live.as_ref().unwrap();
         assert_eq!(live.filter.phase, Some(PhaseEnum::SideOut));
         assert!(live.break_points.is_none());
+        // no serve in side out: the detail is of the reception
+        assert_eq!(screen.event, EventTypeEnum::P);
+        assert!(
+            live.fundamentals
+                .iter()
+                .all(|f| f.event != EventTypeEnum::S)
+        );
         screen.update(Message::Phase(None));
         assert!(screen.live.as_ref().unwrap().break_points.is_some());
+        // the serve chosen comes back with it
+        assert_eq!(screen.event, EventTypeEnum::S);
         screen.update(Message::Page(2));
         assert!(screen.filters().contains(&Filter::Reception));
         let total = |screen: &StatsScreen| {

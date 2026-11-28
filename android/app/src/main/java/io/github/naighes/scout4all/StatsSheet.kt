@@ -55,7 +55,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -88,6 +87,7 @@ import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.FundamentalStats
 import io.github.naighes.scout4all.core.LiveStats
 import io.github.naighes.scout4all.core.SetPoints
+import io.github.naighes.scout4all.core.PhaseEnum
 import io.github.naighes.scout4all.core.PhaseStats
 import io.github.naighes.scout4all.core.PossessionStats
 import io.github.naighes.scout4all.core.RotationStats
@@ -303,7 +303,8 @@ private fun ComparedDetail(names: Pair<String, String>, scope: StatsScope, filte
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             da.fundamentals.forEach { f ->
                 FilterChip(
-                    selected = f.value == event,
+                    // the one shown: the phase may not have the one asked
+                    selected = f.value == da.event,
                     onClick = { event = f.value },
                     label = { Text(f.name.replaceFirstChar { it.uppercase() }) },
                 )
@@ -430,8 +431,8 @@ internal fun Summary(stats: LiveStats) {
     // the figures of the team, its rallies: none with players chosen
     if (stats.teamFigures) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            PhaseTile(stringResource(R.string.side_out), stats.sideOut, Modifier.weight(1f))
-            PhaseTile(stringResource(R.string.break_points), stats.breakPoints, Modifier.weight(1f))
+            if (stats.sideOutShown) PhaseTile(stringResource(R.string.side_out), stats.sideOut, Modifier.weight(1f))
+            if (stats.breakShown) PhaseTile(stringResource(R.string.break_points), stats.breakPoints, Modifier.weight(1f))
         }
     }
     val fundamentals = stats.fundamentals.filter { it.event != EventTypeEnum.D }
@@ -465,19 +466,28 @@ internal fun Summary(stats: LiveStats) {
             AcesTile(stats, Modifier.weight(1f))
             Spacer(Modifier.weight(1f))
         }
-        Rotations(stats.rotations)
-        Possessions(stats.sideOutPossessions)
+        Rotations(stats.rotations, stats.sideOutShown, stats.breakShown)
+        if (stats.sideOutShown) Possessions(stats.sideOutPossessions)
     }
 }
 
-/** Our aces and theirs. */
+/** Whether the figures have the rallies of the phase: both, or only the
+ * ones of the phase asked. */
+internal val LiveStats.sideOutShown get() = PhaseEnum.SIDE_OUT in phases
+internal val LiveStats.breakShown get() = PhaseEnum.BREAK in phases
+
+/** Our aces, at break point, and theirs, in side out. */
 @Composable
-private fun AcesTile(stats: LiveStats, modifier: Modifier) = CountTile(
-    stringResource(R.string.aces),
-    "${stats.aces} – ${stats.acesAgainst}",
-    stringResource(R.string.ours) + " – " + stringResource(R.string.theirs),
-    modifier,
-)
+private fun AcesTile(stats: LiveStats, modifier: Modifier) {
+    val ours = stringResource(R.string.ours)
+    val theirs = stringResource(R.string.theirs)
+    val (value, whose) = when {
+        stats.sideOutShown && stats.breakShown -> "${stats.aces} – ${stats.acesAgainst}" to "$ours – $theirs"
+        stats.breakShown -> stats.aces.toString() to ours
+        else -> stats.acesAgainst.toString() to theirs
+    }
+    CountTile(stringResource(R.string.aces), value, whose, modifier)
+}
 
 /** The side out by possession: how often the first ball, the second and
  * the later ones end with our point. */
@@ -506,11 +516,16 @@ private fun Possessions(possessions: List<PossessionStats>) = Column(verticalArr
 /** The side out and the break points of each rotation, side by side, then
  * all its rallies: the points won minus lost over the rallies won. */
 @Composable
-private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+private fun Rotations(rotations: List<RotationStats>, sideOut: Boolean, atBreak: Boolean) = Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
     Text(stringResource(R.string.rotations), Modifier.title(), style = MaterialTheme.typography.titleMedium)
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         Spacer(Modifier.width(32.dp))
-        listOf(R.string.side_out, R.string.break_points, R.string.total).forEach {
+        listOfNotNull(
+            R.string.side_out.takeIf { sideOut },
+            R.string.break_points.takeIf { atBreak },
+            // one phase has the figures of all the rallies already
+            R.string.total.takeIf { sideOut && atBreak },
+        ).forEach {
             Text(
                 stringResource(it),
                 Modifier.weight(1f),
@@ -527,7 +542,8 @@ private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangeme
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(r.name, Modifier.width(32.dp), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            listOf(r.sideOut, r.breakPoints).forEach { p ->
+            listOfNotNull(true.takeIf { sideOut }, false.takeIf { atBreak }).forEach { ofSideOut ->
+                val p = if (ofSideOut) r.sideOut else r.breakPoints
                 RotationCell(Modifier.weight(1f), p) {
                     Row(verticalAlignment = Alignment.Bottom) {
                         p?.let {
@@ -547,7 +563,7 @@ private fun Rotations(rotations: List<RotationStats>) = Column(verticalArrangeme
                     }
                 }
             }
-            RotationCell(Modifier.weight(1f), r.total) {
+            if (sideOut && atBreak) RotationCell(Modifier.weight(1f), r.total) {
                 Text(
                     r.total?.let { signed(it.balance) } ?: "–",
                     style = MaterialTheme.typography.titleMedium,
@@ -660,13 +676,16 @@ private enum class AttackKind(val title: Int) {
  * target, and how well we attack there. */
 @Composable
 internal fun Distribution(stats: LiveStats) {
-    var kind by remember { mutableIntStateOf(0) }
+    var asked by remember { mutableStateOf(AttackKind.All) }
+    // no attack on our reception without our receptions
+    val kinds = AttackKind.entries.filter { it != AttackKind.First || stats.sideOutShown }
+    val kind = asked.takeIf { it in kinds } ?: AttackKind.All
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AttackKind.entries.forEachIndexed { i, k ->
-            FilterChip(selected = kind == i, onClick = { kind = i }, label = { Text(stringResource(k.title)) })
+        kinds.forEach { k ->
+            FilterChip(selected = kind == k, onClick = { asked = k }, label = { Text(stringResource(k.title)) })
         }
     }
-    val (zones, summary) = when (AttackKind.entries[kind]) {
+    val (zones, summary) = when (kind) {
         AttackKind.All -> stats.distribution to null
         AttackKind.First -> stats.firstAttackDistribution to stats.firstAttack
         AttackKind.Counter -> stats.counterAttackDistribution to stats.counterAttack
@@ -675,8 +694,8 @@ internal fun Distribution(stats: LiveStats) {
         zones.isEmpty() -> Text(stringResource(R.string.no_attacks), color = MaterialTheme.colorScheme.onSurfaceVariant)
         else -> DistributionCourt { z -> ZoneCell(z, zones.find { it.zone.toInt() == z }) }
     }
-    summary?.let { AttackLine(stringResource(AttackKind.entries[kind].title), it) }
-    if (AttackKind.entries[kind] == AttackKind.All) {
+    summary?.let { AttackLine(stringResource(kind.title), it) }
+    if (kind == AttackKind.All) {
         stats.firstAttack?.let { AttackLine(stringResource(R.string.first_attack), it) }
         stats.counterAttack?.let { AttackLine(stringResource(R.string.counter_attack), it) }
     }

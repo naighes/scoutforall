@@ -32,6 +32,15 @@ pub enum PhaseEnum {
 
 impl PhaseEnum {
     pub const ALL: [PhaseEnum; 2] = [PhaseEnum::Break, PhaseEnum::SideOut];
+
+    /// Whether the event can happen in the rallies of the phase: we never
+    /// serve in side out, nor receive at break point.
+    pub fn has(self, event: EventTypeEnum) -> bool {
+        !matches!(
+            (self, event),
+            (PhaseEnum::SideOut, EventTypeEnum::S) | (PhaseEnum::Break, EventTypeEnum::P)
+        )
+    }
 }
 
 impl fmt::Display for PhaseEnum {

@@ -13,6 +13,7 @@ use {
         Alignment, Color, Element, Length,
         widget::{Column, column, container, row, space, text},
     },
+    scout4all_core::shapes::enums::PhaseEnum,
     scout4all_mobile::{EvalStats, FundamentalDetail, LiveStats, PhaseStats},
 };
 
@@ -218,14 +219,19 @@ pub fn comparison<'a, M: 'a>(
         .iter()
         .zip(&b.fundamentals)
         .map(|(fa, fb)| percent_line(ui::capitalized(&fa.name), of(fa), of(fb), c));
+    // the phases in the figures, the same of the two sides
+    let side_out = a.phases.contains(&PhaseEnum::SideOut);
+    let at_break = a.phases.contains(&PhaseEnum::Break);
     let rows = [
-        (s.unforced_errors, a.unforced_errors, b.unforced_errors),
-        (s.forced_errors, a.forced_errors, b.forced_errors),
-        (s.aces, a.aces, b.aces),
-        (s.opponent_errors, a.opponent_errors, b.opponent_errors),
+        Some((s.unforced_errors, a.unforced_errors, b.unforced_errors)),
+        Some((s.forced_errors, a.forced_errors, b.forced_errors)),
+        // our aces: none without our serves
+        at_break.then_some((s.aces, a.aces, b.aces)),
+        Some((s.opponent_errors, a.opponent_errors, b.opponent_errors)),
     ];
     let errors = rows
         .into_iter()
+        .flatten()
         .map(|(name, x, y)| count_line(name, Some(x), Some(y), c));
     // the zones of the setter on the court, as the two sides have them
     let grid = |stats: &LiveStats| -> Element<'a, M> {
@@ -264,16 +270,21 @@ pub fn comparison<'a, M: 'a>(
             c,
         )
     });
+    let phases = [
+        side_out.then(|| phase_line(s.side_out.to_string(), &a.side_out, &b.side_out, c)),
+        at_break.then(|| {
+            phase_line(
+                s.break_point.to_string(),
+                &a.break_points,
+                &b.break_points,
+                c,
+            )
+        }),
+    ];
     let content = column![
         head(&a.team_name, &b.team_name),
         Column::with_children(fundamentals).spacing(8),
-        phase_line(s.side_out.to_string(), &a.side_out, &b.side_out, c),
-        phase_line(
-            s.break_point.to_string(),
-            &a.break_points,
-            &b.break_points,
-            c
-        ),
+        Column::with_children(phases.into_iter().flatten()).spacing(12),
         ui::section(s.errors, c),
         Column::with_children(errors).spacing(8),
         ui::section(s.distribution, c),

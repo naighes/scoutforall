@@ -1936,6 +1936,10 @@ pub struct LiveStats {
     /// point, by possession, the rotations, their errors and points), are
     /// shown: not with players chosen, a rally has none
     pub team_figures: bool,
+    /// the phases of the rallies in the figures, the one of the filter or
+    /// both: what can't happen in them isn't in the figures (no serve in
+    /// side out, no reception at break point), nor to be shown
+    pub phases: Vec<PhaseEnum>,
     pub side_out: Option<PhaseStats>,
     /// the first, second and later possessions of the side outs
     pub side_out_possessions: Vec<PossessionStats>,
@@ -2860,9 +2864,14 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
             grade: measure.and_then(|m| level(m, Some(percentage))),
         })
     };
+    let phases: Vec<PhaseEnum> = [PhaseEnum::SideOut, PhaseEnum::Break]
+        .into_iter()
+        .filter(|p| filter.phase.is_none_or(|asked| asked == *p))
+        .collect();
     let errors = |e: &Errors| {
         e.by_event
             .iter()
+            .filter(|(event, _)| possible(filter.phase, *event))
             .map(|(event, count)| ErrorCount {
                 event: *event,
                 count: *count,
@@ -2882,14 +2891,19 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
     LiveStats {
         scope: StatsScope::Match,
         sets: vec![],
-        fundamentals: vec![
-            fundamental(EventTypeEnum::P, o.reception),
-            fundamental(EventTypeEnum::A, o.attack),
-            fundamental(EventTypeEnum::S, o.serve),
-            fundamental(EventTypeEnum::B, o.block),
-            fundamental(EventTypeEnum::D, o.dig),
-        ],
+        fundamentals: [
+            (EventTypeEnum::P, o.reception),
+            (EventTypeEnum::A, o.attack),
+            (EventTypeEnum::S, o.serve),
+            (EventTypeEnum::B, o.block),
+            (EventTypeEnum::D, o.dig),
+        ]
+        .into_iter()
+        .filter(|(event, _)| possible(filter.phase, *event))
+        .map(|(event, f)| fundamental(event, f))
+        .collect(),
         team_figures: !filter.of_players(),
+        phases,
         side_out: phase(o.side_out, Some(Measure::SideOut)),
         side_out_possessions: o
             .side_out_possessions
@@ -2945,6 +2959,21 @@ fn rotation_choices(labels: &Labels) -> Vec<RotationChoice> {
             name: rotation_name(r, labels),
         })
         .collect()
+}
+
+/// Whether the event can happen in the rallies asked for.
+fn possible(phase: Option<PhaseEnum>, event: EventTypeEnum) -> bool {
+    phase.is_none_or(|p| p.has(event))
+}
+
+/// The fundamental in detail of the one asked for: with a phase it can't
+/// happen in, the one it starts with instead.
+fn detailed(phase: Option<PhaseEnum>, event: EventTypeEnum) -> EventTypeEnum {
+    match (possible(phase, event), phase) {
+        (false, Some(PhaseEnum::SideOut)) => EventTypeEnum::P,
+        (false, _) => EventTypeEnum::S,
+        (true, _) => event,
+    }
 }
 
 /// The phases to narrow the figures to.
@@ -3004,6 +3033,7 @@ fn detail_of(
     filter: DetailFilter,
 ) -> Result<DetailStats, MobileError> {
     let narrowed = narrowed(&filter)?;
+    let event = detailed(filter.phase, event);
     let team = teams.first().copied().cloned().unwrap_or_default();
     let team = &team;
     let level = |value: Option<f64>| {
@@ -3162,6 +3192,7 @@ fn detail_of(
         filter,
         fundamentals: FUNDAMENTALS
             .iter()
+            .filter(|e| possible(narrowed.phase, **e))
             .map(|e| EventChoice {
                 value: *e,
                 name: fundamental_name(*e),
@@ -10245,16 +10276,21 @@ pub(crate) mod tests {
         // a set
         let set = detail(StatsScope::Set { number: 2 }, EventTypeEnum::S, &all);
         assert_eq!(set.fundamental.unwrap().total, 2);
-        // no serve in side out
-        let side_out = DetailFilter {
-            phase: Some(PhaseEnum::SideOut),
-            ..DetailFilter::default()
-        };
-        let none = detail(StatsScope::Match, EventTypeEnum::S, &side_out)
-            .fundamental
-            .unwrap();
-        assert_eq!((none.total, none.efficiency), (0, None));
-        assert!(none.evals.is_empty() && none.players.is_empty());
+        // no serve in side out, nor reception at break point: neither to
+        // choose, and the detail is of the one the phase starts with
+        for (phase, asked, shown) in [
+            (PhaseEnum::SideOut, EventTypeEnum::S, EventTypeEnum::P),
+            (PhaseEnum::Break, EventTypeEnum::P, EventTypeEnum::S),
+        ] {
+            let filter = DetailFilter {
+                phase: Some(phase),
+                ..DetailFilter::default()
+            };
+            let d = detail(StatsScope::Match, asked, &filter);
+            assert_eq!(d.event, shown);
+            assert!(d.fundamentals.iter().all(|f| f.value != asked));
+            assert!(d.fundamentals.iter().any(|f| f.value == shown));
+        }
         // the first rotation: the aces and the first error
         let first = DetailFilter {
             rotations: vec![0],
@@ -10398,6 +10434,50 @@ pub(crate) mod tests {
             .stats(StatsScope::Match, DetailFilter::default())
             .unwrap();
         assert_eq!(everything.filter, DetailFilter::default());
+        // a phase leaves out what can't happen in it
+        let told = |phase: Option<PhaseEnum>| {
+            let filter = DetailFilter {
+                phase,
+                ..DetailFilter::default()
+            };
+            let live = scouting.stats(StatsScope::Match, filter).unwrap();
+            let events = |errors: &[ErrorCount]| errors.iter().map(|e| e.event).collect();
+            let fundamentals: Vec<_> = live.fundamentals.iter().map(|f| f.event).collect();
+            let unforced: Vec<_> = events(&live.unforced_by_event);
+            let forced: Vec<_> = events(&live.forced_by_event);
+            (live.phases, fundamentals, unforced, forced)
+        };
+        {
+            use EventTypeEnum::{A, B, D, F, P, S};
+            use PhaseEnum::{Break, SideOut};
+            assert_eq!(
+                told(None),
+                (
+                    vec![SideOut, Break],
+                    vec![P, A, S, B, D],
+                    vec![S, A, B, F],
+                    vec![A, B, P, D]
+                )
+            );
+            assert_eq!(
+                told(Some(SideOut)),
+                (
+                    vec![SideOut],
+                    vec![P, A, B, D],
+                    vec![A, B, F],
+                    vec![A, B, P, D]
+                )
+            );
+            assert_eq!(
+                told(Some(Break)),
+                (
+                    vec![Break],
+                    vec![A, S, B, D],
+                    vec![S, A, B, F],
+                    vec![A, B, D]
+                )
+            );
+        }
         assert_eq!(
             (
                 everything.rotation_choices.len(),
@@ -10411,9 +10491,14 @@ pub(crate) mod tests {
                 .detail(StatsScope::Match, EventTypeEnum::S, filter.clone())
                 .unwrap();
             assert_eq!(live.filter, filter);
+            // in side out the serve is in neither
             assert_eq!(
                 serves(&live),
-                detail.fundamental.as_ref().map(|f| f.total),
+                detail
+                    .fundamental
+                    .as_ref()
+                    .filter(|_| detail.event == EventTypeEnum::S)
+                    .map(|f| f.total),
                 "{filter:?}"
             );
         }
@@ -12311,11 +12396,11 @@ pub(crate) mod tests {
         };
         assert_eq!(
             narrowed(Some(PhaseEnum::SideOut), vec![]),
-            [(P, 1), (A, 0), (S, 0), (B, 0), (D, 0)]
+            [(P, 1), (A, 0), (B, 0), (D, 0)]
         );
         assert_eq!(
             narrowed(Some(PhaseEnum::Break), vec![]),
-            [(P, 0), (A, 0), (S, 0), (B, 0), (D, 1)]
+            [(A, 0), (S, 0), (B, 0), (D, 1)]
         );
         assert_eq!(narrowed(None, vec![0]), summary);
         assert_eq!(
