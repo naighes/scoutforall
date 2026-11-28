@@ -1,5 +1,8 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.filled.Home
+import android.widget.Toast
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.foundation.Image
@@ -169,10 +172,33 @@ fun TeamScreen(
                         val name = (state as? TeamState.Loaded)?.team?.name.orEmpty()
                         val exporter = rememberExporter { it.exportTeam(id) }
                         val delete = rememberTeamDeletion(id, name, onDeleted)
+                        var hidden by rememberSaveable { mutableStateOf(false) }
+                        LaunchedEffect(id) {
+                            hidden = try {
+                                app.core { it.teamHidden(id) }
+                            } catch (_: MobileException) {
+                                false
+                            }
+                        }
+                        val scope = rememberCoroutineScope()
                         MoreMenu { close ->
                             ExportEntries(exporter, close)
                             MenuEntry(stringResource(R.string.edit_team), Icons.Filled.Edit, close, onEdit)
                             MenuEntry(stringResource(R.string.new_season), Icons.Filled.Refresh, close, onNewSeason)
+                            MenuEntry(
+                                stringResource(if (hidden) R.string.show_in_home else R.string.hide_from_home),
+                                Icons.Filled.Home,
+                                close,
+                            ) {
+                                scope.launch {
+                                    try {
+                                        app.core { it.setHidden(id, !hidden) }
+                                        hidden = !hidden
+                                    } catch (e: MobileException) {
+                                        Toast.makeText(app, e.reason, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
                             MenuEntry(stringResource(R.string.delete_team), Icons.Filled.Delete, close, delete)
                         }
                     }

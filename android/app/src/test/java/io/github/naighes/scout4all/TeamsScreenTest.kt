@@ -171,4 +171,37 @@ class TeamsScreenTest {
         val saved = core { it.teams() }.map { (it as TeamListing.Team).name to it.pinned }
         assertEquals(listOf("Cortona" to true, "Arezzo" to false), saved)
     }
+
+    /** A touch on the title of a block closes it, remembered, and opens it
+     * again. */
+    @Test
+    fun theBlocksCloseAndOpenByTheirTitle() {
+        saveTeam("Cortona")
+        show()
+        rule.waitForText("Cortona")
+        rule.onNodeWithText(string(R.string.teams)).performClick()
+        rule.waitUntil { rule.onAllNodesWithText("Cortona").fetchSemanticsNodes().isEmpty() }
+        assertTrue(core { it.home() }.teamsClosed)
+        rule.onNodeWithText(string(R.string.teams)).performClick()
+        rule.waitForText("Cortona")
+        assertTrue(!core { it.home() }.teamsClosed)
+    }
+
+    /** A team hidden is listed at the end on request, and a touch shows it
+     * on the home again; all hidden, the home is not empty. */
+    @Test
+    fun aHiddenTeamIsShownAgain() {
+        val team = saveTeam("Cortona")
+        core { it.setHidden(team, true) }
+        show()
+        val more = string(R.string.show_hidden, 1)
+        rule.waitForText(more)
+        rule.onAllNodesWithText(string(R.string.no_teams)).assertCountEquals(0)
+        rule.onAllNodesWithText("Cortona").assertCountEquals(0)
+        rule.onNodeWithText(more).performClick()
+        rule.onNodeWithText("Cortona").performClick()
+        rule.waitUntil { rule.onAllNodesWithText(more).fetchSemanticsNodes().isEmpty() }
+        assertTrue(!core { it.teamHidden(team) })
+        rule.onNodeWithText("Cortona").assertIsDisplayed()
+    }
 }

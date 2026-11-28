@@ -81,6 +81,20 @@ fun rememberAgendaBetween(teamId: String?, from: LocalDate?, to: LocalDate?, rea
     }
 }
 
+/** The week of the home holding [day], without the teams hidden from it.
+ * Empty until read, and when it can't be. */
+@Composable
+fun rememberHomeWeek(day: LocalDate, refresh: Any?): State<List<AgendaDay>> {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+    return produceState(emptyList(), day, refresh) {
+        value = try {
+            app.core { it.homeWeek(day.toString()) }
+        } catch (_: MobileException) {
+            emptyList()
+        }
+    }
+}
+
 /** The week of [monday], with the buttons to move it: the days with
  * something planned, and today, always there and lit. */
 fun LazyListScope.agendaWeek(
@@ -92,8 +106,23 @@ fun LazyListScope.agendaWeek(
     onToday: () -> Unit,
     onMatch: (teamId: String, matchId: String) -> Unit,
     onSession: (teamId: String, sessionId: String) -> Unit = { _, _ -> },
-) {
-    item(key = "agenda-week") {
+) = weekPieces(days, today, withTeam, onPrevious, onNext, onToday, onMatch, onSession).forEach { (key, piece) ->
+    item(key = key) { piece() }
+}
+
+/** The pieces of `agendaWeek`, each with its key: the rows of a lazy
+ * list, or of a block. */
+internal fun weekPieces(
+    days: List<AgendaDay>,
+    today: LocalDate,
+    withTeam: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onToday: () -> Unit,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+    onSession: (teamId: String, sessionId: String) -> Unit,
+): List<Pair<String, @Composable () -> Unit>> = buildList {
+    add("agenda-week" to {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -106,27 +135,31 @@ fun LazyListScope.agendaWeek(
             )
             PeriodButtons(onPrevious, onToday, onNext)
         }
-    }
+    })
     // the phone is narrow: only the days with something and today, or a
     // line saying there is nothing
     val shown = days.filter { it.events.isNotEmpty() || it.date == today.toString() }
     if (shown.isEmpty()) {
-        item(key = "agenda-nothing") { NothingPlanned() }
+        add("agenda-nothing" to { NothingPlanned() })
     }
     shown.forEach { day ->
         val date = LocalDate.parse(day.date)
         if (date == today) {
             // today as one block, on a background of its own
-            item(key = "day/${day.date}") {
+            add("day/${day.date}" to {
                 TodayBox {
                     DayHeader(date, true)
                     if (day.events.isEmpty()) NothingPlanned()
                     day.events.forEach { EventRow(it, withTeam, onMatch, onSession, lit = true) }
                 }
-            }
+            })
         } else {
-            item(key = "day/${day.date}") { DayHeader(date, false) }
-            items(day.events, key = { "${day.date}/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch, onSession) }
+            add("day/${day.date}" to { DayHeader(date, false) })
+            day.events.forEach { event ->
+                add("${day.date}/${event.teamId}/${event.start}/${event.id()}" to {
+                    EventRow(event, withTeam, onMatch, onSession)
+                })
+            }
         }
     }
 }

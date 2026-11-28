@@ -60,6 +60,21 @@ class TeamBarTest {
         assertEquals(1, seasons)
     }
 
+    /** The menu hides the team from the home, then offers to show it. */
+    @Test
+    fun theMenuHidesTheTeamFromTheHome() {
+        val team = saveTeam("Cortona")
+        show(team)
+        rule.waitForText(string(R.string.no_players))
+        val menu = { rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick() }
+        menu()
+        rule.onNodeWithText(string(R.string.hide_from_home)).performClick()
+        rule.waitFor { core { it.teamHidden(team) } }
+        menu()
+        rule.onNodeWithText(string(R.string.show_in_home)).performClick()
+        rule.waitFor { !core { it.teamHidden(team) } }
+    }
+
     /** Without a logo its initials head the team, as in the lists. */
     @Test
     fun theInitialsHeadATeamWithoutALogo() {
