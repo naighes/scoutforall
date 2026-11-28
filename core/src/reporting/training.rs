@@ -3,7 +3,7 @@
 
 use crate::localization::Labels;
 use crate::reporting::logo::Logo;
-use crate::training::cycles::Cycle;
+use crate::training::cycles::{Cycle, Window};
 use crate::training::venue::Venue;
 use crate::training::{Activity, AttendanceRow, AttendanceStatus, SessionStatus, TrainingSession};
 use chrono::{Datelike, NaiveDateTime};
@@ -52,6 +52,9 @@ pub struct SheetSession {
     pub title: String,
     pub objectives: String,
     pub cancelled: bool,
+    /// what heads its part of the plan of a microcycle; none when it has no
+    /// title nor activities, as the table of the sessions says the rest
+    pub heading: Option<String>,
     pub activities: Vec<SheetActivity>,
     /// none when not asked, or when never recorded
     pub participants: Option<Vec<Participant>>,
@@ -162,13 +165,24 @@ fn sheet_session(
     participants: Option<Vec<Participant>>,
     notes: Option<String>,
 ) -> SheetSession {
+    let day = format!(
+        "{} {}",
+        weekday(labels, session.start),
+        session.start.format("%d/%m")
+    );
+    let time = session.start.format("%H:%M").to_string();
+    let heading = match (session.title.as_str(), activities) {
+        ("", []) => None,
+        (title, _) => Some(once_joined(
+            [format!("{day} {time}"), title.to_string()]
+                .into_iter()
+                .filter(|part| !part.is_empty()),
+        )),
+    };
     SheetSession {
-        day: format!(
-            "{} {}",
-            weekday(labels, session.start),
-            session.start.format("%d/%m")
-        ),
-        time: session.start.format("%H:%M").to_string(),
+        day,
+        time,
+        heading,
         location: ctx.venue_name(session),
         title: session.title.clone(),
         objectives: session.objectives.clone(),
@@ -249,6 +263,16 @@ fn once_joined(parts: impl Iterator<Item = String>) -> String {
     parts.collect::<Vec<_>>().join(" · ")
 }
 
+/// The first and last day of a window, written as the dates of the sheets.
+fn days(window: Window) -> String {
+    let last = window.end.pred_opt().unwrap_or(window.start);
+    format!(
+        "{} – {}",
+        window.start.format("%d/%m/%Y"),
+        last.format("%d/%m/%Y")
+    )
+}
+
 /// The plan of a microcycle: its window, objectives and sessions (by
 /// start, as given), each with its activities. Neither attendance nor
 /// notes.
@@ -260,7 +284,7 @@ pub fn microcycle_sheet(
 ) -> Sheet {
     Sheet {
         title: cycle.title.clone(),
-        subtitle: cycle.window.text(),
+        subtitle: days(cycle.window),
         objectives: cycle.objectives.clone(),
         table: true,
         sessions: sessions

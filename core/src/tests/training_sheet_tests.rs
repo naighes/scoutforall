@@ -171,7 +171,7 @@ mod tests {
         ];
         let sheet = microcycle_sheet(l, &ctx(), &cycle, &sessions);
         assert!(sheet.table);
-        assert_eq!(sheet.subtitle, "2026-11-23 – 2026-11-29");
+        assert_eq!(sheet.subtitle, "23/11/2026 – 29/11/2026");
         assert_eq!(sheet.sessions[0].day, "Lun 23/11");
         assert!(!sheet.sessions[0].cancelled && sheet.sessions[1].cancelled);
         assert!(
@@ -181,6 +181,49 @@ mod tests {
                 .all(|s| s.participants.is_none() && s.notes.is_none())
         );
         assert!(!json(&sheet).contains("SECRET"));
+    }
+
+    /// A session with a title or activities heads its part of the plan,
+    /// without a separator left hanging; one with neither has no part.
+    #[test]
+    fn a_session_without_contents_has_no_part_in_the_plan() {
+        let l = labels(LanguageEnum::It);
+        let titled = |title: &str| TrainingSession {
+            title: title.into(),
+            ..session(23, SessionStatus::Planned)
+        };
+        let sessions = [
+            (titled("Muro e difesa"), vec![]),
+            (titled(""), vec![activity("Muro", None)]),
+            (titled(""), vec![]),
+        ];
+        let cycle = Cycle {
+            id: Uuid::new_v4(),
+            team_id: Uuid::nil(),
+            level: Level::Microcycle,
+            parent_id: None,
+            title: "Settimana 1".into(),
+            span: Span::Weeks(1),
+            window: Window {
+                start: NaiveDate::default(),
+                end: NaiveDate::default(),
+            },
+            objectives: String::new(),
+            notes: String::new(),
+        };
+        let headings: Vec<_> = microcycle_sheet(l, &ctx(), &cycle, &sessions)
+            .sessions
+            .into_iter()
+            .map(|s| s.heading)
+            .collect();
+        assert_eq!(
+            headings,
+            [
+                Some("Lun 23/11 18:30 · Muro e difesa".to_string()),
+                Some("Lun 23/11 18:30".to_string()),
+                None,
+            ]
+        );
     }
 
     /// Both sheets in every language, with long and CJK names.

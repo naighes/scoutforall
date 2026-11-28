@@ -142,9 +142,9 @@
 #if sheet.table {
   objectives(sheet.objectives)
   overview()
-  for s in sheet.sessions {
+  for s in sheet.sessions.filter(s => s.heading != none) {
     block(breakable: true, {
-      section(strike-if(s.cancelled, [#s.day #s.time · #s.title]))
+      section(strike-if(s.cancelled, s.heading))
       if s.cancelled { text(fill: muted, labels.cancelled) }
       activities(s)
     })
