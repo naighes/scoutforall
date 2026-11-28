@@ -427,7 +427,53 @@ impl PeriodChoice {
     }
 }
 
+/// What a period takes, under it: its days, the matches and the
+/// opponents left out (a set doesn't replay).
+pub fn caption(
+    from: Option<&str>,
+    to: Option<&str>,
+    matches: usize,
+    skipped: &[String],
+    s: &'static Strings,
+) -> String {
+    let days = from
+        .zip(to)
+        .map(|(from, to)| format!("{} → {}  ·  ", s.day(from), s.day(to)))
+        .unwrap_or_default();
+    let count = ui::fill(s.matches_count, &[matches.to_string()]);
+    let skipped = match skipped.is_empty() {
+        true => String::new(),
+        false => format!("\n{}", ui::fill(s.skipped, &[skipped.join(", ")])),
+    };
+    format!("{days}{count}{skipped}")
+}
+
 /// The days a calendar marks, from their texts.
 pub fn played_days(days: &[String]) -> Vec<NaiveDate> {
     days.iter().filter_map(|d| Days::parse(d)).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use {super::caption, crate::strings::strings, scout4all_core::shapes::enums::LanguageEnum};
+
+    #[test]
+    fn the_caption_tells_the_days_the_matches_and_the_ones_left_out() {
+        let s = strings(LanguageEnum::En);
+        let skipped = vec!["Serbia".to_string(), "Brasile".to_string()];
+        assert_eq!(
+            caption(Some("2026-11-01"), Some("2026-11-26"), 4, &skipped, s),
+            format!(
+                "{} → {}  ·  4 matches\nLeft out, a set can't be read: Serbia, Brasile",
+                s.day("2026-11-01"),
+                s.day("2026-11-26")
+            )
+        );
+    }
+
+    #[test]
+    fn without_days_nor_matches_left_out_the_caption_is_the_count() {
+        let s = strings(LanguageEnum::En);
+        assert_eq!(caption(None, None, 0, &[], s), "0 matches");
+    }
 }

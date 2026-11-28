@@ -2145,26 +2145,17 @@ impl StatsScreen {
     /// or picked on the calendar; then the matches it takes.
     fn period_row<'a>(&'a self, on: bool, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let chosen: Element<'a, Message> = match &self.analysis {
-            Some(a) => {
-                let days = a
-                    .from
-                    .as_deref()
-                    .zip(a.to.as_deref())
-                    .map(|(from, to)| format!("{} → {}  ·  ", s.day(from), s.day(to)))
-                    .unwrap_or_default();
-                let skipped = match a.skipped.is_empty() {
-                    true => String::new(),
-                    false => format!("\n{}", ui::fill(s.skipped, &[a.skipped.join(", ")])),
-                };
-                small(
-                    format!(
-                        "{days}{}{skipped}",
-                        ui::fill(s.matches_count, &[a.matches.len().to_string()])
-                    ),
-                    c,
-                )
-                .into()
-            }
+            Some(a) => small(
+                period::caption(
+                    a.from.as_deref(),
+                    a.to.as_deref(),
+                    a.matches.len(),
+                    &a.skipped,
+                    s,
+                ),
+                c,
+            )
+            .into(),
             None => space::vertical().height(0).into(),
         };
         self.choice

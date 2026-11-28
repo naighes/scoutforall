@@ -219,20 +219,14 @@ impl PlayerStats {
         let on = rows.get(self.row).copied();
         let small = |text_of: String| text(text_of).size(SIZE_SMALL).color(c.muted);
         let chosen: Element<'a, Message> = match &self.read {
-            Ok(r) => {
-                let days = r
-                    .from
-                    .as_deref()
-                    .zip(r.to.as_deref())
-                    .map(|(from, to)| format!("{} → {}  ·  ", s.day(from), s.day(to)))
-                    .unwrap_or_default();
-                let skipped = match r.skipped.is_empty() {
-                    true => String::new(),
-                    false => format!("\n{}", ui::fill(s.skipped, &[r.skipped.join(", ")])),
-                };
-                let count = ui::fill(s.matches_count, &[r.matches.len().to_string()]);
-                small(format!("{days}{count}{skipped}")).into()
-            }
+            Ok(r) => small(period::caption(
+                r.from.as_deref(),
+                r.to.as_deref(),
+                r.matches.len(),
+                &r.skipped,
+                s,
+            ))
+            .into(),
             Err(_) => space::vertical().height(0).into(),
         };
         let period = self.filters.choice.view(
