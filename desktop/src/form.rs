@@ -203,6 +203,9 @@ pub struct Field {
     /// a date with a button that opens a month to choose the day from:
     /// today, where it opens and what it marks
     pub calendar: Option<NaiveDate>,
+    /// a "+" beside the field, with what it adds, giving
+    /// `Message::Details` of the field
+    pub add: Option<&'static str>,
 }
 
 impl Field {
@@ -215,6 +218,7 @@ impl Field {
             icons: vec![],
             secret: false,
             calendar: None,
+            add: None,
         }
     }
 
@@ -1760,6 +1764,16 @@ impl Form {
                 ..container::Style::default()
             })
             .into(),
+        };
+        let input: Element<'a, M> = match f.add {
+            Some(what) => row![
+                container(input).width(Length::Fill),
+                ui::add_button(what, on(Message::Details(i)), c)
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into(),
+            None => input,
         };
         // what to correct takes the place of the hint, while it's there
         let hint: Element<'a, M> = match (invalid, &f.hint) {

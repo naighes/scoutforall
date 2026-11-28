@@ -12,7 +12,7 @@ use {
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL, SIZE_TITLE},
         ui,
-        venue_choice::{venue_at, venue_options, venue_value},
+        venue_choice::{self, NewVenue, Step, venue_at, venue_field, venue_options},
     },
     chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone},
     iced::{
@@ -254,6 +254,8 @@ pub struct MatchEditor {
     stages: Vec<StageChoice>,
     /// the gyms of the choice after the empty one: id and name
     venues: Vec<(String, String)>,
+    /// a new gym being written, over the form
+    new_venue: Option<NewVenue>,
     /// another team holds the gym then and the user was told: Enter again
     /// saves
     warned: bool,
@@ -1044,10 +1046,7 @@ impl Editor {
                 theme::icons::AWAY,
                 theme::icons::VOLLEYBALL,
             ]),
-            Field {
-                value: venue_value(&venues, data.venue.map(|v| v.to_string()).as_deref()),
-                ..Field::choice(s.session_location, vec![], 0)
-            },
+            venue_field(s, &venues, data.venue.map(|v| v.to_string()).as_deref()),
             Field::choice(
                 s.scouting,
                 vec![s.scouting_one.to_string(), s.scouting_both.to_string()],
@@ -1108,6 +1107,7 @@ impl Editor {
                 formats,
                 stages,
                 venues,
+                new_venue: None,
                 warned: false,
                 anyway_hint: s.save_anyway_hint.to_string(),
                 step: MatchStep::Match,
@@ -2115,6 +2115,12 @@ impl Editor {
     }
 
     pub fn update(&mut self, core: &Scout4All, s: &Strings, message: form::Message) -> Edited {
+        if let Kind::Match(m) = &mut self.kind
+            && let Some(venue) = &mut m.new_venue
+        {
+            let step = venue.update(core, message);
+            return self.venue_step(step);
+        }
         match (&self.namesake, message) {
             (Some(_), form::Message::Save) => self.answered(core, s, true),
             (Some(_), form::Message::Another) => self.answered(core, s, false),
@@ -2125,6 +2131,10 @@ impl Editor {
             }
             (Some(_), _) => Edited::Stay,
             (None, form::Message::Another) if self.may_wait() => self.save_later(core, s),
+            (None, form::Message::Details(MATCH_VENUE)) if !self.on_roster() => {
+                self.open_venue(s);
+                Edited::Stay
+            }
             (None, form::Message::PickLogo) => {
                 let file = rfd::FileDialog::new()
                     .add_filter(s.logo, &["png", "jpg", "jpeg", "webp"])
@@ -2354,6 +2364,16 @@ impl Editor {
     }
 
     fn form_key(&mut self, core: &Scout4All, s: &Strings, ck: KeyCombination) -> Edited {
+        if let Kind::Match(m) = &mut self.kind
+            && let Some(venue) = &mut m.new_venue
+        {
+            let step = venue.key(core, ck);
+            return self.venue_step(step);
+        }
+        if self.on_venue() && ck == venue_choice::NEW_KEY {
+            self.open_venue(s);
+            return Edited::Stay;
+        }
         if let Some(form) = self.correction() {
             let outcome = form.key(ck);
             return self.correction_outcome(core, s, outcome);
@@ -2422,6 +2442,9 @@ impl Editor {
         if told {
             return crate::notice::hints(s);
         }
+        if self.new_venue().is_some() {
+            return Form::hints(s);
+        }
         let correcting = self.correcting().is_some();
         let toggle = match self.kind {
             Kind::Season(_) => s.season_toggle,
@@ -2465,16 +2488,21 @@ impl Editor {
             ])
             .collect(),
             // the details of a match: Enter goes on to the score sheet
-            (false, false) => self.form.on_field(
-                s,
-                Form::hints(s)
-                    .into_iter()
-                    .map(|(k, what)| match (k.as_str(), &self.kind) {
-                        ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
-                        _ => (k, what),
-                    })
-                    .collect(),
-            ),
+            (false, false) => self
+                .form
+                .on_field(
+                    s,
+                    Form::hints(s)
+                        .into_iter()
+                        .map(|(k, what)| match (k.as_str(), &self.kind) {
+                            ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
+                            _ => (k, what),
+                        })
+                        .collect(),
+                )
+                .into_iter()
+                .chain(self.on_venue().then(|| venue_choice::new_hint(s)))
+                .collect(),
         }
     }
 
@@ -2500,7 +2528,49 @@ impl Editor {
         matches!(&self.kind, Kind::Match(m) if m.id.is_none())
     }
 
+    fn new_venue(&self) -> Option<&NewVenue> {
+        match &self.kind {
+            Kind::Match(m) => m.new_venue.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The small form of a new gym, over the details of a match.
+    fn open_venue(&mut self, s: &Strings) {
+        if let Kind::Match(m) = &mut self.kind {
+            m.new_venue = Some(NewVenue::new(s));
+        }
+    }
+
+    /// What became of the new gym: made, it's the one chosen.
+    fn venue_step(&mut self, step: Step) -> Edited {
+        if let Kind::Match(m) = &mut self.kind {
+            match step {
+                Step::Stay => {}
+                Step::Close => m.new_venue = None,
+                Step::Made(id, name) => {
+                    m.new_venue = None;
+                    m.warned = false;
+                    m.venues.push((id.clone(), name));
+                    if let Some(field) = self.form.fields.get_mut(MATCH_VENUE) {
+                        field.value = venue_choice::venue_value(&m.venues, Some(&id));
+                    }
+                }
+            }
+        }
+        Edited::Stay
+    }
+
+    /// The keys are on the choice of the gym of a match.
+    fn on_venue(&self) -> bool {
+        matches!(&self.kind, Kind::Match(m) if m.step == MatchStep::Match)
+            && self.form.focused == MATCH_VENUE
+    }
+
     pub fn focus_id(&self) -> Id {
+        if let Some(venue) = self.new_venue() {
+            return venue.focus_id();
+        }
         self.correcting()
             .map_or_else(|| self.form.focus_id(), |c| c.form.focus_id())
     }
@@ -2511,6 +2581,9 @@ impl Editor {
         c: Colors,
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
+        if let Some(venue) = self.new_venue() {
+            return venue.view(s, c, on);
+        }
         match (&self.namesake, &self.kind) {
             (Some(namesake), _) if self.same_person.is_some() => ui::confirm_with(
                 s,
@@ -3042,6 +3115,28 @@ mod tests {
             Edited::Saved(_)
         ));
         assert_eq!(missing(), None);
+    }
+
+    /// A gym made from the details of a match is the one of the match.
+    #[test]
+    fn a_gym_is_made_from_the_match_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        send(&mut e, &core, form::Message::Details(MATCH_VENUE));
+        send(&mut e, &core, Input(0, "Palazzetto".into()));
+        assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
+        assert!(e.new_venue().is_none());
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        let Edited::Saved(id) = press(&mut e, &core, key!(enter)) else {
+            unreachable!("saved")
+        };
+        let made = core.venues().unwrap().remove(0);
+        let saved = core.match_form(cortona, id).unwrap().venue;
+        assert_eq!(saved.map(|v| v.to_string()), Some(made.id));
     }
 
     fn edit_match(core: &Scout4All, team_id: &str, id: &str) -> Editor {
