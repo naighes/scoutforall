@@ -5141,7 +5141,8 @@ impl Scout4All {
     }
 
     /// Creates the team of the new season with the players chosen: the same
-    /// persons, in one more team; returns its id. The old team stays.
+    /// persons, in one more team, with a copy of the logo (each season
+    /// changes its own); returns its id. The old team stays.
     pub fn save_new_season(
         &self,
         team_id: String,
@@ -5156,6 +5157,15 @@ impl Scout4All {
         let input = season::new_team(&team, input, &season_members(&players))
             .map_err(|e| self.season_error(e))?;
         let saved = self.runtime.block_on(self.team_writer.save(input))?;
+        // the team is there all the same when the logo can't be copied
+        let logo = self.team_logo(team_id).and_then(|logo| {
+            logo.map_or(Ok(()), |l| {
+                self.set_team_logo(saved.id.to_string(), Some(l))
+            })
+        });
+        if let Err(e) = logo {
+            log_error(&format!("could not copy the logo to the new team: {e:?}"));
+        }
         // as a team created by hand: at the top of the list
         if let Err(e) = self.set_pinned(saved.id.to_string(), true) {
             log_error(&format!("could not pin the new team: {e:?}"));
@@ -7577,11 +7587,19 @@ pub(crate) mod tests {
             players.last().map(|p| (p.number, p.role_name.as_deref())),
             Some((10, Some("libero")))
         );
+        app.set_team_logo(senior.clone(), Some(PNG.to_vec()))
+            .unwrap();
         let new = app
             .save_new_season(senior.clone(), season.form, players)
             .unwrap();
         let details = app.team(new.clone()).unwrap();
         assert_eq!(details.year, 2027);
+        // the logo goes along, each season then has its own
+        let logo = app.team_logo(senior.clone()).unwrap();
+        assert!(logo.is_some());
+        assert_eq!(app.team_logo(new.clone()).unwrap(), logo);
+        app.set_team_logo(new.clone(), None).unwrap();
+        assert_eq!(app.team_logo(senior.clone()).unwrap(), logo);
         let numbers: Vec<(String, u8)> = details
             .players
             .iter()
