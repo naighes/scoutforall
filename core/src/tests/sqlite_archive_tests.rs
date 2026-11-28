@@ -1217,7 +1217,7 @@ pub(crate) mod tests {
                     crate::tests::clock::now(),
                 )
                 .unwrap();
-                match preview(&archive, &en()).unwrap() {
+                match preview(&archive, &en()).unwrap().0 {
                     Preview::Team(previewed) => assert_eq!(previewed, team, "{version}"),
                     other => panic!("{version}: {other:?}"),
                 }
@@ -1225,7 +1225,7 @@ pub(crate) mod tests {
                     let uuid = Uuid::parse_str(&m.id).unwrap();
                     let archive =
                         export(&db, Subject::Match(uuid), crate::tests::clock::now()).unwrap();
-                    match preview(&archive, &en()).unwrap() {
+                    match preview(&archive, &en()).unwrap().0 {
                         Preview::Match(previewed) => {
                             let MatchPreview {
                                 team: previewed_team,

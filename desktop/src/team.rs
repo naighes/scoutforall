@@ -1107,16 +1107,16 @@ impl TeamScreen {
             scrollable(
                 column![
                     row![
-                        match &self.logo {
-                            Some(logo) => ui::team_logo(logo, 48.0, c),
-                            None => container(ui::initials(
-                                scout4all_mobile::initials(d.name.clone()),
-                                c
-                            ))
-                            .center_x(Length::Fixed(48.0))
-                            .center_y(Length::Fixed(48.0))
-                            .into(),
-                        },
+                        ui::team_head(
+                            &match &self.logo {
+                                Some(logo) => ui::TeamPicture::Logo(logo.clone()),
+                                None => ui::TeamPicture::Initials(scout4all_mobile::initials(
+                                    d.name.clone()
+                                )),
+                            },
+                            48.0,
+                            c
+                        ),
                         text(d.name.clone()).size(22).font(theme::fonts().bold),
                     ]
                     .spacing(10)

@@ -2591,6 +2591,7 @@ mod tests {
                 year: 2026,
                 sessions: 1,
                 cycles: 0,
+                logo: None,
             }
         );
         to.import_team(zip.bytes, None).unwrap();

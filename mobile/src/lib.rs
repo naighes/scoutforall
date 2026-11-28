@@ -1213,6 +1213,8 @@ pub struct DvwImported {
 pub struct TeamChoice {
     pub id: String,
     pub name: String,
+    /// the one it has here, else the one the archive would give it
+    pub logo: Option<Vec<u8>>,
 }
 
 /// What an archive holds, to confirm importing it: only an archive that
@@ -1223,6 +1225,8 @@ pub enum ArchivePreview {
         name: String,
         year: u16,
         players: u32,
+        /// as `TeamChoice::logo`
+        logo: Option<Vec<u8>>,
     },
     Match {
         opponent: String,
@@ -1241,6 +1245,8 @@ pub enum ArchivePreview {
         year: u16,
         sessions: u32,
         cycles: u32,
+        /// as `TeamChoice::logo`
+        logo: Option<Vec<u8>>,
     },
 }
 
@@ -5441,7 +5447,15 @@ impl Scout4All {
         team_id: Option<String>,
     ) -> Result<ArchivePreview, MobileError> {
         let labels = self.language.labels();
-        let team_preview = |team: TeamEntry| ArchivePreview::Team {
+        // the logo here wins over the archive's, as the import does
+        let logo = |id: Uuid, archived: Option<Vec<u8>>| {
+            self.team_logo(id.to_string())
+                .ok()
+                .flatten()
+                .or(archived)
+        };
+        let team_preview = |team: TeamEntry, archived| ArchivePreview::Team {
+            logo: logo(team.id, archived),
             players: count(&team),
             name: team.name,
             year: team.year,
@@ -5455,20 +5469,22 @@ impl Scout4All {
                 lost,
                 teams,
             };
-        let choice = |t: &TeamEntry| TeamChoice {
+        let choice = |t: &TeamEntry, archived| TeamChoice {
+            logo: logo(t.id, archived),
             id: t.id.to_string(),
             name: t.name.clone(),
         };
         Ok(match legacy_archive::open(&self.db, &bytes, labels)? {
             Opened::Database(_) => match archives::preview(&bytes, &self.language)? {
-                Preview::Team(team) => team_preview(team),
-                Preview::Match(m) => match_preview(
+                (Preview::Team(team), archived) => team_preview(team, archived),
+                (Preview::Match(m), archived) => match_preview(
                     &m.entry,
                     m.status.us_wins,
                     m.status.them_wins,
-                    vec![choice(&m.team)],
+                    vec![choice(&m.team, archived)],
                 ),
-                Preview::Training(t) => ArchivePreview::Training {
+                (Preview::Training(t), archived) => ArchivePreview::Training {
+                    logo: logo(t.team.id, archived),
                     name: t.team.name,
                     year: t.team.year,
                     sessions: count_of(t.sessions),
@@ -5478,7 +5494,7 @@ impl Scout4All {
             // up to v0.9.0 the id only in the name of the file
             Opened::LegacyTeam { team, id } => {
                 match id.or_else(|| file_name.as_deref().and_then(file_team_id)) {
-                    Some(_) => team_preview(team),
+                    Some(_) => team_preview(team, None),
                     None => return Err(failed(labels.team_archive_without_id)),
                 }
             }
@@ -5486,7 +5502,7 @@ impl Scout4All {
                 let mut choices: Vec<TeamChoice> = teams
                     .iter()
                     .filter(|t| team_id.as_ref().is_none_or(|id| t.id.to_string() == *id))
-                    .map(choice)
+                    .map(|t| choice(t, None))
                     .collect();
                 if choices.is_empty() {
                     return Err(failed(labels.match_of_another_team));
@@ -11029,6 +11045,26 @@ pub(crate) mod tests {
         assert!(app(&dir, "it").archive_contacts());
     }
 
+    /// An app without the team shows the logo the archive carries.
+    #[test]
+    fn the_preview_has_the_logo_of_the_archive() {
+        let from_dir = tempfile::tempdir().unwrap();
+        let from = app(&from_dir, "it");
+        let (team, m) = match_with_a_set(&from);
+        from.set_team_logo(team.clone(), Some(PNG.to_vec()))
+            .unwrap();
+        let stored = from.team_logo(team.clone()).unwrap();
+        let to_dir = tempfile::tempdir().unwrap();
+        let to = app(&to_dir, "it");
+        let logo_of = |bytes: Vec<u8>| match to.preview_archive(bytes, None, None).unwrap() {
+            ArchivePreview::Team { logo, .. } | ArchivePreview::Training { logo, .. } => logo,
+            ArchivePreview::Match { teams, .. } => teams.into_iter().find_map(|t| t.logo),
+        };
+        assert!(stored.is_some());
+        assert_eq!(logo_of(from.export_team(team.clone()).unwrap().bytes), stored);
+        assert_eq!(logo_of(from.export_match(team, m).unwrap().bytes), stored);
+    }
+
     #[test]
     fn a_team_and_a_match_move_to_another_phone() {
         let from_dir = tempfile::tempdir().unwrap();
@@ -11051,6 +11087,7 @@ pub(crate) mod tests {
                 name: "Cortona".into(),
                 year: 2026,
                 players: 7,
+                logo: None,
             }
         );
         assert_eq!(
@@ -11081,6 +11118,7 @@ pub(crate) mod tests {
                 teams: vec![TeamChoice {
                     id: team.clone(),
                     name: "Cortona".into(),
+                    logo: None,
                 }],
             }
         );

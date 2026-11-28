@@ -275,7 +275,8 @@ pub struct Importing {
     team_id: Option<String>,
     preview: ArchivePreview,
     team: usize,
-    /// the pictures of the teams to choose, in their order
+    /// the pictures of the teams of the preview: the one of a team or of
+    /// its training, the ones to choose of a match, in their order
     pictures: Vec<ui::TeamPicture>,
 }
 
@@ -293,9 +294,12 @@ impl Importing {
         let pictures = match &preview {
             ArchivePreview::Match { teams, .. } => teams
                 .iter()
-                .map(|t| ui::TeamPicture::of(core, Some(&t.id), &t.name))
+                .map(|t| ui::TeamPicture::from_png(t.logo.as_deref(), &t.name))
                 .collect(),
-            ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => vec![],
+            ArchivePreview::Team { name, logo, .. }
+            | ArchivePreview::Training { name, logo, .. } => {
+                vec![ui::TeamPicture::from_png(logo.as_deref(), name)]
+            }
         };
         Ok(Importing {
             picked,
@@ -416,6 +420,7 @@ impl Importing {
                 name,
                 year,
                 players,
+                ..
             } => (
                 s.import_team_title,
                 name.clone(),
@@ -426,6 +431,7 @@ impl Importing {
                 year,
                 sessions,
                 cycles,
+                ..
             } => (
                 s.import_team_title,
                 name.clone(),
@@ -475,11 +481,22 @@ impl Importing {
             .spacing(6)
             .into(),
         };
+        // of a match the picture is the one of the team it goes into
+        let head = match &self.preview {
+            ArchivePreview::Match { .. } => None,
+            ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => {
+                self.pictures.first().map(|p| ui::team_head(p, 48.0, c))
+            }
+        };
         let body = ui::panel(
             Some(title),
             column![
                 column![
-                    text(name).size(22).font(bold),
+                    iced::widget::Row::new()
+                        .push(head)
+                        .push(text(name).size(22).font(bold))
+                        .spacing(10)
+                        .align_y(Alignment::Center),
                     text(line).size(SIZE_BODY).color(c.muted),
                     text(self.picked.name.clone())
                         .size(SIZE_SMALL)

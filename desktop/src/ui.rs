@@ -852,6 +852,28 @@ pub fn team_picture<'a, M: 'a>(picture: &TeamPicture, size: f32, c: Colors) -> E
     }
 }
 
+/// The picture of a team standing on its own, heading what tells of it: the
+/// initials in a square, as in the lists, not lost as bare letters.
+pub fn team_head<'a, M: 'a>(picture: &TeamPicture, size: f32, c: Colors) -> Element<'a, M> {
+    match picture {
+        TeamPicture::Logo(logo) => team_logo(logo, size, c),
+        TeamPicture::Initials(letters) => container(
+            text(letters.clone())
+                .size(size * 0.38)
+                .font(theme::fonts().bold)
+                .color(c.muted),
+        )
+        .center_x(Length::Fixed(size))
+        .center_y(Length::Fixed(size))
+        .style(move |_| container::Style {
+            background: Some(c.button.into()),
+            border: border(Color::TRANSPARENT, 0.0, ROW_RADIUS),
+            ..container::Style::default()
+        })
+        .into(),
+    }
+}
+
 /// A `pill` of a team, its picture before its name.
 pub fn team_pill<'a, M: Clone + 'a>(
     picture: &TeamPicture,

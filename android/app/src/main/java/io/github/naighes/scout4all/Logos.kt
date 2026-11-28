@@ -77,8 +77,14 @@ fun initialsTag(letters: String) = "initials-$letters"
  * initials, not read as the name says it. `teamId` is null for a name
  * only. */
 @Composable
-fun TeamPicture(teamId: String?, name: String, size: Dp = 48.dp, modifier: Modifier = Modifier) {
-    val letters: @Composable () -> Unit = { TeamInitials(name, size, modifier) }
+fun TeamPicture(
+    teamId: String?,
+    name: String,
+    size: Dp = 48.dp,
+    modifier: Modifier = Modifier,
+    boxed: Boolean = false,
+) {
+    val letters: @Composable () -> Unit = { TeamInitials(name, size, modifier, boxed) }
     when (teamId) {
         null -> letters()
         else -> TeamLogo(teamId, size, modifier, none = letters)
@@ -87,9 +93,15 @@ fun TeamPicture(teamId: String?, name: String, size: Dp = 48.dp, modifier: Modif
 
 /** The initials of the team in a square, not read as its name says it. */
 @Composable
-private fun TeamInitials(name: String, size: Dp, modifier: Modifier = Modifier) {
+private fun TeamInitials(name: String, size: Dp, modifier: Modifier = Modifier, boxed: Boolean = false) {
     val shown = initials(name)
-    Box(modifier.size(size).clearAndSetSemantics { testTag = initialsTag(shown) }, contentAlignment = Alignment.Center) {
+    // on its own, heading what tells of the team: in a square as in the
+    // lists, not lost as bare letters
+    val box = when (boxed) {
+        true -> modifier.size(size).clip(RoundedCornerShape(size * 0.15f)).background(MaterialTheme.colorScheme.surfaceVariant)
+        false -> modifier.size(size)
+    }
+    Box(box.clearAndSetSemantics { testTag = initialsTag(shown) }, contentAlignment = Alignment.Center) {
         Text(
             shown,
             style = if (size < 40.dp) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleMedium,
@@ -101,9 +113,9 @@ private fun TeamInitials(name: String, size: Dp, modifier: Modifier = Modifier) 
 /** `TeamPicture` of a logo already read: `logo` null for a team without
  * one. */
 @Composable
-fun LogoOrInitials(logo: ByteArray?, name: String, size: Dp, modifier: Modifier = Modifier) {
+fun LogoOrInitials(logo: ByteArray?, name: String, size: Dp, modifier: Modifier = Modifier, boxed: Boolean = false) {
     when (logo) {
-        null -> TeamInitials(name, size, modifier)
+        null -> TeamInitials(name, size, modifier, boxed)
         else -> TeamLogoBox(logo, size, modifier)
     }
 }

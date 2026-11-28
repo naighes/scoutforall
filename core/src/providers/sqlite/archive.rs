@@ -641,13 +641,16 @@ pub struct MatchPreview {
     pub status: MatchStatus,
 }
 
-/// What the archive holds, read as the import would (the same checks):
-/// nothing is written here.
-pub fn preview(archive: &[u8], language: &Language) -> Result<Preview, AppError> {
+/// What the archive holds, read as the import would (the same checks),
+/// and the logo it has for its team: nothing is written here.
+pub fn preview(
+    archive: &[u8],
+    language: &Language,
+) -> Result<(Preview, Option<Vec<u8>>), AppError> {
     let (manifest, staging) = staged(archive, language.labels())?;
     let staged = Database::new(staging);
     let missing = || not_found(&format!("{:?} {}", manifest.kind, manifest.id));
-    staged.read(|tx| match (manifest.kind, manifest.contents) {
+    let preview = staged.read(|tx| match (manifest.kind, manifest.contents) {
         (Kind::Team, Some(Contents::Training)) => training_archive::preview(tx, &manifest.id),
         (Kind::Team, None) => read_team(tx, &manifest.id).map(Preview::Team),
         (Kind::Match, _) => {
@@ -660,7 +663,14 @@ pub fn preview(archive: &[u8], language: &Language) -> Result<Preview, AppError>
                 status,
             })))
         }
-    })
+    })?;
+    let team = match &preview {
+        Preview::Team(team) => team,
+        Preview::Match(m) => &m.team,
+        Preview::Training(t) => &t.team,
+    };
+    let logo = crate::assets::team_logo(&staged, &team.id.to_string())?;
+    Ok((preview, logo.map(|image| image.data)))
 }
 
 /// Adds what the archive holds that isn't here: see the module.

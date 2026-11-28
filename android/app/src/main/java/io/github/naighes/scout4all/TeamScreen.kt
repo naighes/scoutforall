@@ -228,7 +228,7 @@ fun TeamScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    TeamPicture(id, s.team.name, 48.dp)
+                    TeamPicture(id, s.team.name, 48.dp, boxed = true)
                     Text(
                         listOfNotNull(s.team.year.toString(), s.team.classification, s.team.gender)
                             .joinToString(" · "),

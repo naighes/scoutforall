@@ -325,7 +325,7 @@ mod tests {
     async fn the_preview_tells_the_team_and_how_much_training() {
         let (db, t) = trained().await;
         let archive = export(&db, Subject::Training(t.id), crate::tests::clock::now()).unwrap();
-        match preview(&archive, &en()).unwrap() {
+        match preview(&archive, &en()).unwrap().0 {
             Preview::Training(p) => {
                 assert_eq!((p.team.id, p.sessions, p.cycles), (t.id, 2, 3));
             }

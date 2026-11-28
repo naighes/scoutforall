@@ -8,9 +8,10 @@ import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -28,12 +29,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.remember
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.toggleableState
-import androidx.compose.ui.state.ToggleableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -43,6 +41,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.toggleableState
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.lifecycle.ViewModel
@@ -270,12 +271,12 @@ private fun ImportDialog(
                 when (preview) {
                     is ArchivePreview.Team -> {
                         val players = preview.players.toInt()
-                        Text(preview.name, style = MaterialTheme.typography.titleMedium)
+                        TeamHead(preview.logo, preview.name)
                         Text("${preview.year} · ${pluralStringResource(R.plurals.players, players, players)}")
                     }
                     // the screen of its own comes with TODO/021 step 24
                     is ArchivePreview.Training -> {
-                        Text(preview.name, style = MaterialTheme.typography.titleMedium)
+                        TeamHead(preview.logo, preview.name)
                         Text("${preview.year}")
                     }
                     is ArchivePreview.Match -> {
@@ -296,6 +297,18 @@ private fun ImportDialog(
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }
+
+/** The team of the archive: its picture and its name. */
+@Composable
+private fun TeamHead(logo: ByteArray?, name: String) =
+    Row(
+        Modifier.padding(bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        LogoOrInitials(logo, name, 48.dp, boxed = true)
+        Text(name, style = MaterialTheme.typography.titleMedium)
+    }
 
 /** The team of the match: its name when there's one, to choose otherwise. */
 @Composable
@@ -323,7 +336,7 @@ private fun TeamChoices(teams: List<io.github.naighes.scout4all.core.TeamChoice>
 @Composable
 private fun TeamLine(team: io.github.naighes.scout4all.core.TeamChoice, modifier: Modifier = Modifier) =
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        TeamPicture(team.id, team.name, 32.dp)
+        LogoOrInitials(team.logo, team.name, 32.dp)
         Text(team.name, modifier = Modifier.padding(start = 8.dp))
     }
 
