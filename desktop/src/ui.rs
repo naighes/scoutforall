@@ -173,18 +173,7 @@ pub fn bar_item<'a, M: Clone + 'a>(
         true => c.on_accent,
         false => c.text,
     };
-    button(
-        column![
-            icon(icon_bytes, 22.0, color),
-            text(label.to_string()).size(SIZE_SMALL)
-        ]
-        .spacing(2)
-        .align_x(Alignment::Center),
-    )
-    .padding(Padding::from([4, 10]))
-    .on_press(message)
-    .style(move |_, status| {
-        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+    labelled_bar_button(icon_bytes, label, color, message, move |hovered| {
         button::Style {
             background: match (chosen, hovered) {
                 (true, _) => Some(c.accent.into()),
@@ -196,7 +185,6 @@ pub fn bar_item<'a, M: Clone + 'a>(
             ..button::Style::default()
         }
     })
-    .into()
 }
 
 /// What a bar makes, shaped as its choices ([`bar_item`]) but framed: it
@@ -207,9 +195,28 @@ pub fn bar_action<'a, M: Clone + 'a>(
     message: M,
     c: Colors,
 ) -> Element<'a, M> {
+    labelled_bar_button(icon_bytes, label, c.accent, message, move |hovered| {
+        button::Style {
+            background: hovered.then(|| c.button.into()),
+            text_color: c.text,
+            border: border(c.accent, 1.0, 8.0),
+            ..button::Style::default()
+        }
+    })
+}
+
+/// The button of a bar, its icon over its words: `style` tells it by
+/// whether the pointer is on it.
+fn labelled_bar_button<'a, M: Clone + 'a>(
+    icon_bytes: &'static [u8],
+    label: &str,
+    icon_color: Color,
+    message: M,
+    style: impl Fn(bool) -> button::Style + 'a,
+) -> Element<'a, M> {
     button(
         column![
-            icon(icon_bytes, 22.0, c.accent),
+            icon(icon_bytes, 22.0, icon_color),
             text(label.to_string()).size(SIZE_SMALL)
         ]
         .spacing(2)
@@ -218,13 +225,10 @@ pub fn bar_action<'a, M: Clone + 'a>(
     .padding(Padding::from([4, 10]))
     .on_press(message)
     .style(move |_, status| {
-        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
-        button::Style {
-            background: hovered.then(|| c.button.into()),
-            text_color: c.text,
-            border: border(c.accent, 1.0, 8.0),
-            ..button::Style::default()
-        }
+        style(matches!(
+            status,
+            button::Status::Hovered | button::Status::Pressed
+        ))
     })
     .into()
 }
