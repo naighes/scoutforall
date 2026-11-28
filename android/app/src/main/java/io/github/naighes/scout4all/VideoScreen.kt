@@ -1050,7 +1050,13 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 val summed = plan
+                // said before the video is made, and kept while and after
+                if (summed != null && summed.outside > 0) {
+                    Text(stringResource(R.string.montage_outside, summed.outside, summed.actions + summed.outside))
+                }
                 when {
+                    // a single match with no action in its video
+                    summed != null && !several && summed.actions == 0 -> Text(stringResource(R.string.montage_none))
                     failed != null -> Banner(
                         Level.ERROR,
                         stringResource(R.string.video_not_made) + (failed?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""),
@@ -1081,7 +1087,8 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(stringResource(if (made == null && failed == null) android.R.string.cancel else R.string.close))
+                val over = made != null || failed != null || (!several && plan?.actions == 0)
+                Text(stringResource(if (over) R.string.close else android.R.string.cancel))
             }
         },
     )

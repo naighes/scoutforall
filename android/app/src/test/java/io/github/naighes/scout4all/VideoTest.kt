@@ -60,8 +60,8 @@ private fun linkVideo(team: String, match: String) = core { c ->
 
 /** The video of the match read as ten minutes long (the shadow of the
  * reader of Robolectric), the three aces tied a minute apart from the
- * first minute: their clips apart on the strip. */
-private fun aceClips(team: String, match: String): VideoRequest.Clips {
+ * first minute: their clips apart on the strip; or at `at`. */
+private fun aceClips(team: String, match: String, at: List<ULong> = listOf(60_000u, 120_000u, 180_000u)): VideoRequest.Clips {
     linkVideo(team, match)
     ShadowMediaMetadataRetriever.addMetadata(
         DataSource.toDataSource(app, Uri.parse("content://nowhere/20261025 175500.mp4")),
@@ -71,9 +71,8 @@ private fun aceClips(team: String, match: String): VideoRequest.Clips {
     val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, listOf(EvalEnum.PERFECT), null, null)
     core { c ->
         val review = c.videoReview(team, match, MatchSide.A, pick)
-        review.anchorHere(0u, 60_000u)
-        review.correctHere(1u, 120_000u)
-        review.correctHere(2u, 180_000u)
+        review.anchorHere(0u, at[0])
+        (1 until at.size).forEach { review.correctHere(it.toUInt(), at[it]) }
     }
     val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, null, pick) }
     return VideoRequest.Clips(team, pick, "Serve · #", matches)
@@ -302,6 +301,30 @@ class VideoTest {
         }
         rule.waitForIdle()
         assertTrue("${shown.position}", shown.position in 70_000L..110_000L)
+    }
+
+    /** An action past the end of the video: said before making it, left
+     * out of it. */
+    @Test
+    fun theActionsOutsideTheVideoAreSaid() {
+        val (team, match) = servedMatch()
+        val request = aceClips(team, match, listOf(60_000u, 120_000u, 700_000u))
+        rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
+        rule.waitForText(string(R.string.clip_before))
+        rule.onNodeWithContentDescription(string(R.string.share_video)).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.montage_outside, 1, 3))
+    }
+
+    /** All the actions past the end of the video: nothing to make, said. */
+    @Test
+    fun withNoActionInTheVideoNothingIsMade() {
+        val (team, match) = servedMatch()
+        val request = aceClips(team, match, listOf(700_000u, 760_000u, 820_000u))
+        rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
+        rule.waitForText(string(R.string.clip_before))
+        rule.onNodeWithContentDescription(string(R.string.share_video)).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.montage_none))
+        rule.onNodeWithText(string(R.string.close)).assertExists()
     }
 
     /** A video of another day (its name says when it starts): the events

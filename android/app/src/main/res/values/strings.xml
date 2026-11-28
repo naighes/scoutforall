@@ -481,6 +481,8 @@
     <string name="clips_without_video">Without a video, left out: %1$d</string>
     <string name="clips_match_of">Match %1$d of %2$d</string>
     <string name="montage_left_out">Left out: %1$s</string>
+    <string name="montage_outside">Actions outside the video, not included: %1$d of %2$d</string>
+    <string name="montage_none">No action is inside the video: nothing to make</string>
     <string name="left_out_no_video">no video</string>
     <string name="left_out_unreadable">video not readable</string>
     <string name="left_out_not_lined_up">not synced with the video</string>

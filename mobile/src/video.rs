@@ -630,12 +630,22 @@ impl VideoReview {
         standing(&st.all, position_ms)
     }
 
+    /// How many of the actions shown aren't in the video, left out of its
+    /// `pieces`.
+    pub fn outside(&self) -> u32 {
+        let st = self.state();
+        let total = Some(st.total()).filter(|t| *t > 0);
+        count_of(st.shown().filter(|e| !inside(e.offset_ms, total)).count())
+    }
+
     /// The pieces of the video of the actions shown: each from `before_s`
-    /// before it to `after_s` after it, the ones overlapping as one.
+    /// before it to `after_s` after it, the ones overlapping as one; the
+    /// ones not in the video left out.
     pub fn pieces(&self, before_s: u32, after_s: u32) -> Vec<MontagePiece> {
         let st = self.state();
         let shown: Vec<&VideoEvent> = st.shown().collect();
-        pieces(&shown, &st.all, before_s, after_s)
+        let total = Some(st.total()).filter(|t| *t > 0);
+        pieces(&shown, &st.all, before_s, after_s, total)
             .into_iter()
             .map(|p| MontagePiece {
                 event: st.row(p.event),
@@ -907,17 +917,20 @@ pub struct Piece<'a> {
 }
 
 /// The pieces of the actions `picked`: each from `before_s` before it to
-/// `after_s` after it, the ones overlapping as one; the score before each
-/// from `all` the events.
+/// `after_s` after it, the ones overlapping as one, the ones not in the
+/// video (`total_ms` long when known) left out; the score before each from
+/// `all` the events.
 pub fn pieces<'a>(
     picked: &[&'a VideoEvent],
     all: &[VideoEvent],
     before_s: u32,
     after_s: u32,
+    total_ms: Option<u64>,
 ) -> Vec<Piece<'a>> {
     let (before, after) = (i64::from(before_s) * 1000, u64::from(after_s) * 1000);
     let mut sorted: Vec<(u64, u64, &VideoEvent)> = picked
         .iter()
+        .filter(|e| inside(e.offset_ms, total_ms))
         .filter_map(|e| {
             Some((
                 target(e, before)?,
@@ -1613,6 +1626,29 @@ mod tests {
         let at = review.locate(1_805_000);
         assert_eq!((at.file, at.from_ms), (1, 5_000));
         assert_eq!(review.locate(99_999_999).file, 1);
+    }
+
+    #[test]
+    fn the_actions_outside_the_video_are_in_no_piece() {
+        let dir = tempfile::tempdir().unwrap();
+        let (app, team, id) = imported(&dir);
+        let review = app.video_review(team, id, MatchSide::A, None).unwrap();
+        review.add_files(vec![file("a.mp4")], 0).unwrap();
+        review.set_durations(vec![3 * 3600 * 1000]).unwrap();
+        review.anchor_here(0, 10_000).unwrap();
+        assert_eq!(review.outside(), 0);
+        let count = u32::try_from(review.events().len()).unwrap();
+        // a video that ends half way through the events
+        let half = review.events()[count as usize / 2].offset_ms.unwrap();
+        review.set_durations(vec![half.unsigned_abs()]).unwrap();
+        let outside = review.outside();
+        assert!(outside > 0 && outside < count, "{outside} of {count}");
+        let pieces = review.pieces(5, 5);
+        assert_eq!(
+            pieces.iter().map(|p| p.actions).sum::<u32>(),
+            count - outside
+        );
+        assert!(pieces.iter().all(|p| p.from_ms < half.unsigned_abs()));
     }
 
     #[test]

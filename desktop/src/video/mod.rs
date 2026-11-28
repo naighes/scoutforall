@@ -170,8 +170,26 @@ pub enum Outcome {
     Share(PathBuf, String),
 }
 
-/// The matches left out of the video of the actions of the team, and why;
-/// none when none is.
+/// What of the actions picked their video can't hold, as said.
+#[derive(Debug, PartialEq)]
+enum Outside {
+    Some(String),
+    /// none in the video: nothing to make
+    All(String),
+}
+
+/// How many of the actions aren't in the video, `duration_ms` long.
+fn outside_count(events: &[VideoEvent], duration_ms: Option<u64>) -> usize {
+    events
+        .iter()
+        .filter(|e| !inside(e.offset_ms, duration_ms))
+        .count()
+}
+
+fn outside_said(outside: usize, count: usize, s: &Strings) -> String {
+    ui::fill(s.montage_outside, &[outside.to_string(), count.to_string()])
+}
+
 fn left_out_said(left_out: &[(String, LeftOut)], s: &Strings) -> Option<String> {
     let said: Vec<String> = left_out
         .iter()
@@ -349,6 +367,7 @@ struct TourMatch {
     the_match: MatchEntry,
     day: String,
     files: Vec<PathBuf>,
+    duration_ms: u64,
     /// all its events in its video, for the score
     all: Vec<VideoEvent>,
     picked: Vec<VideoEvent>,
@@ -359,6 +378,8 @@ struct TourMatch {
 struct Summary {
     plan: montage::Plan,
     actions: usize,
+    /// the actions of the matches in it not in their video
+    outside: usize,
     left_out: Vec<(String, LeftOut)>,
 }
 
@@ -582,6 +603,7 @@ impl VideoScreen {
             &self.all_events,
             self.margins.before_s,
             self.margins.after_s,
+            self.status.as_ref().map(|st| st.duration_ms),
         );
         let count = pieces.len();
         montage::MatchPlan {
@@ -635,6 +657,10 @@ impl VideoScreen {
             }
         }
         let count: usize = kept.iter().map(|t| self.tour_pieces(t).len()).sum();
+        let outside = kept
+            .iter()
+            .map(|t| outside_count(&t.picked, Some(t.duration_ms)))
+            .sum();
         let mut n = 0;
         let mut actions = 0;
         let matches = kept
@@ -677,6 +703,7 @@ impl VideoScreen {
                 output: montage::output(&self.clips_title()),
             },
             actions,
+            outside,
             left_out,
         }
     }
@@ -684,7 +711,13 @@ impl VideoScreen {
     /// The pieces of the actions picked of a match of the team.
     fn tour_pieces<'a>(&self, t: &'a TourMatch) -> Vec<Piece<'a>> {
         let picked: Vec<&VideoEvent> = t.picked.iter().collect();
-        pieces(&picked, &t.all, self.margins.before_s, self.margins.after_s)
+        pieces(
+            &picked,
+            &t.all,
+            self.margins.before_s,
+            self.margins.after_s,
+            Some(t.duration_ms),
+        )
     }
 
     /// A match of the team: its files, all its events in its video and the
@@ -723,6 +756,7 @@ impl VideoScreen {
             .cloned()
             .collect();
         Ok(TourMatch {
+            duration_ms: durations.iter().sum(),
             the_match,
             day: m.day.clone(),
             files,
@@ -749,11 +783,7 @@ impl VideoScreen {
     /// left out), made once asked (`make_montage`).
     pub fn start_montage(&mut self, s: &'static Strings) {
         self.not_made = s.video_not_made;
-        let several = self
-            .tour
-            .as_ref()
-            .filter(|t| t.matches.len() + t.without_video.len() > 1);
-        match several {
+        match self.several() {
             Some(tour) => self.summary = Some(self.tour_summary(tour, s)),
             None => {
                 let plan = montage::Plan {
@@ -762,6 +792,32 @@ impl VideoScreen {
                 };
                 self.make(plan);
             }
+        }
+    }
+
+    /// The matches of a team, when the actions picked are of more than
+    /// one.
+    fn several(&self) -> Option<&Tour> {
+        self.tour
+            .as_ref()
+            .filter(|t| t.matches.len() + t.without_video.len() > 1)
+    }
+
+    /// With the actions of a single match picked and its video open, what
+    /// of them its video can't hold, to say before making it: how many are
+    /// outside, or that all are. Of several matches said when summed up.
+    fn outside_notice(&self, s: &Strings) -> Option<Outside> {
+        let status = self.status.as_ref()?;
+        match (&self.clips, self.several()) {
+            (Some(_), None) => {
+                let count = self.events.len();
+                match outside_count(&self.events, Some(status.duration_ms)) {
+                    0 => None,
+                    n if n == count => Some(Outside::All(s.montage_none.to_string())),
+                    n => Some(Outside::Some(outside_said(n, count, s))),
+                }
+            }
+            _ => None,
         }
     }
 
@@ -2224,11 +2280,15 @@ impl VideoScreen {
         ]
         .spacing(10)
         .align_y(Alignment::Center);
-        let left_out: Element<'a, Message> = match left_out_said(&summary.left_out, s) {
-            Some(said) => text(said).size(SIZE_SMALL).color(c.muted).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![line, left_out].spacing(4).into()
+        let outside = (summary.outside > 0)
+            .then(|| outside_said(summary.outside, summary.actions + summary.outside, s));
+        outside
+            .into_iter()
+            .chain(left_out_said(&summary.left_out, s))
+            .fold(column![line].spacing(4), |col, said| {
+                col.push(text(said).size(SIZE_SMALL).color(c.muted))
+            })
+            .into()
     }
 
     /// With the actions picked: their video to share, or how far it got
@@ -2237,8 +2297,13 @@ impl VideoScreen {
         if let (Some(_), None, Some(summary)) = (&self.clips, &self.montage, &self.summary) {
             return self.summary_view(summary, s, c);
         }
+        let said = |said: String| text(said).size(SIZE_SMALL).color(c.muted);
+        let notice = self.outside_notice(s);
         let line: Element<'a, Message> = match (&self.clips, &self.montage) {
             (None, _) => return space::vertical().height(0).into(),
+            (Some(_), None) if matches!(notice, Some(Outside::All(_))) => {
+                space::vertical().height(0).into()
+            }
             (Some(_), Some(montage)) => row![
                 text(ui::fill(
                     s.making_video,
@@ -2261,7 +2326,12 @@ impl VideoScreen {
             )
             .into(),
         };
-        line
+        match notice {
+            Some(Outside::Some(notice) | Outside::All(notice)) => {
+                column![line, said(notice)].spacing(4).into()
+            }
+            None => line,
+        }
     }
 
     /// With the actions picked, where their clips are in the video, from
@@ -3886,6 +3956,60 @@ pub(crate) mod screen_tests {
             (0, 0),
             "the first set counted"
         );
+    }
+
+    /// The actions picked its video can't hold are said before making it,
+    /// and left out of it; all of them outside, nothing to make.
+    #[test]
+    fn the_actions_outside_the_video_said() {
+        let dir = tempfile::tempdir().unwrap();
+        let whole = with_file(&dir, "20150125 000000.mp4");
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let all: Vec<EventRef> = whole.events.iter().map(event_ref).collect();
+        let count = all.len();
+        let mut screen = VideoScreen::with_clips(
+            whole.core.clone(),
+            dir.path().to_path_buf(),
+            whole.team_id.clone(),
+            whole.match_id.clone(),
+            MatchSide::A,
+            all,
+            "Tutto".into(),
+        )
+        .unwrap();
+        let lasting = |ms: u64| {
+            Some(Status {
+                frame: None,
+                position_ms: 0,
+                duration_ms: ms,
+                playing: false,
+                speed: 1.0,
+                error: None,
+            })
+        };
+        screen.status = lasting(u64::MAX / 2);
+        assert_eq!(screen.outside_notice(s), None);
+        let half = screen.events[count / 2].offset_ms.unwrap().unsigned_abs();
+        screen.status = lasting(half);
+        let outside = outside_count(&screen.events, Some(half));
+        assert!(outside > 0 && outside < count);
+        assert_eq!(
+            screen.outside_notice(s),
+            Some(Outside::Some(format!(
+                "Azioni fuori dal video, non incluse: {outside} su {count}"
+            )))
+        );
+        assert!(screen.match_plan(s).pieces.iter().all(|p| p.from_ms < half));
+        // a video ending before the first action
+        screen.status = lasting(0);
+        screen.events.retain(|e| e.offset_ms > Some(0));
+        assert_eq!(
+            screen.outside_notice(s),
+            Some(Outside::All(s.montage_none.to_string()))
+        );
+        assert!(screen.match_plan(s).pieces.is_empty());
+        screen.start_montage(s);
+        assert!(screen.montage.is_none());
     }
 
     /// The events of the list marked: theirs (their point, their error),

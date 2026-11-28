@@ -480,6 +480,8 @@
     <string name="clips_without_video">Sem vídeo, deixadas de fora: %1$d</string>
     <string name="clips_match_of">Partida %1$d de %2$d</string>
     <string name="montage_left_out">Deixadas de fora: %1$s</string>
+    <string name="montage_outside">Ações fora do vídeo, não incluídas: %1$d de %2$d</string>
+    <string name="montage_none">Nenhuma ação está dentro do vídeo: nada para criar</string>
     <string name="left_out_no_video">sem vídeo</string>
     <string name="left_out_unreadable">vídeo ilegível</string>
     <string name="left_out_not_lined_up">não sincronizada com o vídeo</string>

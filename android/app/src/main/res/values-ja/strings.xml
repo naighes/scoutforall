@@ -479,6 +479,8 @@
     <string name="clips_without_video">ビデオなしで除外: %1$d</string>
     <string name="clips_match_of">試合 %1$d / %2$d</string>
     <string name="montage_left_out">除外: %1$s</string>
+    <string name="montage_outside">ビデオ外のため含まれないアクション: %2$d件中%1$d件</string>
+    <string name="montage_none">ビデオ内にアクションがないため作成できません</string>
     <string name="left_out_no_video">ビデオなし</string>
     <string name="left_out_unreadable">ビデオを読み込めません</string>
     <string name="left_out_not_lined_up">ビデオと未同期</string>

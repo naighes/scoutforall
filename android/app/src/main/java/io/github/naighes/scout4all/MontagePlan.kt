@@ -30,6 +30,8 @@ enum class LeftOut { NO_VIDEO, UNREADABLE, NOT_LINED_UP }
 data class MontagePlan(
     val matches: List<MontageMatch>,
     val actions: Int,
+    /** the actions of the matches in it not in their video */
+    val outside: Int,
     val leftOut: List<Pair<String, LeftOut>>,
 )
 
@@ -55,9 +57,13 @@ suspend fun montagePlan(
 ): MontagePlan {
     val leftOut = request.leftOut.map { it.opponent to LeftOut.NO_VIDEO }.toMutableList()
     val kept = mutableListOf<Triple<TeamClipMatch, VideoReview, List<MontagePiece>>>()
+    var outside = 0
     request.matches.forEach { m ->
         when (val read = readMatch(app, request, m, shown, beforeS, afterS)) {
-            is Read.Kept -> kept += Triple(m, read.review, read.pieces)
+            is Read.Kept -> {
+                kept += Triple(m, read.review, read.pieces)
+                outside += app.onCore { read.review.outside() }.toInt()
+            }
             is Read.Out -> leftOut += m.opponent to read.why
         }
     }
@@ -88,7 +94,7 @@ suspend fun montagePlan(
             },
         )
     }
-    return MontagePlan(matches, matches.sumOf { m -> m.pieces.sumOf { it.actions.toInt() } }, leftOut)
+    return MontagePlan(matches, matches.sumOf { m -> m.pieces.sumOf { it.actions.toInt() } }, outside, leftOut)
 }
 
 private sealed interface Read {
