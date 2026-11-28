@@ -8,6 +8,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -45,6 +46,18 @@ class ScreensLayoutTest(private val screen: Size) {
         button?.let { rule.assertWhole(hasText(it) and hasClickAction()) }
     }
 
+    /** The lines of `text` end between words, never within one. */
+    private fun assertWholeWords(text: String) {
+        val layouts = mutableListOf<TextLayoutResult>()
+        rule.onNode(hasText(text), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        val broken = (0 until layout.lineCount - 1)
+            .map { layout.getLineEnd(it) }
+            .filterNot { text[it - 1].isWhitespace() || text[it].isWhitespace() }
+        assertEquals(emptyList<Int>(), broken)
+    }
+
     @Test
     fun theTeams() {
         saveNationalTeam()
@@ -66,6 +79,8 @@ class ScreensLayoutTest(private val screen: Size) {
         val resume = hasText(string(R.string.resume)) and hasClickAction()
         rule.onNode(resume).performScrollTo()
         rule.assertWhole(resume)
+        // beside the button on a narrow screen the name would break a word
+        assertWholeWords("Cortona Volley Pallavolo Femminile Valdichiana")
     }
 
     @Test

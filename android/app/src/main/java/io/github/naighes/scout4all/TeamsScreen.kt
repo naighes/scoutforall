@@ -3,6 +3,7 @@ package io.github.naighes.scout4all
 import android.app.Application
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -37,6 +38,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -332,7 +334,12 @@ private fun SectionTitle(title: Int) = Text(
 /** A match of the home: the logo of its team at the head, then against
  * whom, of which team and when. */
 @Composable
-private fun HomeMatchRow(m: HomeMatch, onOpen: () -> Unit, tail: @Composable () -> Unit) = BoxRow(
+private fun HomeMatchRow(
+    m: HomeMatch,
+    onOpen: () -> Unit,
+    tail: @Composable () -> Unit = {},
+    below: @Composable ColumnScope.() -> Unit = {},
+) = BoxRow(
     onClick = onOpen,
     modifier = HOME_ROW,
     head = { TeamLogo(m.teamId, 48.dp) { Initials(m.teamInitials) } },
@@ -345,15 +352,29 @@ private fun HomeMatchRow(m: HomeMatch, onOpen: () -> Unit, tail: @Composable () 
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    below()
 }
 
-/** A match not over: touched, its page; the button goes on scouting it. */
+/** A match not over: touched, its page; the button goes on scouting it,
+ * at the tail of the row, or under its texts where beside them it would
+ * break the words of a name. */
 @Composable
-private fun InProgressRow(m: HomeMatch, onOpen: () -> Unit, onResume: () -> Unit) = HomeMatchRow(m, onOpen) {
-    FilledTonalButton(onClick = onResume, Modifier.padding(end = 12.dp)) {
-        Text(stringResource(if (m.standing == MatchStanding.TO_PLAY) R.string.start else R.string.resume))
+private fun InProgressRow(m: HomeMatch, onOpen: () -> Unit, onResume: () -> Unit) = BoxWithConstraints {
+    // a larger font needs as much more room
+    val narrow = maxWidth / LocalDensity.current.fontScale < BESIDE_WIDTH
+    val button: @Composable (Modifier) -> Unit = { modifier ->
+        FilledTonalButton(onClick = onResume, modifier) {
+            Text(stringResource(if (m.standing == MatchStanding.TO_PLAY) R.string.start else R.string.resume))
+        }
+    }
+    when {
+        narrow -> HomeMatchRow(m, onOpen, below = { button(Modifier.align(Alignment.End)) })
+        else -> HomeMatchRow(m, onOpen, tail = { button(Modifier.padding(end = 12.dp)) })
     }
 }
+
+/** The least width of a home row with a button beside its texts. */
+private val BESIDE_WIDTH = 320.dp
 
 /** A match over, with the sets won and lost. */
 @Composable
