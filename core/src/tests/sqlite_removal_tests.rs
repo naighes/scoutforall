@@ -161,7 +161,7 @@ mod tests {
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
-                    vec![],
+                    ids.clone(),
                 ),
             )
             .await

@@ -262,7 +262,7 @@ mod tests {
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
-                    vec![],
+                    t.players.iter().map(|p| p.id).collect(),
                 ),
             )
             .await
@@ -537,7 +537,7 @@ mod tests {
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
-                    vec![],
+                    t.players.iter().map(|p| p.id).collect(),
                 ),
             )
             .await

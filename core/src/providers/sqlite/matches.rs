@@ -660,7 +660,7 @@ fn without_side_b(tx: &Transaction, id: Uuid) -> Result<(), AppError> {
 /// Updates the match `id` with `input`: team B changes, unless both teams
 /// are scouted. The roster: the players left out go; number and role as in
 /// `numbers`, else the ones added copy them from the team (D9) and the
-/// others keep those of the match; empty, the active team.
+/// others keep those of the match; empty, none yet.
 fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), AppError> {
     let MatchInput {
         opponent,
@@ -718,10 +718,6 @@ fn update_match(tx: &Transaction, id: Uuid, input: MatchInput) -> Result<(), App
     )
     .map_err(sqlite)?;
     let team_a = rows.row.team_a;
-    let roster = match roster.as_slice() {
-        [] => team.active_players().iter().map(|p| p.id).collect(),
-        ids => ids.to_vec(),
-    };
     let entries = roster
         .iter()
         .map(|person_id| {
@@ -775,9 +771,10 @@ impl MatchWriter for SqliteMatchWriter {
     /// A match with a new id: two matches against the same opponent on the
     /// same day are two matches (no `MatchAlreadyExists`). Its roster
     /// takes number and role from `numbers`, else copies them from the
-    /// team (D9); the whole active team when empty.
+    /// team (D9); empty, none yet (the call-ups to choose later).
     async fn create(&self, team: &TeamEntry, input: MatchInput) -> Result<MatchEntry, AppError> {
         let id = Uuid::new_v4();
+        let pending = input.roster.is_empty();
         let m = MatchEntry {
             source: Default::default(),
             video_clock: false,
@@ -812,6 +809,11 @@ impl MatchWriter for SqliteMatchWriter {
                     scouting: input.scouting,
                     venue_id: input.venue_id,
                     ..rows.row
+                },
+                // `of` gives the whole team to a match without a roster
+                roster: match pending {
+                    true => vec![],
+                    false => rows.roster,
                 },
                 ..rows
             };

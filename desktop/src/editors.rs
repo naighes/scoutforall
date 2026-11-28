@@ -1178,6 +1178,7 @@ impl Editor {
             )
         };
         MatchForm {
+            callups_later: false,
             opponent: f.text(MATCH_OPPONENT),
             date: parse_date(&f.text(MATCH_DATE), &f.text(MATCH_TIME), m.data.date),
             home: court == COURT_HOME,
