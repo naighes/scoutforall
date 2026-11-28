@@ -51,6 +51,8 @@ struct Slot(usize, usize);
 pub struct Agenda {
     /// one team, or all
     team: Option<String>,
+    /// the week of the home: without the teams hidden from it
+    home: bool,
     /// a day of the period shown
     anchor: NaiveDate,
     today: NaiveDate,
@@ -62,8 +64,18 @@ pub struct Agenda {
 impl Agenda {
     /// The week of `today`, of `team` (all the teams without).
     pub fn week(core: &Scout4All, team: Option<String>, today: NaiveDate) -> Agenda {
+        Agenda::of(core, team, false, today)
+    }
+
+    /// The week of `today` as the home shows it.
+    pub fn home_week(core: &Scout4All, today: NaiveDate) -> Agenda {
+        Agenda::of(core, None, true, today)
+    }
+
+    fn of(core: &Scout4All, team: Option<String>, home: bool, today: NaiveDate) -> Agenda {
         let mut agenda = Agenda {
             team,
+            home,
             anchor: today,
             today,
             days: vec![],
@@ -76,7 +88,13 @@ impl Agenda {
 
     /// Read again, after a change.
     pub fn reload(&mut self, core: &Scout4All) {
-        match core.training_agenda(self.team.clone(), AgendaSpan::Week, text_of(self.anchor)) {
+        let read = match self.home {
+            true => core.home_week(text_of(self.anchor)),
+            false => {
+                core.training_agenda(self.team.clone(), AgendaSpan::Week, text_of(self.anchor))
+            }
+        };
+        match read {
             Ok(days) => {
                 self.days = days;
                 self.error = None;
@@ -226,6 +244,19 @@ impl Agenda {
         active: bool,
         with_team: bool,
     ) -> Element<'a, Message> {
+        let (actions, body) = self.parts(s, c, active, with_team);
+        ui::panel_with(s.week, actions, body, c)
+    }
+
+    /// The actions of the week (its dates, today, the arrows) and its
+    /// days, to put in a panel.
+    pub fn parts<'a>(
+        &'a self,
+        s: &'static Strings,
+        c: Colors,
+        active: bool,
+        with_team: bool,
+    ) -> (Vec<Element<'a, Message>>, Element<'a, Message>) {
         let mut index = 0;
         let shown = self.shown();
         let nothing = || -> Element<'a, Message> {
@@ -291,8 +322,7 @@ impl Agenda {
         ]
         .spacing(8);
         actions.push(arrows.into());
-        let body = scrollable(body).height(Length::Fill);
-        ui::panel_with(s.week, actions, body, c)
+        (actions, scrollable(body).height(Length::Fill).into())
     }
 }
 

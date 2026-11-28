@@ -260,6 +260,9 @@ pub mod icons {
     pub const LOST: &[u8] = include_bytes!("../assets/icons/cancel.svg");
     pub const COIN: &[u8] = include_bytes!("../assets/icons/toll.svg");
     pub const TODAY: &[u8] = include_bytes!("../assets/icons/today.svg");
+    /// a block open, or closed
+    pub const EXPAND_MORE: &[u8] = include_bytes!("../assets/icons/expand_more.svg");
+    pub const CHEVRON_RIGHT: &[u8] = include_bytes!("../assets/icons/chevron_right.svg");
     pub const CALENDAR: &[u8] = include_bytes!("../assets/icons/event.svg");
     /// a hall with an arched roof: the gyms
     pub const GYM: &[u8] = include_bytes!("../assets/icons/gym.svg");

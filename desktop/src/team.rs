@@ -71,6 +71,8 @@ struct PlayerDeletion {
 pub enum Message {
     EditTeam,
     NewSeason,
+    /// hidden from the home, or shown there again
+    ToggleHidden,
     NewPlayer,
     Player(usize),
     OtherTeam(String),
@@ -159,6 +161,8 @@ pub struct TeamScreen {
     mode: Mode,
     error: Option<String>,
     logo: Option<ui::TeamLogo>,
+    /// left out of the home
+    hidden: bool,
     /// the photos of the players of the list, in its order
     photos: Vec<Option<iced::widget::image::Handle>>,
     /// the profile open: also under its form and its deletion
@@ -187,9 +191,11 @@ impl TeamScreen {
         let week = Agenda::week(&core, Some(team_id.clone()), core.clock().today());
         let next = core.team_appointments(team_id.clone())?.next_match;
         let logo = ui::TeamLogo::of(&core, &team_id);
+        let hidden = core.team_hidden(team_id.clone())?;
         let opponents = TeamScreen::opponents_of(&core, &matches);
         let photos = TeamScreen::photos_of(&core, &details);
         Ok(TeamScreen {
+            hidden,
             logo,
             photos,
             opponents,
@@ -434,6 +440,24 @@ impl TeamScreen {
             }),
         );
         self.edit(Ok(editor));
+    }
+
+    fn toggle_hidden(&mut self) {
+        match self.core.set_hidden(self.team_id.clone(), !self.hidden) {
+            Ok(()) => {
+                self.hidden = !self.hidden;
+                self.error = None;
+            }
+            Err(e) => self.error = Some(e.to_string()),
+        }
+    }
+
+    /// What hiding the team from the home does now.
+    fn home_action(&self, s: &Strings) -> &'static str {
+        match self.hidden {
+            true => s.show_in_home,
+            false => s.hide_from_home,
+        }
     }
 
     /// The new season of the team (D15), a step at a time.
@@ -685,6 +709,7 @@ impl TeamScreen {
                 | Message::DeletePerson
                 | Message::EditTeam
                 | Message::NewSeason
+                | Message::ToggleHidden
                 | Message::NewPlayer
                 | Message::Player(_)
                 | Message::NewMatch
@@ -715,6 +740,10 @@ impl TeamScreen {
             ) => Outcome::Stay,
             (Message::EditTeam, Mode::Browse, None) => {
                 self.edit_team(s);
+                Outcome::Stay
+            }
+            (Message::ToggleHidden, Mode::Browse, None) => {
+                self.toggle_hidden();
                 Outcome::Stay
             }
             (Message::NewSeason, Mode::Browse, None) => {
@@ -825,6 +854,7 @@ impl TeamScreen {
             }
             (_, k) if k == key!(e) => self.edit_team(s),
             (_, k) if k == key!(t) => self.new_season(s),
+            (_, k) if k == key!(h) => self.toggle_hidden(),
             (_, k) if k == key!(i) => return Outcome::Import,
             (_, k) if k == key!(x) => return Outcome::Export,
             (_, k) if k == key!(s) => return Outcome::Analysis,
@@ -991,6 +1021,7 @@ impl TeamScreen {
                         ("n".to_string(), new.to_string()),
                         ("e".to_string(), s.edit_team.to_string()),
                         ("t".to_string(), s.new_season.to_string()),
+                        ("h".to_string(), self.home_action(s).to_string()),
                         ("i".to_string(), s.import_archive.to_string()),
                         ("x".to_string(), s.export_team.to_string()),
                         ("s".to_string(), s.analysis.to_string()),
@@ -1117,6 +1148,14 @@ impl TeamScreen {
                         theme::icons::FORWARD_ARROW,
                         s.new_season,
                         Message::NewSeason,
+                        false,
+                        c
+                    )
+                    .width(Length::Fill),
+                    ui::action(
+                        theme::icons::HOME,
+                        self.home_action(s),
+                        Message::ToggleHidden,
                         false,
                         c
                     )
@@ -2281,6 +2320,28 @@ mod tests {
         team.key(s, key!(shift - backspace));
         team.key(s, key!(a));
         assert!(matches!(team.mode, Mode::Delete(Deletion::Team(_))));
+    }
+
+    /// h hides the team from the home and shows it there again; the hint
+    /// says which.
+    #[test]
+    fn h_hides_the_team_from_the_home_and_back() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = core.tutorial_team().unwrap();
+        let mut screen = TeamScreen::new(core.clone(), team.clone()).unwrap();
+        let hint = |screen: &TeamScreen, label: &str| {
+            screen
+                .hints(s)
+                .contains(&("h".to_string(), label.to_string()))
+        };
+        assert!(hint(&screen, s.hide_from_home));
+        screen.key(s, key!(h));
+        assert!(core.team_hidden(team.clone()).unwrap());
+        assert!(hint(&screen, s.show_in_home));
+        screen.key(s, key!(h));
+        assert!(!core.team_hidden(team).unwrap());
     }
 
     /// "t" starts the new season: the team the year after, then its

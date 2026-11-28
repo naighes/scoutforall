@@ -4333,6 +4333,12 @@ impl Scout4All {
         })
     }
 
+    /// Whether the team is left out of the home.
+    pub fn team_hidden(&self, team_id: String) -> Result<bool, MobileError> {
+        let id = parse_id(&team_id)?;
+        Ok(!self.read_config()?.home.shows(&id))
+    }
+
     /// Closes a block of the home, or opens it again.
     pub fn set_home_block_closed(&self, block: HomeBlock, closed: bool) -> Result<(), MobileError> {
         self.update_config(|config| {
@@ -7393,7 +7399,9 @@ pub(crate) mod tests {
         };
         let both = vec!["Alfa".to_string(), "Beta".to_string()];
         assert_eq!(seen(&app), (both.clone(), vec![], 2, 2));
+        assert!(!app.team_hidden(other.clone()).unwrap());
         app.set_hidden(other.clone(), true).unwrap();
+        assert!(app.team_hidden(other.clone()).unwrap());
         assert_eq!(seen(&app), (vec!["Alfa".into()], vec!["Beta".into()], 1, 1));
         // elsewhere nothing changes
         assert_eq!(app.teams().unwrap().len(), 2);
