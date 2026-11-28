@@ -128,7 +128,7 @@ class DefaultCountryTest {
         rule.waitForText(string(R.string.default_country_none))
         rule.onNode(hasText(string(R.string.default_country)) and hasClickAction()).performClick()
         rule.onNode(hasSetTextAction() and hasText(string(R.string.search_country))).performTextInput("japa")
-        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Japan") and hasClickAction()).fetchSemanticsNodes().size == 1 }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(hasText("Japan") and hasClickAction()).fetchSemanticsNodes().size == 1 }
         rule.onNode(hasText("Japan") and hasClickAction()).performClick()
         rule.waitFor { core { it.defaultCountry() }?.value == "JP" }
         rule.waitForText("🇯🇵  Japan")

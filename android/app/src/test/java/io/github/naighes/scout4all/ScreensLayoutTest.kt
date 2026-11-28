@@ -81,7 +81,7 @@ class ScreensLayoutTest(private val screen: Size) {
         }
         rule.waitForText("Monica De Gennaro")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        rule.waitUntil(10_000) { rule.onAllNodes(hasScrollToNodeAction()).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(hasScrollToNodeAction()).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Cortona"))
         rule.waitForText("Cortona")
         rule.shot("screen-team-matches-$screen")
@@ -117,7 +117,7 @@ class ScreensLayoutTest(private val screen: Size) {
                 TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
             }
         }
-        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText(string(R.string.agenda_nothing)))).assertExists()
     }
 
@@ -177,7 +177,7 @@ class ScreensLayoutTest(private val screen: Size) {
                 TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {}, onTraining = { calendar++ })
             }
         }
-        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText("Serbia"))).assertExists()
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.agenda_next_match))

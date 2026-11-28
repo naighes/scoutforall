@@ -138,14 +138,19 @@ fun ComposeTestRule.texts(): List<String> =
     onAllNodes(SemanticsMatcher("any") { true }).fetchSemanticsNodes()
         .mapNotNull { it.config.getOrNull(SemanticsProperties.Text)?.joinToString(" ") }
 
+/** How long a test waits for the screen before failing: only a failing test
+ * waits it all. Wide on purpose: the first test of a run is cold (the
+ * native core loads, the first screen composes) and takes seconds. */
+const val WAIT_MS = 30_000L
+
 /** Until `condition`, letting the main thread run: what the core answers
  * off it reaches the screen there. */
 fun ComposeTestRule.waitFor(why: () -> String = { "" }, condition: () -> Boolean) {
-    val end = System.nanoTime() + 5_000_000_000
+    val end = System.nanoTime() + WAIT_MS * 1_000_000
     while (true) {
         waitForIdle()
         if (condition()) return
-        check(System.nanoTime() < end) { "still not so after 5 s ${why()}" }
+        check(System.nanoTime() < end) { "still not so after ${WAIT_MS / 1000} s ${why()}" }
         Thread.sleep(10)
     }
 }

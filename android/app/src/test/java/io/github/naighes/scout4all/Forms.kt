@@ -33,7 +33,7 @@ private val hasError = SemanticsMatcher.keyIsDefined(SemanticsProperties.Error)
 
 /** The field shows the error of the core, and nothing else does. */
 fun ComposeContentTestRule.assertInvalid(label: String) {
-    waitUntil(5_000) { onAllNodes(hasError).fetchSemanticsNodes().isNotEmpty() }
+    waitUntil(WAIT_MS) { onAllNodes(hasError).fetchSemanticsNodes().isNotEmpty() }
     field(label).assert(hasError)
 }
 

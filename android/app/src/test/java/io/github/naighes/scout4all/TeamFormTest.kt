@@ -60,7 +60,7 @@ class TeamFormTest {
     private fun chooseCountry(typed: String, name: String) {
         rule.onNode(hasText(string(R.string.country)) and hasClickAction()).performScrollTo().performClick()
         rule.onNode(hasSetTextAction() and hasText(string(R.string.search_country))).performTextInput(typed)
-        rule.waitUntil(5_000) {
+        rule.waitUntil(WAIT_MS) {
             rule.onAllNodes(hasText(name) and hasClickAction()).fetchSemanticsNodes().size == 1
         }
         rule.onNode(hasText(name) and hasClickAction()).performClick()

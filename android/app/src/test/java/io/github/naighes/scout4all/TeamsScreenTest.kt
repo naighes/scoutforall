@@ -164,7 +164,7 @@ class TeamsScreenTest {
         rule.onAllNodesWithContentDescription(unpin).assertCountEquals(2)
         // Arezzo, the first one
         rule.onAllNodesWithContentDescription(unpin)[0].performClick()
-        rule.waitUntil { rule.onAllNodesWithContentDescription(pin).fetchSemanticsNodes().size == 1 }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodesWithContentDescription(pin).fetchSemanticsNodes().size == 1 }
         rule.onAllNodesWithContentDescription(unpin).assertCountEquals(1)
         val top = { name: String -> rule.onNodeWithText(name).fetchSemanticsNode().positionInRoot.y }
         assertTrue(top("Cortona") < top("Arezzo"))
@@ -180,7 +180,7 @@ class TeamsScreenTest {
         show()
         rule.waitForText("Cortona")
         rule.onNodeWithText(string(R.string.teams)).performClick()
-        rule.waitUntil { rule.onAllNodesWithText("Cortona").fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodesWithText("Cortona").fetchSemanticsNodes().isEmpty() }
         assertTrue(core { it.home() }.teamsClosed)
         rule.onNodeWithText(string(R.string.teams)).performClick()
         rule.waitForText("Cortona")
@@ -200,7 +200,7 @@ class TeamsScreenTest {
         rule.onAllNodesWithText("Cortona").assertCountEquals(0)
         rule.onNodeWithText(more).performClick()
         rule.onNodeWithText("Cortona").performClick()
-        rule.waitUntil { rule.onAllNodesWithText(more).fetchSemanticsNodes().isEmpty() }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodesWithText(more).fetchSemanticsNodes().isEmpty() }
         assertTrue(!core { it.teamHidden(team) })
         rule.onNodeWithText("Cortona").assertIsDisplayed()
     }

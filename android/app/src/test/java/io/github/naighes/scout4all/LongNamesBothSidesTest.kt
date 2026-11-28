@@ -78,7 +78,7 @@ class LongNamesBothSidesTest(private val screen: Size) {
     fun theSideOfBReceives() {
         scout()
         val plus = hasText("+") and hasClickAction() and isEnabled()
-        rule.waitUntil(5_000) { rule.onAllNodes(plus).fetchSemanticsNodes().size == 1 }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(plus).fetchSemanticsNodes().size == 1 }
         rule.onNode(plus).performClick()
         rule.waitFor { runCatching { rule.onNode(hasContentDescription(string(R.string.swap_side)) and hasClickAction()).assertIsEnabled() }.isSuccess }
         rule.shot("long-both-reception-$screen")
@@ -109,7 +109,7 @@ class LongNamesBothSidesTest(private val screen: Size) {
     fun noNameIsCoveredByAJersey() {
         scout(rotation = 2)
         val plus = hasText("+") and hasClickAction() and isEnabled()
-        rule.waitUntil(5_000) { rule.onAllNodes(plus).fetchSemanticsNodes().size == 1 }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(plus).fetchSemanticsNodes().size == 1 }
         rule.onNode(plus).performClick()
         rule.waitFor { runCatching { rule.onNode(hasContentDescription(string(R.string.swap_side)) and hasClickAction()).assertIsEnabled() }.isSuccess }
         val texts = { match: (String) -> Boolean ->
