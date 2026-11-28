@@ -6,6 +6,7 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
@@ -57,6 +58,15 @@ class TeamBarTest {
         rule.onNodeWithContentDescription(string(R.string.more_actions)).performClick()
         rule.onNodeWithText(string(R.string.new_season)).performClick()
         assertEquals(1, seasons)
+    }
+
+    /** Without a logo its initials head the team, as in the lists. */
+    @Test
+    fun theInitialsHeadATeamWithoutALogo() {
+        show(saveTeam("Italia U19"))
+        rule.waitFor {
+            rule.onAllNodesWithTag(initialsTag("IU"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
     }
 
     @Test

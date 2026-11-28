@@ -1075,17 +1075,19 @@ impl TeamScreen {
             // the actions scroll when the window is low: none cut off
             scrollable(
                 column![
-                    Row::with_children(
-                        self.logo
-                            .as_ref()
-                            .map(|l| ui::team_logo(l, 48.0, c))
-                            .into_iter()
-                            .chain([text(d.name.clone())
-                                .size(22)
-                                .font(theme::fonts().bold)
-                                .into()])
-                            .collect::<Vec<Element<'a, Message>>>()
-                    )
+                    row![
+                        match &self.logo {
+                            Some(logo) => ui::team_logo(logo, 48.0, c),
+                            None => container(ui::initials(
+                                scout4all_mobile::initials(d.name.clone()),
+                                c
+                            ))
+                            .center_x(Length::Fixed(48.0))
+                            .center_y(Length::Fixed(48.0))
+                            .into(),
+                        },
+                        text(d.name.clone()).size(22).font(theme::fonts().bold),
+                    ]
                     .spacing(10)
                     .align_y(Alignment::Center),
                     line(s.year, d.year.to_string()),
