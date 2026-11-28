@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.PressInteraction
@@ -37,7 +39,6 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
@@ -63,6 +64,7 @@ import io.github.naighes.scout4all.core.MatchField
 import io.github.naighes.scout4all.core.CompetitionChoice
 import io.github.naighes.scout4all.core.FormatChoice
 import io.github.naighes.scout4all.core.MatchForm
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.MatchRoster
 import io.github.naighes.scout4all.core.OpponentChoice
 import io.github.naighes.scout4all.core.PlayerForm
@@ -128,6 +130,8 @@ sealed interface MatchFormState {
         val b: RosterOfB? = null,
         /** a player of B written, not on its team yet */
         val adding: NewPlayer? = null,
+        /** a match without its call-ups, new or saved so: they may wait */
+        val pending: Boolean = false,
     ) : MatchFormState {
         val changed: Boolean get() = form != loaded
 
@@ -153,8 +157,9 @@ sealed interface MatchFormState {
             )
         }
     }
-    /** saved, with its team A and its id: the screen goes on */
-    data class Saved(val teamId: String, val matchId: String) : MatchFormState
+    /** saved, with its team A and its id: the screen goes on; `later`,
+     * with call-ups still to choose */
+    data class Saved(val teamId: String, val matchId: String, val later: Boolean = false) : MatchFormState
 }
 
 /** A player of the score sheet whose number and role in this match are
@@ -201,6 +206,9 @@ class MatchFormViewModel(
     example: Boolean = false,
     /** a new match on this day of the calendar, at the time of now */
     day: LocalDate? = null,
+    /** the call-ups still missing, asked before the first set: straight to
+     * them, of A or else of B */
+    val callups: Boolean = false,
 ) : ViewModel() {
     private val mutableState = MutableStateFlow<MatchFormState>(MatchFormState.Loading)
     val state: StateFlow<MatchFormState> = mutableState
@@ -211,7 +219,8 @@ class MatchFormViewModel(
     init {
         viewModelScope.launch {
             mutableState.value = try {
-                app.core { core ->
+                val missing = matchId?.let { id -> app.core { it.callupsMissing(teamId, id) } }
+                val editing = app.core { core ->
                     val form = when (matchId) {
                         null -> when (example) {
                             true -> core.tutorialMatchForm(teamId, rfc3339(app.clock.offsetNow()))
@@ -233,7 +242,13 @@ class MatchFormViewModel(
                         stages = core.stages(),
                         formats = core.competitionFormats(),
                         roles = core.roles(),
+                        pending = !example && (matchId == null || missing == MatchSide.A),
                     )
+                }
+                when {
+                    !callups || matchId == null -> editing
+                    missing == MatchSide.B -> startB(editing, matchId)
+                    else -> editing.copy(onRoster = true)
                 }
             } catch (e: MobileException) {
                 MatchFormState.Failed(e.reason)
@@ -393,7 +408,11 @@ class MatchFormViewModel(
     fun toFields() = update { it.copy(onRoster = false, invalid = null, error = null) }
 
     /** Saves, once at a time. */
-    fun save() = save(false)
+    fun save() = save(false, later = false)
+
+    /** Saves the match without its call-ups, to choose before its first
+     * set. */
+    fun saveLater() = save(false, later = true)
 
     fun dismissClashes() = update { it.copy(clashes = null) }
 
@@ -402,9 +421,11 @@ class MatchFormViewModel(
 
     /** The gym held by another team at that time asks first, unless
      * `confirmed`. */
-    fun save(confirmed: Boolean) {
-        val editing = mutableState.value as? MatchFormState.Editing ?: return
-        if (editing.busy) return
+    fun save(confirmed: Boolean, later: Boolean? = null) {
+        val current = mutableState.value as? MatchFormState.Editing ?: return
+        if (current.busy) return
+        // confirmed after the clashes: as asked before them
+        val editing = current.copy(form = current.form.copy(callupsLater = later ?: current.form.callupsLater))
         mutableState.value = editing.copy(busy = true, clashes = null)
         viewModelScope.launch {
             mutableState.value = try {
@@ -419,9 +440,10 @@ class MatchFormViewModel(
                     return@launch
                 }
                 val id = app.core { it.saveMatch(editing.teamId, matchId, editing.form) }
-                when (editing.form.both) {
+                val waiting = editing.form.callupsLater
+                when (editing.form.both && !waiting) {
                     true -> startB(editing, id)
-                    false -> MatchFormState.Saved(editing.teamId, id)
+                    false -> MatchFormState.Saved(editing.teamId, id, later = waiting)
                 }
             } catch (e: MobileException.InvalidMatch) {
                 // on the step of the field
@@ -474,7 +496,7 @@ class MatchFormViewModel(
     fun leaveB() {
         val editing = mutableState.value as? MatchFormState.Editing ?: return
         val b = editing.b ?: return
-        mutableState.value = MatchFormState.Saved(editing.teamId, b.matchId)
+        mutableState.value = MatchFormState.Saved(editing.teamId, b.matchId, later = true)
     }
 
     /** A new player of B to write, or none (cancelled). */
@@ -537,18 +559,25 @@ fun MatchFormScreen(
     onSaved: (teamId: String, matchId: String) -> Unit,
     example: Boolean = false,
     day: LocalDate? = null,
+    callups: Boolean = false,
+    /** saved with call-ups still to choose */
+    onLater: (teamId: String, matchId: String) -> Unit = onSaved,
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
-    val model = viewModel { MatchFormViewModel(app, teamId, matchId, example, day) }
+    val model = viewModel { MatchFormViewModel(app, teamId, matchId, example, day, callups) }
     val state by model.state.collectAsState()
     val back = rememberFormBack((state as? MatchFormState.Editing)?.changed == true, onBack)
     val onRoster = (state as? MatchFormState.Editing)?.onRoster == true
     val onB = (state as? MatchFormState.Editing)?.b != null
     // from the roster, back to the fields; from the one of B, out: the
     // match is saved
-    BackHandler(enabled = onRoster || onB) { if (onB) model.leaveB() else model.toFields() }
+    // asked for the call-ups only, there are no fields to go back to
+    val toFields = onRoster && !callups
+    BackHandler(enabled = toFields || onB) { if (onB) model.leaveB() else model.toFields() }
     LaunchedEffect(state) {
-        (state as? MatchFormState.Saved)?.let { onSaved(it.teamId, it.matchId) }
+        (state as? MatchFormState.Saved)?.let {
+            if (it.later) onLater(it.teamId, it.matchId) else onSaved(it.teamId, it.matchId)
+        }
     }
     Scaffold(
         topBar = {
@@ -563,7 +592,7 @@ fun MatchFormScreen(
                     }
                     Text(title, Modifier.title())
                 },
-                navigationIcon = { BackButton(if (onB) model::leaveB else if (onRoster) model::toFields else back) },
+                navigationIcon = { BackButton(if (onB) model::leaveB else if (toFields) model::toFields else back) },
             )
         },
     ) { padding ->
@@ -795,11 +824,25 @@ private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewMod
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).heightIn(min = 48.dp),
             ) { Text(stringResource(R.string.new_player)) }
         }
-        Button(
-            onClick = if (b != null) model::saveB else model::save,
-            enabled = !state.busy,
-            modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp).tutorial("save-match"),
-        ) { Text(stringResource(R.string.save)) }
+        Row(
+            Modifier.fillMaxWidth().padding(16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // the match may be on the calendar before its call-ups; side by
+            // side with Save, the players keep their room
+            if (b == null && state.pending && !model.callups) {
+                OutlinedButton(
+                    onClick = model::saveLater,
+                    enabled = !state.busy,
+                    modifier = Modifier.weight(1f).heightIn(min = 56.dp),
+                ) { Text(stringResource(R.string.callups_later), textAlign = TextAlign.Center) }
+            }
+            Button(
+                onClick = if (b != null) model::saveB else model::save,
+                enabled = !state.busy,
+                modifier = Modifier.weight(1f).heightIn(min = 56.dp).tutorial("save-match"),
+            ) { Text(stringResource(R.string.save)) }
+        }
     }
 
 /** A player of team B written on the spot: its name, number and role. */

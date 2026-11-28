@@ -76,6 +76,8 @@ sealed interface Pick {
 sealed interface SetStartState {
     data object Loading : SetStartState
     data class Failed(val message: String) : SetStartState
+    /** the call-ups, still missing, come first */
+    data object CallupsMissing : SetStartState
     data class Choosing(
         val lineup: Lineup,
         /** the open list of players, if any */
@@ -114,6 +116,10 @@ class SetStartViewModel(
     init {
         viewModelScope.launch {
             mutableState.value = try {
+                if (app.core { it.callupsMissing(teamId, matchId) } != null) {
+                    mutableState.value = SetStartState.CallupsMissing
+                    return@launch
+                }
                 val start = app.core { it.setStart(teamId, matchId) }
                 if (example) start.tutorialLineup()
                 setStart = start
@@ -260,12 +266,14 @@ fun SetStartScreen(
     onBack: () -> Unit,
     onStarted: () -> Unit,
     example: Boolean = false,
+    onCallups: () -> Unit = {},
 ) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val model = viewModel { SetStartViewModel(app, teamId, matchId, example) }
     val state by model.state.collectAsState()
     LaunchedEffect(state) {
         if (state == SetStartState.Started) onStarted()
+        if (state == SetStartState.CallupsMissing) onCallups()
     }
     Scaffold(
         topBar = {
@@ -288,7 +296,7 @@ fun SetStartScreen(
     ) { padding ->
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
-            SetStartState.Loading, SetStartState.Started -> Centered(modifier) { CircularProgressIndicator() }
+            SetStartState.Loading, SetStartState.Started, SetStartState.CallupsMissing -> Centered(modifier) { CircularProgressIndicator() }
             is SetStartState.Failed -> LoadFailed(s.message, modifier)
             is SetStartState.Choosing -> SetStartContent(s, model, modifier)
         }

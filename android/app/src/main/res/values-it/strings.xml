@@ -547,6 +547,7 @@
     </plurals>
     <string name="scout_both">Rileva entrambe le squadre</string>
     <string name="roster_of_b">Lista di %1$s</string>
+    <string name="callups_later">Convocazioni più tardi</string>
     <string name="tr_programming">Programmazione</string>
     <string name="tr_sessions">Sedute</string>
     <string name="tr_new_session">Nuova seduta</string>

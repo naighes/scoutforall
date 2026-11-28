@@ -333,7 +333,10 @@ private fun Navigation(
         }
         composable("team/{id}/new-match") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
-            MatchFormScreen(id, null, example = tutorial, onBack = { nav.back(entry) }, onSaved = { a, m ->
+            MatchFormScreen(id, null, example = tutorial, onBack = { nav.back(entry) }, onLater = { a, m ->
+                // no call-ups yet: the page of the match, no set
+                nav.navigate("team/$a/match/${Uri.encode(m)}") { popUpTo("team/{id}/new-match") { inclusive = true } }
+            }, onSaved = { a, m ->
                 // as the TUI, a new match goes on with its first set; back
                 // from it, the page of the match, of its team A (maybe
                 // another team)
@@ -412,11 +415,30 @@ private fun Navigation(
             val m = entry.arguments?.getString("match").orEmpty()
             // as the TUI, a set started goes on with its scouting; back from
             // it, the page of the match
-            SetStartScreen(id, m, example = tutorial, onBack = { nav.back(entry) }, onStarted = {
+            SetStartScreen(id, m, example = tutorial, onBack = { nav.back(entry) }, onCallups = {
+                nav.navigate("team/$id/match/${Uri.encode(m)}/callups") {
+                    popUpTo("team/{id}/match/{match}/start-set") { inclusive = true }
+                }
+            }, onStarted = {
                 nav.navigate("team/$id/match/${Uri.encode(m)}/scouting") {
                     popUpTo("team/{id}/match/{match}/start-set") { inclusive = true }
                 }
             })
+        }
+        // the call-ups asked before the first set, then on to it; left for
+        // later, back where the set was asked for
+        composable("team/{id}/match/{match}/callups") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val m = entry.arguments?.getString("match").orEmpty()
+            MatchFormScreen(
+                id, m, callups = true, onBack = { nav.back(entry) },
+                onLater = { _, _ -> nav.back(entry) },
+                onSaved = { _, _ ->
+                    nav.navigate("team/$id/match/${Uri.encode(m)}/start-set") {
+                        popUpTo("team/{id}/match/{match}/callups") { inclusive = true }
+                    }
+                },
+            )
         }
         composable("team/{id}/match/{match}/scouting") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()

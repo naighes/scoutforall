@@ -547,6 +547,7 @@
     </plurals>
     <string name="scout_both">Registrar as duas equipes</string>
     <string name="roster_of_b">Súmula de %1$s</string>
+    <string name="callups_later">Convocar depois</string>
     <string name="tr_programming">Programação</string>
     <string name="tr_sessions">Sessões</string>
     <string name="tr_new_session">Nova sessão</string>

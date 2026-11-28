@@ -545,6 +545,7 @@
     </plurals>
     <string name="scout_both">両チームを記録</string>
     <string name="roster_of_b">%1$sのメンバー表</string>
+    <string name="callups_later">招集は後で</string>
     <string name="tr_programming">計画</string>
     <string name="tr_sessions">セッション</string>
     <string name="tr_new_session">新しいセッション</string>
