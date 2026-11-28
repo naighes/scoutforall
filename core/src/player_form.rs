@@ -155,39 +155,21 @@ impl PlayerForm {
                     birth_place: self.birth_place.trim().to_string(),
                 };
                 Ok(match (existing, self.person) {
-                    (Some(player), _) => PlayerInput::Existing(PlayerEntry {
+                    (Some(player), _) => PlayerInput::Existing(details.given_to(PlayerEntry {
                         name,
                         role: Some(role),
                         number,
-                        birth_date: details.birth_date,
-                        height_cm: details.height_cm,
-                        notes: details.notes,
-                        nationality: details.nationality,
-                        dominant_hand: details.dominant_hand,
-                        federation_id: details.federation_id,
-                        email: details.email,
-                        phone: details.phone,
-                        birth_place: details.birth_place,
                         // a player removed from the team comes back
                         deleted: false,
                         ..player.clone()
-                    }),
-                    (None, Some(person)) => PlayerInput::Existing(PlayerEntry {
+                    })),
+                    (None, Some(person)) => PlayerInput::Existing(details.given_to(PlayerEntry {
                         id: person,
                         name,
                         role: Some(role),
                         number,
-                        deleted: false,
-                        birth_date: details.birth_date,
-                        height_cm: details.height_cm,
-                        notes: details.notes,
-                        nationality: details.nationality,
-                        dominant_hand: details.dominant_hand,
-                        federation_id: details.federation_id,
-                        email: details.email,
-                        phone: details.phone,
-                        birth_place: details.birth_place,
-                    }),
+                        ..PlayerEntry::default()
+                    })),
                     (None, None) => PlayerInput::New {
                         name,
                         role,

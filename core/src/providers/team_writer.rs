@@ -40,6 +40,36 @@ pub struct PlayerDetails {
     pub birth_place: String,
 }
 
+impl PlayerDetails {
+    /// `player` with these details, the rest of them kept. Every detail is
+    /// named, so one added here doesn't compile until it is handed on.
+    pub fn given_to(self, player: PlayerEntry) -> PlayerEntry {
+        let PlayerDetails {
+            birth_date,
+            height_cm,
+            notes,
+            nationality,
+            dominant_hand,
+            federation_id,
+            email,
+            phone,
+            birth_place,
+        } = self;
+        PlayerEntry {
+            birth_date,
+            height_cm,
+            notes,
+            nationality,
+            dominant_hand,
+            federation_id,
+            email,
+            phone,
+            birth_place,
+            ..player
+        }
+    }
+}
+
 pub enum PlayerInput {
     New {
         name: String,

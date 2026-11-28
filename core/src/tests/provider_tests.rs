@@ -339,6 +339,56 @@ mod tests {
         assert_eq!(saved, read);
     }
 
+    /// A new player is written with every detail given.
+    #[tokio::test]
+    async fn a_new_player_keeps_every_detail() {
+        let db = database();
+        let p = sqlite(&db);
+        let mut team = team(&p, players()).await;
+        let details = crate::providers::team_writer::PlayerDetails {
+            birth_date: chrono::NaiveDate::from_ymd_opt(2004, 5, 6),
+            height_cm: Some(178),
+            notes: "notes".into(),
+            nationality: crate::shapes::country::CountryCode::parse("IT"),
+            dominant_hand: Some(crate::shapes::player::DominantHand::Left),
+            federation_id: "FIPAV-1".into(),
+            email: "anna@example.com".into(),
+            phone: "+393331234567".into(),
+            birth_place: "Cortona".into(),
+        };
+        let saved = p
+            .team_writer
+            .save_player(
+                PlayerInput::New {
+                    name: "Anna".into(),
+                    role: RoleEnum::Setter,
+                    number: 10,
+                    details: details.clone(),
+                },
+                &mut team,
+            )
+            .await
+            .unwrap();
+        let read = p.team_reader.read_single(&team.id).await.unwrap();
+        let expected = PlayerEntry {
+            id: saved.id,
+            name: "Anna".into(),
+            role: Some(RoleEnum::Setter),
+            number: 10,
+            deleted: false,
+            birth_date: details.birth_date,
+            height_cm: details.height_cm,
+            notes: details.notes,
+            nationality: details.nationality,
+            dominant_hand: details.dominant_hand,
+            federation_id: details.federation_id,
+            email: details.email,
+            phone: details.phone,
+            birth_place: details.birth_place,
+        };
+        assert_eq!(read.find_player(saved.id), Some(&expected));
+    }
+
     /// A player no match tells of leaves the team; one a match tells of (in
     /// a lineup, in an event) stays for it, without the personal details,
     /// out of the active players.

@@ -293,6 +293,66 @@ mod tests {
         }
     }
 
+    /// Every detail of the form reaches the player, whether edited, a new
+    /// one or a person of the registry joining the team.
+    #[test]
+    fn every_detail_reaches_the_player_on_each_way() {
+        let team = team();
+        let details = PlayerDetails {
+            birth_date: NaiveDate::from_ymd_opt(2001, 12, 3),
+            height_cm: Some(182),
+            notes: "captain".into(),
+            nationality: CountryCode::parse("IT"),
+            dominant_hand: Some(crate::shapes::player::DominantHand::Left),
+            federation_id: "FIPAV-1".into(),
+            email: "anna@example.com".into(),
+            phone: "+393331234567".into(),
+            birth_place: "Cortona".into(),
+        };
+        let anna = PlayerEntry {
+            birth_date: details.birth_date,
+            height_cm: details.height_cm,
+            notes: details.notes.clone(),
+            nationality: details.nationality,
+            dominant_hand: details.dominant_hand,
+            federation_id: details.federation_id.clone(),
+            email: details.email.clone(),
+            phone: details.phone.clone(),
+            birth_place: details.birth_place.clone(),
+            ..team.players[0].clone()
+        };
+        let form = PlayerForm::of(&anna);
+        match form.clone().validate(&team, Some(&anna), today()) {
+            Ok(PlayerInput::Existing(updated)) => assert_eq!(updated, anna),
+            _ => unreachable!("expected the existing player"),
+        }
+        let person = uuid::Uuid::new_v4();
+        let joining = PlayerForm {
+            person: Some(person),
+            number: "12".into(),
+            ..form.clone()
+        };
+        match joining.validate(&team, None, today()) {
+            Ok(PlayerInput::Existing(joined)) => assert_eq!(
+                joined,
+                PlayerEntry {
+                    id: person,
+                    number: 12,
+                    ..anna.clone()
+                }
+            ),
+            _ => unreachable!("expected the person of the registry"),
+        }
+        let new = PlayerForm {
+            number: "12".into(),
+            ..form
+        };
+        match new.validate(&team, None, today()) {
+            Ok(PlayerInput::New { details: given, .. }) => assert_eq!(given, details),
+            _ => unreachable!("expected a new player"),
+        }
+    }
+
     /// Files without the details read as before, and a player without them
     /// is written as before: an older version reads it alike.
     #[test]
