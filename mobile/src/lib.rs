@@ -73,7 +73,9 @@ use scout4all_core::{
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     season::{self, SeasonError, SeasonMember},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::{ActivitySearch, ArchiveContacts, Consent, PinnedTeams, TeamDefaults, VideoSeconds},
+    settings::{
+        ActivitySearch, ArchiveContacts, Consent, HomeView, PinnedTeams, TeamDefaults, VideoSeconds,
+    },
     shapes::{
         country::CountryCode,
         court_zone::{
@@ -1007,13 +1009,26 @@ pub struct HomeMatch {
     pub next: NextSetKind,
 }
 
-/// The home: the matches not over, the last ones over, of every team, the
-/// most recent first; then the teams.
-#[derive(Debug, PartialEq, uniffi::Record)]
+/// The home: the matches not over, the last ones over, the most recent
+/// first; then the teams. Of the teams not hidden from it.
+#[derive(Debug, Default, PartialEq, uniffi::Record)]
 pub struct Home {
     pub in_progress: Vec<HomeMatch>,
     pub recent: Vec<HomeMatch>,
     pub teams: Vec<TeamListing>,
+    /// the teams hidden, to show them again
+    pub hidden: Vec<TeamListing>,
+    pub week_closed: bool,
+    pub matches_closed: bool,
+    pub teams_closed: bool,
+}
+
+/// A block of the home, closed or open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum HomeBlock {
+    Week,
+    Matches,
+    Teams,
 }
 
 /// How many matches over the home lists.
@@ -4309,17 +4324,75 @@ impl Scout4All {
             .collect()
     }
 
-    /// The home: the matches of every team not over and the last ones
-    /// over, the most recent first, then the teams. What can't be read is
-    /// left out of the matches; the teams list it.
+    /// Hides the team from the home, or shows it again.
+    pub fn set_hidden(&self, team_id: String, hidden: bool) -> Result<(), MobileError> {
+        let id = parse_id(&team_id)?;
+        self.update_config(|config| AppConfig {
+            home: config.home.with_hidden(id, hidden),
+            ..config
+        })
+    }
+
+    /// Closes a block of the home, or opens it again.
+    pub fn set_home_block_closed(&self, block: HomeBlock, closed: bool) -> Result<(), MobileError> {
+        self.update_config(|config| {
+            let home = config.home;
+            let home = match block {
+                HomeBlock::Week => HomeView {
+                    home_week_closed: closed,
+                    ..home
+                },
+                HomeBlock::Matches => HomeView {
+                    home_matches_closed: closed,
+                    ..home
+                },
+                HomeBlock::Teams => HomeView {
+                    home_teams_closed: closed,
+                    ..home
+                },
+            };
+            AppConfig { home, ..config }
+        })
+    }
+
+    /// The week of the home that holds `date`: `training_agenda` of the
+    /// teams not hidden.
+    pub fn home_week(&self, date: String) -> Result<Vec<training::AgendaDay>, MobileError> {
+        let view = self.read_config()?.home;
+        let shown = |team: &str| Uuid::parse_str(team).map_or(true, |id| view.shows(&id));
+        Ok(self
+            .training_agenda(None, training::AgendaSpan::Week, date)?
+            .into_iter()
+            .map(|day| training::AgendaDay {
+                events: day
+                    .events
+                    .into_iter()
+                    .filter(|e| shown(&e.team_id))
+                    .collect(),
+                ..day
+            })
+            .collect())
+    }
+
+    /// The home: the matches not over and the last ones over, the most
+    /// recent first, then the teams, all of the teams not hidden. What
+    /// can't be read is left out of the matches; the teams list it.
     pub fn home(&self) -> Result<Home, MobileError> {
-        let teams = self.teams()?;
+        let view = self.read_config()?.home;
+        let (teams, hidden): (Vec<TeamListing>, Vec<TeamListing>) =
+            self.teams()?.into_iter().partition(|t| match t {
+                TeamListing::Team { id, .. } => {
+                    Uuid::parse_str(id).map_or(true, |id| view.shows(&id))
+                }
+                TeamListing::Unreadable { .. } => true,
+            });
         let mut matches: Vec<(DateTime<FixedOffset>, HomeMatch)> = Vec::new();
         for team in self
             .runtime
             .block_on(self.team_reader.read_all())?
             .into_iter()
             .flatten()
+            .filter(|team| view.shows(&team.id))
         {
             let read = self
                 .runtime
@@ -4355,6 +4428,10 @@ impl Scout4All {
             in_progress,
             recent: recent.into_iter().take(RECENT_MATCHES).collect(),
             teams,
+            hidden,
+            week_closed: view.home_week_closed,
+            matches_closed: view.home_matches_closed,
+            teams_closed: view.home_teams_closed,
         })
     }
 
@@ -5179,8 +5256,11 @@ impl Scout4All {
         let id = parse_id(&team_id)?;
         self.runtime.block_on(self.team_writer.remove(&id))?;
         // the team is gone all the same when the settings can't be written
-        if let Err(e) = self.set_pinned(team_id, false) {
-            log_error(&format!("could not unpin the removed team: {e:?}"));
+        if let Err(e) = self
+            .set_pinned(team_id.clone(), false)
+            .and_then(|()| self.set_hidden(team_id, false))
+        {
+            log_error(&format!("could not forget the removed team: {e:?}"));
         }
         Ok(())
     }
@@ -6002,6 +6082,8 @@ struct AppConfig {
     team_defaults: TeamDefaults,
     #[serde(flatten)]
     pinned: PinnedTeams,
+    #[serde(flatten)]
+    home: HomeView,
     #[serde(flatten)]
     video: VideoSeconds,
     #[serde(flatten)]
@@ -7267,6 +7349,70 @@ pub(crate) mod tests {
         let config = config(&dir);
         assert_eq!(config.get("pinned_teams"), None, "{config}");
         assert!(config.get("language").is_some(), "{config}");
+    }
+
+    /// A team hidden from the home takes its matches and its week along;
+    /// the blocks closed are remembered.
+    #[test]
+    fn the_home_leaves_out_the_hidden_teams() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let [_, other] = ["Alfa", "Beta"].map(|name| {
+            let team = app.save_team(None, form(name)).unwrap();
+            for n in 1..=7 {
+                let number = n.to_string();
+                app.save_player(team.clone(), None, player(&format!("P{n}"), &number), false)
+                    .unwrap();
+            }
+            app.save_match(
+                team.clone(),
+                None,
+                match_form("Arezzo", "2026-11-26T18:00:00+01:00", "8"),
+            )
+            .unwrap();
+            team
+        });
+        let seen = |app: &Scout4All| {
+            let home = app.home().unwrap();
+            let week = app.home_week("2026-11-26".into()).unwrap();
+            let names = |teams: &[TeamListing]| -> Vec<String> {
+                teams
+                    .iter()
+                    .filter_map(|t| match t {
+                        TeamListing::Team { name, .. } => Some(name.clone()),
+                        TeamListing::Unreadable { .. } => None,
+                    })
+                    .collect()
+            };
+            (
+                names(&home.teams),
+                names(&home.hidden),
+                home.in_progress.len(),
+                week.iter().map(|d| d.events.len()).sum::<usize>(),
+            )
+        };
+        let both = vec!["Alfa".to_string(), "Beta".to_string()];
+        assert_eq!(seen(&app), (both.clone(), vec![], 2, 2));
+        app.set_hidden(other.clone(), true).unwrap();
+        assert_eq!(seen(&app), (vec!["Alfa".into()], vec!["Beta".into()], 1, 1));
+        // elsewhere nothing changes
+        assert_eq!(app.teams().unwrap().len(), 2);
+        app.set_hidden(other.clone(), false).unwrap();
+        assert_eq!(seen(&app), (both, vec![], 2, 2));
+
+        app.set_home_block_closed(HomeBlock::Matches, true).unwrap();
+        let home = app.home().unwrap();
+        assert_eq!(
+            (home.week_closed, home.matches_closed, home.teams_closed),
+            (false, true, false)
+        );
+        app.set_home_block_closed(HomeBlock::Matches, false)
+            .unwrap();
+        assert!(!app.home().unwrap().matches_closed);
+        // a removed team is forgotten
+        app.set_hidden(other.clone(), true).unwrap();
+        app.delete_team(other).unwrap();
+        assert_eq!(config(&dir).get("hidden_teams"), None);
     }
 
     /// The opponent made from the match form starts unpinned, as the
@@ -9654,6 +9800,10 @@ pub(crate) mod tests {
                 in_progress: vec![],
                 recent: vec![],
                 teams: vec![],
+                hidden: vec![],
+                week_closed: false,
+                matches_closed: false,
+                teams_closed: false,
             }
         );
     }

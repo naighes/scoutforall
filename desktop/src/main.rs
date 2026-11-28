@@ -440,14 +440,7 @@ impl App {
                 Err(_) => std::process::exit(1),
             },
         };
-        let home = HomeScreen::new(
-            &core,
-            Home {
-                in_progress: vec![],
-                recent: vec![],
-                teams: vec![],
-            },
-        );
+        let home = HomeScreen::new(&core, Home::default());
         let mut app = App {
             core,
             dir,
