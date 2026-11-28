@@ -6,6 +6,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
@@ -57,9 +58,14 @@ class ScreensLayoutTest(private val screen: Size) {
         val team = saveNationalTeam()
         startFirstSet(team, "Cortona Volley Pallavolo Femminile Valdichiana")
         winMatch(team, "Serbia")
-        assertFits("home", string(R.string.resume), string(R.string.resume)) {
+        assertFits("home", string(R.string.resume)) {
             TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
         }
+        // the calendar above may push the match below a short screen: the
+        // home scrolls, and its button must be whole once there
+        val resume = hasText(string(R.string.resume)) and hasClickAction()
+        rule.onNode(resume).performScrollTo()
+        rule.assertWhole(resume)
     }
 
     @Test
