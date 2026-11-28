@@ -447,7 +447,7 @@ private fun rememberTeamDeletion(id: String, name: String, onDeleted: () -> Unit
         delete = { it.deleteTeam(id) },
         onDeleted = onDeleted,
     )
-    error?.let { NoticeDialog(Notice.error(it)) { error = null } }
+    FailureDialog(error) { error = null }
     return {
         scope.launch {
             try {
