@@ -129,15 +129,12 @@ impl TeamWriter for SqliteTeamWriter {
                 role,
                 number,
                 details,
-            } => PlayerEntry {
+            } => details.given_to(PlayerEntry {
                 name,
                 role: Some(role),
                 number,
-                birth_date: details.birth_date,
-                height_cm: details.height_cm,
-                notes: details.notes,
                 ..Default::default()
-            },
+            }),
             PlayerInput::Existing(existing) => existing,
         };
         let mut saved = team.clone();

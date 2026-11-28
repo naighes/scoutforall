@@ -119,6 +119,9 @@ class NewSeasonViewModel(private val app: Scout4AllApplication, private val team
         }
     }
 
+    /** The dialog of what went wrong closed. */
+    fun dismissError() = update { it.copy(error = null) }
+
     fun change(field: TeamField, edit: (TeamForm) -> TeamForm) = update { s ->
         s.copy(form = edit(s.form), invalid = s.invalid?.takeIf { it.first != field }, error = null)
     }
@@ -209,7 +212,7 @@ fun NewSeasonScreen(teamId: String, onBack: () -> Unit, onSaved: (String) -> Uni
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             SeasonState.Loading, is SeasonState.Saved -> Centered(modifier) { CircularProgressIndicator() }
-            is SeasonState.Failed -> Centered(modifier) { Text(s.message) }
+            is SeasonState.Failed -> LoadFailed(s.message, modifier)
             is SeasonState.Editing -> {
                 when (s.onPlayers) {
                     true -> SeasonPlayers(s, model, modifier)
@@ -249,7 +252,7 @@ private fun SeasonFields(state: SeasonState.Editing, model: NewSeasonViewModel, 
             onPickCountry = model::pickCountry,
         )
     }
-    state.error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+    state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
     Button(
         onClick = model::next,
         modifier = Modifier.fillMaxWidth().padding(16.dp).heightIn(min = 56.dp),
@@ -283,7 +286,7 @@ private fun SeasonPlayers(state: SeasonState.Editing, model: NewSeasonViewModel,
             ) { model.toggle(player.id) }
         }
     }
-    state.error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+    state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
     Button(
         onClick = model::save,
         enabled = !state.busy,

@@ -1,9 +1,13 @@
 package io.github.naighes.scout4all
 
+import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
 import android.net.Uri
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -19,13 +23,16 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.lifecycle.viewmodel.compose.viewModel
 import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.AnalysisPeriod
+import io.github.naighes.scout4all.core.ClipMargins
 import io.github.naighes.scout4all.core.ClipPick
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.NewVideoFile
 import io.github.naighes.scout4all.core.StatsScope
 import io.github.naighes.scout4all.core.VideoSeconds
+import io.github.naighes.scout4all.core.initials
 import io.github.naighes.scout4all.core.stripBars
+import java.io.ByteArrayOutputStream
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -53,8 +60,8 @@ private fun linkVideo(team: String, match: String) = core { c ->
 
 /** The video of the match read as ten minutes long (the shadow of the
  * reader of Robolectric), the three aces tied a minute apart from the
- * first minute: their clips apart on the strip. */
-private fun aceClips(team: String, match: String): VideoRequest.Clips {
+ * first minute: their clips apart on the strip; or at `at`. */
+private fun aceClips(team: String, match: String, at: List<ULong> = listOf(60_000u, 120_000u, 180_000u)): VideoRequest.Clips {
     linkVideo(team, match)
     ShadowMediaMetadataRetriever.addMetadata(
         DataSource.toDataSource(app, Uri.parse("content://nowhere/20261025 175500.mp4")),
@@ -64,11 +71,10 @@ private fun aceClips(team: String, match: String): VideoRequest.Clips {
     val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, listOf(EvalEnum.PERFECT), null, null)
     core { c ->
         val review = c.videoReview(team, match, MatchSide.A, pick)
-        review.anchorHere(0u, 60_000u)
-        review.correctHere(1u, 120_000u)
-        review.correctHere(2u, 180_000u)
+        review.anchorHere(0u, at[0])
+        (1 until at.size).forEach { review.correctHere(it.toUInt(), at[it]) }
     }
-    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, pick) }
+    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, null, pick) }
     return VideoRequest.Clips(team, pick, "Serve · #", matches)
 }
 
@@ -108,7 +114,7 @@ private fun acesOfFiveMatches(): VideoRequest.Clips {
             "Pisa" -> videoOf(team, match, "pisa.mp4", readable = true)
         }
     }
-    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(10u), null, pick) }
+    val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(10u), null, null, pick) }
     return VideoRequest.Clips(team, pick, "Serve · #", matches.filter { it.hasVideo }, matches.filter { !it.hasVideo })
 }
 
@@ -124,6 +130,14 @@ class VideoTest {
         rule.setContent { Scout4AllTheme { VideoScreen(VideoRequest.Match(team, match), onBack = {}) } }
         rule.waitForText(string(R.string.video_none))
         rule.onNodeWithText(string(R.string.video_choose)).assertIsEnabled()
+    }
+
+    /** A match that can't be read: told in the dialog of the app. */
+    @Test
+    fun aMatchThatCannotBeReadSaysWhy() {
+        val (team, _) = servedMatch()
+        rule.setContent { Scout4AllTheme { VideoScreen(VideoRequest.Match(team, "missing"), onBack = {}) } }
+        rule.waitFor { rule.onAllNodesWithTag(NOTICE_TAG).fetchSemanticsNodes().isNotEmpty() }
     }
 
     /** The events marked as TalkBack says them: the aces points won, the
@@ -236,7 +250,7 @@ class VideoTest {
         val (team, match) = servedMatch()
         linkVideo(team, match)
         val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, listOf(EvalEnum.PERFECT), null, null)
-        val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, pick) }
+        val matches = core { it.teamClipMatches(team, AnalysisPeriod.LastMatches(4u), null, null, pick) }
         assertEquals(listOf(match), matches.map { it.matchId })
         val request = VideoRequest.Clips(team, pick, "Serve · #", matches)
         rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
@@ -289,6 +303,30 @@ class VideoTest {
         assertTrue("${shown.position}", shown.position in 70_000L..110_000L)
     }
 
+    /** An action past the end of the video: said before making it, left
+     * out of it. */
+    @Test
+    fun theActionsOutsideTheVideoAreSaid() {
+        val (team, match) = servedMatch()
+        val request = aceClips(team, match, listOf(60_000u, 120_000u, 700_000u))
+        rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
+        rule.waitForText(string(R.string.clip_before))
+        rule.onNodeWithContentDescription(string(R.string.share_video)).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.montage_outside, 1, 3))
+    }
+
+    /** All the actions past the end of the video: nothing to make, said. */
+    @Test
+    fun withNoActionInTheVideoNothingIsMade() {
+        val (team, match) = servedMatch()
+        val request = aceClips(team, match, listOf(700_000u, 760_000u, 820_000u))
+        rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
+        rule.waitForText(string(R.string.clip_before))
+        rule.onNodeWithContentDescription(string(R.string.share_video)).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.montage_none))
+        rule.onNodeWithText(string(R.string.close)).assertExists()
+    }
+
     /** A video of another day (its name says when it starts): the events
      * fall far past its end, and the screen opens at its start all the
      * same, with no error. */
@@ -306,6 +344,39 @@ class VideoTest {
         rule.waitFor { model?.total == 600_000L }
         rule.waitForIdle()
         assertEquals(0L, model!!.position)
+    }
+
+    /** The actions of team B in its analysis, as a video: the match scouted
+     * on both sides is there, read from B's side. */
+    @Test
+    fun theActionsOfATeamSeenAsB() {
+        val (home, match, b) = bothSides()
+        val path = "content://nowhere/$match/a.mp4"
+        core { c -> c.videoReview(home, match, MatchSide.A, null).addFiles(listOf(NewVideoFile(path, "a.mp4")), 7200) }
+        ShadowMediaMetadataRetriever.addMetadata(DataSource.toDataSource(app, Uri.parse(path)), MediaMetadataRetriever.METADATA_KEY_DURATION, "600000")
+        val pick = ClipPick(StatsScope.Match, EventTypeEnum.S, DetailQuery().filter, emptyList(), null, null)
+        val matches = core { it.teamClipMatches(b, AnalysisPeriod.LastMatches(4u), null, null, pick) }
+        // in the analysis of B: its match scouted on both sides, A's video
+        assertEquals(listOf(Triple(match, home, MatchSide.B)), matches.map { Triple(it.matchId, it.teamId, it.side) })
+        assertTrue(matches.single().hasVideo)
+        // the same, from the team of A with B the opponent chosen
+        assertEquals(matches, core { it.teamClipMatches(home, AnalysisPeriod.LastMatches(4u), null, b, pick) })
+        val serves = core { it.matchClipCount(home, match, MatchSide.B, pick) }
+        assertEquals(serves, matches.single().actions)
+        val request = VideoRequest.Clips(b, pick, "Serve", matches)
+        // the saved request opens the same match from the same side
+        assertEquals(matches, savedClips(request.saved())?.matches)
+        var model: VideoModel? = null
+        rule.setContent {
+            Scout4AllTheme {
+                VideoScreen(request, onBack = {})
+                model = viewModel<VideoModel>()
+            }
+        }
+        rule.waitFor { model?.total == 600_000L }
+        // B's serves, from the review of B's side
+        assertEquals(serves.toInt(), model!!.events.size)
+        assertEquals(serves, core { it.videoReview(home, match, MatchSide.B, pick).events().size.toUInt() })
     }
 
     /** The video of the aces of the team: summed up before making it, the
@@ -358,6 +429,55 @@ class VideoLayoutTest(private val screen: Size) {
         rule.setContent { Scout4AllTheme { VideoScreen(VideoRequest.Match(team, match), onBack = {}) } }
         rule.waitForText(string(R.string.video_missing, "20261025 175500.mp4"))
         rule.shot("video-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+    }
+
+    /** Over the video each team has its logo, or its initials. */
+    @Test
+    fun theTeamsOverTheVideoHaveTheirLogos() {
+        val (team, match) = servedMatch()
+        val request = aceClips(team, match)
+        val png = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).let { bitmap ->
+            bitmap.eraseColor(android.graphics.Color.RED)
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        core {
+            it.setTeamLogo(team, png)
+            // from the action itself: how the match stands is told from it
+            it.saveClipMargins(ClipMargins(0u, 5u, true))
+        }
+        val opponent = core { it.videoReview(team, match, MatchSide.A, null).opponent() }
+        rule.setContent { Scout4AllTheme { VideoScreen(request, onBack = {}) } }
+        rule.waitFor {
+            rule.onAllNodesWithTag(initialsTag(initials(opponent)), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() &&
+                listOf(LOGO_AS_IT_IS, LOGO_BACKDROP)
+                    .sumOf { rule.onAllNodesWithTag(it, useUnmergedTree = true).fetchSemanticsNodes().size } == 1
+        }
+        rule.shot("video-logos-$screen")
+    }
+
+    /** Beside the events the photo of who touched, none without it. */
+    @Test
+    fun thePhotosInTheEvents() {
+        val (team, match) = servedMatch()
+        val server = core { c ->
+            c.videoReview(team, match, MatchSide.A, null).events().firstNotNullOf { it.event.event.player?.id }
+        }
+        val png = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).let { bitmap ->
+            bitmap.eraseColor(android.graphics.Color.RED)
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        core { it.setPersonPhoto(server, png) }
+        linkVideo(team, match)
+        rule.setContent { Scout4AllTheme { VideoScreen(VideoRequest.Match(team, match), onBack = {}) } }
+        // rotated, the events are in a panel beside the video, opened by hand
+        if (screen.toString() == "landscape") {
+            val events = hasContentDescription(string(R.string.video_events))
+            rule.waitFor { rule.onAllNodes(events).fetchSemanticsNodes().isNotEmpty() }
+            rule.onNode(events).performClick()
+        }
+        rule.waitFor { rule.onAllNodesWithTag(SHOWN_IMAGE, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
+        rule.shot("video-photos-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 

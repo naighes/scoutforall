@@ -8,6 +8,7 @@
 use {
     crate::{
         calendar::{day_of, text_of},
+        notice::{self, Level},
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
@@ -20,7 +21,7 @@ use {
     scout4all_core::training::SessionStatus,
     scout4all_keys::{KeyCombination, key},
     scout4all_mobile::{
-        Scout4All,
+        MatchStanding, Scout4All,
         training::{AgendaDay, AgendaEventRecord, AgendaItemRecord, AgendaSpan},
     },
 };
@@ -50,6 +51,8 @@ struct Slot(usize, usize);
 pub struct Agenda {
     /// one team, or all
     team: Option<String>,
+    /// the week of the home: without the teams hidden from it
+    home: bool,
     /// a day of the period shown
     anchor: NaiveDate,
     today: NaiveDate,
@@ -61,8 +64,18 @@ pub struct Agenda {
 impl Agenda {
     /// The week of `today`, of `team` (all the teams without).
     pub fn week(core: &Scout4All, team: Option<String>, today: NaiveDate) -> Agenda {
+        Agenda::of(core, team, false, today)
+    }
+
+    /// The week of `today` as the home shows it.
+    pub fn home_week(core: &Scout4All, today: NaiveDate) -> Agenda {
+        Agenda::of(core, None, true, today)
+    }
+
+    fn of(core: &Scout4All, team: Option<String>, home: bool, today: NaiveDate) -> Agenda {
         let mut agenda = Agenda {
             team,
+            home,
             anchor: today,
             today,
             days: vec![],
@@ -75,7 +88,13 @@ impl Agenda {
 
     /// Read again, after a change.
     pub fn reload(&mut self, core: &Scout4All) {
-        match core.training_agenda(self.team.clone(), AgendaSpan::Week, text_of(self.anchor)) {
+        let read = match self.home {
+            true => core.home_week(text_of(self.anchor)),
+            false => {
+                core.training_agenda(self.team.clone(), AgendaSpan::Week, text_of(self.anchor))
+            }
+        };
+        match read {
             Ok(days) => {
                 self.days = days;
                 self.error = None;
@@ -225,6 +244,19 @@ impl Agenda {
         active: bool,
         with_team: bool,
     ) -> Element<'a, Message> {
+        let (actions, body) = self.parts(s, c, active, with_team);
+        ui::panel_with(s.week, actions, body, c)
+    }
+
+    /// The actions of the week (its dates, today, the arrows) and its
+    /// days, to put in a panel.
+    pub fn parts<'a>(
+        &'a self,
+        s: &'static Strings,
+        c: Colors,
+        active: bool,
+        with_team: bool,
+    ) -> (Vec<Element<'a, Message>>, Element<'a, Message>) {
         let mut index = 0;
         let shown = self.shown();
         let nothing = || -> Element<'a, Message> {
@@ -273,26 +305,24 @@ impl Agenda {
             });
         }
         let body: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
+            Some(e) => notice::banner(Level::Error, e, c),
             None => Column::with_children(rows).spacing(3).into(),
         };
         let mut actions: Vec<Element<'a, Message>> =
             vec![text(self.range(s)).size(SIZE_SMALL).color(c.muted).into()];
-        if self.anchor != self.today {
-            actions.push(ui::pill(s.today, false, Some(Message::Today), c));
-        }
-        actions.push(ui::tip(
-            ui::pill("‹", false, Some(Message::Previous), c),
-            s.previous_week,
-            c,
-        ));
-        actions.push(ui::tip(
-            ui::pill("›", false, Some(Message::Next), c),
-            s.next_week,
-            c,
-        ));
-        let body = scrollable(body).height(Length::Fill);
-        ui::panel_with(s.week, actions, body, c)
+        actions.push(ui::today_pill(s.today, Message::Today, c));
+        // the arrows stay side by side where the actions wrap
+        let arrows = row![
+            ui::tip(
+                ui::pill("‹", false, Some(Message::Previous), c),
+                s.previous_week,
+                c,
+            ),
+            ui::tip(ui::pill("›", false, Some(Message::Next), c), s.next_week, c,),
+        ]
+        .spacing(8);
+        actions.push(arrows.into());
+        (actions, scrollable(body).height(Length::Fill).into())
     }
 }
 
@@ -334,74 +364,136 @@ fn event_row<'a>(
     chosen: bool,
     index: usize,
 ) -> Element<'a, Message> {
+    let told = Told {
+        with_team,
+        times: None,
+        unrecorded: false,
+    };
+    event_box(event, s, c, told, chosen, Message::Row(index))
+}
+
+/// What the box of an event tells besides the event itself.
+pub struct Told {
+    /// the name of its team (the events of all the teams)
+    pub with_team: bool,
+    /// when it starts and ends, where the end matters
+    pub times: Option<String>,
+    /// a completed session whose attendance isn't written
+    pub unrecorded: bool,
+}
+
+/// An event of a list: the time at its head over the icon (a session and a
+/// match apart by it and by its color), what and where, the score of a
+/// match and the sign of a gym held by two teams at its tail.
+pub fn event_box<'a, M: Clone + 'a>(
+    event: &AgendaEventRecord,
+    s: &'static Strings,
+    c: Colors,
+    told: Told,
+    chosen: bool,
+    message: M,
+) -> Element<'a, M> {
     let bold = theme::fonts().bold;
     let time = event.start.get(11..16).unwrap_or_default().to_string();
-    let (icon, title, detail, trailing) = match &event.item {
+    let (icon, color, title, flags, score, cancelled) = match &event.item {
         AgendaItemRecord::Session {
             title,
             status,
             to_close,
             ..
         } => {
-            let mut flags = vec![];
-            if *status == SessionStatus::Cancelled {
-                flags.push(s.cancelled.to_string());
-            }
-            if *to_close {
-                flags.push(s.to_close.to_string());
-            }
+            let cancelled = *status == SessionStatus::Cancelled;
+            let flags = [
+                cancelled.then_some(s.cancelled),
+                to_close.then_some(s.to_close),
+                told.unrecorded.then_some(s.attendance_not_recorded),
+            ];
             (
                 theme::icons::CALENDAR,
+                c.accent,
                 title.clone(),
-                [event
-                    .venue
-                    .as_ref()
-                    .map(|v| crate::venue_choice::venue_label(s, &v.name, v.deleted))
-                    .unwrap_or_default()]
-                .into_iter()
-                .chain(flags)
-                .filter(|d| !d.is_empty())
-                .collect::<Vec<_>>(),
-                String::new(),
+                flags.into_iter().flatten().collect::<Vec<_>>(),
+                None,
+                cancelled,
             )
         }
         AgendaItemRecord::Match {
             opponent,
             ours,
             theirs,
+            standing,
             ..
         } => (
             theme::icons::VOLLEYBALL,
+            c.break_point,
             format!("– {opponent}"),
             vec![],
-            match (ours, theirs) {
-                (Some(o), Some(t)) => format!("{o}–{t}"),
-                _ => String::new(),
-            },
+            // won or lost in its color, once over
+            ours.zip(*theirs).map(|(o, t)| {
+                (
+                    format!("{o}–{t}"),
+                    ui::score_color(o, t, *standing == MatchStanding::Over, c),
+                )
+            }),
+            false,
         ),
     };
-    let heading = heading(event, title, with_team);
-    let body = row![
-        ui::icon(icon, 18.0, c.muted),
-        column![
-            text(heading).size(SIZE_BODY).font(bold),
-            text(
-                [time]
-                    .into_iter()
-                    .chain(detail)
-                    .collect::<Vec<_>>()
-                    .join(" · ")
-            )
-            .size(SIZE_SMALL)
-            .color(c.muted),
-        ]
-        .spacing(1)
-        .width(Length::Fill),
-        text(trailing).size(SIZE_BODY).font(bold),
+    let head = column![
+        text(time).size(SIZE_SMALL).font(bold),
+        ui::icon(icon, 16.0, color),
     ]
-    .spacing(8)
-    .align_y(Alignment::Center);
-    ui::list_row(body, chosen, Some(Message::Row(index)), c)
+    .spacing(2)
+    .align_x(Alignment::Center);
+    // another team holds the gym then: the error color and an icon
+    let shared = event.shared_venue && !cancelled;
+    let detail = told
+        .times
+        .into_iter()
+        .chain(
+            event
+                .venue
+                .as_ref()
+                .map(|v| crate::venue_choice::venue_label(s, &v.name, v.deleted)),
+        )
+        .chain(flags.into_iter().map(str::to_string))
+        .collect::<Vec<_>>()
+        .join(" · ");
+    let what = Column::new()
+        .push(
+            text(heading(event, title, told.with_team))
+                .size(SIZE_BODY)
+                .font(bold)
+                .color(match cancelled {
+                    true => c.muted,
+                    false => c.text,
+                }),
+        )
+        // no empty line: the title stays in the middle
+        .push((!detail.is_empty()).then(|| {
+            text(detail).size(SIZE_SMALL).color(match shared {
+                true => c.danger,
+                false => c.muted,
+            })
+        }))
+        .spacing(1)
+        .width(Length::Fill);
+    let body = row![what]
+        .push(shared.then(|| {
+            ui::tip(
+                ui::icon(theme::icons::WARNING, 16.0, c.danger),
+                s.venue_busy_mark,
+                c,
+            )
+        }))
+        .push(score.map(|(score, color)| {
+            text(score)
+                .size(crate::theme::SIZE_TITLE)
+                .font(bold)
+                .color(color)
+        }))
+        .spacing(8)
+        .align_y(Alignment::Center);
+    ui::box_row(head, body, chosen, message, c)
 }
 
 #[cfg(test)]
@@ -412,7 +504,7 @@ mod tests {
     };
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
     }
 
     fn session(core: &Scout4All, team: &str, start: &str, title: &str) -> String {
@@ -542,10 +634,11 @@ mod tests {
             to_close: false,
         });
         let game = event(AgendaItemRecord::Match {
+            friendly: false,
             id: "m".into(),
             opponent: "Leoni".into(),
             opponent_team: None,
-            played: false,
+            standing: MatchStanding::ToPlay,
             ours: None,
             theirs: None,
         });

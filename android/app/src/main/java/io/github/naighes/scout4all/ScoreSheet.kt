@@ -157,7 +157,7 @@ fun NumberRoleDialog(
                 label = { Text(stringResource(R.string.number)) },
                 singleLine = true,
                 isError = error != null,
-                supportingText = error?.let { { Text(it) } },
+                supportingText = noteOf(error),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
             FieldTitle(stringResource(R.string.role), null)

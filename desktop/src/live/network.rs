@@ -5,6 +5,7 @@
 //! the preview. Cut off while recording, it connects again and goes on in
 //! the same recording.
 
+use scout4all_mobile::clock::Clock;
 use {
     super::{
         capture::{Command, Pace, Status, Take, finish, set},
@@ -427,7 +428,12 @@ pub enum Reading {
     Receive(super::rtmp::Receiver),
 }
 
-pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<Status>) {
+pub(super) fn run(
+    reading: Reading,
+    clock: &dyn Clock,
+    commands: Receiver<Command>,
+    status: &Mutex<Status>,
+) {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build();
@@ -444,6 +450,7 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
         };
         let mut io = Io {
             commands: &commands,
+            clock,
             take: &mut take,
             preview: &mut preview,
             status,
@@ -459,7 +466,7 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
                     }
                     Ok((url, Protocol::Onvif, in_url)) => {
                         let user = credentials(source, in_url.clone());
-                        match super::onvif::stream_uri(&url, user).await {
+                        match super::onvif::stream_uri(&url, user, io.clock).await {
                             Ok(rtsp) => stream(rtsp, source, in_url, &mut io).await,
                             Err(problem) => Err(problem),
                         }
@@ -491,6 +498,7 @@ pub(super) fn run(reading: Reading, commands: Receiver<Command>, status: &Mutex<
 /// the preview.
 pub(super) struct Io<'a> {
     commands: &'a Receiver<Command>,
+    pub(super) clock: &'a dyn Clock,
     pub(super) take: &'a mut Option<Take>,
     pub(super) preview: &'a mut Pace,
     pub(super) status: &'a Mutex<Status>,
@@ -713,18 +721,34 @@ mod tests {
             }
             false
         };
-        let wrong = Capture::open(source("campo", "sbagliata"));
+        let wrong = Capture::open(
+            source("campo", "sbagliata"),
+            std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+        );
         assert!(wait(&wrong, &|s| s.problem == Some(Problem::Refused)));
-        let hevc = Capture::open(source("campo265", "segreta"));
+        let hevc = Capture::open(
+            source("campo265", "segreta"),
+            std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+        );
         assert!(wait(&hevc, &|s| s.problem == Some(Problem::Hevc)));
-        let missing = Capture::open(source("nessuno", "segreta"));
+        let missing = Capture::open(
+            source("nessuno", "segreta"),
+            std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+        );
         assert!(wait(&missing, &|s| s.problem == Some(Problem::NotFound)));
         let dir = tempfile::tempdir().unwrap();
-        let capture = Capture::open(source("campo", "segreta"));
+        let capture = Capture::open(
+            source("campo", "segreta"),
+            std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+        );
         assert!(wait(&capture, &|s| s.frame.is_some()));
         assert_eq!(capture.status().unwrap().size, Some((1280, 720)));
         let base = dir.path().join("20261106 120000");
-        capture.record(base.clone(), chrono::Local::now(), Default::default());
+        capture.record(
+            base.clone(),
+            scout4all_mobile::clock::ClockExt::zoned_now(&scout4all_mobile::clock::SystemClock),
+            Default::default(),
+        );
         capture.preview(false);
         std::thread::sleep(Duration::from_secs(3));
         capture.stop();
@@ -761,11 +785,14 @@ mod tests {
             false
         };
         let open = |url: String| {
-            Capture::open(Source::Network(NetworkSource {
-                url,
-                username: "scout".into(),
-                password: "segreta".into(),
-            }))
+            Capture::open(
+                Source::Network(NetworkSource {
+                    url,
+                    username: "scout".into(),
+                    password: "segreta".into(),
+                }),
+                std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+            )
         };
         // not trusted by the system, unless a test of the same run trusted
         // the test authority already (one for all)
@@ -860,7 +887,9 @@ mod tests {
         let (send, commands) = std::sync::mpsc::channel();
         send.send(Command::Record {
             base: dir.path().join("20261110 120000"),
-            started: chrono::Local::now(),
+            started: scout4all_mobile::clock::ClockExt::zoned_now(
+                &scout4all_mobile::clock::TestClock::new(),
+            ),
             quality: crate::live::capture::Quality::High,
         })
         .unwrap();
@@ -924,8 +953,16 @@ mod tests {
         let status = Mutex::new(Status::default());
         let mut feed = Feed::new().unwrap();
         let base = dir.path().join("20261110 120000");
-        let mut take =
-            Some(Take::start_on(base.clone(), chrono::Local::now(), |_| Some(0)).unwrap());
+        let mut take = Some(
+            Take::start_on(
+                base.clone(),
+                scout4all_mobile::clock::ClockExt::zoned_now(
+                    &scout4all_mobile::clock::TestClock::new(),
+                ),
+                |_| Some(0),
+            )
+            .unwrap(),
+        );
         for (i, f) in frames.iter().enumerate() {
             let at = u64::try_from(i).unwrap() * 33;
             feed.frame(f, i == 0, at, 0, &mut take, &mut Pace::new(None), &status);
@@ -944,7 +981,16 @@ mod tests {
         // with room for its MP4 and the reserve: on
         let base = dir.path().join("20261110 130000");
         let room = |_: &std::path::Path| Some(crate::live::space::RESERVE + 10_000_000);
-        let mut take = Some(Take::start_on(base, chrono::Local::now(), room).unwrap());
+        let mut take = Some(
+            Take::start_on(
+                base,
+                scout4all_mobile::clock::ClockExt::zoned_now(
+                    &scout4all_mobile::clock::TestClock::new(),
+                ),
+                room,
+            )
+            .unwrap(),
+        );
         for (i, f) in frames.iter().enumerate() {
             let at = u64::try_from(i).unwrap() * 33;
             feed.frame(f, i == 0, at, 0, &mut take, &mut Pace::new(None), &status);
@@ -967,11 +1013,14 @@ mod tests {
         };
         let folder = std::path::PathBuf::from(std::env::var("S4A_SMALL_DISK").unwrap());
         let base_url = std::env::var("S4A_RTSP").unwrap_or_else(|_| "127.0.0.1:8554".to_string());
-        let capture = Capture::open(Source::Network(NetworkSource {
-            url: format!("{base_url}/campo"),
-            username: "scout".into(),
-            password: "segreta".into(),
-        }));
+        let capture = Capture::open(
+            Source::Network(NetworkSource {
+                url: format!("{base_url}/campo"),
+                username: "scout".into(),
+                password: "segreta".into(),
+            }),
+            std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+        );
         let seen = (0..150).any(|_| {
             std::thread::sleep(Duration::from_millis(100));
             capture.status().is_some_and(|s| s.frame.is_some())
@@ -979,7 +1028,7 @@ mod tests {
         assert!(seen);
         capture.record(
             folder.join("20261112 120000"),
-            chrono::Local::now(),
+            scout4all_mobile::clock::ClockExt::zoned_now(&scout4all_mobile::clock::SystemClock),
             Default::default(),
         );
         std::thread::sleep(Duration::from_secs(3));

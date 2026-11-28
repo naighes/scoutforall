@@ -80,6 +80,8 @@ class TeamsScreenTest {
         val new = core { it.saveMatch(team, null, MatchForm("Arezzo", "2026-10-20T18:00:00+02:00", true, "6")) }
         show()
         rule.waitForText(string(R.string.home_in_progress))
+        // only the one without sets is said to play
+        rule.onAllNodesWithText(string(R.string.to_play), substring = true).assertCountEquals(1)
         rule.onNodeWithText(string(R.string.resume)).performClick()
         rule.onNodeWithText(string(R.string.start)).performClick()
         assertEquals(
@@ -127,6 +129,28 @@ class TeamsScreenTest {
         assertEquals(listOf(won), matches)
     }
 
+    /** Without a logo, the initials in its place. */
+    @Test
+    fun aTeamWithoutALogoHasItsInitials() {
+        saveTeam("Cortona Volley")
+        show()
+        rule.waitForText("Cortona Volley")
+        rule.onNodeWithText("CV", useUnmergedTree = true).assertIsDisplayed()
+    }
+
+    /** Without a logo, the initials of the team head its matches too. */
+    @Test
+    fun theMatchesOfTheHomeHaveTheInitialsOfTheirTeam() {
+        val team = saveNationalTeam()
+        winMatch(team, "Serbia")
+        core { it.saveMatch(team, null, MatchForm("Arezzo", "2026-10-20T18:00:00+02:00", true, "6")) }
+        val initials = (core { it.teams() }.single() as TeamListing.Team).initials
+        show()
+        rule.waitForText(string(R.string.home_recent))
+        // the match in progress, the one over, the team
+        rule.onAllNodesWithText(initials, useUnmergedTree = true).assertCountEquals(3)
+    }
+
     /** The teams created by hand start pinned; a touch on the pin moves
      * the team below the pinned ones, saved for the next start. */
     @Test
@@ -140,11 +164,44 @@ class TeamsScreenTest {
         rule.onAllNodesWithContentDescription(unpin).assertCountEquals(2)
         // Arezzo, the first one
         rule.onAllNodesWithContentDescription(unpin)[0].performClick()
-        rule.waitUntil { rule.onAllNodesWithContentDescription(pin).fetchSemanticsNodes().size == 1 }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodesWithContentDescription(pin).fetchSemanticsNodes().size == 1 }
         rule.onAllNodesWithContentDescription(unpin).assertCountEquals(1)
         val top = { name: String -> rule.onNodeWithText(name).fetchSemanticsNode().positionInRoot.y }
         assertTrue(top("Cortona") < top("Arezzo"))
         val saved = core { it.teams() }.map { (it as TeamListing.Team).name to it.pinned }
         assertEquals(listOf("Cortona" to true, "Arezzo" to false), saved)
+    }
+
+    /** A touch on the title of a block closes it, remembered, and opens it
+     * again. */
+    @Test
+    fun theBlocksCloseAndOpenByTheirTitle() {
+        saveTeam("Cortona")
+        show()
+        rule.waitForText("Cortona")
+        rule.onNodeWithText(string(R.string.teams)).performClick()
+        rule.waitUntil(WAIT_MS) { rule.onAllNodesWithText("Cortona").fetchSemanticsNodes().isEmpty() }
+        assertTrue(core { it.home() }.teamsClosed)
+        rule.onNodeWithText(string(R.string.teams)).performClick()
+        rule.waitForText("Cortona")
+        assertTrue(!core { it.home() }.teamsClosed)
+    }
+
+    /** A team hidden is listed at the end on request, and a touch shows it
+     * on the home again; all hidden, the home is not empty. */
+    @Test
+    fun aHiddenTeamIsShownAgain() {
+        val team = saveTeam("Cortona")
+        core { it.setHidden(team, true) }
+        show()
+        val more = string(R.string.show_hidden, 1)
+        rule.waitForText(more)
+        rule.onAllNodesWithText(string(R.string.no_teams)).assertCountEquals(0)
+        rule.onAllNodesWithText("Cortona").assertCountEquals(0)
+        rule.onNodeWithText(more).performClick()
+        rule.onNodeWithText("Cortona").performClick()
+        rule.waitUntil(WAIT_MS) { rule.onAllNodesWithText(more).fetchSemanticsNodes().isEmpty() }
+        assertTrue(!core { it.teamHidden(team) })
+        rule.onNodeWithText("Cortona").assertIsDisplayed()
     }
 }

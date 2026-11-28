@@ -2,33 +2,60 @@ package io.github.naighes.scout4all
 
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.LogoBackdrop
+import io.github.naighes.scout4all.core.LogoTone
 import io.github.naighes.scout4all.core.MobileException
+import io.github.naighes.scout4all.core.initials
+import io.github.naighes.scout4all.core.logoBackdrop
+import io.github.naighes.scout4all.core.logoTone
 
 /** Tag of the image shown by [LogoBox], for the tests. */
 const val SHOWN_IMAGE = "shown-image"
+
+/** Tags of a logo once its tone is read: on a backdrop (it would vanish
+ * on the theme) or as it is, for the tests. */
+const val LOGO_BACKDROP = "logo-backdrop"
+const val LOGO_AS_IT_IS = "logo-as-it-is"
 
 /** The image the bytes hold, null when they are none or no image. */
 fun decodeImage(bytes: ByteArray?): ImageBitmap? =
     bytes?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }?.asImageBitmap()
 
-/** The logo of the team in a square: an empty box when it has none, so the
- * names line up. Read once per team. */
+/** The logo of the team in a square: without it `none`, else an empty box,
+ * so the names line up. Read once per team. */
 @Composable
-fun TeamLogo(teamId: String, size: Dp = 40.dp, modifier: Modifier = Modifier) {
+fun TeamLogo(
+    teamId: String,
+    size: Dp = 40.dp,
+    modifier: Modifier = Modifier,
+    none: (@Composable () -> Unit)? = null,
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val bytes by produceState<ByteArray?>(null, teamId) {
         value = try {
@@ -37,7 +64,88 @@ fun TeamLogo(teamId: String, size: Dp = 40.dp, modifier: Modifier = Modifier) {
             null
         }
     }
-    LogoBox(bytes, size, modifier)
+    when {
+        bytes == null && none != null -> none()
+        else -> TeamLogoBox(bytes, size, modifier)
+    }
+}
+
+/** The tag of the initials of a `TeamPicture`, for the tests. */
+fun initialsTag(letters: String) = "initials-$letters"
+
+/** What stands for a team beside its name, in a square: its logo, or its
+ * initials, not read as the name says it. `teamId` is null for a name
+ * only. */
+@Composable
+fun TeamPicture(
+    teamId: String?,
+    name: String,
+    size: Dp = 48.dp,
+    modifier: Modifier = Modifier,
+    boxed: Boolean = false,
+) {
+    val letters: @Composable () -> Unit = { TeamInitials(name, size, modifier, boxed) }
+    when (teamId) {
+        null -> letters()
+        else -> TeamLogo(teamId, size, modifier, none = letters)
+    }
+}
+
+/** The initials of the team in a square, not read as its name says it. */
+@Composable
+private fun TeamInitials(name: String, size: Dp, modifier: Modifier = Modifier, boxed: Boolean = false) {
+    val shown = initials(name)
+    // on its own, heading what tells of the team: in a square as in the
+    // lists, not lost as bare letters
+    val box = when (boxed) {
+        true -> modifier.size(size).clip(RoundedCornerShape(size * 0.15f)).background(MaterialTheme.colorScheme.surfaceVariant)
+        false -> modifier.size(size)
+    }
+    Box(box.clearAndSetSemantics { testTag = initialsTag(shown) }, contentAlignment = Alignment.Center) {
+        Text(
+            shown,
+            style = if (size < 40.dp) MaterialTheme.typography.labelSmall else MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/** `TeamPicture` of a logo already read: `logo` null for a team without
+ * one. */
+@Composable
+fun LogoOrInitials(logo: ByteArray?, name: String, size: Dp, modifier: Modifier = Modifier, boxed: Boolean = false) {
+    when (logo) {
+        null -> TeamInitials(name, size, modifier, boxed)
+        else -> TeamLogoBox(logo, size, modifier)
+    }
+}
+
+/** The color behind a logo, none when it shows on the theme. */
+fun backdropColor(backdrop: LogoBackdrop): Color? = when (backdrop) {
+    LogoBackdrop.NONE -> null
+    LogoBackdrop.DARK -> LogoBackdropDark
+    LogoBackdrop.LIGHT -> LogoBackdropLight
+}
+
+/** The logo `bytes` in a square: on the background of the other theme, a
+ * bit smaller, when it would vanish on this one (TODO/011 R8.6). Its tone
+ * is read once, away from the main thread. */
+@Composable
+fun TeamLogoBox(bytes: ByteArray?, size: Dp, modifier: Modifier = Modifier) {
+    val tone by produceState<LogoTone?>(null, bytes) {
+        value = bytes?.let { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { logoTone(it) } }
+    }
+    val dark = MaterialTheme.colorScheme.background.luminance() < 0.5f
+    val backdrop = tone?.let { logoBackdrop(it, dark) }
+    when (val color = backdrop?.let(::backdropColor)) {
+        null -> LogoBox(bytes, size, backdrop?.let { modifier.testTag(LOGO_AS_IT_IS) } ?: modifier)
+        else -> Box(
+            modifier.size(size).clip(RoundedCornerShape(size * 0.15f)).background(color).testTag(LOGO_BACKDROP),
+            contentAlignment = Alignment.Center,
+        ) {
+            LogoBox(bytes, size * 0.8f)
+        }
+    }
 }
 
 /** The photo of the player (the id of the player is the one of the person)
@@ -67,6 +175,26 @@ fun photoOf(playerId: String): androidx.compose.ui.graphics.ImageBitmap? {
         }
     }
     return remember(bytes) { decodeImage(bytes) }
+}
+
+/** The side of the photo beside a name in a row of events. */
+val ROW_PHOTO = 32.dp
+
+/** The photo of a row of events; without one its width alone, so that a row
+ * without a player grows no taller. */
+@Composable
+fun RowPhoto(photo: ByteArray?) =
+    if (photo != null) LogoBox(photo, ROW_PHOTO) else Spacer(Modifier.width(ROW_PHOTO))
+
+/** The photos of the persons, by id: only who has one, each read once. */
+suspend fun Scout4AllApplication.personPhotos(ids: List<String>): Map<String, ByteArray> = core { core ->
+    ids.distinct().mapNotNull { id ->
+        try {
+            core.personPhoto(id)?.let { id to it }
+        } catch (e: MobileException) {
+            null
+        }
+    }.toMap()
 }
 
 /** `bytes` in a square, an empty box when null or not an image. */

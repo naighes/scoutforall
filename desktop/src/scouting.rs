@@ -8,7 +8,7 @@ use {
     crate::{
         charts::{self, Trend},
         court::{Content, Court, Touch},
-        keymap,
+        keymap, notice,
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SCORE, SIZE_SMALL, grade_color},
         ui,
@@ -131,8 +131,8 @@ pub struct ScoutingScreen {
     /// the digits of the shirt number typed so far, while more than one
     /// player's number starts with them
     typed: String,
-    /// an error, or that the set is over: any key closes it
-    notice: Option<(String, bool)>,
+    /// an error, or that the set is over (`set_over`): any key closes it
+    notice: Option<String>,
     set_over: bool,
     show_stats: bool,
     match_scope: bool,
@@ -147,6 +147,8 @@ pub struct ScoutingScreen {
     pub refresh_ms: u128,
     /// the photos of the players of our team, by player id, read once
     photos: std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// the same photos cut for the circles on the court (`court::disc`)
+    discs: std::collections::HashMap<String, iced::widget::image::Handle>,
 }
 
 impl ScoutingScreen {
@@ -183,6 +185,7 @@ impl ScoutingScreen {
             trend,
             refresh_ms: 0,
             photos: std::collections::HashMap::new(),
+            discs: std::collections::HashMap::new(),
         }
     }
 
@@ -190,6 +193,11 @@ impl ScoutingScreen {
     /// the players to choose.
     pub fn with_photos(mut self, core: &scout4all_mobile::Scout4All) -> Self {
         self.photos = crate::editors::team_photos(core, &self.team_id);
+        self.discs = self
+            .photos
+            .iter()
+            .map(|(id, photo)| (id.clone(), crate::court::disc(photo)))
+            .collect();
         self
     }
 
@@ -233,10 +241,10 @@ impl ScoutingScreen {
         match progress {
             Ok(Progress::SetOver) => {
                 self.set_over = true;
-                self.notice = Some((String::new(), false));
+                self.notice = Some(String::new());
             }
             Ok(Progress::Choosing | Progress::Saved) => {}
-            Err(e) => self.notice = Some((e, true)),
+            Err(e) => self.notice = Some(e),
         }
     }
 
@@ -424,7 +432,7 @@ impl ScoutingScreen {
             return;
         }
         if let Err(e) = self.scouting.swap_side() {
-            self.notice = Some((e.to_string(), true));
+            self.notice = Some(e.to_string());
         }
     }
 
@@ -881,23 +889,15 @@ impl ScoutingScreen {
         .height(Length::Fill);
         match &self.notice {
             None => body.into(),
-            Some((message, error)) => {
-                let message = match self.set_over {
-                    true => s.set_over.to_string(),
-                    false => message.clone(),
+            Some(why) => {
+                // never a dialog: the scouting doesn't stop
+                let (level, message) = match self.set_over {
+                    true => (notice::Level::Info, s.set_over),
+                    false => (notice::Level::Error, why.as_str()),
                 };
-                let color = match error {
-                    true => c.danger,
-                    false => c.accent,
-                };
-                let banner = ui::list_row(
-                    container(ui::body(message).color(color))
-                        .width(Length::Fill)
-                        .align_x(Alignment::Center),
-                    true,
-                    Some(Message::Dismiss),
-                    c,
-                );
+                let banner = iced::widget::mouse_area(notice::banner(level, message, c))
+                    .on_press(Message::Dismiss)
+                    .interaction(iced::mouse::Interaction::Pointer);
                 column![banner, body].spacing(10).into()
             }
         }
@@ -1206,7 +1206,7 @@ impl ScoutingScreen {
                 for p in self.offered(&snap.players) {
                     list = list.push(ui::choice(
                         Some(self.player_key_label(p, p.index.to_string())),
-                        self.player_label(p, c),
+                        self.player_label(p, s, c),
                         false,
                         Some(Message::Player(p.id.to_string())),
                         c,
@@ -1215,12 +1215,14 @@ impl ScoutingScreen {
             }
             ScoutingStep::Replacement => {
                 list = list.push(self.typed_line(s, c));
+                // the rows of the team's list: at stopped play they may scroll
                 for p in self.offered(&snap.replacements) {
-                    list = list.push(ui::choice(
-                        Some(self.player_key_label(p, replacement_key(p.index))),
-                        self.player_label(p, c),
+                    list = list.push(ui::portrait_row(
+                        self.photos.get(&p.id.to_string()),
+                        scout4all_core::names::initials(&p.name),
+                        self.replacement_label(p, c),
                         false,
-                        Some(Message::Replacement(p.id.to_string())),
+                        Message::Replacement(p.id.to_string()),
                         c,
                     ));
                 }
@@ -1606,7 +1608,7 @@ impl ScoutingScreen {
         let court = canvas(Court {
             content,
             colors: c,
-            photos: self.photos.clone(),
+            photos: self.discs.clone(),
         })
         .width(Length::Fill)
         .height(Length::Fill);
@@ -1973,12 +1975,41 @@ impl ScoutingScreen {
     }
 
     /// With the shirt number on the key, the name alone.
-    fn player_label<'a>(&self, p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
+    /// Who is out for the libero told apart at the tail: the scout doesn't
+    /// see them on court.
+    fn player_label<'a>(&self, p: &PlayerChoice, s: &Strings, c: Colors) -> Element<'a, Message> {
         let photo = self.photos.get(&p.id.to_string());
-        match self.keys.player_keys {
+        let label = match self.keys.player_keys {
             PlayerKeysEnum::Number => with_photo(photo, ui::name(p.name.clone())),
             PlayerKeysEnum::Role => with_photo(photo, player_label(p, c)),
+        };
+        match p.out_for_the_libero {
+            true => row![
+                label,
+                text(s.out_for_the_libero)
+                    .size(SIZE_SMALL)
+                    .color(c.muted)
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into(),
+            false => label,
         }
+    }
+
+    /// Who comes in as in the team's list, the number at the tail: with the
+    /// shirt number on the key that number is the key, else the key of the
+    /// place before the name.
+    fn replacement_label<'a>(&self, p: &PlayerChoice, c: Colors) -> Element<'a, Message> {
+        let key: Element<'a, Message> = match self.keys.player_keys {
+            PlayerKeysEnum::Number => space::horizontal().width(0).into(),
+            PlayerKeysEnum::Role => ui::keycap(&replacement_key(p.index), c),
+        };
+        row![key, ui::name(p.name.clone()), ui::tail_number(p.number, c),]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into()
     }
 
     /// The digits typed so far, while they wait for one more or Enter.
@@ -2129,7 +2160,8 @@ pub(crate) mod tests {
     #[test]
     fn the_photo_of_a_player_is_read_for_the_choices() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = team_with_shirts(&core);
         let details = core.team(team.clone()).unwrap();
         let first = details.players[0].id.clone();
@@ -2148,7 +2180,8 @@ pub(crate) mod tests {
 
     fn shirt_screen(keys: ScoutingKeys) -> (tempfile::TempDir, ScoutingScreen) {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = team_with_shirts(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
@@ -2244,7 +2277,8 @@ pub(crate) mod tests {
     #[test]
     fn the_statistics_are_narrowed_to_a_phase_and_a_rotation() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = both_sides_started(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
@@ -2269,7 +2303,8 @@ pub(crate) mod tests {
     #[test]
     fn both_sides_show_one_side_and_f5_swaps_it() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = both_sides_started(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
@@ -2318,7 +2353,8 @@ pub(crate) mod tests {
     #[test]
     fn the_statistics_compare_both_sides_and_the_arrows_change_them() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = both_sides_started(&core);
         let scouting = core
             .scouting_in_order(&team, &m, ChoiceOrder::EventFirst)
@@ -2354,7 +2390,8 @@ pub(crate) mod tests {
     #[test]
     fn the_shift_key_makes_the_change_of_the_other_side() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = both_sides_started(&core);
         let new = || {
             let scouting = core
@@ -2467,7 +2504,7 @@ pub(crate) mod tests {
         // 33 is on the bench
         screen.key(key!('3'));
         screen.key(key!('3'));
-        assert!(screen.notice.as_ref().is_some_and(|(_, error)| *error));
+        assert!(screen.notice.is_some() && !screen.set_over);
         screen.key(key!(enter));
         assert_eq!(screen.notice, None);
         assert!(screen.typed.is_empty());
@@ -2522,7 +2559,8 @@ pub(crate) mod tests {
     fn the_arrows_reach_where_the_serve_starts_from() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         // three aces: we still serve
         let arezzo = match_against(&core, &team, "Arezzo");

@@ -3,6 +3,8 @@
 //! fields of `form`, saved through the core, which checks them. An error
 //! takes the keys to its field.
 
+use scout4all_mobile::clock::ClockExt;
+use std::collections::HashMap;
 use {
     crate::{
         countries,
@@ -21,7 +23,10 @@ use {
         },
     },
     scout4all_core::{
-        competition_form::CompetitionForm, match_form::MatchForm, player_form::PlayerForm,
+        competition_form::CompetitionForm,
+        match_form::MatchForm,
+        player_form::PlayerForm,
+        shapes::{country::CountryCode, player::DominantHand},
         team_form::TeamForm,
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
@@ -72,7 +77,7 @@ pub struct TeamEditor {
     /// what the logo of the team becomes when it's saved
     logo: LogoEdit,
     /// the logo being shown: the saved one or the chosen one
-    shown: Option<iced::widget::image::Handle>,
+    shown: Option<ui::TeamLogo>,
 }
 
 /// What is done to the logo of a team on saving.
@@ -88,17 +93,28 @@ pub fn team_photos(
     core: &scout4all_mobile::Scout4All,
     team_id: &str,
 ) -> std::collections::HashMap<String, iced::widget::image::Handle> {
-    core.team(team_id.to_string())
+    let players = core
+        .team(team_id.to_string())
         .map(|details| details.players)
-        .unwrap_or_default()
+        .unwrap_or_default();
+    person_photos(core, players.into_iter().map(|p| p.id))
+}
+
+/// The photos of the persons, by id: only who has one, each read once.
+pub fn person_photos(
+    core: &scout4all_mobile::Scout4All,
+    ids: impl IntoIterator<Item = String>,
+) -> std::collections::HashMap<String, iced::widget::image::Handle> {
+    ids.into_iter()
+        .collect::<std::collections::HashSet<_>>()
         .into_iter()
-        .filter_map(|p| {
+        .filter_map(|id| {
             let handle = core
-                .person_photo(p.id.clone())
+                .person_photo(id.clone())
                 .ok()
                 .flatten()
                 .and_then(|jpeg| logo_handle(&jpeg))?;
-            Some((p.id, handle))
+            Some((id, handle))
         })
         .collect()
 }
@@ -144,6 +160,8 @@ const COMPETITION_COUNTRY: usize = 4;
 const COMPETITION_FRIENDLY: usize = 5;
 
 pub struct PlayerEditor {
+    /// the prefix proposed for a player without a phone
+    proposed: Option<String>,
     team_id: String,
     id: Option<String>,
     roles: Vec<RoleChoice>,
@@ -173,8 +191,50 @@ const PLAYER_NAME: usize = 0;
 const PLAYER_NUMBER: usize = 1;
 const PLAYER_ROLE: usize = 2;
 const PLAYER_BIRTH: usize = 3;
-const PLAYER_HEIGHT: usize = 4;
-const PLAYER_NOTES: usize = 5;
+const PLAYER_BIRTH_PLACE: usize = 4;
+const PLAYER_NATIONALITY: usize = 5;
+const PLAYER_HEIGHT: usize = 6;
+const PLAYER_HAND: usize = 7;
+const PLAYER_FEDERATION_ID: usize = 8;
+const PLAYER_NOTES: usize = 9;
+const PLAYER_EMAIL: usize = 10;
+const PLAYER_PREFIX: usize = 11;
+const PLAYER_PHONE: usize = 12;
+
+const HANDS: [DominantHand; 2] = [DominantHand::Right, DominantHand::Left];
+
+fn nationality_field(core: &Scout4All, s: &Strings, code: Option<CountryCode>) -> Field {
+    let name = code.map(|c| core.country_name(c)).unwrap_or_default();
+    Field::search(s.nationality, name)
+}
+
+/// The prefix of a phone: the one of the number, else the one proposed
+/// for a player without one.
+fn prefix_of(core: &Scout4All, team_id: &str, form: &PlayerForm) -> String {
+    let country = match form.phone.is_empty() {
+        true => form.phone_country.or_else(|| {
+            core.proposed_phone_country(team_id.to_string(), form.nationality)
+                .ok()
+                .flatten()
+        }),
+        false => form.phone_country,
+    };
+    country
+        .map(|code| countries::with_prefix(core, code))
+        .unwrap_or_default()
+}
+
+fn hand_field(s: &Strings, hand: Option<DominantHand>) -> Field {
+    let names = HANDS.iter().map(|hand| match hand {
+        DominantHand::Right => s.right.to_string(),
+        DominantHand::Left => s.left.to_string(),
+    });
+    Field::choice(
+        s.dominant_hand,
+        with_empty(names),
+        option_of(HANDS.into_iter(), hand),
+    )
+}
 
 pub struct MatchEditor {
     /// team A: chosen among `teams` for a new match, then fixed
@@ -187,6 +247,8 @@ pub struct MatchEditor {
     roster: Vec<RosterPlayer>,
     /// the other teams and the names met, offered as team B is written
     opponents: Vec<OpponentChoice>,
+    /// the logos of the teams among them
+    logos: HashMap<uuid::Uuid, ui::TeamLogo>,
     competitions: Vec<CompetitionChoice>,
     formats: Vec<FormatChoice>,
     stages: Vec<StageChoice>,
@@ -354,6 +416,18 @@ fn court_of(form: &MatchForm) -> usize {
         (false, true) => COURT_HOME,
         (false, false) => COURT_AWAY,
     }
+}
+
+/// The logos of the teams team B may be.
+fn opponent_logos(
+    core: &Scout4All,
+    choices: &[OpponentChoice],
+) -> HashMap<uuid::Uuid, ui::TeamLogo> {
+    choices
+        .iter()
+        .filter_map(|c| c.team)
+        .filter_map(|id| ui::TeamLogo::of(core, &id.to_string()).map(|logo| (id, logo)))
+        .collect()
 }
 
 /// The name of a team or a competition as written, to compare.
@@ -545,7 +619,7 @@ impl Editor {
                 shown: id
                     .as_ref()
                     .and_then(|id| core.team_logo(id.clone()).ok().flatten())
-                    .and_then(|png| logo_handle(&png)),
+                    .and_then(|png| ui::TeamLogo::from_png(&png)),
                 id,
                 classifications,
                 genders,
@@ -640,18 +714,34 @@ impl Editor {
                 Mask::Date,
                 s.date_placeholder,
             ),
+            Field::text(s.birth_place, start.birth_place.clone()),
+            nationality_field(core, s, start.nationality),
             Field::text(s.height, start.height_cm.clone()).placeholder(s.height_placeholder),
+            hand_field(s, start.dominant_hand),
+            Field::text(s.federation_id, start.federation_id.clone()),
             Field::lines(s.notes, start.notes.clone()),
+            Field::text(s.email, start.email.clone()),
+            Field::dropdown(s.phone_prefix, prefix_of(core, &team_id, &start)),
+            Field::text(s.phone, start.phone.clone()),
         ];
+        // the prefix proposed follows the nationality until another one is
+        // chosen, or a number written with it
+        let proposed = start
+            .phone
+            .is_empty()
+            .then(|| prefix_of(core, &team_id, &start));
         let title = match id {
             Some(_) => s.edit_player,
             None => s.new_player,
         };
+        let mut form = Form::new(title, fields);
+        form.sections = vec![(PLAYER_EMAIL, s.contacts.to_string())];
         Editor {
-            form: Form::new(title, fields),
+            form,
             namesake: None,
             same_person: None,
             kind: Kind::Player(Box::new(PlayerEditor {
+                proposed,
                 team_id,
                 id,
                 roles,
@@ -762,6 +852,7 @@ impl Editor {
             .map(|e| Suggestion {
                 label: e.label.clone(),
                 value: e.name.clone(),
+                picture: None,
             })
             .collect();
         p.offered = taken;
@@ -807,11 +898,34 @@ impl Editor {
                 Field::masked("", &start.birth_date, Mask::Date, "").value,
             ),
             (
+                PLAYER_BIRTH_PLACE,
+                Field::text("", start.birth_place.clone()).value,
+            ),
+            (
+                PLAYER_NATIONALITY,
+                nationality_field(core, s, start.nationality).value,
+            ),
+            (
                 PLAYER_HEIGHT,
                 Field::text("", start.height_cm.clone()).value,
             ),
+            (PLAYER_HAND, hand_field(s, start.dominant_hand).value),
+            (
+                PLAYER_FEDERATION_ID,
+                Field::text("", start.federation_id.clone()).value,
+            ),
             (PLAYER_NOTES, Field::lines("", start.notes.clone()).value),
+            (PLAYER_EMAIL, Field::text("", start.email.clone()).value),
+            (
+                PLAYER_PREFIX,
+                Field::dropdown("", prefix_of(core, &p.team_id, start)).value,
+            ),
+            (PLAYER_PHONE, Field::text("", start.phone.clone()).value),
         ];
+        p.proposed = start
+            .phone
+            .is_empty()
+            .then(|| prefix_of(core, &p.team_id, start));
         for (field, value) in values {
             if let Some(f) = self.form.fields.get_mut(field) {
                 f.value = value;
@@ -860,12 +974,12 @@ impl Editor {
         id: Option<String>,
         day: Option<NaiveDate>,
     ) -> Result<Editor, MobileError> {
-        let now = Local::now();
+        let now = core.clock().zoned_now();
         // a time the clock skips on that day (summer time): now
         let new = day
             .and_then(|d| d.and_time(now.time()).and_local_timezone(Local).earliest())
-            .unwrap_or(now)
-            .fixed_offset();
+            .map(|at| at.fixed_offset())
+            .unwrap_or(now);
         let data = match &id {
             Some(id) => core.match_form(team_id.clone(), id.clone())?,
             None => MatchForm::new(new),
@@ -978,6 +1092,7 @@ impl Editor {
                 id,
                 data,
                 roster: vec![],
+                logos: opponent_logos(core, &opponents),
                 opponents,
                 competitions,
                 formats,
@@ -1298,7 +1413,7 @@ impl Editor {
                 if let Some(slot) = self.correcting_slot() {
                     *slot = None;
                 }
-                self.form.error = None;
+                self.form.clear();
                 let at = self.sheet().and_then(|sheet| {
                     sheet
                         .tiles
@@ -1313,7 +1428,7 @@ impl Editor {
             Err(MobileError::Namesake { reason }) => self.namesake = Some(reason),
             Err(e) => {
                 if let Some(Some(c)) = self.correcting_slot() {
-                    c.form.error = Some(e.to_string());
+                    c.form.fail(e.to_string());
                 }
             }
         }
@@ -1441,7 +1556,7 @@ impl Editor {
             Ok(Corrected::Season(players)) => self.set_season_players(players),
             Err(e) => {
                 if let Some(Some(c)) = self.correcting_slot() {
-                    c.form.error = Some(e.to_string());
+                    c.form.fail(e.to_string());
                 }
                 return;
             }
@@ -1482,9 +1597,53 @@ impl Editor {
             .map(|c| &mut c.form)
     }
 
+    /// The prefix proposed for the nationality written, unless the user
+    /// chose another one.
+    fn propose_prefix(&mut self, core: &Scout4All) {
+        let Kind::Player(p) = &mut self.kind else {
+            return;
+        };
+        let untouched = p
+            .proposed
+            .as_ref()
+            .is_some_and(|proposed| *proposed == self.form.text(PLAYER_PREFIX))
+            && self.form.text(PLAYER_PHONE).trim().is_empty();
+        if !untouched {
+            return;
+        }
+        let form = PlayerForm {
+            nationality: countries::chosen(core, &self.form.text(PLAYER_NATIONALITY))
+                .ok()
+                .flatten(),
+            ..PlayerForm::default()
+        };
+        let prefix = prefix_of(core, &p.team_id, &form);
+        if let Some(field) = self.form.fields.get_mut(PLAYER_PREFIX) {
+            field.value = Field::dropdown("", prefix.clone()).value;
+        }
+        p.proposed = Some(prefix);
+    }
+
     fn changed(&mut self, core: &Scout4All, s: &Strings, field: usize) {
         match (&mut self.kind, field) {
             (Kind::Player(p), PLAYER_NAME) if p.id.is_none() => self.offer_persons(s),
+            (Kind::Player(_), PLAYER_PREFIX) => {
+                let (written, all) = (
+                    self.form.text(PLAYER_PREFIX),
+                    self.form.browsing(PLAYER_PREFIX),
+                );
+                self.form
+                    .suggest(PLAYER_PREFIX, countries::prefixes(core, &written, all));
+            }
+            (Kind::Player(_), PLAYER_NATIONALITY) => {
+                let (written, all) = (
+                    self.form.text(PLAYER_NATIONALITY),
+                    self.form.browsing(PLAYER_NATIONALITY),
+                );
+                self.form
+                    .suggest(PLAYER_NATIONALITY, countries::offered(core, &written, all));
+                self.propose_prefix(core);
+            }
             // a player taken to the new season, or left
             (Kind::Season(t), f) if f >= SEASON_PLAYERS => {
                 let mut players = t.players.clone();
@@ -1517,10 +1676,11 @@ impl Editor {
                     m.data.roster = None;
                     m.data.numbers.clear();
                     m.opponents = core.opponent_choices(team.clone()).unwrap_or_default();
+                    m.logos = opponent_logos(core, &m.opponents);
                 }
                 self.linked();
                 if let Err(e) = self.toggle(core, None) {
-                    self.form.error = Some(e.to_string());
+                    self.form.fail(e.to_string());
                 }
             }
             (Kind::Match(m), MATCH_OPPONENT) => {
@@ -1529,13 +1689,25 @@ impl Editor {
                     scout4all_mobile::offered_names(names, self.form.text(MATCH_OPPONENT))
                         .into_iter()
                         .map(|name| {
-                            let label = m
-                                .opponents
-                                .iter()
-                                .find(|o| o.name == name)
+                            // the first of the name, the one `linked` takes
+                            let choice = m.opponents.iter().find(|o| o.name == name);
+                            let label = choice
                                 .and_then(|o| o.year)
                                 .map_or_else(|| name.clone(), |year| format!("{name} ({year})"));
-                            Suggestion { label, value: name }
+                            let logo = choice.and_then(|o| o.team).and_then(|id| m.logos.get(&id));
+                            let picture = logo.cloned().map_or_else(
+                                || {
+                                    ui::TeamPicture::Initials(scout4all_core::names::initials(
+                                        &name,
+                                    ))
+                                },
+                                ui::TeamPicture::Logo,
+                            );
+                            Suggestion {
+                                label,
+                                value: name,
+                                picture: Some(picture),
+                            }
                         })
                         .collect();
                 self.form.suggest(MATCH_OPPONENT, offered);
@@ -1556,7 +1728,11 @@ impl Editor {
                                     || name.clone(),
                                     |season| format!("{name} ({season})"),
                                 );
-                            Suggestion { label, value: name }
+                            Suggestion {
+                                label,
+                                value: name,
+                                picture: None,
+                            }
                         })
                         .collect();
                 self.form.suggest(MATCH_COMPETITION, offered);
@@ -1565,7 +1741,7 @@ impl Editor {
             (Kind::Match(m), f) if f >= MATCH_ROSTER => {
                 let toggled = m.roster.get(f - MATCH_ROSTER).map(|p| p.id);
                 if let Err(e) = self.toggle(core, toggled) {
-                    self.form.error = Some(e.to_string());
+                    self.form.fail(e.to_string());
                 }
             }
             _ => {}
@@ -1627,6 +1803,26 @@ impl Editor {
                 core.save_competition(c.id, form).map(|()| c.id.to_string())
             }
             Kind::Player(p) => {
+                let nationality =
+                    countries::chosen(core, &f.text(PLAYER_NATIONALITY)).map_err(|()| {
+                        MobileError::InvalidPlayer {
+                            field: PlayerField::Nationality,
+                            reason: s.no_country_found.to_string(),
+                        }
+                    })?;
+                let phone_country =
+                    countries::of_prefix(core, &f.text(PLAYER_PREFIX)).map_err(|()| {
+                        MobileError::InvalidPlayer {
+                            field: PlayerField::Phone,
+                            reason: s.no_country_found.to_string(),
+                        }
+                    });
+                let phone = f.text(PLAYER_PHONE);
+                // without a number the prefix says nothing
+                let phone_country = match phone.trim().is_empty() {
+                    true => None,
+                    false => phone_country?,
+                };
                 let form = PlayerForm {
                     name: f.text(PLAYER_NAME),
                     number: f.text(PLAYER_NUMBER),
@@ -1638,6 +1834,17 @@ impl Editor {
                     birth_date: f.text(PLAYER_BIRTH),
                     height_cm: f.text(PLAYER_HEIGHT),
                     notes: f.text(PLAYER_NOTES),
+                    nationality,
+                    dominant_hand: f
+                        .index(PLAYER_HAND)
+                        .checked_sub(1)
+                        .and_then(|i| HANDS.get(i))
+                        .copied(),
+                    federation_id: f.text(PLAYER_FEDERATION_ID),
+                    email: f.text(PLAYER_EMAIL),
+                    phone_country,
+                    phone,
+                    birth_place: f.text(PLAYER_BIRTH_PLACE),
                     person: p.person.as_ref().map(|person| person.id),
                 };
                 let id =
@@ -1680,6 +1887,9 @@ impl Editor {
                 PlayerField::Role => PLAYER_ROLE,
                 PlayerField::BirthDate => PLAYER_BIRTH,
                 PlayerField::Height => PLAYER_HEIGHT,
+                PlayerField::Nationality => PLAYER_NATIONALITY,
+                PlayerField::Email => PLAYER_EMAIL,
+                PlayerField::Phone => PLAYER_PHONE,
             }),
             MobileError::InvalidCompetition { field, .. } => Some(match field {
                 CompetitionField::Name => COMPETITION_NAME,
@@ -1717,7 +1927,7 @@ impl Editor {
             }
             // the details of a match, then its score sheet
             Outcome::Save if self.step(false) => {
-                self.form.error = None;
+                self.form.clear();
                 Edited::Stay
             }
             Outcome::Save => self.saved(core, s, false),
@@ -1756,7 +1966,7 @@ impl Editor {
     fn saved(&mut self, core: &Scout4All, s: &Strings, namesake_confirmed: bool) -> Edited {
         self.namesake = None;
         if let Some(warning) = self.venue_warning(core) {
-            self.form.error = Some(warning);
+            self.form.warn(warning);
             return Edited::Stay;
         }
         match self.save(core, s, namesake_confirmed) {
@@ -1781,9 +1991,10 @@ impl Editor {
                         Kind::Season(_) => self.show_season(field >= SEASON_PLAYERS),
                         Kind::Team(_) | Kind::Competition(_) | Kind::Player(_) => {}
                     }
-                    self.form.focused = field;
+                    self.form.reject(field, e.to_string());
+                } else {
+                    self.form.fail(e.to_string());
                 }
-                self.form.error = Some(e.to_string());
                 Edited::Stay
             }
         }
@@ -1932,11 +2143,11 @@ impl Editor {
         };
         match scout4all_core::assets::normalize_logo(&bytes) {
             Ok(image) => {
-                t.shown = logo_handle(&image.data);
+                t.shown = ui::TeamLogo::from_png(&image.data);
                 t.logo = LogoEdit::Replace(bytes);
-                self.form.error = None;
+                self.form.clear();
             }
-            Err(e) => self.form.error = Some(e.to_string()),
+            Err(e) => self.form.fail(e.to_string()),
         }
     }
 
@@ -1956,13 +2167,11 @@ impl Editor {
             Ok(face) => {
                 p.shown = logo_handle(&face);
                 p.photo = PhotoEdit::Replace(face);
-                self.form.error = None;
+                self.form.clear();
             }
-            Err(form::Face::None) => self.form.error = Some(s.no_face.to_string()),
-            Err(form::Face::Many(n)) => {
-                self.form.error = Some(ui::fill(s.many_faces, &[n.to_string()]))
-            }
-            Err(form::Face::Other(e)) => self.form.error = Some(e),
+            Err(form::Face::None) => self.form.fail(s.no_face.to_string()),
+            Err(form::Face::Many(n)) => self.form.fail(ui::fill(s.many_faces, &[n.to_string()])),
+            Err(form::Face::Other(e)) => self.form.fail(e),
         }
     }
 
@@ -2029,11 +2238,7 @@ impl Editor {
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
         let picture: Element<'a, M> = match &t.shown {
-            Some(handle) => iced::widget::image(handle.clone())
-                .width(Length::Fixed(LOGO_BOX))
-                .height(Length::Fixed(LOGO_BOX))
-                .content_fit(iced::ContentFit::Contain)
-                .into(),
+            Some(logo) => ui::team_logo(logo, LOGO_BOX, c),
             None => container(text(s.no_logo).size(SIZE_SMALL).color(c.muted))
                 .center_x(Length::Fixed(LOGO_BOX))
                 .center_y(Length::Fixed(LOGO_BOX))
@@ -2092,6 +2297,11 @@ impl Editor {
             let outcome = form.key(ck);
             return self.correction_outcome(core, s, outcome);
         }
+        // a dialog over the form takes the keys
+        if self.form.notice.is_some() {
+            self.form.key(ck);
+            return Edited::Stay;
+        }
         if self.on_roster() && ck == key!(e) {
             self.open_correction(core, s, self.form.focused);
             return Edited::Stay;
@@ -2142,6 +2352,12 @@ impl Editor {
 
     /// The keys, for the bar at the bottom.
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        // a dialog over the form, or over the correction: only its keys
+        let told = self.form.notice.is_some()
+            || self.correcting().is_some_and(|c| c.form.notice.is_some());
+        if told {
+            return crate::notice::hints(s);
+        }
         let correcting = self.correcting().is_some();
         let toggle = match self.kind {
             Kind::Season(_) => s.season_toggle,
@@ -2182,6 +2398,7 @@ impl Editor {
             .collect(),
             // the details of a match: Enter goes on to the score sheet
             (false, false) => self.form.on_field(
+                s,
                 Form::hints(s)
                     .into_iter()
                     .map(|(k, what)| match (k.as_str(), &self.kind) {
@@ -2465,10 +2682,6 @@ impl Editor {
             .into(),
             false => space::vertical().height(0).into(),
         };
-        let error: Element<'a, M> = match &self.form.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         let buttons = ui::answers(
             Some((theme::icons::CLOSE, s.cancel, on(form::Message::Cancel))),
             theme::icons::CHECK,
@@ -2484,10 +2697,14 @@ impl Editor {
             Some(&title),
             column![
                 text(count).size(SIZE_SMALL).color(c.muted),
+                // what's wrong with the players chosen, under their count
+                match self.form.invalid.as_ref().filter(|(at, _)| *at >= first) {
+                    Some((_, why)) => crate::notice::field_note(why, c),
+                    None => space::vertical().height(0).into(),
+                },
                 legend,
                 add,
                 grid,
-                error,
                 container(buttons)
                     .width(Length::Fill)
                     .align_x(Alignment::End),
@@ -2495,12 +2712,13 @@ impl Editor {
             .spacing(14),
             c,
         );
-        row![
+        let sheet = row![
             space::horizontal().width(Length::FillPortion(1)),
             container(panel).width(Length::FillPortion(6)),
             space::horizontal().width(Length::FillPortion(1)),
         ]
-        .into()
+        .into();
+        self.form.over(sheet, s, c, on)
     }
 }
 
@@ -2519,7 +2737,7 @@ mod tests {
     };
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
     }
 
     /// A team with `players` players, numbered from 1, the seventh the
@@ -2644,7 +2862,7 @@ mod tests {
         assert!(!id.is_empty());
         // none yet: too few
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
-        assert!(e.form.error.is_some());
+        assert!(e.form.told().is_some());
         assert_eq!(step(&e), MatchStep::RosterB);
         for n in 1..=7u8 {
             let first = MATCH_ROSTER + usize::from(n) - 1;
@@ -2656,10 +2874,10 @@ mod tests {
             send(&mut e, &core, Input(ADDING_NAME, format!("Player {n}")));
             send(&mut e, &core, Input(ADDING_NUMBER, n.to_string()));
             send(&mut e, &core, form::Message::Save);
-            assert!(e.correcting().is_none(), "{:?}", e.form.error);
+            assert!(e.correcting().is_none(), "{:?}", e.form.told());
         }
         let Edited::Saved(saved) = press(&mut e, &core, key!(enter)) else {
-            unreachable!("saved: {:?}", e.form.error);
+            unreachable!("saved: {:?}", e.form.told());
         };
         assert_eq!(saved, id);
         let roster = core
@@ -2680,7 +2898,7 @@ mod tests {
             send(e, core, Input(ADDING_NAME, format!("Player {n}")));
             send(e, core, Input(ADDING_NUMBER, n.to_string()));
             send(e, core, form::Message::Save);
-            assert!(e.correcting().is_none(), "{:?}", e.form.error);
+            assert!(e.correcting().is_none(), "{:?}", e.form.told());
         }
         send(e, core, form::Message::Focus(MATCH_ROSTER));
         press(e, core, key!(space));
@@ -2784,7 +3002,7 @@ mod tests {
         assert_eq!(step(&e), MatchStep::RosterB);
         // seven at least, as when the match is created
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
-        assert!(e.form.error.is_some());
+        assert!(e.form.told().is_some());
         write_players_of_b(&mut e, &core);
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Saved(s) if s == id));
         assert_eq!(chosen_of_b(&core, &cortona, &id), 7);
@@ -2938,9 +3156,19 @@ mod tests {
         press(&mut e, &core, key!(enter));
         press(&mut e, &core, key!(enter));
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
-        let told = e.form.error.clone().unwrap_or_default();
+        let told = e.form.told().unwrap_or_default();
         assert!(told.contains("Terontola"), "{told}");
+        // to know, in a dialog
+        assert!(matches!(
+            &e.form.notice,
+            Some(crate::notice::Notice {
+                level: crate::notice::Level::Warning,
+                ..
+            })
+        ));
         assert!(core.matches(cortona.clone()).unwrap().is_empty());
+        // the warning closed, then saved all the same
+        press(&mut e, &core, key!(enter));
         assert!(matches!(
             press(&mut e, &core, key!(enter)),
             Edited::Saved(_)
@@ -2998,6 +3226,27 @@ mod tests {
         assert_eq!(core.competitions().unwrap().len(), 1);
     }
 
+    /// What's wrong in the form of a player is told under its field, the
+    /// country not found too, not in a dialog; it goes as it's corrected.
+    #[test]
+    fn the_errors_of_a_player_are_told_under_their_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 2);
+        let s = strings(LanguageEnum::It);
+        let mut e = Editor::player(s, &core, cortona, None, PlayerForm::default());
+        press(&mut e, &core, key!(enter));
+        assert!(matches!(&e.form.invalid, Some((PLAYER_NAME, _))));
+        assert_eq!(e.form.notice, None);
+        send(&mut e, &core, Input(PLAYER_NAME, "Anna".into()));
+        assert_eq!(e.form.invalid, None);
+        send(&mut e, &core, Input(PLAYER_NATIONALITY, "Atlantide".into()));
+        press(&mut e, &core, key!(enter));
+        assert!(matches!(&e.form.invalid, Some((PLAYER_NATIONALITY, _))));
+        assert_eq!(e.form.focused, PLAYER_NATIONALITY);
+        assert_eq!(e.form.notice, None);
+    }
+
     /// The error of a field takes the keys back to its step.
     #[test]
     fn an_error_goes_back_to_the_step_of_its_field() {
@@ -3011,7 +3260,9 @@ mod tests {
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
         assert_eq!(step(&e), MatchStep::Match);
         assert_eq!(e.form.focused, MATCH_OPPONENT);
-        assert!(e.form.error.is_some());
+        // under its field, not in a dialog: it goes as the field changes
+        assert!(matches!(&e.form.invalid, Some((MATCH_OPPONENT, _))));
+        assert_eq!(e.form.notice, None);
         // the substitutions: the second step
         send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
         press(&mut e, &core, key!(enter));
@@ -3020,6 +3271,67 @@ mod tests {
         press(&mut e, &core, key!(enter));
         assert_eq!(step(&e), MatchStep::Competition);
         assert_eq!(e.form.focused, MATCH_SUBSTITUTIONS);
+    }
+
+    /// The prefix of a new player is the one of the team, then of the
+    /// nationality written, until another one is chosen; the contacts are
+    /// saved and read back, kept by a later edit.
+    #[test]
+    fn the_contacts_of_a_player() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 0);
+        let mut e = Editor::player(s, &core, cortona.clone(), None, PlayerForm::default());
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Italia +39");
+        send(&mut e, &core, Input(PLAYER_NATIONALITY, "Polonia".into()));
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Polonia +48");
+        send(&mut e, &core, Input(PLAYER_NATIONALITY, String::new()));
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Italia +39");
+        send(&mut e, &core, Input(PLAYER_PREFIX, "Francia".into()));
+        send(&mut e, &core, Input(PLAYER_NATIONALITY, "Polonia".into()));
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Francia");
+        send(&mut e, &core, Input(PLAYER_PREFIX, "Italia +39".into()));
+
+        send(&mut e, &core, Input(PLAYER_NAME, "Anna".into()));
+        send(&mut e, &core, Input(PLAYER_NUMBER, "5".into()));
+        send(&mut e, &core, Choose(PLAYER_ROLE, 1));
+        send(&mut e, &core, Input(PLAYER_BIRTH_PLACE, "Cortona".into()));
+        send(&mut e, &core, Input(PLAYER_EMAIL, "anna".into()));
+        send(&mut e, &core, Input(PLAYER_PHONE, "333 123 4567".into()));
+        send(&mut e, &core, form::Message::Save);
+        assert!(matches!(&e.form.invalid, Some((PLAYER_EMAIL, _))));
+        send(
+            &mut e,
+            &core,
+            Input(PLAYER_EMAIL, "anna@example.com".into()),
+        );
+        assert!(matches!(
+            send(&mut e, &core, form::Message::Save),
+            Edited::Saved(_)
+        ));
+
+        let saved = core.team(cortona.clone()).unwrap().players.remove(0);
+        let mut e = Editor::player(
+            s,
+            &core,
+            cortona.clone(),
+            Some(saved.id.clone()),
+            saved.form.clone(),
+        );
+        assert_eq!(e.form.text(PLAYER_PREFIX), "Italia +39");
+        assert_eq!(e.form.text(PLAYER_EMAIL), "anna@example.com");
+        assert!(matches!(
+            send(&mut e, &core, form::Message::Save),
+            Edited::Saved(_)
+        ));
+        let again = core.team(cortona).unwrap().players.remove(0);
+        assert_eq!(again.form, saved.form);
+        assert_eq!(again.form.birth_place, "Cortona");
+        assert_eq!(
+            again.contacts.phone.map(|p| p.shown).as_deref(),
+            Some("+39 333 123 4567")
+        );
     }
 
     /// A new match can be of another team A, with its players, not against
@@ -3031,6 +3343,17 @@ mod tests {
         let cortona = team(&core, "Cortona", 7);
         let arezzo = team(&core, "Arezzo", 8);
         let mut e = new_match(&core, &cortona);
+        // offered with its picture: the initials, without a logo
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Are".into()));
+        assert_eq!(
+            e.form
+                .suggested(MATCH_OPPONENT)
+                .iter()
+                .map(|s| (s.value.as_str(), s.picture.clone()))
+                .collect::<Vec<_>>(),
+            [("Arezzo", Some(ui::TeamPicture::Initials("A".into())))]
+        );
+        send(&mut e, &core, Input(MATCH_OPPONENT, String::new()));
         let Kind::Match(m) = &e.kind else {
             unreachable!("a match")
         };
@@ -3110,7 +3433,8 @@ mod tests {
         // in use: refused, the form stays
         send(&mut e, &core, Input(CORRECTION_NUMBER, "3".into()));
         assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
-        assert!(correcting(&e).and_then(|c| c.form.error.clone()).is_some());
+        assert!(correcting(&e).and_then(|c| c.form.told()).is_some());
+        press(&mut e, &core, key!(enter));
         let opposite = core
             .roles()
             .iter()

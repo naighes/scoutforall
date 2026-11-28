@@ -93,6 +93,12 @@ impl TeamRows {
                     birth_date: p.birth_date,
                     height_cm: p.height_cm,
                     notes: p.notes.clone(),
+                    nationality: p.nationality,
+                    dominant_hand: p.dominant_hand,
+                    federation_id: p.federation_id.clone(),
+                    email: p.email.clone(),
+                    phone: p.phone.clone(),
+                    birth_place: p.birth_place.clone(),
                     deleted: false,
                 })
                 .collect(),
@@ -130,6 +136,12 @@ impl TeamRows {
                 birth_date: person.birth_date,
                 height_cm: person.height_cm,
                 notes: person.notes.clone(),
+                nationality: person.nationality,
+                dominant_hand: person.dominant_hand,
+                federation_id: person.federation_id.clone(),
+                email: person.email.clone(),
+                phone: person.phone.clone(),
+                birth_place: person.birth_place.clone(),
             })
             .map(|player| match member.deleted {
                 // the person keeps them, for the other teams

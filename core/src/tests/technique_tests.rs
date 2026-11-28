@@ -252,7 +252,7 @@ mod tests {
 
     fn serve(player: Uuid, technique: Option<TechniqueEnum>) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: S,
             player: Some(player),
             eval: Some(Positive),
@@ -564,7 +564,7 @@ mod tests {
         technique: Option<TechniqueEnum>,
     ) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: Some(player),
             eval: Some(eval),
@@ -576,7 +576,7 @@ mod tests {
 
     fn opp(event_type: EventTypeEnum) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: None,
             eval: None,

@@ -4,6 +4,7 @@
 //! play: a removed player stays in the team only for the matches played.
 
 use crate::{
+    clock::UtcNow,
     localization::Labels,
     providers::set_writer::SetWriter,
     rally::Touches,
@@ -314,6 +315,7 @@ pub async fn start(
     input: SetStartInput,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
     opponent: Option<TeamEntry>,
+    now: UtcNow,
 ) -> Result<ScoutingSession, SetStartError> {
     let (set, theirs) = match (&input.opponent, opponent) {
         (Some(_), None) => Err(SetStartError::CouldNotStartSet),
@@ -363,8 +365,10 @@ pub async fn start(
         }
     }?;
     match theirs {
-        None => resume(current_match, set, set_writer),
-        Some((team_b, touches)) => resume_both(current_match, set, touches, team_b, set_writer),
+        None => resume(current_match, set, set_writer, now),
+        Some((team_b, touches)) => {
+            resume_both(current_match, set, touches, team_b, set_writer, now)
+        }
     }
 }
 
@@ -376,8 +380,9 @@ pub fn resume_both(
     touches: Touches,
     team_b: TeamEntry,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
+    now: UtcNow,
 ) -> Result<ScoutingSession, SetStartError> {
-    resume(current_match, set, set_writer).and_then(|session| {
+    resume(current_match, set, set_writer, now).and_then(|session| {
         session
             .with_theirs(team_b, touches)
             .map_err(|_| SetStartError::CouldNotComputeSnapshot)
@@ -389,8 +394,9 @@ pub fn resume(
     current_match: MatchEntry,
     set: SetEntry,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
+    now: UtcNow,
 ) -> Result<ScoutingSession, SetStartError> {
     set.compute_snapshot(current_match.max_substitutions)
         .map_err(|_| SetStartError::CouldNotComputeSnapshot)
-        .map(|snapshot| ScoutingSession::new(current_match, set, snapshot, set_writer))
+        .map(|snapshot| ScoutingSession::new(current_match, set, snapshot, set_writer, now))
 }

@@ -6,13 +6,17 @@
 //! providers of the core. The final app must never block the UI: the plan is
 //! to move to the `async fn` of UniFFI.
 
-use chrono::{DateTime, FixedOffset, Local, NaiveDate, Utc};
+#[cfg(doc)]
+use crate::clock::SystemClock;
+use crate::clock::{Clock, ClockExt, TestClock};
+use chrono::{DateTime, FixedOffset, NaiveDate, Utc};
 use scout4all_core::{
     analytics::{
         finished::{FinishedMatches, QueuedFinishedMatches},
         queue_manager::QueueManager,
         upload::{UploadStep, upload_next, upload_url},
     },
+    assets::{LogoBackdrop, LogoTone},
     benchmark::{Measure, band, grade},
     competition_form::{CompetitionForm, CompetitionFormError},
     db,
@@ -38,8 +42,12 @@ use scout4all_core::{
     localization::{Labels, Language},
     logging::logger::{init_logger, log_error, log_info},
     match_form::{CompetitionInput, MatchForm, MatchFormError, RosterNumber},
+    names,
     overview::{Errors, Fundamental, Overview, distribution_in, stats_of},
-    player_form::{self, PlayerForm, PlayerFormError, name_the_removed},
+    player_form::{
+        self, Contacts, EmailContact, PhoneContact, PlayerForm, PlayerFormError, name_the_removed,
+    },
+    player_profile::{PlayerSeasonStats, age, has_training},
     providers::{
         match_reader::MatchReader,
         match_writer::MatchWriter,
@@ -54,16 +62,20 @@ use scout4all_core::{
             queue::SqliteQueue,
             sets::{SqliteSetReader, SqliteSetWriter},
             teams::{SqliteTeamReader, SqliteTeamWriter},
+            training::SqliteTraining,
             upload::SqliteUploads,
             video::SqliteVideoProfiles,
         },
         team_reader::TeamReader,
         team_writer::TeamWriter,
+        training_totals::TrainingTotals,
     },
     scouting::{ChoiceOrder, PlayerChoice, Progress, ScoutingError, ScoutingSession, ScoutingStep},
     season::{self, SeasonError, SeasonMember},
     set_start::{self, MIN_PLAYERS_FOR_FALLBACK_LIBERO, NextSet, SetStartForm, next_set},
-    settings::{ActivitySearch, Consent, PinnedTeams, TeamDefaults, VideoSeconds},
+    settings::{
+        ActivitySearch, ArchiveContacts, Consent, HomeView, PinnedTeams, TeamDefaults, VideoSeconds,
+    },
     shapes::{
         country::CountryCode,
         court_zone::{
@@ -76,7 +88,7 @@ use scout4all_core::{
         },
         flags::{BlockersEnum, ReceptionSchemeEnum},
         r#match::{MatchEntry, MatchSummary, PlayedMatch},
-        player::PlayerEntry,
+        player::{DominantHand, PlayerEntry},
         set::SetEntry,
         snapshot::{EventEntry, Formation},
         stats::{
@@ -93,6 +105,7 @@ use scout4all_core::{
     },
     team_form::{TeamForm, TeamFormError},
     touch_edit::TouchEdit,
+    training::totals::Scope as TrainingScope,
     trend::{Replay, Series, TrendPoint},
     video::{EventRef, StoredProfile, VideoProfile, VideoProfiles, place},
 };
@@ -113,6 +126,7 @@ use uuid::Uuid;
 uniffi::setup_scaffolding!();
 
 mod analysis;
+pub mod clock;
 pub mod sender;
 pub use analysis::*;
 pub mod strip;
@@ -335,6 +349,20 @@ pub struct PlayerForm {
     pub height_cm: String,
     #[uniffi(default = "")]
     pub notes: String,
+    #[uniffi(default = None)]
+    pub nationality: Option<CountryCode>,
+    #[uniffi(default = None)]
+    pub dominant_hand: Option<DominantHand>,
+    #[uniffi(default = "")]
+    pub federation_id: String,
+    #[uniffi(default = "")]
+    pub email: String,
+    #[uniffi(default = None)]
+    pub phone_country: Option<CountryCode>,
+    #[uniffi(default = "")]
+    pub phone: String,
+    #[uniffi(default = "")]
+    pub birth_place: String,
     #[uniffi(default = None)]
     pub person: Option<Uuid>,
 }
@@ -584,6 +612,17 @@ pub enum PlayerField {
     Number,
     BirthDate,
     Height,
+    /// a country the app couldn't find among the ones it offers (the core
+    /// takes it chosen)
+    Nationality,
+    Email,
+    Phone,
+}
+
+#[uniffi::remote(Enum)]
+pub enum DominantHand {
+    Right,
+    Left,
 }
 
 impl From<PlayerFormError> for PlayerField {
@@ -594,6 +633,8 @@ impl From<PlayerFormError> for PlayerField {
             PlayerFormError::InvalidNumber | PlayerFormError::NumberInUse => PlayerField::Number,
             PlayerFormError::InvalidBirthDate => PlayerField::BirthDate,
             PlayerFormError::InvalidHeight => PlayerField::Height,
+            PlayerFormError::InvalidEmail => PlayerField::Email,
+            PlayerFormError::InvalidPhone => PlayerField::Phone,
         }
     }
 }
@@ -680,8 +721,31 @@ pub struct Player {
     pub name: String,
     pub number: u8,
     pub role: Option<String>,
+    /// in place of a missing photo
+    pub initials: String,
     /// what the form starts from, to edit the player
     pub form: PlayerForm,
+    /// how to reach them
+    pub contacts: Contacts,
+}
+
+#[uniffi::remote(Record)]
+pub struct Contacts {
+    pub email: Option<EmailContact>,
+    pub phone: Option<PhoneContact>,
+}
+
+#[uniffi::remote(Record)]
+pub struct EmailContact {
+    pub address: String,
+    pub link: String,
+}
+
+#[uniffi::remote(Record)]
+pub struct PhoneContact {
+    pub shown: String,
+    pub call_link: Option<String>,
+    pub whatsapp_link: Option<String>,
 }
 
 /// A person of the registry that can be added to a team (D5): playing in
@@ -774,6 +838,8 @@ pub struct CompetitionChoice {
 pub struct CompetitionListing {
     pub id: Uuid,
     pub name: String,
+    /// of the name, at the head of its row
+    pub initials: String,
     pub season: Option<String>,
     pub format: String,
     pub matches: u32,
@@ -801,6 +867,38 @@ pub struct TeamDetails {
     pub form: TeamForm,
 }
 
+/// A team in the same season that a player is active in.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ProfileTeam {
+    pub id: String,
+    pub name: String,
+    pub year: u16,
+    pub number: u8,
+    pub role: Option<RoleEnum>,
+}
+
+/// What the profile of a player in one team shows beyond the form: the
+/// season totals and what's worked out from the person.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlayerProfile {
+    /// in place of a missing photo
+    pub initials: String,
+    /// today, none without a birth date
+    pub age: Option<u32>,
+    pub matches_played: u32,
+    pub matches_scouted: u32,
+    pub sets_played: u32,
+    pub points: u32,
+    pub attack_points: u32,
+    pub block_points: u32,
+    pub serve_points: u32,
+    /// whether to show the attendance (`player_profile::has_training`)
+    pub has_training: bool,
+    /// present includes late; absent sessions form the denominator
+    pub attendance_percent: Option<u8>,
+    pub other_teams: Vec<ProfileTeam>,
+}
+
 /// A team as the list shows it: one that can't be read keeps its folder.
 #[derive(Debug, PartialEq, uniffi::Enum)]
 pub enum TeamListing {
@@ -811,6 +909,8 @@ pub enum TeamListing {
         players: u32,
         /// kept at the top of the list (see `set_pinned`)
         pinned: bool,
+        /// in place of a missing logo
+        initials: String,
     },
     Unreadable {
         folder: String,
@@ -819,11 +919,32 @@ pub enum TeamListing {
 
 /// A match as the team page lists it: one that can't be read, or whose sets
 /// don't replay, keeps its folder.
+/// How far a match is: see `core`'s `MatchStanding`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum MatchStanding {
+    ToPlay,
+    InProgress,
+    Over,
+}
+
+impl From<scout4all_core::shapes::r#match::MatchStanding> for MatchStanding {
+    fn from(standing: scout4all_core::shapes::r#match::MatchStanding) -> Self {
+        use scout4all_core::shapes::r#match::MatchStanding as Core;
+        match standing {
+            Core::ToPlay => MatchStanding::ToPlay,
+            Core::InProgress => MatchStanding::InProgress,
+            Core::Over => MatchStanding::Over,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, uniffi::Enum)]
 pub enum MatchListing {
     Match {
         id: String,
         opponent: String,
+        /// the team the opponent is, for its logo: none for a name only
+        opponent_team: Option<String>,
         home: bool,
         /// RFC 3339, with the offset of where it was played: the app formats
         /// it in its language
@@ -831,7 +952,7 @@ pub enum MatchListing {
         /// the sets won by the team and by the opponent
         won: u8,
         lost: u8,
-        finished: bool,
+        standing: MatchStanding,
         /// team A, when the team is B of a match scouted from A's side
         /// only: the result as B sees it, nothing to scout from here
         scouted_by: Option<String>,
@@ -875,6 +996,8 @@ fn next_of(m: &MatchSummary) -> NextSetKind {
 pub struct HomeMatch {
     pub team_id: String,
     pub team_name: String,
+    /// in place of a missing logo of the team
+    pub team_initials: String,
     pub id: String,
     pub opponent: String,
     pub home: bool,
@@ -882,16 +1005,30 @@ pub struct HomeMatch {
     pub date: String,
     pub won: u8,
     pub lost: u8,
+    pub standing: MatchStanding,
     pub next: NextSetKind,
 }
 
-/// The home: the matches not over, the last ones over, of every team, the
-/// most recent first; then the teams.
-#[derive(Debug, PartialEq, uniffi::Record)]
+/// The home: the matches not over, the last ones over, the most recent
+/// first; then the teams. Of the teams not hidden from it.
+#[derive(Debug, Default, PartialEq, uniffi::Record)]
 pub struct Home {
     pub in_progress: Vec<HomeMatch>,
     pub recent: Vec<HomeMatch>,
     pub teams: Vec<TeamListing>,
+    /// the teams hidden, to show them again
+    pub hidden: Vec<TeamListing>,
+    pub week_closed: bool,
+    pub matches_closed: bool,
+    pub teams_closed: bool,
+}
+
+/// A block of the home, closed or open.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum HomeBlock {
+    Week,
+    Matches,
+    Teams,
 }
 
 /// How many matches over the home lists.
@@ -932,6 +1069,7 @@ fn migrate_folder(
     db: &Database,
     data_dir: &Path,
     labels: &Labels,
+    today: NaiveDate,
 ) -> Option<String> {
     let backup = Backup {
         dir: data_dir
@@ -941,6 +1079,7 @@ fn migrate_folder(
             || "scout4all".to_string(),
             |name| name.to_string_lossy().into_owned(),
         ),
+        day: today,
     };
     match runtime.block_on(migrate(store, db, &backup, labels)) {
         Ok(migrated) => {
@@ -1074,6 +1213,8 @@ pub struct DvwImported {
 pub struct TeamChoice {
     pub id: String,
     pub name: String,
+    /// the one it has here, else the one the archive would give it
+    pub logo: Option<Vec<u8>>,
 }
 
 /// What an archive holds, to confirm importing it: only an archive that
@@ -1084,6 +1225,8 @@ pub enum ArchivePreview {
         name: String,
         year: u16,
         players: u32,
+        /// as `TeamChoice::logo`
+        logo: Option<Vec<u8>>,
     },
     Match {
         opponent: String,
@@ -1102,6 +1245,8 @@ pub enum ArchivePreview {
         year: u16,
         sessions: u32,
         cycles: u32,
+        /// as `TeamChoice::logo`
+        logo: Option<Vec<u8>>,
     },
 }
 
@@ -1461,6 +1606,11 @@ pub struct ScoutingPlayer {
     pub name: String,
     pub number: u8,
     pub role: String,
+    /// in place of a missing photo
+    pub initials: String,
+    /// off the court while the libero plays in their place: to show apart,
+    /// as the court doesn't (see `PlayerChoice::out_for_the_libero`)
+    pub out_for_the_libero: bool,
 }
 
 /// An event as the scout chooses it.
@@ -1803,6 +1953,14 @@ pub struct LiveStats {
     pub sets: Vec<u8>,
     /// reception, attack, serve, block, dig
     pub fundamentals: Vec<FundamentalStats>,
+    /// whether the figures of the team, of its rallies (side out, break
+    /// point, by possession, the rotations, their errors and points), are
+    /// shown: not with players chosen, a rally has none
+    pub team_figures: bool,
+    /// the phases of the rallies in the figures, the one of the filter or
+    /// both: what can't happen in them isn't in the figures (no serve in
+    /// side out, no reception at break point), nor to be shown
+    pub phases: Vec<PhaseEnum>,
     pub side_out: Option<PhaseStats>,
     /// the first, second and later possessions of the side outs
     pub side_out_possessions: Vec<PossessionStats>,
@@ -2727,9 +2885,14 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
             grade: measure.and_then(|m| level(m, Some(percentage))),
         })
     };
+    let phases: Vec<PhaseEnum> = [PhaseEnum::SideOut, PhaseEnum::Break]
+        .into_iter()
+        .filter(|p| filter.phase.is_none_or(|asked| asked == *p))
+        .collect();
     let errors = |e: &Errors| {
         e.by_event
             .iter()
+            .filter(|(event, _)| possible(filter.phase, *event))
             .map(|(event, count)| ErrorCount {
                 event: *event,
                 count: *count,
@@ -2749,13 +2912,19 @@ fn summary(stats: &Stats, filter: &StatsFilter, team: &TeamEntry, labels: &Label
     LiveStats {
         scope: StatsScope::Match,
         sets: vec![],
-        fundamentals: vec![
-            fundamental(EventTypeEnum::P, o.reception),
-            fundamental(EventTypeEnum::A, o.attack),
-            fundamental(EventTypeEnum::S, o.serve),
-            fundamental(EventTypeEnum::B, o.block),
-            fundamental(EventTypeEnum::D, o.dig),
-        ],
+        fundamentals: [
+            (EventTypeEnum::P, o.reception),
+            (EventTypeEnum::A, o.attack),
+            (EventTypeEnum::S, o.serve),
+            (EventTypeEnum::B, o.block),
+            (EventTypeEnum::D, o.dig),
+        ]
+        .into_iter()
+        .filter(|(event, _)| possible(filter.phase, *event))
+        .map(|(event, f)| fundamental(event, f))
+        .collect(),
+        team_figures: !filter.of_players(),
+        phases,
         side_out: phase(o.side_out, Some(Measure::SideOut)),
         side_out_possessions: o
             .side_out_possessions
@@ -2811,6 +2980,21 @@ fn rotation_choices(labels: &Labels) -> Vec<RotationChoice> {
             name: rotation_name(r, labels),
         })
         .collect()
+}
+
+/// Whether the event can happen in the rallies asked for.
+fn possible(phase: Option<PhaseEnum>, event: EventTypeEnum) -> bool {
+    phase.is_none_or(|p| p.has(event))
+}
+
+/// The fundamental in detail of the one asked for: with a phase it can't
+/// happen in, the one it starts with instead.
+fn detailed(phase: Option<PhaseEnum>, event: EventTypeEnum) -> EventTypeEnum {
+    match (possible(phase, event), phase) {
+        (false, Some(PhaseEnum::SideOut)) => EventTypeEnum::P,
+        (false, _) => EventTypeEnum::S,
+        (true, _) => event,
+    }
 }
 
 /// The phases to narrow the figures to.
@@ -2870,6 +3054,7 @@ fn detail_of(
     filter: DetailFilter,
 ) -> Result<DetailStats, MobileError> {
     let narrowed = narrowed(&filter)?;
+    let event = detailed(filter.phase, event);
     let team = teams.first().copied().cloned().unwrap_or_default();
     let team = &team;
     let level = |value: Option<f64>| {
@@ -3028,6 +3213,7 @@ fn detail_of(
         filter,
         fundamentals: FUNDAMENTALS
             .iter()
+            .filter(|e| possible(narrowed.phase, **e))
             .map(|e| EventChoice {
                 value: *e,
                 name: fundamental_name(*e),
@@ -3174,6 +3360,8 @@ fn scouting_player(p: &PlayerEntry, labels: &Labels) -> ScoutingPlayer {
         role: p
             .role
             .map_or_else(String::new, |r| r.friendly_name(labels).to_string()),
+        initials: names::initials(&p.name),
+        out_for_the_libero: false,
     }
 }
 
@@ -3327,8 +3515,12 @@ impl Scouting {
     ) -> Vec<ScoutingPlayer> {
         choices
             .into_iter()
-            .filter_map(|c| session.team().find_player(c.id))
-            .map(|p| self.scouting_player(p))
+            .filter_map(|c| {
+                session.team().find_player(c.id).map(|p| ScoutingPlayer {
+                    out_for_the_libero: c.out_for_the_libero,
+                    ..self.scouting_player(p)
+                })
+            })
             .collect()
     }
 
@@ -3395,6 +3587,21 @@ pub struct ClipPick {
 /// For the apps written in Rust (the desktop app), not exported to the
 /// bindings: they drive the scouting from the keyboard as the TUI does.
 impl Scout4All {
+    /// What time it is, for the app: the clock the core asks too.
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        self.clock.clone()
+    }
+
+    /// What the core asks for the time in UTC (the touches of a scouting).
+    fn utc_now(&self) -> scout4all_core::clock::UtcNow {
+        clock::utc_now_of(self.clock.clone())
+    }
+
+    /// The year on the clock, for a team.
+    fn this_year(&self) -> u16 {
+        u16::try_from(chrono::Datelike::year(&self.clock.today())).unwrap_or_default()
+    }
+
     /// Scouts the set in progress of the match, choosing in `order`: the
     /// keyboard chooses the event first, the touch the player.
     pub fn scouting_in_order(
@@ -3436,12 +3643,21 @@ impl Scout4All {
             reason: e.message(labels),
         };
         match self.set_reader.read_touches(&m, set.set_number)? {
-            None => set_start::resume(m, set, self.set_writer.clone()).map_err(failed),
+            None => {
+                set_start::resume(m, set, self.set_writer.clone(), self.utc_now()).map_err(failed)
+            }
             Some(touches) => {
                 let b = self.read_match_of(team_id, match_id, MatchSide::B)?;
-                set_start::resume_both(m, set, touches, b.team, self.set_writer.clone())
-                    .map(|session| session.with_earlier_of_b(&b.sets))
-                    .map_err(failed)
+                set_start::resume_both(
+                    m,
+                    set,
+                    touches,
+                    b.team,
+                    self.set_writer.clone(),
+                    self.utc_now(),
+                )
+                .map(|session| session.with_earlier_of_b(&b.sets))
+                .map_err(failed)
             }
         }
     }
@@ -3732,6 +3948,7 @@ pub struct Scout4All {
     match_writer: SqliteMatchWriter,
     competitions: SqliteCompetitions,
     persons: SqlitePersons,
+    training: SqliteTraining,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
     videos: SqliteVideoProfiles,
     /// for `config.json`
@@ -3745,9 +3962,19 @@ pub struct Scout4All {
     uploads_enabled: Arc<AtomicBool>,
     /// sends the queue in the background, once `send_in_background`
     sender: Arc<UploadSender>,
+    /// what time it is: the system's, or the one the app gives
+    clock: Arc<dyn Clock>,
 }
 
 type UploadQueueManager = QueueManager<SqliteQueue, SqliteQueue>;
+
+impl Scout4All {
+    /// The data in `data_dir` with the clock of the tests ([`TestClock`]),
+    /// for the Rust tests of `mobile` and of the desktop.
+    pub fn for_tests(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
+        Self::with_clock(data_dir, language, Arc::new(TestClock::new()))
+    }
+}
 
 #[uniffi::export]
 impl Scout4All {
@@ -3756,8 +3983,15 @@ impl Scout4All {
     /// (an error when it can't be opened, e.g. saved by a newer version)
     /// and moves into it what the versions before left in the folder,
     /// after a copy of it beside it (`startup_notice` tells what stayed).
+    /// Asks `clock` what time it is: the app's own, so that the app and
+    /// the core tell the same time. No constructor takes the system's by
+    /// itself: the app passes [`SystemClock`], a test [`TestClock`].
     #[uniffi::constructor]
-    pub fn new(data_dir: String, language: String) -> Result<Arc<Self>, MobileError> {
+    pub fn with_clock(
+        data_dir: String,
+        language: String,
+        clock: Arc<dyn Clock>,
+    ) -> Result<Arc<Self>, MobileError> {
         let data_dir = PathBuf::from(data_dir);
         let language = Language::new(LanguageEnum::from_str(&language).unwrap_or(LanguageEnum::En));
         set_errors_language(language.clone());
@@ -3770,7 +4004,14 @@ impl Scout4All {
                 reason: e.to_string(),
             })?;
         let db = open_database(&data_dir.join(layout::DATABASE), language.labels())?;
-        let notice = migrate_folder(&runtime, &*store, &db, &data_dir, language.labels());
+        let notice = migrate_folder(
+            &runtime,
+            &*store,
+            &db,
+            &data_dir,
+            language.labels(),
+            clock.today(),
+        );
         let queue = Arc::new(SqliteQueue::new(db.clone()));
         let app = Self {
             runtime: Arc::new(runtime),
@@ -3782,6 +4023,7 @@ impl Scout4All {
             match_writer: SqliteMatchWriter::new(db.clone()),
             competitions: SqliteCompetitions::new(db.clone()),
             persons: SqlitePersons::new(db.clone()),
+            training: SqliteTraining::new(db.clone()),
             set_writer: Arc::new(SqliteSetWriter::new(db.clone(), language.clone())),
             match_reader: SqliteMatchReader::new(db.clone(), language.clone()),
             set_reader: SqliteSetReader::new(db.clone(), language.clone()),
@@ -3790,6 +4032,7 @@ impl Scout4All {
             store,
             notice: Mutex::new(notice),
             language,
+            clock,
         };
         // unreadable settings: nothing sent until the terms are accepted
         let enabled = app.read_config().is_ok_and(|c| c.consent.uploads_enabled());
@@ -3820,6 +4063,7 @@ impl Scout4All {
                     id: team.id.to_string(),
                     players: count(&team),
                     pinned: pins.is_pinned(&team.id),
+                    initials: names::initials(&team.name),
                     name: team.name,
                     year: team.year,
                 },
@@ -3863,6 +4107,72 @@ impl Scout4All {
         })
     }
 
+    /// The player's participation, points, training presence and other
+    /// teams in this season.
+    pub fn player_profile(
+        &self,
+        team_id: String,
+        player_id: String,
+    ) -> Result<PlayerProfile, MobileError> {
+        let player_id = parse_id(&player_id)?;
+        let team = self.read_team(&team_id)?;
+        let player = team
+            .find_player(player_id)
+            .filter(|player| !player.deleted)
+            .ok_or_else(|| {
+                failed(format!(
+                    "player {player_id} is not active in team {team_id}"
+                ))
+            })?;
+        let matches = self
+            .runtime
+            .block_on(self.match_reader.read_scouted(&team))?;
+        let stats = PlayerSeasonStats::of(player_id, &matches)?;
+
+        let totals = self
+            .runtime
+            .block_on(self.training.totals(&team.id, TrainingScope::All))?;
+        let attendance = self.runtime.block_on(
+            self.training
+                .attendance_report(&team.id, TrainingScope::All),
+        )?;
+        let attendance_percent = attendance
+            .players
+            .iter()
+            .find(|player| player.person_id == player_id)
+            .and_then(|player| player.percent());
+        let other_teams = self
+            .persons
+            .teams_of(&player_id)?
+            .into_iter()
+            .filter(|other| other.team != team.id && other.year == team.year)
+            .map(|other| ProfileTeam {
+                id: other.team.to_string(),
+                name: other.name,
+                year: other.year,
+                number: other.number,
+                role: other.role,
+            })
+            .collect();
+
+        Ok(PlayerProfile {
+            initials: names::initials(&player.name),
+            age: player
+                .birth_date
+                .and_then(|birth| age(birth, self.clock.today())),
+            matches_played: stats.matches_played,
+            matches_scouted: stats.matches_scouted,
+            sets_played: stats.sets_played,
+            points: stats.points(),
+            attack_points: stats.attack_points,
+            block_points: stats.block_points,
+            serve_points: stats.serve_points,
+            has_training: has_training(&totals),
+            attendance_percent,
+            other_teams,
+        })
+    }
+
     /// The matches the team plays, as A or as B, from its side: the most
     /// recent first, then the unreadable ones.
     pub fn matches(&self, team_id: String) -> Result<Vec<MatchListing>, MobileError> {
@@ -3876,13 +4186,14 @@ impl Scout4All {
                     summary: m,
                     scouted_by,
                 }) => MatchListing::Match {
+                    standing: m.standing().into(),
                     date: m.date.to_rfc3339(),
                     id: m.id,
                     opponent: m.opponent,
+                    opponent_team: m.opponent_team.map(|b| b.to_string()),
                     home: m.home,
                     won: m.us_wins,
                     lost: m.them_wins,
-                    finished: m.finished,
                     scouted_by: scouted_by.map(|a| a.to_string()),
                 },
                 Err(unreadable) => MatchListing::Unreadable {
@@ -3963,6 +4274,7 @@ impl Scout4All {
             .into_iter()
             .map(|(c, matches)| CompetitionListing {
                 id: c.id,
+                initials: names::initials(&c.name),
                 name: c.name,
                 season: c.season,
                 format: c.format.name(labels).to_string(),
@@ -4018,34 +4330,101 @@ impl Scout4All {
             .collect()
     }
 
-    /// The home: the matches of every team not over and the last ones
-    /// over, the most recent first, then the teams. What can't be read is
-    /// left out of the matches; the teams list it.
+    /// Hides the team from the home, or shows it again.
+    pub fn set_hidden(&self, team_id: String, hidden: bool) -> Result<(), MobileError> {
+        let id = parse_id(&team_id)?;
+        self.update_config(|config| AppConfig {
+            home: config.home.with_hidden(id, hidden),
+            ..config
+        })
+    }
+
+    /// Whether the team is left out of the home.
+    pub fn team_hidden(&self, team_id: String) -> Result<bool, MobileError> {
+        let id = parse_id(&team_id)?;
+        Ok(!self.read_config()?.home.shows(&id))
+    }
+
+    /// Closes a block of the home, or opens it again.
+    pub fn set_home_block_closed(&self, block: HomeBlock, closed: bool) -> Result<(), MobileError> {
+        self.update_config(|config| {
+            let home = config.home;
+            let home = match block {
+                HomeBlock::Week => HomeView {
+                    home_week_closed: closed,
+                    ..home
+                },
+                HomeBlock::Matches => HomeView {
+                    home_matches_closed: closed,
+                    ..home
+                },
+                HomeBlock::Teams => HomeView {
+                    home_teams_closed: closed,
+                    ..home
+                },
+            };
+            AppConfig { home, ..config }
+        })
+    }
+
+    /// The week of the home that holds `date`: `training_agenda` of the
+    /// teams not hidden.
+    pub fn home_week(&self, date: String) -> Result<Vec<training::AgendaDay>, MobileError> {
+        let view = self.read_config()?.home;
+        let shown = |team: &str| Uuid::parse_str(team).map_or(true, |id| view.shows(&id));
+        Ok(self
+            .training_agenda(None, training::AgendaSpan::Week, date)?
+            .into_iter()
+            .map(|day| training::AgendaDay {
+                events: day
+                    .events
+                    .into_iter()
+                    .filter(|e| shown(&e.team_id))
+                    .collect(),
+                ..day
+            })
+            .collect())
+    }
+
+    /// The home: the matches not over and the last ones over, the most
+    /// recent first, then the teams, all of the teams not hidden. What
+    /// can't be read is left out of the matches; the teams list it.
     pub fn home(&self) -> Result<Home, MobileError> {
-        let teams = self.teams()?;
+        let view = self.read_config()?.home;
+        let (teams, hidden): (Vec<TeamListing>, Vec<TeamListing>) =
+            self.teams()?.into_iter().partition(|t| match t {
+                TeamListing::Team { id, .. } => {
+                    Uuid::parse_str(id).map_or(true, |id| view.shows(&id))
+                }
+                TeamListing::Unreadable { .. } => true,
+            });
         let mut matches: Vec<(DateTime<FixedOffset>, HomeMatch)> = Vec::new();
         for team in self
             .runtime
             .block_on(self.team_reader.read_all())?
             .into_iter()
             .flatten()
+            .filter(|team| view.shows(&team.id))
         {
             let read = self
                 .runtime
                 .block_on(self.match_reader.read_summaries(&team))?;
             matches.extend(read.into_iter().flatten().map(|m| {
                 let next = next_of(&m);
+                let standing = m.standing().into();
                 (
                     m.date,
                     HomeMatch {
                         team_id: team.id.to_string(),
                         team_name: team.name.clone(),
+                        team_initials: names::initials(&team.name),
                         date: m.date.to_rfc3339(),
                         id: m.id,
                         opponent: m.opponent,
                         home: m.home,
                         won: m.us_wins,
                         lost: m.them_wins,
+                        standing,
                         next,
                     },
                 )
@@ -4061,6 +4440,10 @@ impl Scout4All {
             in_progress,
             recent: recent.into_iter().take(RECENT_MATCHES).collect(),
             teams,
+            hidden,
+            week_closed: view.home_week_closed,
+            matches_closed: view.home_matches_closed,
+            teams_closed: view.home_teams_closed,
         })
     }
 
@@ -4277,8 +4660,11 @@ impl Scout4All {
         // corrected (the set ends as it did)
         let m = &correction.current_match;
         if m.get_status().is_ok_and(|status| status.match_finished) {
-            self.runtime
-                .block_on(self.finished_matches().finished(m.team.id, m.id.clone()));
+            self.runtime.block_on(self.finished_matches().finished(
+                m.team.id,
+                m.id.clone(),
+                self.clock.utc(),
+            ));
         }
         Ok(())
     }
@@ -4361,6 +4747,7 @@ impl Scout4All {
                 input,
                 self.set_writer.clone(),
                 Some(b.team),
+                self.utc_now(),
             ))
             .map(|_| ())
             .map_err(failed)
@@ -4383,7 +4770,13 @@ impl Scout4All {
         };
         let input = set_start.form().clone().validate(&m.team).map_err(failed)?;
         self.runtime
-            .block_on(set_start::start(m, input, self.set_writer.clone(), None))
+            .block_on(set_start::start(
+                m,
+                input,
+                self.set_writer.clone(),
+                None,
+                self.utc_now(),
+            ))
             .map(|_| ())
             .map_err(failed)
     }
@@ -4666,7 +5059,7 @@ impl Scout4All {
             .filter(|_| !namesake_confirmed)
             .map(|p| player_form::namesake_message(p, labels));
         let input = form
-            .validate(&team, existing.as_ref(), Local::now().date_naive())
+            .validate(&team, existing.as_ref(), self.clock.today())
             .map_err(|e| MobileError::InvalidPlayer {
                 field: e.into(),
                 reason: e.message(labels),
@@ -4700,6 +5093,21 @@ impl Scout4All {
             number: free.map(|n| n.to_string()).unwrap_or_default(),
             ..PlayerForm::default()
         })
+    }
+
+    /// The country of the prefix to propose for a player without a phone:
+    /// the one of the nationality, else the one of the team.
+    pub fn proposed_phone_country(
+        &self,
+        team_id: String,
+        nationality: Option<CountryCode>,
+    ) -> Result<Option<CountryCode>, MobileError> {
+        Ok(nationality.or(self.read_team(&team_id)?.country))
+    }
+
+    /// The international prefix of the phones of `country`.
+    pub fn dial_code(&self, country: CountryCode) -> Option<u16> {
+        player_form::dial_code(country)
     }
 
     /// The person of the registry with the name written (case, accents and
@@ -4738,6 +5146,7 @@ impl Scout4All {
                     false => format!("{} ({})", c.person.name, teams.join(", ")),
                 };
                 let latest = c.teams.first();
+                let (phone_country, phone) = player_form::split_phone(&c.person.phone);
                 ExistingPlayer {
                     id: c.person.id,
                     name: c.person.name.clone(),
@@ -4757,6 +5166,13 @@ impl Scout4All {
                             .map(|h| h.to_string())
                             .unwrap_or_default(),
                         notes: c.person.notes,
+                        nationality: c.person.nationality,
+                        dominant_hand: c.person.dominant_hand,
+                        federation_id: c.person.federation_id,
+                        email: c.person.email,
+                        phone_country,
+                        phone,
+                        birth_place: c.person.birth_place,
                         person: Some(c.person.id),
                     },
                 }
@@ -4814,7 +5230,8 @@ impl Scout4All {
     }
 
     /// Creates the team of the new season with the players chosen: the same
-    /// persons, in one more team; returns its id. The old team stays.
+    /// persons, in one more team, with a copy of the logo (each season
+    /// changes its own); returns its id. The old team stays.
     pub fn save_new_season(
         &self,
         team_id: String,
@@ -4829,6 +5246,15 @@ impl Scout4All {
         let input = season::new_team(&team, input, &season_members(&players))
             .map_err(|e| self.season_error(e))?;
         let saved = self.runtime.block_on(self.team_writer.save(input))?;
+        // the team is there all the same when the logo can't be copied
+        let logo = self.team_logo(team_id).and_then(|logo| {
+            logo.map_or(Ok(()), |l| {
+                self.set_team_logo(saved.id.to_string(), Some(l))
+            })
+        });
+        if let Err(e) = logo {
+            log_error(&format!("could not copy the logo to the new team: {e:?}"));
+        }
         // as a team created by hand: at the top of the list
         if let Err(e) = self.set_pinned(saved.id.to_string(), true) {
             log_error(&format!("could not pin the new team: {e:?}"));
@@ -4842,8 +5268,11 @@ impl Scout4All {
         let id = parse_id(&team_id)?;
         self.runtime.block_on(self.team_writer.remove(&id))?;
         // the team is gone all the same when the settings can't be written
-        if let Err(e) = self.set_pinned(team_id, false) {
-            log_error(&format!("could not unpin the removed team: {e:?}"));
+        if let Err(e) = self
+            .set_pinned(team_id.clone(), false)
+            .and_then(|()| self.set_hidden(team_id, false))
+        {
+            log_error(&format!("could not forget the removed team: {e:?}"));
         }
         Ok(())
     }
@@ -4897,14 +5326,15 @@ impl Scout4All {
         )?)
     }
 
-    /// The photo of the person (the player's id is theirs) as JPEG, if
-    /// they have one.
+    /// The photo of the person (the player's id is theirs) as PNG, if they
+    /// have one. Previously saved JPEGs remain readable.
     pub fn person_photo(&self, person_id: String) -> Result<Option<Vec<u8>>, MobileError> {
         Ok(scout4all_core::assets::person_photo(&self.db, &person_id)?.map(|image| image.data))
     }
 
-    /// The face the photo holds, cropped (square PNG): for the preview, then
-    /// `set_person_photo`. No face or many faces are errors of their own.
+    /// The person in the photo, cropped to a square with a transparent
+    /// background (PNG): for the preview, then `set_person_photo`. No face or
+    /// many faces are errors of their own.
     pub fn crop_face(&self, bytes: Vec<u8>) -> Result<Vec<u8>, MobileError> {
         use scout4all_core::faces::{PhotoError, crop_face};
         crop_face(&bytes).map_err(|e| match e {
@@ -4919,8 +5349,8 @@ impl Scout4All {
         })
     }
 
-    /// The face cropped (`core::faces::crop_face`) becomes the photo of the
-    /// person (as JPEG), `None` removes it.
+    /// The cropped person (`core::faces::crop_face`) becomes the photo of the
+    /// person (as PNG), `None` removes it.
     pub fn set_person_photo(
         &self,
         person_id: String,
@@ -4933,12 +5363,29 @@ impl Scout4All {
         )?)
     }
 
+    /// Whether the archives exported carry the contacts of the persons
+    /// (email, phone, birth place).
+    pub fn archive_contacts(&self) -> bool {
+        self.read_config()
+            .map(|config| config.archive_contacts.archive_contacts)
+            .unwrap_or_default()
+    }
+
+    pub fn set_archive_contacts(&self, included: bool) -> Result<(), MobileError> {
+        self.update_config(|config| AppConfig {
+            archive_contacts: ArchiveContacts {
+                archive_contacts: included,
+            },
+            ..config
+        })
+    }
+
     /// The archive of the team, its players without its matches.
     pub fn export_team(&self, team_id: String) -> Result<ExportedArchive, MobileError> {
         let id = parse_id(&team_id)?;
         // a team removed or not there: not exported
         self.read_team(&team_id)?;
-        let bytes = archives::export(&self.db, archives::Subject::Team(id))?;
+        let bytes = self.export_archive(archives::Subject::Team(id))?;
         Ok(ExportedArchive {
             file_name: format!("{id}.zip"),
             bytes,
@@ -4953,7 +5400,7 @@ impl Scout4All {
     ) -> Result<ExportedArchive, MobileError> {
         let m = self.read_match(&team_id, &match_id)?;
         let id = Uuid::parse_str(&m.id).map_err(failed)?;
-        let bytes = archives::export(&self.db, archives::Subject::Match(id))?;
+        let bytes = self.export_archive(archives::Subject::Match(id))?;
         Ok(ExportedArchive {
             file_name: format!("{id}.zip"),
             bytes,
@@ -4963,9 +5410,15 @@ impl Scout4All {
     /// The report of the match as a PDF, in the language of the app: the
     /// file to save or print, as the TUI opens it.
     pub fn match_pdf(&self, team_id: String, match_id: String) -> Result<Vec<u8>, MobileError> {
+        use scout4all_core::assets;
+        use scout4all_core::reporting::logo::{Logo, MatchLogos};
         use scout4all_core::reporting::pdf::{render_both_pdf, render_match_pdf};
         let m = self.read_match(&team_id, &match_id)?;
         let labels = self.language.labels();
+        let logos = MatchLogos {
+            team: self.pdf_logo(&team_id)?,
+            opponent: assets::opponent_logo(&self.db, &match_id, &team_id)?.map(Logo::from),
+        };
         // a match scouted on both sides has the opponent's pages too
         match self
             .match_reader
@@ -4973,9 +5426,9 @@ impl Scout4All {
         {
             Ok(Some(mut b)) => {
                 name_the_removed(&mut b.team, labels);
-                Ok(render_both_pdf(&m, &b, labels)?)
+                Ok(render_both_pdf(&m, &b, labels, logos)?)
             }
-            Ok(None) => Ok(render_match_pdf(&m, labels)?),
+            Ok(None) => Ok(render_match_pdf(&m, labels, logos)?),
             Err(e) => Err(unreadable(&e, labels.unreadable_match)),
         }
     }
@@ -4994,7 +5447,12 @@ impl Scout4All {
         team_id: Option<String>,
     ) -> Result<ArchivePreview, MobileError> {
         let labels = self.language.labels();
-        let team_preview = |team: TeamEntry| ArchivePreview::Team {
+        // the logo here wins over the archive's, as the import does
+        let logo = |id: Uuid, archived: Option<Vec<u8>>| {
+            self.team_logo(id.to_string()).ok().flatten().or(archived)
+        };
+        let team_preview = |team: TeamEntry, archived| ArchivePreview::Team {
+            logo: logo(team.id, archived),
             players: count(&team),
             name: team.name,
             year: team.year,
@@ -5008,20 +5466,22 @@ impl Scout4All {
                 lost,
                 teams,
             };
-        let choice = |t: &TeamEntry| TeamChoice {
+        let choice = |t: &TeamEntry, archived| TeamChoice {
+            logo: logo(t.id, archived),
             id: t.id.to_string(),
             name: t.name.clone(),
         };
         Ok(match legacy_archive::open(&self.db, &bytes, labels)? {
             Opened::Database(_) => match archives::preview(&bytes, &self.language)? {
-                Preview::Team(team) => team_preview(team),
-                Preview::Match(m) => match_preview(
+                (Preview::Team(team), archived) => team_preview(team, archived),
+                (Preview::Match(m), archived) => match_preview(
                     &m.entry,
                     m.status.us_wins,
                     m.status.them_wins,
-                    vec![choice(&m.team)],
+                    vec![choice(&m.team, archived)],
                 ),
-                Preview::Training(t) => ArchivePreview::Training {
+                (Preview::Training(t), archived) => ArchivePreview::Training {
+                    logo: logo(t.team.id, archived),
                     name: t.team.name,
                     year: t.team.year,
                     sessions: count_of(t.sessions),
@@ -5031,7 +5491,7 @@ impl Scout4All {
             // up to v0.9.0 the id only in the name of the file
             Opened::LegacyTeam { team, id } => {
                 match id.or_else(|| file_name.as_deref().and_then(file_team_id)) {
-                    Some(_) => team_preview(team),
+                    Some(_) => team_preview(team, None),
                     None => return Err(failed(labels.team_archive_without_id)),
                 }
             }
@@ -5039,7 +5499,7 @@ impl Scout4All {
                 let mut choices: Vec<TeamChoice> = teams
                     .iter()
                     .filter(|t| team_id.as_ref().is_none_or(|id| t.id.to_string() == *id))
-                    .map(choice)
+                    .map(|t| choice(t, None))
                     .collect();
                 if choices.is_empty() {
                     return Err(failed(labels.match_of_another_team));
@@ -5214,6 +5674,7 @@ impl Scout4All {
             &self.match_writer,
             &*self.set_writer,
             &*self.finished_matches(),
+            self.clock.utc(),
         ))?;
         Ok(DvwImported {
             team_id: team.team.id.to_string(),
@@ -5274,6 +5735,26 @@ impl Scout4All {
         }
     }
 
+    /// The licenses of the parts made by others the app carries, in the
+    /// settings beside the terms.
+    pub fn licenses(&self) -> Licenses {
+        let labels = self.language.labels();
+        Licenses {
+            title: labels.third_party_licenses.to_string(),
+            intro: labels.third_party_intro.to_string(),
+            parts: scout4all_core::licenses::THIRD_PARTIES
+                .iter()
+                .map(|p| ThirdPartyLicense {
+                    name: p.name.to_string(),
+                    purpose: p.purpose.label(labels).to_string(),
+                    source: p.source.to_string(),
+                    license: p.license.to_string(),
+                    text: scout4all_core::licenses::reflowed(p.text.trim()),
+                })
+                .collect(),
+        }
+    }
+
     /// Saves the current terms of use as seen, keeping the other settings
     /// (those of the TUI too). A new `config.json` has the language too,
     /// which the TUI needs.
@@ -5290,6 +5771,7 @@ impl Scout4All {
             &self.team_reader,
             &self.team_writer,
             self.language.labels(),
+            self.this_year(),
         ))?;
         match added {
             Some(team) => self
@@ -5331,6 +5813,7 @@ impl Scout4All {
                 let team = self.runtime.block_on(example::add_example_team(
                     &self.team_writer,
                     self.language.labels(),
+                    self.this_year(),
                 ))?;
                 let id = team.id.to_string();
                 self.update_tutorial(|tutorial| Tutorial {
@@ -5468,8 +5951,8 @@ struct SentFinishedMatches {
 
 #[async_trait::async_trait]
 impl FinishedMatches for SentFinishedMatches {
-    async fn finished(&self, team_id: Uuid, match_id: String) {
-        self.queued.finished(team_id, match_id).await;
+    async fn finished(&self, team_id: Uuid, match_id: String, at: DateTime<Utc>) {
+        self.queued.finished(team_id, match_id, at).await;
         self.sender.request();
     }
 }
@@ -5487,8 +5970,11 @@ pub enum Uploads {
 /// process: the app starts it once, the tests leave it off (each of them has
 /// its own data, the log would go to the last one's).
 #[uniffi::export]
-pub fn start_log(data_dir: String) {
-    init_logger(PathBuf::from(data_dir).join("scout4all.log"));
+pub fn start_log(data_dir: String, clock: Arc<dyn Clock>) {
+    init_logger(
+        PathBuf::from(data_dir).join("scout4all.log"),
+        clock::wall_now_of(clock),
+    );
 }
 
 /// A name of a player in little room: each long word cut to its first
@@ -5503,6 +5989,39 @@ pub fn abbreviated_name(name: String) -> String {
 #[uniffi::export]
 pub fn offered_names(names: Vec<String>, written: String) -> Vec<String> {
     scout4all_core::names::offered(&names, &written)
+}
+
+#[uniffi::remote(Enum)]
+pub enum LogoTone {
+    Light,
+    Dark,
+    Mixed,
+}
+
+#[uniffi::remote(Enum)]
+pub enum LogoBackdrop {
+    None,
+    Dark,
+    Light,
+}
+
+/// The initials of a name, in place of the logo of a team that has none.
+#[uniffi::export]
+pub fn initials(name: String) -> String {
+    names::initials(&name)
+}
+
+/// The tone of the logo the bytes hold, to decide its backdrop once per
+/// logo.
+#[uniffi::export]
+pub fn logo_tone(bytes: Vec<u8>) -> LogoTone {
+    scout4all_core::assets::logo_tone(&bytes)
+}
+
+/// What goes behind a logo of `tone` on the theme so it doesn't vanish.
+#[uniffi::export]
+pub fn logo_backdrop(tone: LogoTone, dark_theme: bool) -> LogoBackdrop {
+    tone.backdrop(dark_theme)
 }
 
 /// The seconds a setting can take, both ends in.
@@ -5547,6 +6066,26 @@ pub struct Terms {
     pub paragraphs: Vec<String>,
 }
 
+/// The licenses of the parts made by others the app carries: the title, a
+/// line before them, then each part.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct Licenses {
+    pub title: String,
+    pub intro: String,
+    pub parts: Vec<ThirdPartyLicense>,
+}
+
+/// A part made by others: its name, what it's for, where it comes from, the
+/// name of its license and its full text (in English, as written).
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct ThirdPartyLicense {
+    pub name: String,
+    pub purpose: String,
+    pub source: String,
+    pub license: String,
+    pub text: String,
+}
+
 /// The key of the language in `config.json`.
 const LANGUAGE: &str = "language";
 
@@ -5563,9 +6102,13 @@ struct AppConfig {
     #[serde(flatten)]
     pinned: PinnedTeams,
     #[serde(flatten)]
+    home: HomeView,
+    #[serde(flatten)]
     video: VideoSeconds,
     #[serde(flatten)]
     activity_search: ActivitySearch,
+    #[serde(flatten)]
+    archive_contacts: ArchiveContacts,
     #[serde(flatten)]
     other: Map<String, Value>,
 }
@@ -5599,6 +6142,21 @@ fn failed(e: impl std::fmt::Display) -> MobileError {
 }
 
 impl Scout4All {
+    /// The archive of `subject`, with the contacts if chosen
+    /// (`archive_contacts`).
+    fn export_archive(&self, subject: archives::Subject) -> Result<Vec<u8>, MobileError> {
+        let contacts = match self.archive_contacts() {
+            true => archives::Contacts::Included,
+            false => archives::Contacts::Left,
+        };
+        Ok(archives::export_with(
+            &self.db,
+            subject,
+            contacts,
+            self.clock.utc(),
+        )?)
+    }
+
     /// Where the scouting sends a finished match: the queue, if the user
     /// allows the statistics.
     fn finished_matches(&self) -> Arc<dyn FinishedMatches> {
@@ -5757,7 +6315,7 @@ impl Scout4All {
         };
         let opponent = opponent_plan(file, side, &team.team, opponent_choice)
             .map_err(|e| failed(e.describe(labels)))?;
-        let date = match_date(file, day, *Local::now().offset());
+        let date = match_date(file, day, self.clock.offset());
         let plan = match_plan(
             file,
             side,
@@ -5901,6 +6459,14 @@ impl Scout4All {
     }
 
     /// The match, a player removed from the registry named as such.
+    /// The logo of the team as the PDFs show it.
+    fn pdf_logo(
+        &self,
+        team_id: &str,
+    ) -> Result<Option<scout4all_core::reporting::logo::Logo>, MobileError> {
+        Ok(scout4all_core::assets::team_logo(&self.db, team_id)?.map(Into::into))
+    }
+
     fn read_match(&self, team_id: &str, match_id: &str) -> Result<MatchEntry, MobileError> {
         let team = self.read_team(team_id)?;
         let labels = self.language.labels();
@@ -6137,7 +6703,9 @@ fn players(team: &TeamEntry, labels: &Labels) -> Vec<Player> {
             name: p.name.clone(),
             number: p.number,
             role: p.role.map(|r| r.friendly_name(labels).to_string()),
+            initials: names::initials(&p.name),
             form: PlayerForm::of(p),
+            contacts: Contacts::of(p),
         })
         .collect();
     players.sort_by_key(|p| p.number);
@@ -6151,14 +6719,24 @@ fn count(team: &TeamEntry) -> u32 {
 
 #[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::unreachable)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use scout4all_core::{localization::labels, match_form::MatchInput, settings::TERMS_VERSION};
+
+    /// A 1×1 PNG.
+    pub(crate) const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x38,
+        0x21, 0x27, 0xf7, 0x1f, 0x00, 0x04, 0xba, 0x02, 0x04, 0x3e, 0x57, 0x1f, 0xc7, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
 
     #[test]
     fn an_empty_folder_has_no_teams() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         assert_eq!(app.teams().unwrap(), vec![]);
     }
 
@@ -6238,9 +6816,9 @@ mod tests {
                                 date,
                                 won,
                                 lost,
-                                finished,
+                                standing,
                                 ..
-                            } => (opponent, date, won, lost, finished),
+                            } => (opponent, date, won, lost, standing == MatchStanding::Over),
                             other => panic!("{other:?}"),
                         })
                         .collect(),
@@ -6252,7 +6830,7 @@ mod tests {
 
     /// The day of the backups, as the migration names them.
     fn backup_of(dir: &tempfile::TempDir) -> PathBuf {
-        let day = Local::now().date_naive();
+        let day = crate::clock::ClockExt::today(&crate::clock::TestClock::new());
         dir.path().join(format!("data-backup-{day}.zip"))
     }
 
@@ -6267,7 +6845,7 @@ mod tests {
         copy_dir(&legacy_data("v0.18.0"), &data);
         let expected = Runtime::new().unwrap().block_on(listed_in_files(&data));
         assert_eq!(expected.len(), 3);
-        let app = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app = Scout4All::for_tests(data.to_string_lossy().into_owned(), "it".into()).unwrap();
         assert_eq!(app.startup_notice(), None);
         assert_eq!(listed_in_app(&app), expected);
         assert!(data.join(layout::DATABASE).exists());
@@ -6282,7 +6860,7 @@ mod tests {
         // the queue of the uploads moved with it
         assert!(!queued_of(&data).is_empty());
         drop(app);
-        let again = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let again = Scout4All::for_tests(data.to_string_lossy().into_owned(), "it".into()).unwrap();
         assert_eq!(again.startup_notice(), None);
         assert_eq!(listed_in_app(&again), expected);
         let backups = std::fs::read_dir(dir.path())
@@ -6323,7 +6901,7 @@ mod tests {
             .find(|p| p.join("set_1.json").exists())
             .unwrap();
         std::fs::write(broken.join("set_1.json"), "{\"serving").unwrap();
-        let app = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app = Scout4All::for_tests(data.to_string_lossy().into_owned(), "it".into()).unwrap();
         let it = labels(LanguageEnum::It);
         let notice = app.startup_notice().unwrap();
         let lines: Vec<&str> = notice.lines().collect();
@@ -6344,7 +6922,7 @@ mod tests {
         assert_eq!(app.teams().unwrap().len(), 3);
         // the next start tells it again, without a new copy
         drop(app);
-        let again = Scout4All::new(data.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let again = Scout4All::for_tests(data.to_string_lossy().into_owned(), "it".into()).unwrap();
         assert_eq!(again.startup_notice().unwrap(), lines[..2].join("\n"));
     }
 
@@ -6364,7 +6942,7 @@ mod tests {
             std::fs::set_permissions(&parent, std::fs::Permissions::from_mode(m)).unwrap();
         };
         mode(0o555);
-        let app = Scout4All::new(data.to_string_lossy().into_owned(), "en".into());
+        let app = Scout4All::for_tests(data.to_string_lossy().into_owned(), "en".into());
         mode(0o755);
         let app = app.unwrap();
         let notice = app.startup_notice().unwrap();
@@ -6380,7 +6958,7 @@ mod tests {
             expected
         );
         drop(app);
-        let again = Scout4All::new(data.to_string_lossy().into_owned(), "en".into()).unwrap();
+        let again = Scout4All::for_tests(data.to_string_lossy().into_owned(), "en".into()).unwrap();
         assert_eq!(again.startup_notice(), None);
         assert_eq!(listed_in_app(&again), expected);
     }
@@ -6394,7 +6972,7 @@ mod tests {
         drop(scout4all_core::db::open(&file).unwrap());
         let newer = scout4all_core::db::schema_version() + 1;
         sql(&dir, &format!("PRAGMA user_version = {newer}"));
-        let e = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
+        let e = Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into())
             .err()
             .unwrap();
         assert_eq!(reason_of(e), labels(LanguageEnum::It).io_database_newer);
@@ -6464,7 +7042,8 @@ mod tests {
     #[test]
     fn a_team_that_cant_be_read_is_unreadable() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "xx".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "xx".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         // the schema doesn't check the spelling of the country, reading does
         sql(
@@ -6499,7 +7078,7 @@ mod tests {
     }
 
     fn app(dir: &tempfile::TempDir, language: &str) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), language.into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), language.into()).unwrap()
     }
 
     fn config(dir: &tempfile::TempDir) -> Value {
@@ -6667,6 +7246,48 @@ mod tests {
         assert_eq!(app.terms().title, "terms of use");
     }
 
+    #[test]
+    fn the_licenses_of_others_in_the_language_of_the_app_with_their_texts() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let licenses = app.licenses();
+        assert_eq!(licenses.title, "licenze di terze parti");
+        assert_eq!(
+            licenses
+                .parts
+                .iter()
+                .map(|p| (p.name.as_str(), p.license.as_str(), p.purpose.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                (
+                    "SeetaFace Engine",
+                    "BSD 2-Clause",
+                    "trova il volto in una foto, per ritagliarla"
+                ),
+                (
+                    "U-2-Net (U2NetP)",
+                    "Apache License 2.0",
+                    "toglie lo sfondo a una foto"
+                ),
+                (
+                    "Source Sans 3",
+                    "SIL Open Font License 1.1",
+                    "il carattere dei report PDF"
+                ),
+                (
+                    "Rust crates, Android libraries",
+                    "MIT, Apache 2.0, …",
+                    "le librerie con cui è fatta l'app"
+                ),
+            ]
+        );
+        // the texts whole, without the blank lines around them
+        assert!(licenses.parts.iter().all(|p| p.text.len() > 1000));
+        assert!(licenses.parts.iter().all(|p| p.text == p.text.trim()));
+        app.set_language("ja".into());
+        assert_eq!(app.licenses().title, "サードパーティのライセンス");
+    }
+
     fn form(name: &str) -> TeamForm {
         TeamForm {
             name: name.into(),
@@ -6680,7 +7301,8 @@ mod tests {
     #[test]
     fn a_new_team_is_listed_and_can_be_edited() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let id = app.save_team(None, form(" Cortona ")).unwrap();
         let team = app.team(id.clone()).unwrap();
         assert_eq!(team.name, "Cortona");
@@ -6700,6 +7322,7 @@ mod tests {
                 players: 0,
                 // created by hand
                 pinned: true,
+                initials: "CV".into(),
             }]
         );
     }
@@ -6745,6 +7368,72 @@ mod tests {
         let config = config(&dir);
         assert_eq!(config.get("pinned_teams"), None, "{config}");
         assert!(config.get("language").is_some(), "{config}");
+    }
+
+    /// A team hidden from the home takes its matches and its week along;
+    /// the blocks closed are remembered.
+    #[test]
+    fn the_home_leaves_out_the_hidden_teams() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let [_, other] = ["Alfa", "Beta"].map(|name| {
+            let team = app.save_team(None, form(name)).unwrap();
+            for n in 1..=7 {
+                let number = n.to_string();
+                app.save_player(team.clone(), None, player(&format!("P{n}"), &number), false)
+                    .unwrap();
+            }
+            app.save_match(
+                team.clone(),
+                None,
+                match_form("Arezzo", "2026-11-26T18:00:00+01:00", "8"),
+            )
+            .unwrap();
+            team
+        });
+        let seen = |app: &Scout4All| {
+            let home = app.home().unwrap();
+            let week = app.home_week("2026-11-26".into()).unwrap();
+            let names = |teams: &[TeamListing]| -> Vec<String> {
+                teams
+                    .iter()
+                    .filter_map(|t| match t {
+                        TeamListing::Team { name, .. } => Some(name.clone()),
+                        TeamListing::Unreadable { .. } => None,
+                    })
+                    .collect()
+            };
+            (
+                names(&home.teams),
+                names(&home.hidden),
+                home.in_progress.len(),
+                week.iter().map(|d| d.events.len()).sum::<usize>(),
+            )
+        };
+        let both = vec!["Alfa".to_string(), "Beta".to_string()];
+        assert_eq!(seen(&app), (both.clone(), vec![], 2, 2));
+        assert!(!app.team_hidden(other.clone()).unwrap());
+        app.set_hidden(other.clone(), true).unwrap();
+        assert!(app.team_hidden(other.clone()).unwrap());
+        assert_eq!(seen(&app), (vec!["Alfa".into()], vec!["Beta".into()], 1, 1));
+        // elsewhere nothing changes
+        assert_eq!(app.teams().unwrap().len(), 2);
+        app.set_hidden(other.clone(), false).unwrap();
+        assert_eq!(seen(&app), (both, vec![], 2, 2));
+
+        app.set_home_block_closed(HomeBlock::Matches, true).unwrap();
+        let home = app.home().unwrap();
+        assert_eq!(
+            (home.week_closed, home.matches_closed, home.teams_closed),
+            (false, true, false)
+        );
+        app.set_home_block_closed(HomeBlock::Matches, false)
+            .unwrap();
+        assert!(!app.home().unwrap().matches_closed);
+        // a removed team is forgotten
+        app.set_hidden(other.clone(), true).unwrap();
+        app.delete_team(other).unwrap();
+        assert_eq!(config(&dir).get("hidden_teams"), None);
     }
 
     /// The opponent made from the match form starts unpinned, as the
@@ -6793,7 +7482,8 @@ mod tests {
     #[test]
     fn an_invalid_form_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let result = app.save_team(
             None,
             TeamForm {
@@ -6815,7 +7505,7 @@ mod tests {
     fn the_country_is_guessed_once_and_offered_to_a_new_team() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().to_string_lossy().into_owned();
-        let app = Scout4All::new(path.clone(), "it".into()).unwrap();
+        let app = Scout4All::for_tests(path.clone(), "it".into()).unwrap();
         assert_eq!(app.new_team_form(2026).country, None);
         // no SIM, the network in France
         app.guess_default_country(vec!["".into(), "fr".into(), "it-IT".into()])
@@ -6835,12 +7525,13 @@ mod tests {
     #[test]
     fn without_hints_the_country_of_the_language() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "pt".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "pt".into()).unwrap();
         app.guess_default_country(vec![]).unwrap();
         assert_eq!(app.default_country().unwrap().name, "Brasil");
         let english = tempfile::tempdir().unwrap();
-        let app =
-            Scout4All::new(english.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app = Scout4All::for_tests(english.path().to_string_lossy().into_owned(), "en".into())
+            .unwrap();
         app.guess_default_country(vec!["".into()]).unwrap();
         assert_eq!(app.default_country(), None);
     }
@@ -6848,7 +7539,8 @@ mod tests {
     #[test]
     fn countries_by_code_or_name_in_the_language() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "pl".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "pl".into()).unwrap();
         assert_eq!(app.countries(String::new()).len(), 249);
         let found = app.countries("wło".into());
         assert_eq!(found[0].name, "Włochy");
@@ -6861,7 +7553,8 @@ mod tests {
     #[test]
     fn a_team_without_country_names_the_field() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let result = app.save_team(
             None,
             TeamForm {
@@ -6881,7 +7574,8 @@ mod tests {
     #[test]
     fn the_new_form_has_the_year_given() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         assert_eq!(app.new_team_form(2026).year, "2026");
         assert_eq!(
             app.classifications().len(),
@@ -6898,8 +7592,53 @@ mod tests {
             birth_date: String::new(),
             height_cm: String::new(),
             notes: String::new(),
+            nationality: None,
+            dominant_hand: None,
+            federation_id: String::new(),
+            email: String::new(),
+            phone_country: None,
+            phone: String::new(),
+            birth_place: String::new(),
             person: None,
         }
+    }
+
+    #[test]
+    fn a_player_profile_lists_only_other_teams_of_the_same_season() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let first = app.save_team(None, form("First")).unwrap();
+        let same_season = app.save_team(None, form("Second")).unwrap();
+        let mut next_year_form = form("Next year");
+        next_year_form.year = "2027".into();
+        let next_year = app.save_team(None, next_year_form).unwrap();
+
+        let player_id = app
+            .save_player(first.clone(), None, player("Alex Player", "7"), false)
+            .unwrap();
+        for team in [&same_season, &next_year] {
+            let mut form = player("Alex Player", "8");
+            form.person = Some(parse_id(&player_id).unwrap());
+            app.save_player(team.clone(), None, form, false).unwrap();
+        }
+
+        let profile = app.player_profile(first, player_id).unwrap();
+        assert_eq!(profile.initials, "AP");
+        assert_eq!(profile.age, None);
+        assert_eq!(profile.matches_played, 0);
+        assert_eq!(profile.matches_scouted, 0);
+        assert_eq!(profile.sets_played, 0);
+        assert_eq!(profile.points, 0);
+        assert!(!profile.has_training);
+        assert_eq!(profile.attendance_percent, None);
+        assert_eq!(
+            profile
+                .other_teams
+                .iter()
+                .map(|team| team.id.as_str())
+                .collect::<Vec<_>>(),
+            vec![same_season.as_str()]
+        );
     }
 
     /// A new player starts with the first number free in the team, from 1;
@@ -6907,7 +7646,8 @@ mod tests {
     #[test]
     fn a_new_player_starts_with_the_first_number_free() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let number = || app.new_player_form(team.clone()).unwrap().number;
         assert_eq!(number(), "1");
@@ -6940,7 +7680,8 @@ mod tests {
     #[test]
     fn the_registry_offers_adds_takes_to_a_new_season_and_removes() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let senior = app.save_team(None, form("Cortona")).unwrap();
         let ids: Vec<String> = (1..=7)
             .map(|n| {
@@ -7013,11 +7754,19 @@ mod tests {
             players.last().map(|p| (p.number, p.role_name.as_deref())),
             Some((10, Some("libero")))
         );
+        app.set_team_logo(senior.clone(), Some(PNG.to_vec()))
+            .unwrap();
         let new = app
             .save_new_season(senior.clone(), season.form, players)
             .unwrap();
         let details = app.team(new.clone()).unwrap();
         assert_eq!(details.year, 2027);
+        // the logo goes along, each season then has its own
+        let logo = app.team_logo(senior.clone()).unwrap();
+        assert!(logo.is_some());
+        assert_eq!(app.team_logo(new.clone()).unwrap(), logo);
+        app.set_team_logo(new.clone(), None).unwrap();
+        assert_eq!(app.team_logo(senior.clone()).unwrap(), logo);
         let numbers: Vec<(String, u8)> = details
             .players
             .iter()
@@ -7063,7 +7812,8 @@ mod tests {
     #[test]
     fn players_are_added_edited_and_removed() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let anna = app
             .save_player(team.clone(), None, player("Anna", "9"), false)
@@ -7116,7 +7866,8 @@ mod tests {
     #[test]
     fn matches_are_listed_the_most_recent_first() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team_id = app.save_team(None, form("Cortona")).unwrap();
         assert_eq!(app.matches(team_id.clone()).unwrap(), vec![]);
 
@@ -7145,21 +7896,23 @@ mod tests {
                 MatchListing::Match {
                     id: ids[1].clone(),
                     opponent: "Siena".into(),
+                    opponent_team: None,
                     home: false,
                     date: "2026-10-11T21:00:00+02:00".into(),
                     won: 0,
                     lost: 0,
-                    finished: false,
+                    standing: MatchStanding::ToPlay,
                     scouted_by: None,
                 },
                 MatchListing::Match {
                     id: ids[0].clone(),
                     opponent: "Arezzo".into(),
+                    opponent_team: None,
                     home: true,
                     date: "2026-10-04T18:00:00+02:00".into(),
                     won: 0,
                     lost: 0,
-                    finished: false,
+                    standing: MatchStanding::ToPlay,
                     scouted_by: None,
                 },
                 MatchListing::Unreadable {
@@ -7175,7 +7928,8 @@ mod tests {
     #[test]
     fn teams_and_matches_are_deleted() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team_id = app.save_team(None, form("Cortona")).unwrap();
         let other = app.save_team(None, form("Arezzo")).unwrap();
         let team = app.read_team(&team_id).unwrap();
@@ -7227,7 +7981,8 @@ mod tests {
     #[test]
     fn team_b_and_the_competition_are_offered_and_saved() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let livorno = app.save_team(None, form("Livorno")).unwrap();
         for n in 1..=7 {
@@ -7314,7 +8069,8 @@ mod tests {
     #[test]
     fn a_competition_is_listed_edited_and_removed() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=7 {
             app.save_player(
@@ -7399,7 +8155,8 @@ mod tests {
     #[test]
     fn a_number_of_the_score_sheet_is_corrected_and_saved() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let ids: Vec<Uuid> = (1..=7)
             .map(|n| {
@@ -7467,7 +8224,8 @@ mod tests {
     #[test]
     fn matches_are_created_and_edited() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let players: Vec<Uuid> = (1..=7)
             .map(|n| {
@@ -7522,7 +8280,8 @@ mod tests {
     #[test]
     fn a_match_of_a_large_team_chooses_its_roster() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         for n in 1..=15 {
             // a libero: more than 12 on the score sheet need one
@@ -7570,7 +8329,8 @@ mod tests {
     #[test]
     fn an_invalid_match_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         match app.save_match(
             team.clone(),
@@ -7592,7 +8352,8 @@ mod tests {
     #[test]
     fn a_set_starts_from_the_lineup_and_then_resumes() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         let ids: Vec<String> = (1..=7)
             .map(|n| {
@@ -7658,7 +8419,8 @@ mod tests {
     #[test]
     fn a_match_between_two_teams_is_seen_by_both() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, _) = match_with_a_set(&app);
         let livorno = app.save_team(None, form("Livorno")).unwrap();
         let m = app
@@ -7724,11 +8486,15 @@ mod tests {
                     home: true,
                     won: 0,
                     lost: 1,
-                    finished: false,
+                    standing: MatchStanding::InProgress,
                     scouted_by: Some(a),
+                    opponent_team,
                     ..
                 },
-            ] => assert_eq!((id, opponent.as_str(), a), (&m, "Cortona", &team)),
+            ] => assert_eq!(
+                (id, opponent.as_str(), a, opponent_team.as_ref()),
+                (&m, "Cortona", &team, Some(&team))
+            ),
             other => unreachable!("{other:?}"),
         }
         // A's list: the match of the set and this one, its own
@@ -7744,6 +8510,31 @@ mod tests {
             "{listed:?}"
         );
         assert_eq!(listed.len(), 2);
+        // the team of the opponent, none for a name only; the same when the
+        // summaries come from the cache
+        let opponents = |listed: &[MatchListing]| -> Vec<(String, Option<String>)> {
+            let mut found: Vec<(String, Option<String>)> = listed
+                .iter()
+                .filter_map(|l| match l {
+                    MatchListing::Match {
+                        id, opponent_team, ..
+                    } => Some((id.clone(), opponent_team.clone())),
+                    MatchListing::Unreadable { .. } => None,
+                })
+                .collect();
+            found.sort_by_key(|(id, _)| *id != m);
+            found
+        };
+        let found = opponents(&listed);
+        assert!(
+            matches!(
+                found.as_slice(),
+                [(_, Some(b)), (_, None)] if *b == livorno
+            ),
+            "{found:?}"
+        );
+        assert_eq!(opponents(&app.matches(team.clone()).unwrap()), found);
+        assert_eq!(initials("volley livorno".into()), "VL");
         // a match of Livorno not scouted by it: not in its statistics
         let analysis = app.team_analysis(
             livorno.clone(),
@@ -7777,7 +8568,8 @@ mod tests {
     #[test]
     fn the_analysis_of_a_competition() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, first) = match_with_a_set(&app);
         let cup = |name: &str| MatchForm {
             competition: name.into(),
@@ -7828,6 +8620,7 @@ mod tests {
                 team.clone(),
                 AnalysisPeriod::LastMatches { count: 2 },
                 competition,
+                None,
                 ClipPick {
                     scope: StatsScope::Match,
                     event: EventTypeEnum::S,
@@ -7999,7 +8792,8 @@ mod tests {
     #[test]
     fn the_defense_by_digs() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let player = |n: usize| {
@@ -8043,12 +8837,97 @@ mod tests {
         assert_eq!(total(Some(DigsEnum::Cover)), 1);
     }
 
+    /// Who comes in has the initials, in place of a missing photo.
+    #[test]
+    fn the_replacements_have_the_initials() {
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        // seven on court with the libero: one on the bench
+        for n in 1..=8 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n} Rossi"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8"),
+            )
+            .unwrap();
+        let scouting = started_set(&app, &team, &m);
+        scouting.choose_event(EventTypeEnum::R).unwrap();
+        let out = scouting.player_choices().into_iter().nth(1).map(|p| p.id);
+        scouting.choose_player(out.unwrap_or_default()).unwrap();
+        let replacements = scouting.replacement_choices();
+        assert!(!replacements.is_empty());
+        for p in replacements {
+            assert_eq!(p.initials, "PR");
+        }
+    }
+
+    /// Who goes out: the one out for the libero too, though not on court,
+    /// told apart; never the libero.
+    #[test]
+    fn the_one_out_for_the_libero_can_go_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        for n in 1..=8 {
+            app.save_player(
+                team.clone(),
+                None,
+                player(&format!("P{n} Rossi"), &n.to_string()),
+                false,
+            )
+            .unwrap();
+        }
+        let m = app
+            .save_match(
+                team.clone(),
+                None,
+                match_form("Arezzo", "2026-10-24T18:00:00+02:00", "8"),
+            )
+            .unwrap();
+        let scouting = started_set(&app, &team, &m);
+        // the libero 7 on court for 6
+        let court: Vec<u8> = scouting.state().court.iter().map(|p| p.number).collect();
+        assert!(court.contains(&7) && !court.contains(&6));
+        scouting.choose_event(EventTypeEnum::R).unwrap();
+        let choices = scouting.player_choices();
+        let numbers = |out: bool| -> Vec<u8> {
+            choices
+                .iter()
+                .filter(|p| p.out_for_the_libero == out)
+                .map(|p| p.number)
+                .collect()
+        };
+        assert_eq!(numbers(true), vec![6]);
+        assert_eq!(numbers(false), vec![1, 2, 3, 4, 5]);
+        let out = choices.iter().find(|p| p.number == 6).map(|p| p.id.clone());
+        scouting.choose_player(out.unwrap_or_default()).unwrap();
+        assert!(
+            scouting
+                .replacement_choices()
+                .iter()
+                .all(|p| p.number == 8 && !p.out_for_the_libero)
+        );
+    }
+
     /// How many blocked: on our block from one on, the one chosen saved
     /// with the evaluation and shown on the event; none on the serve.
     #[test]
     fn how_many_blocked_is_told() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         assert!(scouting.available_blockers().is_empty());
@@ -8089,7 +8968,8 @@ mod tests {
     #[test]
     fn the_block_target_is_at_the_net() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Positive).unwrap();
@@ -8134,7 +9014,8 @@ mod tests {
     #[test]
     fn the_serve_target_is_told_on_the_court() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let court = scouting.target_court();
@@ -8207,7 +9088,8 @@ mod tests {
     #[test]
     fn a_set_in_progress_is_scouted_and_undone() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         // no set in progress yet
         assert!(app.scouting(team.clone(), m.clone()).is_err());
@@ -8318,7 +9200,8 @@ mod tests {
     #[test]
     fn a_match_whose_set_does_not_replay_tells_why() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Over).unwrap();
@@ -8348,7 +9231,8 @@ mod tests {
     #[test]
     fn our_block_on_their_reception_straight_over() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Over).unwrap();
@@ -8390,7 +9274,8 @@ mod tests {
     #[test]
     fn our_freeball_is_a_team_event() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         assert!(
@@ -8438,7 +9323,8 @@ mod tests {
     #[test]
     fn our_fault_can_be_the_teams() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         scouting.choose_eval(EvalEnum::Positive).unwrap();
@@ -8479,7 +9365,8 @@ mod tests {
     #[test]
     fn the_libero_goes_out_and_back_in() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let name = |scouting: &Scouting| {
@@ -8523,7 +9410,8 @@ mod tests {
     #[test]
     fn the_libero_for_a_player_of_the_back_row() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let ids: Vec<String> = scouting
@@ -8587,7 +9475,8 @@ mod tests {
     #[test]
     fn the_players_spread_to_receive() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // our serve error: they serve, we receive in P1
@@ -8608,7 +9497,8 @@ mod tests {
     #[test]
     fn the_inverted_p1_stays_until_changed() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let state = scouting.state();
@@ -8632,7 +9522,8 @@ mod tests {
     #[test]
     fn the_reception_is_told_before_their_serve() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         assert!(!scouting.state().reception_open);
@@ -8649,7 +9540,8 @@ mod tests {
     #[test]
     fn nobody_receives_once_the_serve_is_received() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // we serve: the players are in their zones
@@ -8710,7 +9602,8 @@ mod tests {
     #[test]
     fn the_set_that_wins_the_match_has_its_result() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let mut result = None;
         for set in 1..=3 {
@@ -8779,6 +9672,48 @@ mod tests {
         assert!(lineup.complete);
     }
 
+    /// The matches in the calendar: to play without sets, in progress with
+    /// the sets so far, over with the result.
+    #[test]
+    fn the_agenda_tells_how_far_each_match_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, _) = match_with_a_set(&app);
+        let over = match_on(&app, &team, "Over", 1);
+        play(&app, &team, &over, 3);
+        let between = match_on(&app, &team, "Between", 2);
+        play(&app, &team, &between, 1);
+        let started = match_on(&app, &team, "Started", 3);
+        started_set(&app, &team, &started);
+        match_on(&app, &team, "Later", 4);
+        let week = app
+            .training_agenda(Some(team), training::AgendaSpan::Week, "2026-10-01".into())
+            .unwrap();
+        let found: Vec<_> = week
+            .iter()
+            .flat_map(|d| &d.events)
+            .filter_map(|e| match &e.item {
+                training::AgendaItemRecord::Match {
+                    opponent,
+                    standing,
+                    ours,
+                    theirs,
+                    ..
+                } => Some((opponent.as_str(), *standing, *ours, *theirs)),
+                training::AgendaItemRecord::Session { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("Over", MatchStanding::Over, Some(3), Some(0)),
+                ("Between", MatchStanding::InProgress, Some(1), Some(0)),
+                ("Started", MatchStanding::InProgress, Some(0), Some(0)),
+                ("Later", MatchStanding::ToPlay, None, None),
+            ]
+        );
+    }
+
     #[test]
     fn the_home_has_the_matches_of_every_team_not_over_and_the_last_over() {
         let dir = tempfile::tempdir().unwrap();
@@ -8821,7 +9756,19 @@ mod tests {
                 &NextSetKind::Start { set_number: 2 },
             ]
         );
+        assert_eq!(
+            home.in_progress
+                .iter()
+                .map(|m| m.standing)
+                .collect::<Vec<_>>(),
+            [
+                MatchStanding::ToPlay,
+                MatchStanding::InProgress,
+                MatchStanding::InProgress,
+            ]
+        );
         assert_eq!(home.in_progress[2].team_name, "Siena");
+        assert_eq!(home.in_progress[2].team_initials, "S");
         // the five most recent over, the oldest left out
         assert_eq!(
             opponents(&home.recent),
@@ -8874,6 +9821,10 @@ mod tests {
                 in_progress: vec![],
                 recent: vec![],
                 teams: vec![],
+                hidden: vec![],
+                week_closed: false,
+                matches_closed: false,
+                teams_closed: false,
             }
         );
     }
@@ -8881,7 +9832,8 @@ mod tests {
     #[test]
     fn the_point_that_wins_the_set_ends_it() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // we serve: the serve waits for its evaluation
@@ -8910,7 +9862,8 @@ mod tests {
     #[test]
     fn the_statistics_of_a_set_and_of_the_match() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         // set 1: 25 aces
         let scouting = started_set(&app, &team, &m);
@@ -9128,7 +10081,8 @@ mod tests {
     #[test]
     fn the_serves_by_zone() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // three serves to cells of 1, one without a zone
@@ -9220,7 +10174,8 @@ mod tests {
     #[test]
     fn the_attacks_by_zone_as_the_serves() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         // our serve in the net, their serve received, then our attack to 9
@@ -9269,7 +10224,8 @@ mod tests {
     #[test]
     fn the_serves_by_where_they_started_from() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let scouting = started_set(&app, &team, &m);
         let labels = |s: &Scouting| {
@@ -9405,7 +10361,8 @@ mod tests {
     #[test]
     fn the_detail_of_a_fundamental() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         // set 1: 25 aces of the player in 1
         let scouting = started_set(&app, &team, &m);
@@ -9508,16 +10465,21 @@ mod tests {
         // a set
         let set = detail(StatsScope::Set { number: 2 }, EventTypeEnum::S, &all);
         assert_eq!(set.fundamental.unwrap().total, 2);
-        // no serve in side out
-        let side_out = DetailFilter {
-            phase: Some(PhaseEnum::SideOut),
-            ..DetailFilter::default()
-        };
-        let none = detail(StatsScope::Match, EventTypeEnum::S, &side_out)
-            .fundamental
-            .unwrap();
-        assert_eq!((none.total, none.efficiency), (0, None));
-        assert!(none.evals.is_empty() && none.players.is_empty());
+        // no serve in side out, nor reception at break point: neither to
+        // choose, and the detail is of the one the phase starts with
+        for (phase, asked, shown) in [
+            (PhaseEnum::SideOut, EventTypeEnum::S, EventTypeEnum::P),
+            (PhaseEnum::Break, EventTypeEnum::P, EventTypeEnum::S),
+        ] {
+            let filter = DetailFilter {
+                phase: Some(phase),
+                ..DetailFilter::default()
+            };
+            let d = detail(StatsScope::Match, asked, &filter);
+            assert_eq!(d.event, shown);
+            assert!(d.fundamentals.iter().all(|f| f.value != asked));
+            assert!(d.fundamentals.iter().any(|f| f.value == shown));
+        }
         // the first rotation: the aces and the first error
         let first = DetailFilter {
             rotations: vec![0],
@@ -9661,6 +10623,50 @@ mod tests {
             .stats(StatsScope::Match, DetailFilter::default())
             .unwrap();
         assert_eq!(everything.filter, DetailFilter::default());
+        // a phase leaves out what can't happen in it
+        let told = |phase: Option<PhaseEnum>| {
+            let filter = DetailFilter {
+                phase,
+                ..DetailFilter::default()
+            };
+            let live = scouting.stats(StatsScope::Match, filter).unwrap();
+            let events = |errors: &[ErrorCount]| errors.iter().map(|e| e.event).collect();
+            let fundamentals: Vec<_> = live.fundamentals.iter().map(|f| f.event).collect();
+            let unforced: Vec<_> = events(&live.unforced_by_event);
+            let forced: Vec<_> = events(&live.forced_by_event);
+            (live.phases, fundamentals, unforced, forced)
+        };
+        {
+            use EventTypeEnum::{A, B, D, F, P, S};
+            use PhaseEnum::{Break, SideOut};
+            assert_eq!(
+                told(None),
+                (
+                    vec![SideOut, Break],
+                    vec![P, A, S, B, D],
+                    vec![S, A, B, F],
+                    vec![A, B, P, D]
+                )
+            );
+            assert_eq!(
+                told(Some(SideOut)),
+                (
+                    vec![SideOut],
+                    vec![P, A, B, D],
+                    vec![A, B, F],
+                    vec![A, B, P, D]
+                )
+            );
+            assert_eq!(
+                told(Some(Break)),
+                (
+                    vec![Break],
+                    vec![A, S, B, D],
+                    vec![S, A, B, F],
+                    vec![A, B, D]
+                )
+            );
+        }
         assert_eq!(
             (
                 everything.rotation_choices.len(),
@@ -9674,9 +10680,14 @@ mod tests {
                 .detail(StatsScope::Match, EventTypeEnum::S, filter.clone())
                 .unwrap();
             assert_eq!(live.filter, filter);
+            // in side out the serve is in neither
             assert_eq!(
                 serves(&live),
-                detail.fundamental.as_ref().map(|f| f.total),
+                detail
+                    .fundamental
+                    .as_ref()
+                    .filter(|_| detail.event == EventTypeEnum::S)
+                    .map(|f| f.total),
                 "{filter:?}"
             );
         }
@@ -9695,7 +10706,8 @@ mod tests {
     #[test]
     fn the_events_of_a_set_are_corrected() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         // two aces, a serve error, their error
         let scouting = started_set(&app, &team, &m);
@@ -9856,7 +10868,8 @@ mod tests {
     #[test]
     fn the_statistics_of_a_match_without_sets_are_empty() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = match_with_a_set(&app);
         let stats = app
             .match_stats(
@@ -9917,7 +10930,8 @@ mod tests {
     #[test]
     fn a_number_in_use_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         app.save_player(team.clone(), None, player("Anna", "9"), false)
             .unwrap();
@@ -9933,7 +10947,8 @@ mod tests {
     #[test]
     fn a_namesake_is_saved_once_confirmed() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = app.save_team(None, form("Cortona")).unwrap();
         app.save_player(team.clone(), None, player("Anna Rossi", "9"), false)
             .unwrap();
@@ -9969,6 +10984,88 @@ mod tests {
     }
 
     #[test]
+    fn the_prefix_proposed_is_the_nationality_else_the_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "it");
+        let team = app
+            .save_team(
+                None,
+                TeamForm {
+                    country: CountryCode::known("IT"),
+                    ..form("Cortona")
+                },
+            )
+            .unwrap();
+        let proposed = |nationality: Option<&str>| {
+            app.proposed_phone_country(team.clone(), nationality.and_then(CountryCode::known))
+                .unwrap()
+        };
+        assert_eq!(proposed(Some("PL")), CountryCode::known("PL"));
+        assert_eq!(proposed(None), CountryCode::known("IT"));
+        assert_eq!(app.dial_code(proposed(None).unwrap()), Some(39));
+        let reached = PlayerForm {
+            phone_country: proposed(None),
+            phone: "333 123 4567".into(),
+            ..player("p", "7")
+        };
+        app.save_player(team.clone(), None, reached, false).unwrap();
+        let contacts = app.team(team).unwrap().players.remove(0).contacts;
+        assert_eq!(
+            contacts.phone.and_then(|p| p.call_link).as_deref(),
+            Some("tel:+393331234567")
+        );
+    }
+
+    #[test]
+    fn the_contacts_go_in_the_archive_once_chosen() {
+        let dir = tempfile::tempdir().unwrap();
+        let from = app(&dir, "it");
+        let team = from.save_team(None, form("Cortona")).unwrap();
+        let reached = PlayerForm {
+            email: "p@example.com".into(),
+            ..player("p", "7")
+        };
+        from.save_player(team.clone(), None, reached, false)
+            .unwrap();
+        let email_there = |from: &Scout4All| {
+            let to_dir = tempfile::tempdir().unwrap();
+            let to = app(&to_dir, "it");
+            let archive = from.export_team(team.clone()).unwrap();
+            to.import_team(archive.bytes, None).unwrap();
+            to.team(team.clone()).unwrap().players[0].form.email.clone()
+        };
+        assert!(!from.archive_contacts());
+        assert_eq!(email_there(&from), "");
+        from.set_archive_contacts(true).unwrap();
+        assert_eq!(email_there(&from), "p@example.com");
+        // kept across a restart
+        assert!(app(&dir, "it").archive_contacts());
+    }
+
+    /// An app without the team shows the logo the archive carries.
+    #[test]
+    fn the_preview_has_the_logo_of_the_archive() {
+        let from_dir = tempfile::tempdir().unwrap();
+        let from = app(&from_dir, "it");
+        let (team, m) = match_with_a_set(&from);
+        from.set_team_logo(team.clone(), Some(PNG.to_vec()))
+            .unwrap();
+        let stored = from.team_logo(team.clone()).unwrap();
+        let to_dir = tempfile::tempdir().unwrap();
+        let to = app(&to_dir, "it");
+        let logo_of = |bytes: Vec<u8>| match to.preview_archive(bytes, None, None).unwrap() {
+            ArchivePreview::Team { logo, .. } | ArchivePreview::Training { logo, .. } => logo,
+            ArchivePreview::Match { teams, .. } => teams.into_iter().find_map(|t| t.logo),
+        };
+        assert!(stored.is_some());
+        assert_eq!(
+            logo_of(from.export_team(team.clone()).unwrap().bytes),
+            stored
+        );
+        assert_eq!(logo_of(from.export_match(team, m).unwrap().bytes), stored);
+    }
+
+    #[test]
     fn a_team_and_a_match_move_to_another_phone() {
         let from_dir = tempfile::tempdir().unwrap();
         let from = app(&from_dir, "it");
@@ -9990,6 +11087,7 @@ mod tests {
                 name: "Cortona".into(),
                 year: 2026,
                 players: 7,
+                logo: None,
             }
         );
         assert_eq!(
@@ -10020,6 +11118,7 @@ mod tests {
                 teams: vec![TeamChoice {
                     id: team.clone(),
                     name: "Cortona".into(),
+                    logo: None,
                 }],
             }
         );
@@ -10505,6 +11604,37 @@ mod tests {
         assert!(both.len() > one.len());
     }
 
+    /// The report shows the logos of the match: ours and the one of an
+    /// opponent that is a team.
+    #[test]
+    fn the_report_of_a_match_has_the_logos_of_its_teams() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let choice = DvwChoice {
+            opponent: DvwOpponent::NewTeam,
+            ..dvw_choice(DvwSide::Home, None)
+        };
+        let imported = app.import_dvw(THREE_SETS.to_vec(), choice).unwrap();
+        let (team, id) = (imported.team_id, imported.match_id);
+        let opponent = match app.matches(team.clone()).unwrap().into_iter().next() {
+            Some(MatchListing::Match { opponent_team, .. }) => opponent_team.unwrap(),
+            other => panic!("no match: {other:?}"),
+        };
+        let images = || {
+            let pdf = app.match_pdf(team.clone(), id.clone()).unwrap();
+            let image = b"/Subtype/Image";
+            pdf.windows(image.len()).filter(|w| w == image).count()
+        };
+        assert_eq!(images(), 0);
+        app.set_team_logo(opponent, Some(PNG.to_vec())).unwrap();
+        let theirs = images();
+        assert!(theirs > 0);
+        app.set_team_logo(team.clone(), Some(PNG.to_vec())).unwrap();
+        assert!(images() >= theirs);
+        app.set_team_logo(team.clone(), None).unwrap();
+        assert!(images() > 0);
+    }
+
     /// The analysis of the opponent over the matches scouted on both
     /// sides: its choices, its figures those of B in the match, a match on
     /// one side left out.
@@ -10767,7 +11897,7 @@ mod tests {
         assert!(
             matches!(
                 &matches[..],
-                [MatchListing::Match { id, opponent, home: true, won: 3, lost: 0, finished: true, .. }]
+                [MatchListing::Match { id, opponent, home: true, won: 3, lost: 0, standing: MatchStanding::Over, .. }]
                     if *id == imported.match_id && opponent == "Visiting"
             ),
             "{matches:?}"
@@ -11021,7 +12151,8 @@ mod tests {
     #[test]
     fn the_analysis_of_the_matches_of_a_period() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, first) = match_with_a_set(&app);
         let second = app
             .save_match(
@@ -11198,6 +12329,168 @@ mod tests {
         scouting.choose_event(EventTypeEnum::OE).unwrap();
     }
 
+    /// With players chosen, the figures of the team (its rallies) aren't
+    /// shown, in the analysis and in the statistics of a match: they'd be
+    /// empty, a rally has no player.
+    #[test]
+    fn the_figures_of_the_team_are_not_of_a_player() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let imported = app
+            .import_dvw(THREE_SETS.to_vec(), dvw_choice(DvwSide::Home, None))
+            .unwrap();
+        let team = imported.team_id.clone();
+        let season = |filter| {
+            app.team_analysis(
+                team.clone(),
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::S,
+                filter,
+            )
+            .unwrap()
+        };
+        let series = |a: &TeamAnalysis| a.trend.iter().map(|t| t.series).collect::<Vec<_>>();
+        let all = season(DetailFilter::default());
+        assert!(all.summary.team_figures);
+        assert!(all.summary.side_out.is_some());
+        assert_eq!(series(&all), Series::ALL.to_vec());
+        let server = all.detail.players[0].id.clone();
+        let of_player = DetailFilter {
+            players: vec![server],
+            ..DetailFilter::default()
+        };
+        let narrowed = season(of_player.clone());
+        assert!(!narrowed.summary.team_figures);
+        // what they would show
+        assert_eq!(narrowed.summary.side_out, None);
+        assert_eq!(
+            series(&narrowed),
+            [
+                Series::Reception,
+                Series::Attack,
+                Series::CounterAttack,
+                Series::Serve
+            ]
+        );
+        let m = imported.match_id;
+        let of_match = |filter| {
+            app.match_stats(
+                team.clone(),
+                m.clone(),
+                MatchSide::A,
+                StatsScope::Match,
+                filter,
+            )
+            .unwrap()
+        };
+        assert!(of_match(DetailFilter::default()).team_figures);
+        let narrowed = of_match(of_player);
+        assert!(!narrowed.team_figures);
+        // the trend of a match is of every rally, whatever the filter
+        assert_eq!(narrowed.trend.len(), Series::ALL.len());
+    }
+
+    /// A team that was only B of a match scouted on both sides has it in
+    /// its analysis and in the statistics of its players, which tell the
+    /// same figures as the analysis narrowed to the player.
+    #[test]
+    fn the_statistics_of_a_player_of_side_b() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let team = app
+            .import_dvw(
+                THREE_SETS.to_vec(),
+                DvwChoice {
+                    opponent: DvwOpponent::NewTeam,
+                    ..dvw_choice(DvwSide::Home, None)
+                },
+            )
+            .unwrap()
+            .team_id;
+        let b = app.analysis_opponents(team.clone()).unwrap()[0].id;
+        let season = |filter| {
+            app.team_analysis(
+                b.to_string(),
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::S,
+                filter,
+            )
+            .unwrap()
+        };
+        let all = season(DetailFilter::default());
+        assert_eq!(all.matches.len(), 1);
+        let from_a = app
+            .opponent_analysis(
+                team.clone(),
+                b,
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        assert_eq!(all.matches, from_a.matches);
+        assert_eq!(all.summary, from_a.summary);
+        let server = all.detail.players[0].id.clone();
+        let stats = app
+            .player_statistics(b.to_string(), server.clone(), AnalysisPeriod::Season, None)
+            .unwrap();
+        let narrowed = season(DetailFilter {
+            players: vec![server],
+            ..DetailFilter::default()
+        });
+        let detail = narrowed.detail.fundamental.unwrap();
+        let serve = &stats.fundamentals[0];
+        assert_eq!(serve.event, EventTypeEnum::S);
+        assert_eq!(serve.measure, PlayerMeasure::Efficiency);
+        assert_eq!(serve.value, detail.efficiency);
+        assert_eq!(serve.total, detail.total);
+        assert_eq!(serve.points, detail.points);
+        assert_eq!(serve.errors, detail.errors);
+        let trend = narrowed
+            .trend
+            .iter()
+            .find(|t| t.series == Series::Serve)
+            .unwrap();
+        assert_eq!(stats.trend.first().map(|t| &t.line), Some(trend));
+        assert_eq!(stats.matches, narrowed.matches);
+        assert!(stats.fundamentals.iter().all(|f| f.total > 0));
+        let receiver = app
+            .team_analysis(
+                team.clone(),
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::P,
+                DetailFilter::default(),
+            )
+            .unwrap()
+            .detail
+            .players[0]
+            .id
+            .clone();
+        let stats = app
+            .player_statistics(team, receiver, AnalysisPeriod::Season, None)
+            .unwrap();
+        let reception = stats
+            .fundamentals
+            .iter()
+            .find(|f| f.event == EventTypeEnum::P)
+            .unwrap();
+        let trend = stats
+            .trend
+            .iter()
+            .find(|t| t.line.series == Series::Reception)
+            .unwrap();
+        assert_eq!(trend.measure, PlayerMeasure::Positivity);
+        // one match: the box, the match and the overall are the same
+        assert_eq!(trend.line.values, [reception.value]);
+        assert_eq!(trend.line.moving, [reception.value]);
+        assert_eq!(trend.line.overall, reception.value);
+        assert_eq!(trend.line.band, None);
+    }
+
     fn analysis_of(
         app: &Scout4All,
         team: &str,
@@ -11317,11 +12610,11 @@ mod tests {
         };
         assert_eq!(
             narrowed(Some(PhaseEnum::SideOut), vec![]),
-            [(P, 1), (A, 0), (S, 0), (B, 0), (D, 0)]
+            [(P, 1), (A, 0), (B, 0), (D, 0)]
         );
         assert_eq!(
             narrowed(Some(PhaseEnum::Break), vec![]),
-            [(P, 0), (A, 0), (S, 0), (B, 0), (D, 1)]
+            [(A, 0), (S, 0), (B, 0), (D, 1)]
         );
         assert_eq!(narrowed(None, vec![0]), summary);
         assert_eq!(

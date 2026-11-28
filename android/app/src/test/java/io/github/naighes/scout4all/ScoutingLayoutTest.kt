@@ -38,7 +38,7 @@ class ScoutingLayoutTest(private val screen: Size) {
     private fun touch(text: String) {
         val touchable = hasText(text) and hasClickAction() and isEnabled()
         // the core reads the step off the main thread
-        rule.waitUntil(5_000) { rule.onAllNodes(touchable).fetchSemanticsNodes().size == 1 }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(touchable).fetchSemanticsNodes().size == 1 }
         val node = rule.onNode(touchable)
         when {
             // maybe out of the window, in a scroll inside another

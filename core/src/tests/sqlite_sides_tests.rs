@@ -12,6 +12,7 @@ mod tests {
         event_edit::Correcting,
         localization::Language,
         match_form::{MatchInput, Opponent},
+        player_profile::PlayerSeasonStats,
         providers::{
             match_reader::MatchReader,
             match_writer::MatchWriter,
@@ -339,7 +340,7 @@ mod tests {
         let p = Sqlite::new();
         let (a, m) = block_of_v1(&p).await;
         let attack = EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: A,
             player: Some(a.players[1].id),
             eval: Some(Perfect),
@@ -454,7 +455,7 @@ mod tests {
         let p = Sqlite::new();
         let (a, m) = block_of_v3(&p).await;
         let serve = EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: S,
             player: Some(a.players[0].id),
             eval: Some(Perfect),
@@ -540,6 +541,39 @@ mod tests {
         let of_sides = sides[0].b.as_ref().map(|b| b.stats.clone());
         assert_eq!(Some(match_stats(&of_b).unwrap()), of_sides);
         assert_ne!(of_sides, Some(Stats::new()));
+    }
+
+    /// A player of B counts in the season the matches scouted on both
+    /// sides; scouted on A's side only, the match isn't theirs.
+    #[tokio::test]
+    async fn the_profile_of_a_player_of_b_counts_the_matches_on_both_sides() {
+        for both in [true, false] {
+            let p = Sqlite::new();
+            let (_, b, m) = set_one(&p, both).await;
+            if both {
+                add(
+                    &p,
+                    &m,
+                    &[
+                        (Side::A, S, m.team.players[0].id, Positive),
+                        (Side::B, P, libero(&b), Negative),
+                        (Side::B, A, b.players[1].id, Perfect),
+                    ],
+                );
+            }
+            let matches = p.match_reader.read_scouted(&b).await.unwrap();
+            let season = PlayerSeasonStats::of(b.players[1].id, &matches).unwrap();
+            let expected = u32::from(both);
+            assert_eq!(
+                (
+                    season.matches_scouted,
+                    season.matches_played,
+                    season.sets_played,
+                    season.attack_points
+                ),
+                (expected, expected, expected, expected)
+            );
+        }
     }
 
     /// The event of B born from a touch of A is told with the event of A
@@ -737,9 +771,15 @@ mod tests {
                 p.db.clone(),
                 crate::localization::Language::default(),
             ));
-        let session = crate::set_start::start(m.clone(), input, writer, Some(team_b))
-            .await
-            .unwrap();
+        let session = crate::set_start::start(
+            m.clone(),
+            input,
+            writer,
+            Some(team_b),
+            crate::tests::clock::utc_now(),
+        )
+        .await
+        .unwrap();
         assert!(session.is_both());
         let sides = reader(&p).read_sides(&m).unwrap();
         assert!(sides[0].b.is_some());
@@ -778,9 +818,15 @@ mod tests {
                 p.db.clone(),
                 crate::localization::Language::default(),
             ));
-        let mut session = crate::set_start::start(m, input, writer, Some(team_b))
-            .await
-            .unwrap();
+        let mut session = crate::set_start::start(
+            m,
+            input,
+            writer,
+            Some(team_b),
+            crate::tests::clock::utc_now(),
+        )
+        .await
+        .unwrap();
         let fell = crate::shapes::court_zone::CourtTarget::Zone(5);
         session.choose_event_of(Side::A, S).await.unwrap();
         session.choose_target(Some(fell)).unwrap();
@@ -833,6 +879,7 @@ mod tests {
             input,
             std::sync::Arc::clone(&writer),
             Some(team_b.clone()),
+            crate::tests::clock::utc_now(),
         )
         .await
         .unwrap();
@@ -878,6 +925,7 @@ mod tests {
             touches,
             team_b,
             writer,
+            crate::tests::clock::utc_now(),
         )
         .unwrap();
         assert_eq!(again.touches().len(), 2);
@@ -923,9 +971,15 @@ mod tests {
                 p.db.clone(),
                 crate::localization::Language::default(),
             ));
-        let mut session = crate::set_start::start(m.clone(), input, writer, Some(team_b.clone()))
-            .await
-            .unwrap();
+        let mut session = crate::set_start::start(
+            m.clone(),
+            input,
+            writer,
+            Some(team_b.clone()),
+            crate::tests::clock::utc_now(),
+        )
+        .await
+        .unwrap();
         session.choose_event_of(Side::B, PL).await.unwrap();
         let score = |side| {
             let s = session.snapshot_of(side).unwrap();
@@ -984,10 +1038,16 @@ mod tests {
                 p.db.clone(),
                 crate::localization::Language::default(),
             ));
-        let mut session = crate::set_start::start(m.clone(), input, writer, Some(b.clone()))
-            .await
-            .unwrap()
-            .with_order(crate::scouting::ChoiceOrder::PlayerFirst);
+        let mut session = crate::set_start::start(
+            m.clone(),
+            input,
+            writer,
+            Some(b.clone()),
+            crate::tests::clock::utc_now(),
+        )
+        .await
+        .unwrap()
+        .with_order(crate::scouting::ChoiceOrder::PlayerFirst);
         let others = session.other_events();
         for side in [Side::A, Side::B] {
             assert!(others.contains(&(side, R)), "{side:?} {others:?}");
@@ -1053,9 +1113,15 @@ mod tests {
                 p.db.clone(),
                 crate::localization::Language::default(),
             ));
-        let mut session = crate::set_start::start(m.clone(), input, writer, Some(b.clone()))
-            .await
-            .unwrap();
+        let mut session = crate::set_start::start(
+            m.clone(),
+            input,
+            writer,
+            Some(b.clone()),
+            crate::tests::clock::utc_now(),
+        )
+        .await
+        .unwrap();
         // B substitutes (the only one the match allows)
         assert_eq!(session.side(), Side::A);
         session.choose_event_of(Side::B, R).await.unwrap();
@@ -1205,9 +1271,15 @@ mod tests {
                 p.db.clone(),
                 crate::localization::Language::default(),
             ));
-        let session = crate::set_start::start(m.clone(), input, writer, Some(team_b.clone()))
-            .await
-            .unwrap();
+        let session = crate::set_start::start(
+            m.clone(),
+            input,
+            writer,
+            Some(team_b.clone()),
+            crate::tests::clock::utc_now(),
+        )
+        .await
+        .unwrap();
         assert!(!session.inverted_p1_of(Side::B));
         // B's last set (numbered before this one) was inverted and had a reception
         let mut earlier = start_b.clone();

@@ -165,6 +165,44 @@ class AnalysisPlayersTest(language: String) {
     }
 }
 
+/** A player chosen: the figures of the team, of its rallies (side out,
+ * break point, rotations, their errors), aren't shown, neither on the
+ * summary nor as trends; all of them again with no player chosen. */
+@RunWith(org.robolectric.RobolectricTestRunner::class)
+class AnalysisTeamFiguresTest {
+    @get:Rule val rule = createComposeRule()
+
+    private fun shown(text: String) = rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty()
+
+    @Test
+    fun aPlayerChosenHasNoFiguresOfTheTeam() {
+        val team = saveNationalTeam()
+        liberoMatch(team)
+        rule.analysis(team)
+        val summary = listOf(R.string.side_out, R.string.break_points, R.string.rotations, R.string.opponent_errors)
+            .map { string(it) }
+        assertEquals(summary, summary.filter { shown(it) })
+        rule.choosePlayer(string(R.string.filter_player), LIBERO)
+        rule.waitForText(string(R.string.filter_player) + " 6")
+        rule.waitFor({ rule.texts().toString() }) { summary.none { shown(it) } }
+        // the aces stay, theirs too: the receptions of the player
+        assert(shown(string(R.string.aces)))
+        // the trend: no side out nor break point, as the core names them
+        val trends = core {
+            it.teamAnalysis(team, AnalysisPeriod.LastMatches(5u), null, EventTypeEnum.S, DetailFilter(null))
+        }.trend.map { it.name.replaceFirstChar { c -> c.uppercase() } }
+        rule.click(string(R.string.stats_trend))
+        rule.waitFor({ rule.texts().toString() }) { trends.take(4).all { shown(it) } }
+        assertEquals(trends.take(4), trends.filter { shown(it) })
+        rule.click(string(R.string.filter_player) + " 6")
+        rule.choose(string(R.string.filter_all))
+        rule.waitForNoMenu()
+        rule.waitFor({ rule.texts().toString() }) { trends.all { shown(it) } }
+        rule.click(string(R.string.stats_summary))
+        rule.waitFor({ rule.texts().toString() }) { summary.all { shown(it) } }
+    }
+}
+
 /** Seen from another team, or two teams side by side: the players chosen
  * are of one team only. */
 @RunWith(org.robolectric.RobolectricTestRunner::class)

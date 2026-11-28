@@ -246,7 +246,10 @@ private fun Navigation(
             TermsScreen(onAccept = null, onBack = { nav.back(entry) })
         }
         composable("settings/about") { entry ->
-            AboutScreen(onBack = { nav.back(entry) })
+            AboutScreen(onBack = { nav.back(entry) }, onLicenses = { nav.navigate("settings/licenses") })
+        }
+        composable("settings/licenses") { entry ->
+            LicensesScreen(onBack = { nav.back(entry) })
         }
         composable("new-team") { entry ->
             TeamFormScreen(null, onBack = { nav.back(entry) }, onSaved = { nav.back(entry) })
@@ -291,6 +294,39 @@ private fun Navigation(
             PlayerFormScreen(id, null, onBack = { nav.back(entry) }, onDone = { nav.back(entry) })
         }
         composable("team/{id}/player/{player}") { entry ->
+            val id = entry.arguments?.getString("id").orEmpty()
+            val player = entry.arguments?.getString("player").orEmpty()
+            PlayerProfileScreen(
+                id, player,
+                onBack = { nav.back(entry) },
+                onEdit = { nav.navigate("team/$id/player/$player/edit") },
+                onTeam = { team -> nav.navigate("team/$team/player/$player") },
+                onDeleted = { nav.back(entry) },
+                onDetail = { locked ->
+                    val choice = locked.choice
+                    nav.navigate(
+                        "team/$id/player/$player/analysis?kind=${choice.kind.name}&count=${choice.count}" +
+                            "&from=${choice.from}&to=${choice.to}&competition=${locked.competition.orEmpty()}",
+                    )
+                },
+            )
+        }
+        composable("team/{id}/player/{player}/analysis?kind={kind}&count={count}&from={from}&to={to}&competition={competition}") { entry ->
+            val argument = { name: String -> entry.arguments?.getString(name).orEmpty() }
+            val choice = PeriodChoice(
+                PeriodKind.entries.firstOrNull { it.name == argument("kind") } ?: PeriodKind.Season,
+                argument("count").toIntOrNull() ?: 1,
+                argument("from"),
+                argument("to"),
+            )
+            AnalysisScreen(
+                argument("id"),
+                onBack = { nav.back(entry) },
+                onWatch = { nav.watch(it) },
+                locked = LockedAnalysis(argument("player"), choice, argument("competition").ifEmpty { null }),
+            )
+        }
+        composable("team/{id}/player/{player}/edit") { entry ->
             val id = entry.arguments?.getString("id").orEmpty()
             val player = entry.arguments?.getString("player").orEmpty()
             PlayerFormScreen(id, player, onBack = { nav.back(entry) }, onDone = { nav.back(entry) })
@@ -394,6 +430,7 @@ private fun Navigation(
  * app starts again; before, the user may report it. */
 @Composable
 private fun PanicDialog(app: Scout4AllApplication) {
+    val opened = noAppDialog()
     val panic = app.panic.collectAsState().value ?: return
     val context = LocalContext.current
     val title = stringResource(R.string.panic_report_title)
@@ -404,7 +441,7 @@ private fun PanicDialog(app: Scout4AllApplication) {
         title = { Text(stringResource(R.string.panic_title)) },
         text = { Text(stringResource(R.string.panic_text)) },
         dismissButton = {
-            TextButton(onClick = { context.report(title, body) }) { Text(stringResource(R.string.report)) }
+            TextButton(onClick = { opened(context.report(title, body)) }) { Text(stringResource(R.string.report)) }
         },
         confirmButton = {
             TextButton(onClick = app::startAgain) { Text(stringResource(R.string.start_again)) }
@@ -420,6 +457,8 @@ private fun journaled(app: Scout4AllApplication) =
  * offered again. */
 @Composable
 private fun CrashDialog(app: Scout4AllApplication) {
+    // kept once the crash is forgotten
+    val opened = noAppDialog()
     val crash = app.crashed.collectAsState().value ?: return
     val context = LocalContext.current
     val title = stringResource(R.string.crash_report_title)
@@ -433,7 +472,7 @@ private fun CrashDialog(app: Scout4AllApplication) {
         },
         confirmButton = {
             TextButton(onClick = {
-                context.report(title, body)
+                opened(context.report(title, body))
                 app.forgetCrash()
             }) { Text(stringResource(R.string.report)) }
         },
@@ -445,13 +484,7 @@ private fun CrashDialog(app: Scout4AllApplication) {
 @Composable
 private fun StartupNoticeDialog(app: Scout4AllApplication) {
     val notice = app.startupNotice.collectAsState().value ?: return
-    AlertDialog(
-        onDismissRequest = app::forgetStartupNotice,
-        text = { Text(notice) },
-        confirmButton = {
-            TextButton(onClick = app::forgetStartupNotice) { Text(stringResource(android.R.string.ok)) }
-        },
-    )
+    NoticeDialog(Notice.warning(notice), app::forgetStartupNotice)
 }
 
 /** Back from the screen of `entry`, once: a second touch of the arrow

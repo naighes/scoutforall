@@ -6,6 +6,7 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::shapes::r#match::MatchSummary;
     use crate::{
         analytics::queue::{PendingUpload, UploadQueue},
         constants::DEFAULT_MAX_SUBSTITUTIONS,
@@ -42,7 +43,7 @@ mod tests {
         },
         video::{EventRef, StoredProfile, VideoFile, VideoProfile, VideoProfiles},
     };
-    use chrono::Utc;
+
     use rusqlite::params;
     use serde_json::Value as Json;
     use uuid::Uuid;
@@ -97,6 +98,12 @@ mod tests {
             birth_date: chrono::NaiveDate::from_ymd_opt(2008, 3, n.into()),
             height_cm: Some(180),
             notes: "notes".into(),
+            nationality: None,
+            dominant_hand: None,
+            federation_id: String::new(),
+            email: String::new(),
+            phone: String::new(),
+            birth_place: String::new(),
         })
         .collect()
     }
@@ -118,7 +125,7 @@ mod tests {
 
     fn serve(player: Uuid) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::S,
             player: Some(player),
             eval: Some(EvalEnum::Positive),
@@ -130,7 +137,7 @@ mod tests {
 
     fn their_error() -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::OE,
             player: None,
             eval: None,
@@ -150,7 +157,7 @@ mod tests {
                 team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -233,7 +240,12 @@ mod tests {
                 "INSERT INTO events (id, match_id, set_number, seq, side, timestamp,
                      event_type, player, eval)
                  VALUES (?1, ?2, 1, 2, 'b', ?3, 'P', ?4, '=')",
-                params![Sql(Uuid::new_v4()), m.id, Sql(Utc::now()), Sql(ids[1])],
+                params![
+                    Sql(Uuid::new_v4()),
+                    m.id,
+                    Sql(crate::tests::clock::now()),
+                    Sql(ids[1])
+                ],
             ))
         })
         .unwrap()
@@ -485,6 +497,16 @@ mod tests {
                 TeamSideEnum::Us
             )]
         );
+        // the same summaries, the opponent now a name with no team
+        let summaries: Vec<_> = summaries
+            .into_iter()
+            .map(|listed| {
+                listed.map(|summary| MatchSummary {
+                    opponent_team: None,
+                    ..summary
+                })
+            })
+            .collect();
         assert_eq!(p.matches.read_summaries(&a).await.unwrap(), summaries);
         let id = &m.id;
         for (sql, expected) in [
@@ -1026,7 +1048,12 @@ mod tests {
         let m = scouted(&p, &a).await;
         let gone = a.players[1].id;
         p.persons.remove(&gone).unwrap();
-        let zip = export(&p.db, Subject::Match(Uuid::parse_str(&m.id).unwrap())).unwrap();
+        let zip = export(
+            &p.db,
+            Subject::Match(Uuid::parse_str(&m.id).unwrap()),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let (_, persons) = unzip(&zip)
             .unwrap()
             .into_iter()

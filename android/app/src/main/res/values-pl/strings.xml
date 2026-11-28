@@ -42,10 +42,21 @@
     <string name="home">u siebie</string>
     <string name="away">na wyjeździe</string>
     <string name="in_progress">w trakcie</string>
-    <string name="home_in_progress">W toku</string>
-    <string name="home_recent">Ostatnie mecze</string>
+    <string name="to_play">do rozegrania</string>
+    <string name="home_in_progress">Do wznowienia lub rozegrania</string>
+    <string name="home_recent">Ostatnie wyniki</string>
+    <string name="home_calendar">Kalendarz</string>
+    <string name="home_matches">Mecze</string>
+    <string name="hide_from_home">Ukryj na ekranie głównym</string>
+    <string name="show_in_home">Pokaż na ekranie głównym</string>
+    <string name="show_hidden">Pokaż ukryte (%1$d)</string>
+    <string name="hide_hidden">Zwiń ukryte</string>
+    <string name="home_open_close">Rozwiń lub zwiń</string>
+    <string name="home_no_matches">Brak meczów</string>
     <string name="agenda_today">Dziś</string>
-    <string name="agenda_week">Tydzień</string>
+    <string name="agenda_next_match">Najbliższy mecz</string>
+    <string name="agenda_see_calendar">Zobacz kalendarz</string>
+    <string name="agenda_official_match">Mecz oficjalny</string>
     <string name="agenda_training">Trening</string>
     <string name="agenda_cancelled">odwołany</string>
     <string name="agenda_to_close">do zamknięcia</string>
@@ -83,6 +94,7 @@
     <string name="setter">Rozgrywający</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Drugi libero</string>
+    <string name="out_for_the_libero">zmieniony przez libero</string>
     <string name="none">Brak</string>
     <string name="empty_position">Opróżnij pozycję</string>
     <string name="no_available_players">Brak dostępnych zawodników</string>
@@ -109,8 +121,6 @@
     <string name="set_lost">Set %d przegrany</string>
     <string name="match_won">Mecz wygrany</string>
     <string name="match_lost">Mecz przegrany</string>
-    <string name="match_won_cheer">Gratulacje dla całej drużyny!</string>
-    <string name="match_lost_cheer">Głowa do góry, następnym razem!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">odwr. R1</string>
@@ -236,6 +246,7 @@
     <string name="version">Wersja</string>
     <string name="license">Licencja</string>
     <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="third_party_licenses">Licencje stron trzecich</string>
     <string name="data_privacy">Dane i prywatność</string>
     <string name="source_code">Kod źródłowy</string>
     <string name="report_problem">Zgłoś problem</string>
@@ -243,6 +254,7 @@
     <string name="report_title">Problem w aplikacji na Androida</string>
     <string name="report_body">Co się stało?\n\nCzego się spodziewałeś(-aś)?\n\n---\n%1$s</string>
     <string name="no_app_to_open">Żadna aplikacja nie może tego otworzyć</string>
+    <string name="settings_not_saved">Nie udało się zapisać ustawień: %1$s</string>
     <!-- archives -->
     <string name="export_team">Udostępnij drużynę</string>
     <string name="export_match">Udostępnij mecz</string>
@@ -370,6 +382,7 @@
     <string name="analysis">Analiza</string>
     <string name="period">Okres</string>
     <string name="last_month">Ostatni miesiąc</string>
+    <string name="season_period">Cały sezon</string>
     <string name="last_matches">Ostatnie %1$d</string>
     <string name="between">Od – do</string>
     <string name="from_day">Od</string>
@@ -469,6 +482,8 @@
     <string name="clips_without_video">Mecze bez wideo, pominięte: %1$d</string>
     <string name="clips_match_of">Mecz %1$d z %2$d</string>
     <string name="montage_left_out">Pominięte: %1$s</string>
+    <string name="montage_outside">Akcje poza wideo, pominięte: %1$d z %2$d</string>
+    <string name="montage_none">Żadna akcja nie mieści się w wideo: nie ma czego tworzyć</string>
     <string name="left_out_no_video">bez wideo</string>
     <string name="left_out_unreadable">wideo nieczytelne</string>
     <string name="left_out_not_lined_up">niezsynchronizowany z wideo</string>
@@ -539,6 +554,7 @@
     <string name="tr_programming">Plan treningów</string>
     <string name="tr_sessions">Sesje</string>
     <string name="tr_new_session">Nowa sesja</string>
+    <string name="tr_new_event">Nowe wydarzenie</string>
     <string name="tr_edit_session">Edytuj sesję</string>
     <string name="tr_session_title">Tytuł</string>
     <string name="tr_session_duration">Planowany czas (min)</string>
@@ -728,4 +744,27 @@
     <string name="no_photo">Brak zdjęcia</string>
     <string name="no_face">Nie znaleziono twarzy na zdjęciu: wybierz takie, na którym twarz jest wyraźna.</string>
     <string name="many_faces">Znaleziono %1$d twarzy na zdjęciu: wybierz takie z jedną osobą.</string>
+    <string name="nationality">Narodowość</string>
+    <string name="profile">Profil</string>
+    <string name="sets">Sety</string>
+    <string name="attendance">Obecność</string>
+    <string name="no_matches_played">Brak rozegranych meczów</string>
+    <string name="also_plays_in">Gra także w</string>
+    <string name="player_out_of">z %1$d</string>
+    <string name="player_points_detail">Atak %1$d · Blok %2$d · Serwis %3$d</string>
+    <string name="dominant_hand">Ręka dominująca</string>
+    <string name="right_hand">Prawa</string>
+    <string name="left_hand">Lewa</string>
+    <string name="federation_id">Numer federacyjny</string>
+    <string name="notice_error">Wystąpił problem</string>
+    <string name="notice_warning">Uwaga</string>
+    <string name="notice_info">Gotowe</string>
+    <string name="birth_place">Miejsce urodzenia</string>
+    <string name="contacts">Kontakty</string>
+    <string name="email">E-mail</string>
+    <string name="phone_prefix">Kierunkowy</string>
+    <string name="phone">Telefon</string>
+    <string name="write_email">Napisz e-mail</string>
+    <string name="call">Zadzwoń</string>
+    <string name="include_contacts">Dołącz kontakty (e-mail, telefon, miejsce urodzenia)</string>
 </resources>

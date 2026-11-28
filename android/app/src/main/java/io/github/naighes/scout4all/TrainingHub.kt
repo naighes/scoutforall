@@ -1,6 +1,11 @@
 package io.github.naighes.scout4all
 
 import androidx.compose.foundation.background
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,6 +33,10 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.ui.res.painterResource
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
@@ -175,8 +184,9 @@ internal fun TrainingScreen(
 ) {
     var part by rememberSaveable { mutableStateOf(first) }
     var view by rememberSaveable { mutableStateOf(firstView) }
+    val clock = clock()
     var level by rememberSaveable { mutableStateOf(Level.MICROCYCLE) }
-    var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
+    var day by rememberSaveable { mutableStateOf(clock.today()) }
     var sharing by rememberSaveable { mutableStateOf(false) }
     // what is marked to make a cycle of it: the sessions stay across the
     // views and periods of the calendar, the cycles while on their level
@@ -195,7 +205,7 @@ internal fun TrainingScreen(
                         // added from here too, not only from the home
                         IconButton(onClick = onVenues) {
                             Icon(
-                                androidx.compose.ui.res.painterResource(R.drawable.ic_gym),
+                                painterResource(R.drawable.ic_gym),
                                 contentDescription = stringResource(R.string.venues),
                             )
                         }
@@ -230,8 +240,7 @@ internal fun TrainingScreen(
                             sessions = emptyList()
                         }
                     },
-                    stringResource(R.string.tr_new_session),
-                ) { onNewOn(day) }
+                ) { NewEventFab({ onNewOn(day) }, { onNewMatch(day) }) }
                 Part.CYCLES -> Fabs(
                     up?.takeIf { cycles.isNotEmpty() }?.let { u ->
                         "${stringResource(u.createName())} (${cycles.size})" to {
@@ -239,8 +248,7 @@ internal fun TrainingScreen(
                             cycles = emptyList()
                         }
                     },
-                    stringResource(level.createName()),
-                ) { onNewCycle(level) }
+                ) { NewCycleFab(stringResource(level.createName())) { onNewCycle(level) } }
                 else -> {}
             }
         },
@@ -276,9 +284,9 @@ internal fun TrainingScreen(
 }
 
 /** The + of the part, and above it the cycle of what is marked, when
- * something is: both said in words. */
+ * something is. */
 @Composable
-private fun Fabs(create: Pair<String, () -> Unit>?, add: String, onAdd: () -> Unit) =
+private fun Fabs(create: Pair<String, () -> Unit>?, add: @Composable () -> Unit) =
     Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(16.dp)) {
         create?.let { (label, onCreate) ->
             ExtendedFloatingActionButton(
@@ -288,12 +296,41 @@ private fun Fabs(create: Pair<String, () -> Unit>?, add: String, onAdd: () -> Un
                 text = { Text(label) },
             )
         }
-        ExtendedFloatingActionButton(
-            onClick = onAdd,
-            icon = { Icon(Icons.Filled.Add, contentDescription = add) },
-            text = { Text(add) },
-        )
+        add()
     }
+
+/** Said in words: the same + makes a different cycle on each level. */
+@Composable
+private fun NewCycleFab(add: String, onAdd: () -> Unit) = ExtendedFloatingActionButton(
+    onClick = onAdd,
+    icon = { Icon(Icons.Filled.Add, contentDescription = add) },
+    text = { Text(add) },
+)
+
+/** One + for what the calendar holds: a session or a match, two alike
+ * entries under the icons their rows wear. */
+@Composable
+private fun NewEventFab(onSession: () -> Unit, onMatch: () -> Unit) = Box {
+    var open by remember { mutableStateOf(false) }
+    FloatingActionButton(onClick = { open = true }) {
+        Icon(Icons.Filled.Add, contentDescription = stringResource(R.string.tr_new_event))
+    }
+    DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+        listOf(
+            Triple(R.string.tr_new_session, R.drawable.ic_calendar, onSession),
+            Triple(R.string.new_match, R.drawable.ic_ball, onMatch),
+        ).forEach { (name, icon, onPick) ->
+            DropdownMenuItem(
+                text = { Text(stringResource(name)) },
+                leadingIcon = { Icon(painterResource(icon), contentDescription = null, Modifier.size(24.dp)) },
+                onClick = {
+                    open = false
+                    onPick()
+                },
+            )
+        }
+    }
+}
 
 /** Room under a list for the buttons over it: one, or two with something
  * marked. */
@@ -341,7 +378,7 @@ private fun CalendarTab(
     var venue by rememberSaveable { mutableStateOf<String?>(null) }
     var filter by rememberSaveable { mutableStateOf(EventFilter.ALL) }
     var period by rememberSaveable { mutableStateOf(ListPeriod.ANY) }
-    val today = LocalDate.now()
+    val today = clock().today()
     val team = teamId.takeIf { !allTeams }
     val monthDays by rememberAgenda(team, AgendaSpan.MONTH, month.atDay(1), month)
     val weekDays by rememberAgenda(team, AgendaSpan.WEEK, selected, weekOf(selected).first)
@@ -399,77 +436,52 @@ private fun CalendarTab(
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.primary,
             )
-            IconButton(onClick = {
-                if (view == CalendarView.WEEK) onSelected(selected.minusWeeks(1).also { month = YearMonth.from(it) })
-                else month = month.minusMonths(1)
-            }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
-            }
-            TextButton(onClick = {
-                month = YearMonth.now()
-                onSelected(today)
-            }) { Text(stringResource(R.string.agenda_today)) }
-            IconButton(onClick = {
-                if (view == CalendarView.WEEK) onSelected(selected.plusWeeks(1).also { month = YearMonth.from(it) })
-                else month = month.plusMonths(1)
-            }) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
-            }
+            PeriodButtons(
+                onPrevious = {
+                    if (view == CalendarView.WEEK) onSelected(selected.minusWeeks(1).also { month = YearMonth.from(it) })
+                    else month = month.minusMonths(1)
+                },
+                onToday = {
+                    month = YearMonth.from(today)
+                    onSelected(today)
+                },
+                onNext = {
+                    if (view == CalendarView.WEEK) onSelected(selected.plusWeeks(1).also { month = YearMonth.from(it) })
+                    else month = month.plusMonths(1)
+                },
+            )
         }
     }
+    // the views, a separator, then whose and where: each an icon over its
+    // name, as the bar of the calendars of the mail
     val views: @Composable () -> Unit = {
         Row(
             Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            FilterChip(
-                selected = view == CalendarView.WEEK,
-                onClick = { onView(CalendarView.WEEK) },
-                label = { Text(stringResource(R.string.tr_calendar_week)) },
-            )
-            FilterChip(
-                selected = view == CalendarView.MONTH,
-                onClick = {
-                    month = YearMonth.from(selected)
-                    onView(CalendarView.MONTH)
-                },
-                label = { Text(stringResource(R.string.tr_calendar_month)) },
-            )
-            FilterChip(
-                selected = view == CalendarView.LIST,
-                onClick = { onView(CalendarView.LIST) },
-                label = { Text(stringResource(R.string.tr_calendar_list)) },
-            )
-            if (view == CalendarView.LIST) {
-                Box {
-                    FilterChip(
-                        selected = period != ListPeriod.ANY,
-                        onClick = { periods = true },
-                        label = { Text(period.label()) },
-                    )
-                    androidx.compose.material3.DropdownMenu(expanded = periods, onDismissRequest = { periods = false }) {
-                        ListPeriod.entries.forEach { p ->
-                            androidx.compose.material3.DropdownMenuItem(
-                                text = { Text(p.label()) },
-                                onClick = { period = p; periods = false },
-                            )
-                        }
-                    }
-                }
+            BarItem(R.drawable.ic_view_week, stringResource(R.string.tr_calendar_week), view == CalendarView.WEEK) {
+                onView(CalendarView.WEEK)
             }
-            FilterChip(
-                selected = allTeams,
-                onClick = { allTeams = !allTeams },
-                label = { Text(stringResource(if (allTeams) R.string.venue_all_teams else R.string.venue_this_team)) },
-            )
+            BarItem(R.drawable.ic_view_month, stringResource(R.string.tr_calendar_month), view == CalendarView.MONTH) {
+                month = YearMonth.from(selected)
+                onView(CalendarView.MONTH)
+            }
+            BarItem(R.drawable.ic_view_list, stringResource(R.string.tr_calendar_list), view == CalendarView.LIST) {
+                onView(CalendarView.LIST)
+            }
+            VerticalDivider(Modifier.height(40.dp).align(Alignment.CenterVertically))
+            BarItem(
+                if (allTeams) R.drawable.ic_all_teams else R.drawable.ic_this_team,
+                stringResource(if (allTeams) R.string.venue_all_teams else R.string.venue_this_team),
+                allTeams,
+            ) { allTeams = !allTeams }
             if (venues.isNotEmpty()) {
                 Box {
-                    FilterChip(
-                        selected = venue != null,
-                        onClick = { picking = true },
-                        label = { Text(venues.firstOrNull { it.id == venue }?.name ?: stringResource(R.string.venue_all)) },
-                    )
+                    BarItem(
+                        R.drawable.ic_gym,
+                        venues.firstOrNull { it.id == venue }?.name ?: stringResource(R.string.venue_all),
+                        venue != null,
+                    ) { picking = true }
                     androidx.compose.material3.DropdownMenu(expanded = picking, onDismissRequest = { picking = false }) {
                         androidx.compose.material3.DropdownMenuItem(
                             text = { Text(stringResource(R.string.venue_all)) },
@@ -542,25 +554,40 @@ private fun CalendarTab(
                     }
                 }
                 items(events, key = { "${it.teamId}/${it.start}/${it.id()}" }) { open(it) }
-                // a match on the day chosen, right under it, named as on the
-                // desktop; the session on it is the floating button's
-                item(key = "add") {
-                    TextButton(onClick = { onNewMatch(selected) }, Modifier.padding(horizontal = 8.dp)) {
-                        Icon(Icons.Filled.Add, contentDescription = null)
-                        Text(stringResource(R.string.new_match), Modifier.padding(start = 8.dp))
-                    }
-                }
             }
             CalendarView.LIST -> {
                 // only the days with something, the filter too
                 val days = shown(listDays).filter { it.events.isNotEmpty() }
+                // the period is not a view: it heads the list it bounds
                 item(key = "count") {
-                    Text(
-                        countText(null, days.sumOf { d -> d.events.count { it.item is AgendaItemRecord.Session } }),
-                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Box {
+                            FilterChip(
+                                selected = period != ListPeriod.ANY,
+                                onClick = { periods = true },
+                                label = { Text(period.label()) },
+                            )
+                            androidx.compose.material3.DropdownMenu(expanded = periods, onDismissRequest = { periods = false }) {
+                                ListPeriod.entries.forEach { p ->
+                                    androidx.compose.material3.DropdownMenuItem(
+                                        text = { Text(p.label()) },
+                                        onClick = { period = p; periods = false },
+                                    )
+                                }
+                            }
+                        }
+                        Text(
+                            countText(null, days.sumOf { d -> d.events.count { it.item is AgendaItemRecord.Session } }),
+                            Modifier.weight(1f),
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.End,
+                        )
+                    }
                 }
                 if (days.isEmpty()) {
                     item(key = "nothing") {
@@ -578,6 +605,33 @@ private fun CalendarTab(
                 }
             }
         }
+    }
+}
+
+/** A choice of the calendar's bar: the icon over its name, lit when
+ * chosen. A long name goes on a second line, then is cut. */
+@Composable
+private fun BarItem(icon: Int, label: String, chosen: Boolean, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    val color = if (chosen) colors.onSecondaryContainer else colors.onSurfaceVariant
+    Column(
+        Modifier
+            .widthIn(min = 64.dp, max = 88.dp)
+            .clip(MaterialTheme.shapes.medium)
+            .background(if (chosen) colors.secondaryContainer else colors.surface)
+            .selectable(selected = chosen, onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(androidx.compose.ui.res.painterResource(icon), contentDescription = null, tint = color)
+        Text(
+            label,
+            style = MaterialTheme.typography.labelMedium,
+            color = color,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -689,7 +743,7 @@ private fun AttendanceTab(teamId: String, modifier: Modifier) {
     val cycles by rememberCore(Unit, teamId) { core ->
         listOf(Level.PROGRAM, Level.MESOCYCLE, Level.MICROCYCLE).flatMap { l -> core.cycles(teamId, l).map { l to it } }
     }
-    val today = LocalDate.now()
+    val today = clock().today()
     val scopes = buildList<Triple<String, String, TrainingScope>> {
         add(Triple("all", stringResource(R.string.tr_whole_season), TrainingScope.All))
         weekOf(today).let { (a, b) -> add(Triple("week", stringResource(R.string.tr_this_week), TrainingScope.Dates(a.toString(), b.toString()))) }

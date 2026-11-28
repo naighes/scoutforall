@@ -104,6 +104,12 @@ fn person(player: &PlayerEntry) -> Person {
         birth_date: player.birth_date,
         height_cm: player.height_cm,
         notes: player.notes.clone(),
+        nationality: player.nationality,
+        dominant_hand: player.dominant_hand,
+        federation_id: player.federation_id.clone(),
+        email: player.email.clone(),
+        phone: player.phone.clone(),
+        birth_place: player.birth_place.clone(),
         deleted: false,
     }
 }

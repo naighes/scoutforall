@@ -104,6 +104,18 @@ class TalkBackTest {
     }
 
     @Test
+    fun aMatchNotStartedIsToPlayWithoutAScore() {
+        core { it.saveMatch(team, null, MatchForm("Cortona", "2026-10-25T18:00:00+02:00", true, "6")) }
+        show("Ekaterina") {
+            TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
+        }
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("Cortona, ${string(R.string.home)}, ") } }
+        val row = spoken().first { it.startsWith("Cortona, ${string(R.string.home)}") }
+        assertTrue(row, row.endsWith(string(R.string.to_play)))
+    }
+
+    @Test
     fun anEmptyPositionSaysSo() {
         val match = core { it.saveMatch(team, null, MatchForm("Cortona", "2026-10-25T18:00:00+02:00", true, "6")) }
         show(string(R.string.start_set)) { SetStartScreen(team, match, onBack = {}, onStarted = {}) }
@@ -141,8 +153,8 @@ class TalkBackTest {
             TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
         }
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("${string(R.string.home)}, Cortona, ") } }
-        val row = spoken().first { it.startsWith("${string(R.string.home)}, Cortona") }
+        rule.waitFor({ "${spoken()}" }) { spoken().any { it.startsWith("Cortona, ${string(R.string.home)}, ") } }
+        val row = spoken().first { it.startsWith("Cortona, ${string(R.string.home)}") }
         assertTrue(row, row.endsWith("${string(R.string.in_progress)}, ${string(R.string.sets_score, 0, 0)}"))
         assertTitle("Italia")
     }

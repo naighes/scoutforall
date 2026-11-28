@@ -43,10 +43,21 @@
     <string name="home">home</string>
     <string name="away">away</string>
     <string name="in_progress">in progress</string>
-    <string name="home_in_progress">In progress</string>
-    <string name="home_recent">Recent matches</string>
+    <string name="to_play">to play</string>
+    <string name="home_in_progress">To resume or play</string>
+    <string name="home_recent">Latest results</string>
+    <string name="home_calendar">Calendar</string>
+    <string name="home_matches">Matches</string>
+    <string name="hide_from_home">Hide from home</string>
+    <string name="show_in_home">Show on home</string>
+    <string name="show_hidden">Show hidden (%1$d)</string>
+    <string name="hide_hidden">Close the hidden ones</string>
+    <string name="home_open_close">Open or close</string>
+    <string name="home_no_matches">No matches</string>
     <string name="agenda_today">Today</string>
-    <string name="agenda_week">This week</string>
+    <string name="agenda_next_match">Next match</string>
+    <string name="agenda_see_calendar">See calendar</string>
+    <string name="agenda_official_match">Official match</string>
     <string name="agenda_training">Training</string>
     <string name="agenda_cancelled">cancelled</string>
     <string name="agenda_to_close">to close</string>
@@ -84,6 +95,7 @@
     <string name="setter">Setter</string>
     <string name="libero">Libero</string>
     <string name="fallback_libero">Second libero</string>
+    <string name="out_for_the_libero">out for the libero</string>
     <string name="none">None</string>
     <string name="empty_position">Empty the position</string>
     <string name="no_available_players">No players available</string>
@@ -110,8 +122,6 @@
     <string name="set_lost">Set %d lost</string>
     <string name="match_won">Match won</string>
     <string name="match_lost">Match lost</string>
-    <string name="match_won_cheer">Well played, everyone!</string>
-    <string name="match_lost_cheer">Heads up, on to the next one!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">inv. S1</string>
@@ -235,6 +245,7 @@
     <string name="version">Version</string>
     <string name="license">License</string>
     <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="third_party_licenses">Third-party licenses</string>
     <string name="data_privacy">Data and privacy</string>
     <string name="source_code">Source code</string>
     <string name="report_problem">Report a problem</string>
@@ -242,6 +253,7 @@
     <string name="report_title">Problem in the Android app</string>
     <string name="report_body">What happened?\n\nWhat did you expect instead?\n\n---\n%1$s</string>
     <string name="no_app_to_open">No app can open it</string>
+    <string name="settings_not_saved">Could not save the settings: %1$s</string>
     <!-- archives -->
     <string name="export_team">Share team</string>
     <string name="export_match">Share match</string>
@@ -369,6 +381,7 @@
     <string name="analysis">Analysis</string>
     <string name="period">Period</string>
     <string name="last_month">Last month</string>
+    <string name="season_period">Whole season</string>
     <string name="last_matches">Last %1$d</string>
     <string name="between">From – to</string>
     <string name="from_day">From</string>
@@ -410,7 +423,7 @@
     <string name="video_aligned_file">Lined up from the start of the file: %1$s</string>
     <string name="video_aligned_chosen">Lined up by hand</string>
     <string name="video_not_aligned">Not lined up with the video: the name of the file doesn\'t tell when it starts. Choose an event, go to its moment in the video and tap Sync the event here.</string>
-    <string name="video_outside">%1$d events outside the video</string>
+    <string name="video_outside">Events outside the video: %1$d</string>
     <string name="video_events">Events</string>
     <string name="video_sync">Sync</string>
     <string name="video_files">Files</string>
@@ -468,6 +481,8 @@
     <string name="clips_without_video">Without a video, left out: %1$d</string>
     <string name="clips_match_of">Match %1$d of %2$d</string>
     <string name="montage_left_out">Left out: %1$s</string>
+    <string name="montage_outside">Actions outside the video, not included: %1$d of %2$d</string>
+    <string name="montage_none">No action is inside the video: nothing to make</string>
     <string name="left_out_no_video">no video</string>
     <string name="left_out_unreadable">video not readable</string>
     <string name="left_out_not_lined_up">not synced with the video</string>
@@ -537,6 +552,7 @@
     <string name="tr_programming">Training plan</string>
     <string name="tr_sessions">Sessions</string>
     <string name="tr_new_session">New session</string>
+    <string name="tr_new_event">New event</string>
     <string name="tr_edit_session">Edit the session</string>
     <string name="tr_session_title">Title</string>
     <string name="tr_session_duration">Planned duration (min)</string>
@@ -718,4 +734,27 @@
     <string name="no_photo">No photo</string>
     <string name="no_face">No face found in the photo: choose one where the face is clear.</string>
     <string name="many_faces">%1$d faces found in the photo: choose one with a single person.</string>
+    <string name="nationality">Nationality</string>
+    <string name="profile">Profile</string>
+    <string name="sets">Sets</string>
+    <string name="attendance">Attendance</string>
+    <string name="no_matches_played">No matches played</string>
+    <string name="also_plays_in">Also plays in</string>
+    <string name="player_out_of">of %1$d</string>
+    <string name="player_points_detail">Attack %1$d · Block %2$d · Serve %3$d</string>
+    <string name="dominant_hand">Dominant hand</string>
+    <string name="right_hand">Right</string>
+    <string name="left_hand">Left</string>
+    <string name="federation_id">Federation ID</string>
+    <string name="notice_error">A problem occurred</string>
+    <string name="notice_warning">Heads up</string>
+    <string name="notice_info">Done</string>
+    <string name="birth_place">Birth place</string>
+    <string name="contacts">Contacts</string>
+    <string name="email">Email</string>
+    <string name="phone_prefix">Prefix</string>
+    <string name="phone">Phone</string>
+    <string name="write_email">Write email</string>
+    <string name="call">Call</string>
+    <string name="include_contacts">Include contacts (email, phone, birth place)</string>
 </resources>

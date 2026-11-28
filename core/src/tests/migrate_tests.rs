@@ -65,6 +65,7 @@ mod tests {
 
         fn backup(&self) -> Backup {
             Backup {
+                day: crate::tests::clock::today(),
                 dir: self.dir.path().join("backups"),
                 prefix: ".scout4all".into(),
             }
@@ -341,6 +342,7 @@ mod tests {
         let before = files(&device.data());
         let db = database();
         let backup = Backup {
+            day: crate::tests::clock::today(),
             dir: device.dir.path().join("missing"),
             prefix: ".scout4all".into(),
         };
@@ -1376,6 +1378,7 @@ mod tests {
         let expected = in_files(&data).await;
         let db = Database::new(crate::db::open(&dir.path().join("scout4all.db")).unwrap());
         let backup = Backup {
+            day: crate::tests::clock::today(),
             dir: dir.path().join("backups"),
             prefix: "data".into(),
         };

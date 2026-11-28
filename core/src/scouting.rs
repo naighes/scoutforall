@@ -5,6 +5,7 @@
 //! wouldn't replay anymore. Undo goes back a choice, or removes the last
 //! saved event and resumes it.
 
+use crate::clock::UtcNow;
 use crate::{
     analytics::finished::{FinishedMatches, GlobalFinishedMatches},
     domain::Side,
@@ -25,7 +26,6 @@ use crate::{
         technique::{ServeTypeEnum, TechniqueEnum},
     },
 };
-use chrono::Utc;
 use std::{fmt, sync::Arc};
 use uuid::Uuid;
 
@@ -47,6 +47,9 @@ pub struct PlayerChoice {
     pub name: String,
     pub number: u8,
     pub role: String,
+    /// off the court while the libero plays in their place: still to be
+    /// substituted, though not on court (see `Lineup::is_out_for_the_libero`)
+    pub out_for_the_libero: bool,
 }
 
 /// The order of the choices of the scout.
@@ -170,6 +173,8 @@ pub struct ScoutingSession {
     order: ChoiceOrder,
     set_writer: Arc<dyn SetWriter + Send + Sync>,
     finished: Arc<dyn FinishedMatches>,
+    /// when each touch happens
+    now: UtcNow,
 }
 
 impl fmt::Debug for ScoutingSession {
@@ -195,6 +200,7 @@ impl ScoutingSession {
         set: SetEntry,
         snapshot: Snapshot,
         set_writer: Arc<dyn SetWriter + Send + Sync>,
+        now: UtcNow,
     ) -> Self {
         let earlier_stats = current_match
             .sets
@@ -225,6 +231,7 @@ impl ScoutingSession {
             order: ChoiceOrder::EventFirst,
             set_writer,
             finished: Arc::new(GlobalFinishedMatches),
+            now,
         }
     }
 
@@ -668,7 +675,7 @@ impl ScoutingSession {
         eval: Option<EvalEnum>,
     ) -> bool {
         let touch = |eval| EventEntry {
-            timestamp: Utc::now(),
+            timestamp: (self.now)(),
             event_type: event,
             eval,
             player: None,
@@ -811,6 +818,7 @@ impl ScoutingSession {
                     name: player.name.clone(),
                     number: player.number,
                     role,
+                    out_for_the_libero: lineup.is_out_for_the_libero(&player.id),
                 })
             })
             .collect()
@@ -881,6 +889,8 @@ impl ScoutingSession {
                     role: player
                         .role
                         .map_or_else(|| "-".to_string(), |r| r.to_string()),
+                    // from the bench
+                    out_for_the_libero: false,
                 })
                 .collect(),
             _ => vec![],
@@ -1057,7 +1067,7 @@ impl ScoutingSession {
             }
             (ScoutingStep::Event, true, OE | OS | OF | FB | PW | PL | CL | LR) => {
                 self.save(EventEntry {
-                    timestamp: Utc::now(),
+                    timestamp: (self.now)(),
                     event_type: event,
                     eval: None,
                     player: None,
@@ -1095,7 +1105,7 @@ impl ScoutingSession {
             }
             (ScoutingStep::Player, true, Some(event)) => {
                 self.save(EventEntry {
-                    timestamp: Utc::now(),
+                    timestamp: (self.now)(),
                     event_type: event,
                     eval: None,
                     player: Some(player),
@@ -1123,7 +1133,7 @@ impl ScoutingSession {
         match (self.team_choice(), self.event) {
             (true, Some(event)) => {
                 self.save(EventEntry {
-                    timestamp: Utc::now(),
+                    timestamp: (self.now)(),
                     event_type: event,
                     eval: None,
                     player: None,
@@ -1150,7 +1160,7 @@ impl ScoutingSession {
         match (self.step, self.event, self.player, valid) {
             (ScoutingStep::Replacement, Some(event), Some(replaced), true) => {
                 self.save(EventEntry {
-                    timestamp: Utc::now(),
+                    timestamp: (self.now)(),
                     event_type: event,
                     eval: None,
                     player: Some(replaced),
@@ -1186,7 +1196,7 @@ impl ScoutingSession {
                 if self.available_evals().contains(&eval) =>
             {
                 self.save(EventEntry {
-                    timestamp: Utc::now(),
+                    timestamp: (self.now)(),
                     event_type: event,
                     eval: Some(eval),
                     player: self.player,
@@ -1547,7 +1557,11 @@ impl ScoutingSession {
             .is_ok_and(|status| status.match_finished);
         if finished {
             self.finished
-                .finished(self.current_match.team.id, self.current_match.id.clone())
+                .finished(
+                    self.current_match.team.id,
+                    self.current_match.id.clone(),
+                    (self.now)(),
+                )
                 .await;
         }
     }

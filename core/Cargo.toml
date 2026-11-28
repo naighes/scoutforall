@@ -23,6 +23,7 @@ regex.workspace = true
 reqwest.workspace = true
 # the face in a photo (TODO/011): pure Rust, the model is in `models/`
 rustface = "0.1.7"
+tract-onnx = "0.23"
 # the database of the data (TODO/001, D6)
 rusqlite.workspace = true
 # the counters of the statistics: a quick hash of small keys, not SipHash,
@@ -40,6 +41,7 @@ typst-pdf.workspace = true
 unicode-normalization.workspace = true
 uuid.workspace = true
 zip.workspace = true
+phonenumber = "0.3.10"
 
 # Android has its own verifier of certificates, which needs the context of
 # the app (JNI): the roots of Mozilla, built in, instead

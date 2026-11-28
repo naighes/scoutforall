@@ -35,7 +35,7 @@ mod tests {
         fn set(&self, receptions: &[EvalEnum]) -> SetEntry {
             let [setter, _, _, opposite, ..] = self.positions;
             let touch = |event_type, player, eval| EventEntry {
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 event_type,
                 player: Some(player),
                 eval: Some(eval),
@@ -44,7 +44,7 @@ mod tests {
                 flags: Default::default(),
             };
             let theirs = EventEntry {
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 event_type: OS,
                 player: None,
                 eval: None,
@@ -132,6 +132,24 @@ mod tests {
         assert_eq!(
             Period::LastMonth.days::<MatchEntry>(&[], date(2026, 3, 31)),
             Some((date(2026, 2, 28), date(2026, 3, 31)))
+        );
+    }
+
+    #[test]
+    fn the_whole_season_but_the_matches_to_come() {
+        let t = Team::new();
+        let matches = vec![
+            t.played((2026, 11, 5), &[Perfect]),
+            t.played((2025, 9, 20), &[Perfect]),
+            unplayed((2026, 11, 1)),
+            t.played((2026, 11, 6), &[Perfect]),
+        ];
+        let today = date(2026, 11, 5);
+        let chosen = Period::Season.select(&matches, today);
+        assert_eq!(ids(&chosen), ["(2025, 9, 20)", "(2026, 11, 5)"]);
+        assert_eq!(
+            Period::Season.days(&chosen, today),
+            Some((date(2025, 9, 20), today))
         );
     }
 

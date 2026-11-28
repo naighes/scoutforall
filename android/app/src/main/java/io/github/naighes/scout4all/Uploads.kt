@@ -70,6 +70,7 @@ fun StatisticsSwitch(modifier: Modifier = Modifier) {
     // null while reading
     var enabled by remember { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(Unit) { enabled = app.core { it.analyticsEnabled() } }
+    val notSaved = notSavedDialog()
     val checked = enabled ?: return
     val change = { on: Boolean ->
         scope.launch {
@@ -77,8 +78,8 @@ fun StatisticsSwitch(modifier: Modifier = Modifier) {
                 app.core { it.setAnalyticsEnabled(on) }
                 enabled = on
                 if (on) context.sendUploads()
-            } catch (_: MobileException) {
-                // not saved: it stays as it was
+            } catch (e: MobileException) {
+                notSaved(e)
             }
         }
         Unit

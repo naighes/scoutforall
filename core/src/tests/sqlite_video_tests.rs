@@ -120,6 +120,12 @@ mod tests {
             birth_date: None,
             height_cm: None,
             notes: String::new(),
+            nationality: None,
+            dominant_hand: None,
+            federation_id: String::new(),
+            email: String::new(),
+            phone: String::new(),
+            birth_place: String::new(),
         })
         .collect();
         let team = p
@@ -502,11 +508,12 @@ mod tests {
         p.videos.write(&team.id, &m.id, &profile()).await.unwrap();
         let id = Uuid::parse_str(&m.id).unwrap();
         for subject in [Subject::Match(id), Subject::TeamWithMatches(team.id)] {
-            let names: Vec<String> = unzip(&export(&db, subject).unwrap())
-                .unwrap()
-                .into_iter()
-                .map(|(name, _)| name)
-                .collect();
+            let names: Vec<String> =
+                unzip(&export(&db, subject, crate::tests::clock::now()).unwrap())
+                    .unwrap()
+                    .into_iter()
+                    .map(|(name, _)| name)
+                    .collect();
             assert!(names.iter().any(|n| n == "events.json"), "{names:?}");
             assert!(!names.iter().any(|n| n.contains("video")), "{names:?}");
         }

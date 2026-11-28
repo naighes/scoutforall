@@ -7,6 +7,7 @@ mod tests {
     use crate::reporting::pdf::render_training_pdf;
     use crate::reporting::training::{Context, SessionOptions, microcycle_sheet, session_sheet};
     use crate::shapes::enums::LanguageEnum;
+    use crate::tests::logos::{image_count, logo};
     use crate::training::cycles::{Cycle, Level, Span, Window};
     use crate::training::venue::Venue;
     use crate::training::{
@@ -70,6 +71,7 @@ mod tests {
     fn ctx() -> Context<'static> {
         Context {
             team: "東京 Volley",
+            logo: None,
             year: 2026,
             printed: at(22, 9),
             venues: Box::leak(Box::new(vec![Venue {
@@ -118,7 +120,7 @@ mod tests {
         );
         assert_eq!(full.sessions[0].activities[0].minutes, "20 min");
         assert_eq!(full.sessions[0].activities[1].minutes, "");
-        assert_eq!(full.subtitle, "Mon 23/11/2026 · 18:30 · Palestra Łódź");
+        assert_eq!(full.subtitle, "Mon 11/23/2026 · 18:30 · Palestra Łódź");
         for sheet in [&plain, &full] {
             let text = json(sheet);
             assert!(!text.contains("SECRET"), "{text}");
@@ -169,7 +171,7 @@ mod tests {
         ];
         let sheet = microcycle_sheet(l, &ctx(), &cycle, &sessions);
         assert!(sheet.table);
-        assert_eq!(sheet.subtitle, "2026-11-23 – 2026-11-29");
+        assert_eq!(sheet.subtitle, "23/11/2026 – 29/11/2026");
         assert_eq!(sheet.sessions[0].day, "Lun 23/11");
         assert!(!sheet.sessions[0].cancelled && sheet.sessions[1].cancelled);
         assert!(
@@ -179,6 +181,81 @@ mod tests {
                 .all(|s| s.participants.is_none() && s.notes.is_none())
         );
         assert!(!json(&sheet).contains("SECRET"));
+    }
+
+    /// A session with a title or activities heads its part of the plan,
+    /// without a separator left hanging; one with neither has no part.
+    #[test]
+    fn a_session_without_contents_has_no_part_in_the_plan() {
+        let l = labels(LanguageEnum::It);
+        let titled = |title: &str| TrainingSession {
+            title: title.into(),
+            ..session(23, SessionStatus::Planned)
+        };
+        let sessions = [
+            (titled("Muro e difesa"), vec![]),
+            (titled(""), vec![activity("Muro", None)]),
+            (titled(""), vec![]),
+        ];
+        let cycle = Cycle {
+            id: Uuid::new_v4(),
+            team_id: Uuid::nil(),
+            level: Level::Microcycle,
+            parent_id: None,
+            title: "Settimana 1".into(),
+            span: Span::Weeks(1),
+            window: Window {
+                start: NaiveDate::default(),
+                end: NaiveDate::default(),
+            },
+            objectives: String::new(),
+            notes: String::new(),
+        };
+        let headings: Vec<_> = microcycle_sheet(l, &ctx(), &cycle, &sessions)
+            .sessions
+            .into_iter()
+            .map(|s| s.heading)
+            .collect();
+        assert_eq!(
+            headings,
+            [
+                Some("Lun 23/11 18:30 · Muro e difesa".to_string()),
+                Some("Lun 23/11 18:30".to_string()),
+                None,
+            ]
+        );
+    }
+
+    /// The dates in digits follow the language of the app.
+    #[test]
+    fn the_dates_are_written_as_the_language_does() {
+        let day = |d| NaiveDate::from_ymd_opt(2026, 11, d).unwrap_or_default();
+        let window = Window {
+            start: day(2),
+            end: day(9),
+        };
+        let written: Vec<_> = [
+            LanguageEnum::En,
+            LanguageEnum::It,
+            LanguageEnum::Pt,
+            LanguageEnum::Pl,
+            LanguageEnum::Ja,
+        ]
+        .into_iter()
+        .map(|language| {
+            let l = labels(language);
+            (l.days(window), l.short_date(day(2)))
+        })
+        .collect();
+        let expected = [
+            ("11/02/2026 – 11/08/2026", "11/02"),
+            ("02/11/2026 – 08/11/2026", "02/11"),
+            ("02/11/2026 – 08/11/2026", "02/11"),
+            ("02.11.2026 – 08.11.2026", "02.11"),
+            ("2026/11/02 – 2026/11/08", "11/02"),
+        ]
+        .map(|(days, short)| (days.to_string(), short.to_string()));
+        assert_eq!(written, expected);
     }
 
     /// Both sheets in every language, with long and CJK names.
@@ -237,5 +314,21 @@ mod tests {
             render_training_pdf(&plan)
                 .unwrap_or_else(|e| panic!("expected the microcycle plan in {language}: {e}"));
         }
+    }
+
+    #[test]
+    fn the_sheets_show_the_logo_of_the_team() {
+        let l = labels(LanguageEnum::En);
+        let s = session(23, SessionStatus::Planned);
+        let with = Context {
+            logo: Some(logo([200, 0, 0, 255])),
+            ..ctx()
+        };
+        let images = |ctx: &Context| {
+            let sheet = session_sheet(l, ctx, &s, &[], None, SessionOptions::default());
+            image_count(&render_training_pdf(&sheet).expect("expected the sheet"))
+        };
+        assert_eq!(images(&ctx()), 0);
+        assert!(images(&with) > 0);
     }
 }

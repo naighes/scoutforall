@@ -4,16 +4,14 @@
 //! (`photo_asset_id`) points to. The same code serves every app.
 //!
 //! - a logo keeps its proportions and its transparency (PNG);
-//! - a photo is a square JPEG (no transparency to keep, much smaller).
+//! - a photo is a square PNG, so the transparent background is kept.
 
 use crate::{
     errors::{AppError, IOError},
     providers::sqlite::Database,
 };
 use image::{
-    DynamicImage, ImageEncoder, ImageFormat,
-    codecs::{jpeg::JpegEncoder, png::PngEncoder},
-    imageops::FilterType,
+    DynamicImage, ImageEncoder, ImageFormat, codecs::png::PngEncoder, imageops::FilterType,
 };
 use rusqlite::{Connection, OptionalExtension, params};
 use uuid::Uuid;
@@ -21,9 +19,7 @@ use uuid::Uuid;
 /// The longest side of a logo, in pixels.
 pub const LOGO_MAX_SIDE: u32 = 256;
 /// The side of a photo, in pixels.
-pub const PHOTO_SIDE: u32 = 256;
-/// The quality of the JPEG of a photo.
-pub const PHOTO_QUALITY: u8 = 80;
+pub const PHOTO_SIDE: u32 = 512;
 /// The largest file taken in, before decoding: a bigger one is refused
 /// instead of filling the memory.
 pub const MAX_INPUT_BYTES: usize = 25 * 1024 * 1024;
@@ -101,28 +97,98 @@ pub fn normalize_logo(bytes: &[u8]) -> Result<Image, AppError> {
     })
 }
 
+/// How bright the visible part of a logo is: a light one may vanish on a
+/// light background, a dark one on a dark background (TODO/011 R8.6).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogoTone {
+    Light,
+    Dark,
+    /// colors that show on any background, a logo with a background of
+    /// its own (no transparency) or one that can't be read
+    Mixed,
+}
+
+/// What goes behind a logo so it doesn't vanish on the background.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LogoBackdrop {
+    None,
+    Dark,
+    Light,
+}
+
+/// The share of the visible part (weighted by opacity) that must be light,
+/// or dark, for the whole logo to be.
+const TONE_SHARE: f64 = 0.8;
+/// A pixel this bright or more has less than 2:1 of contrast with white.
+const LIGHT_LUMINANCE: f64 = 0.45;
+/// A pixel this bright or less has less than 2:1 of contrast with the
+/// near-black backgrounds of the apps.
+const DARK_LUMINANCE: f64 = 0.07;
+
+/// The relative luminance of an sRGB pixel (WCAG).
+fn luminance(r: u8, g: u8, b: u8) -> f64 {
+    let linear = |c: u8| match f64::from(c) / 255.0 {
+        v if v <= 0.04045 => v / 12.92,
+        v => ((v + 0.055) / 1.055).powf(2.4),
+    };
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+}
+
+/// The tone of the logo the bytes hold (any format taken as a logo).
+pub fn logo_tone(bytes: &[u8]) -> LogoTone {
+    decode_image(bytes).map_or(LogoTone::Mixed, |image| tone_of(&image.to_rgba8()))
+}
+
+fn tone_of(image: &image::RgbaImage) -> LogoTone {
+    let (visible, light, dark, transparent) = image.pixels().fold(
+        (0.0, 0.0, 0.0, false),
+        |(visible, light, dark, transparent), p| {
+            let [r, g, b, a] = p.0;
+            let weight = f64::from(a) / 255.0;
+            let l = luminance(r, g, b);
+            (
+                visible + weight,
+                light + weight * f64::from(u8::from(l >= LIGHT_LUMINANCE)),
+                dark + weight * f64::from(u8::from(l <= DARK_LUMINANCE)),
+                transparent || a < u8::MAX,
+            )
+        },
+    );
+    match (transparent, visible > 0.0) {
+        (true, true) if light >= TONE_SHARE * visible => LogoTone::Light,
+        (true, true) if dark >= TONE_SHARE * visible => LogoTone::Dark,
+        _ => LogoTone::Mixed,
+    }
+}
+
+impl LogoTone {
+    /// The backdrop on the theme: only a logo of the same tone as the
+    /// background gets one, of the other tone.
+    pub fn backdrop(self, dark_theme: bool) -> LogoBackdrop {
+        match (self, dark_theme) {
+            (LogoTone::Light, false) => LogoBackdrop::Dark,
+            (LogoTone::Dark, true) => LogoBackdrop::Light,
+            _ => LogoBackdrop::None,
+        }
+    }
+}
+
 /// The photo: a square of `PHOTO_SIDE` (the image is expected to be already
-/// the face, cropped), flattened on white, as JPEG.
+/// the person, cropped), with transparency kept, as PNG.
 pub fn normalize_photo(bytes: &[u8]) -> Result<Image, AppError> {
     let square = decode_image(bytes)?.resize_exact(PHOTO_SIDE, PHOTO_SIDE, FilterType::Lanczos3);
     let rgba = square.to_rgba8();
-    let mut flat = image::RgbImage::new(PHOTO_SIDE, PHOTO_SIDE);
-    flat.pixels_mut().zip(rgba.pixels()).for_each(|(out, px)| {
-        let alpha = u32::from(px[3]);
-        let on_white = |c: u8| ((u32::from(c) * alpha + 255 * (255 - alpha)) / 255) as u8;
-        *out = image::Rgb([on_white(px[0]), on_white(px[1]), on_white(px[2])]);
-    });
     let mut data = Vec::new();
-    JpegEncoder::new_with_quality(&mut data, PHOTO_QUALITY)
+    PngEncoder::new(&mut data)
         .write_image(
-            &flat,
+            &rgba,
             PHOTO_SIDE,
             PHOTO_SIDE,
-            image::ExtendedColorType::Rgb8,
+            image::ExtendedColorType::Rgba8,
         )
         .map_err(|e| msg(e.to_string()))?;
     Ok(Image {
-        mime: "image/jpeg",
+        mime: "image/png",
         width: PHOTO_SIDE,
         height: PHOTO_SIDE,
         data,
@@ -188,7 +254,7 @@ pub fn set_team_logo(db: &Connection, team_id: &str, bytes: Option<&[u8]>) -> Re
     )
 }
 
-/// The photo of a person, as `set_team_logo`; `bytes` is the face already
+/// The photo of a person, as `set_team_logo`; `bytes` is the person already
 /// cropped.
 pub fn set_person_photo(
     db: &Connection,
@@ -248,12 +314,36 @@ pub fn team_logo(db: &Database, team_id: &str) -> Result<Option<Image>, AppError
     })
 }
 
+/// The logo of the team `team_id` plays against in the match, if the
+/// opponent is a team with one.
+pub fn opponent_logo(
+    db: &Database,
+    match_id: &str,
+    team_id: &str,
+) -> Result<Option<Image>, AppError> {
+    db.read(|tx| {
+        let id: Option<String> = tx
+            .query_row(
+                "SELECT t.logo_asset_id FROM matches m
+                 JOIN teams t
+                   ON t.id = CASE m.team_a WHEN ?2 THEN m.team_b ELSE m.team_a END
+                 WHERE m.id = ?1",
+                [match_id, team_id],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(|e| AppError::IO(e.into()))?
+            .flatten();
+        id.map(|id| load(tx, &id)).transpose().map(Option::flatten)
+    })
+}
+
 /// `set_team_logo` in one transaction on the shared database.
 pub fn store_team_logo(db: &Database, team_id: &str, bytes: Option<&[u8]>) -> Result<(), AppError> {
     db.write(|tx| set_team_logo(tx, team_id, bytes))
 }
 
-/// The photo of the person (the face, as JPEG), if they have one.
+/// The photo of the person (as PNG for new photos; old JPEGs remain readable), if they have one.
 pub fn person_photo(db: &Database, person_id: &str) -> Result<Option<Image>, AppError> {
     db.read(|tx| {
         let id: Option<String> = tx

@@ -196,7 +196,7 @@ private fun VenueChoiceDialog(teamId: String, onDismiss: () -> Unit, onPick: (St
                         label = { Text(stringResource(R.string.venue_name)) },
                         singleLine = true,
                         isError = failure != null,
-                        supportingText = failure?.let { { Text(it) } },
+                        supportingText = noteOf(failure),
                         keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
                     )
                 }
@@ -282,18 +282,26 @@ fun VenuesScreen(onBack: () -> Unit, onVenue: (String) -> Unit, onNew: () -> Uni
             null -> Centered(modifier) { CircularProgressIndicator() }
             else -> if (list.isEmpty()) Centered(modifier.padding(16.dp)) { Text(stringResource(R.string.venue_none)) }
             else LazyColumn(modifier, contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 88.dp)) {
-                items(list, key = { it.id }) { v ->
-                    ListItem(
-                        modifier = Modifier.clickable { onVenue(v.id) },
-                        headlineContent = { Text(v.name) },
-                        supportingContent = v.address.takeIf { it.isNotBlank() }?.let { { Text(it) } },
-                        trailingContent = if (v.pinned) {
-                            { Icon(Icons.Filled.Star, contentDescription = stringResource(R.string.venue_pinned)) }
-                        } else null,
-                    )
-                }
+                items(list, key = { it.id }) { v -> VenueRow(v) { onVenue(v.id) } }
             }
         }
+    }
+}
+
+@Composable
+private fun VenueRow(v: VenueRecord, onClick: () -> Unit) = BoxRow(
+    onClick = onClick,
+    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+    head = { Initials(v.initials) },
+    tail = {
+        if (v.pinned) {
+            Icon(Icons.Filled.Star, contentDescription = stringResource(R.string.venue_pinned), Modifier.padding(end = 16.dp))
+        }
+    },
+) {
+    Text(v.name, style = MaterialTheme.typography.bodyLarge)
+    if (v.address.isNotBlank()) {
+        Text(v.address, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 
@@ -306,7 +314,7 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
     val scope = rememberCoroutineScope()
     var version by rememberSaveable { mutableIntStateOf(0) }
     var asking by rememberSaveable { mutableStateOf(false) }
-    var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
+    var day by rememberSaveable { mutableStateOf(app.clock.today()) }
     val venue by produceState<VenueRecord?>(null, id, version) {
         value = try {
             app.core { it.venue(id) }
@@ -378,22 +386,20 @@ fun VenueScreen(id: String, onBack: () -> Unit, onEdit: () -> Unit) {
             item(key = "nav") {
                 Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        stringResource(R.string.agenda_week),
+                        weekRange(week.map { it.date }),
                         Modifier.weight(1f).title(),
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
                     )
-                    IconButton(onClick = { day = day.minusWeeks(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
-                    }
-                    TextButton(onClick = { day = LocalDate.now() }) { Text(stringResource(R.string.agenda_today)) }
-                    IconButton(onClick = { day = day.plusWeeks(1) }) {
-                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
-                    }
+                    PeriodButtons(
+                        onPrevious = { day = day.minusWeeks(1) },
+                        onToday = { day = app.clock.today() },
+                        onNext = { day = day.plusWeeks(1) },
+                    )
                 }
             }
             // as in the agendas: the days with something and today, lit
-            val today = LocalDate.now()
+            val today = app.clock.today()
             val shown = week.filter { it.occupations.isNotEmpty() || it.date == today.toString() }
             if (shown.isEmpty()) {
                 item(key = "nothing") { NothingPlanned() }
@@ -539,9 +545,7 @@ private fun VenueFields(id: String?, draft: VenueDraft, modifier: Modifier, onCh
             VenueText(R.string.notes, notes, null, KeyboardCapitalization.Sentences) { edit { notes = it } }
             CheckRow(stringResource(R.string.venue_pinned), pinned, onChecked = { edit { pinned = it } })
         }
-        failure.elsewhere(TrainingField.VENUE_NAME, TrainingField.MAP_LINK, TrainingField.COORDINATES)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        FailureDialog(failure.elsewhere(TrainingField.VENUE_NAME, TrainingField.MAP_LINK, TrainingField.COORDINATES)) { failure = null }
         Button(
             onClick = {
                 busy = true
@@ -581,6 +585,6 @@ private fun VenueText(label: Int, value: String, error: String?, capitalization:
         label = { Text(stringResource(label)) },
         singleLine = true,
         isError = error != null,
-        supportingText = error?.let { { Text(it) } },
+        supportingText = noteOf(error),
         keyboardOptions = KeyboardOptions(capitalization = capitalization, imeAction = ImeAction.Next),
     )

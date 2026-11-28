@@ -5,13 +5,14 @@
 
 use {
     crate::{
+        share,
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, column, container, text},
+        widget::{Column, column, container, row, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{ArchivePreview, MobileError, Scout4All},
@@ -34,6 +35,24 @@ pub enum Export {
     Microcycle(String),
 }
 
+impl Export {
+    /// Whether the file made carries the persons, with their contacts when
+    /// chosen.
+    pub fn is_archive(&self) -> bool {
+        match self {
+            Export::Team(_) | Export::Match(..) | Export::Training(_) => true,
+            Export::Report(..) | Export::SessionSheet(..) | Export::Microcycle(_) => false,
+        }
+    }
+}
+
+/// The contacts of an archive: what it was made of, to make it again once
+/// the choice changes.
+pub struct ContactsChoice {
+    pub export: Export,
+    pub included: bool,
+}
+
 /// A file made to share (an archive, a report, a video): shared with the
 /// sheet of the system or saved where the user chooses, as on Android.
 pub struct Sharing {
@@ -41,6 +60,8 @@ pub struct Sharing {
     pub heading: String,
     pub name: String,
     pub content: Content,
+    /// an archive: whether it carries the contacts of the persons
+    pub contacts: Option<ContactsChoice>,
 }
 
 /// What is shared: made in memory (an archive, a report), or a file
@@ -65,6 +86,8 @@ impl Content {
 pub enum ShareMessage {
     Share,
     Save,
+    /// the contacts taken in or left out
+    Contacts,
     Cancel,
 }
 
@@ -72,41 +95,82 @@ impl Sharing {
     pub fn key(&self, ck: KeyCombination) -> Option<ShareMessage> {
         match ck {
             k if k == BACK_KEY => Some(ShareMessage::Cancel),
-            k if k == key!(enter) => Some(ShareMessage::Share),
+            k if k == key!(enter) && share::NATIVE => Some(ShareMessage::Share),
+            k if k == key!(enter) => Some(ShareMessage::Save),
+            k if k == key!(space) && self.contacts.is_some() => Some(ShareMessage::Contacts),
             k if k == key!(s) => Some(ShareMessage::Save),
             _ => None,
         }
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        vec![
-            ("Enter".to_string(), s.share.to_string()),
-            ("s".to_string(), s.save_to_file.to_string()),
-            ("Esc".to_string(), s.cancel.to_string()),
-        ]
+        let share = share::NATIVE.then(|| ("Enter".to_string(), s.share.to_string()));
+        let save = match share::NATIVE {
+            true => "s",
+            false => "Enter / s",
+        };
+        let contacts = self
+            .contacts
+            .as_ref()
+            .map(|_| ("␣".to_string(), s.contacts.to_string()));
+        share
+            .into_iter()
+            .chain([(save.to_string(), s.save_to_file.to_string())])
+            .chain(contacts)
+            .chain([("Esc".to_string(), s.cancel.to_string())])
+            .collect()
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, ShareMessage> {
+        let heading = column![
+            text(self.heading.clone())
+                .size(22)
+                .font(theme::fonts().bold),
+            text(self.name.clone()).size(SIZE_SMALL).color(c.muted),
+        ]
+        .spacing(4);
+        let contacts = self.contacts.as_ref().map(|choice| {
+            let mark = match choice.included {
+                true => "■",
+                false => "□",
+            };
+            ui::list_row(
+                row![
+                    text(mark).size(SIZE_BODY).color(c.accent),
+                    ui::body(s.include_contacts),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+                false,
+                Some(ShareMessage::Contacts),
+                c,
+            )
+        });
+        let cancel = Some((theme::icons::CLOSE, s.cancel, ShareMessage::Cancel));
+        let buttons = match share::NATIVE {
+            true => ui::answers_with(
+                cancel,
+                vec![(theme::icons::SAVE, s.save_to_file, ShareMessage::Save)],
+                theme::icons::SHARE,
+                s.share,
+                Some(ShareMessage::Share),
+                c,
+            ),
+            false => ui::answers(
+                cancel,
+                theme::icons::SAVE,
+                s.save_to_file,
+                Some(ShareMessage::Save),
+                c,
+            ),
+        };
         let body = ui::panel(
             None,
-            column![
-                column![
-                    text(self.heading.clone())
-                        .size(22)
-                        .font(theme::fonts().bold),
-                    text(self.name.clone()).size(SIZE_SMALL).color(c.muted),
-                ]
-                .spacing(4),
-                ui::answers_with(
-                    Some((theme::icons::CLOSE, s.cancel, ShareMessage::Cancel)),
-                    vec![(theme::icons::SAVE, s.save_to_file, ShareMessage::Save)],
-                    theme::icons::SHARE,
-                    s.share,
-                    Some(ShareMessage::Share),
-                    c,
-                ),
-            ]
-            .spacing(18),
+            Column::new()
+                .push(heading)
+                .push(contacts)
+                .push(buttons)
+                .spacing(18),
             c,
         );
         container(container(body).max_width(640))
@@ -211,6 +275,9 @@ pub struct Importing {
     team_id: Option<String>,
     preview: ArchivePreview,
     team: usize,
+    /// the pictures of the teams of the preview: the one of a team or of
+    /// its training, the ones to choose of a match, in their order
+    pictures: Vec<ui::TeamPicture>,
 }
 
 impl Importing {
@@ -224,11 +291,22 @@ impl Importing {
             Some(picked.name.clone()),
             team_id.clone(),
         )?;
+        let pictures = match &preview {
+            ArchivePreview::Match { teams, .. } => teams
+                .iter()
+                .map(|t| ui::TeamPicture::from_png(t.logo.as_deref(), &t.name))
+                .collect(),
+            ArchivePreview::Team { name, logo, .. }
+            | ArchivePreview::Training { name, logo, .. } => {
+                vec![ui::TeamPicture::from_png(logo.as_deref(), name)]
+            }
+        };
         Ok(Importing {
             picked,
             team_id,
             preview,
             team: 0,
+            pictures,
         })
     }
 
@@ -237,6 +315,27 @@ impl Importing {
             ArchivePreview::Match { teams, .. } => teams,
             ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => &[],
         }
+    }
+
+    #[cfg(test)]
+    pub fn pictures(&self) -> &[ui::TeamPicture] {
+        &self.pictures
+    }
+
+    /// The `i`th team to choose: its picture and its name.
+    fn team_line<'a, M: 'a>(
+        &self,
+        i: usize,
+        team: &scout4all_mobile::TeamChoice,
+        c: Colors,
+    ) -> Element<'a, M> {
+        let picture = self.pictures.get(i);
+        iced::widget::Row::new()
+            .push(picture.map(|p| ui::team_picture(p, 24.0, c)))
+            .push(ui::body(team.name.clone()))
+            .spacing(8)
+            .align_y(iced::Alignment::Center)
+            .into()
     }
 
     /// Imports it, once confirmed.
@@ -321,6 +420,7 @@ impl Importing {
                 name,
                 year,
                 players,
+                ..
             } => (
                 s.import_team_title,
                 name.clone(),
@@ -331,6 +431,7 @@ impl Importing {
                 year,
                 sessions,
                 cycles,
+                ..
             } => (
                 s.import_team_title,
                 name.clone(),
@@ -362,14 +463,14 @@ impl Importing {
         };
         let teams: Element<'a, Message> = match (&self.team_id, self.teams()) {
             (Some(_), _) | (None, []) => column![].into(),
-            (None, [team]) => column![ui::section(s.into_team, c), ui::body(team.name.clone())]
+            (None, [team]) => column![ui::section(s.into_team, c), self.team_line(0, team, c)]
                 .spacing(6)
                 .into(),
             (None, teams) => column![
                 ui::section(s.into_team, c),
                 Column::with_children(teams.iter().enumerate().map(|(i, t)| {
                     ui::list_row(
-                        ui::body(t.name.clone()),
+                        self.team_line(i, t, c),
                         i == self.team,
                         Some(Message::Team(i)),
                         c,
@@ -380,11 +481,22 @@ impl Importing {
             .spacing(6)
             .into(),
         };
+        // of a match the picture is the one of the team it goes into
+        let head = match &self.preview {
+            ArchivePreview::Match { .. } => None,
+            ArchivePreview::Team { .. } | ArchivePreview::Training { .. } => {
+                self.pictures.first().map(|p| ui::team_head(p, 48.0, c))
+            }
+        };
         let body = ui::panel(
             Some(title),
             column![
                 column![
-                    text(name).size(22).font(bold),
+                    iced::widget::Row::new()
+                        .push(head)
+                        .push(text(name).size(22).font(bold))
+                        .spacing(10)
+                        .align_y(Alignment::Center),
                     text(line).size(SIZE_BODY).color(c.muted),
                     text(self.picked.name.clone())
                         .size(SIZE_SMALL)
@@ -424,14 +536,29 @@ mod tests {
             heading: "Condividi squadra".into(),
             name: "team.zip".into(),
             content: Content::Bytes(Arc::new(vec![1, 2, 3])),
+            contacts: None,
         };
-        assert!(matches!(
-            sharing.key(key!(enter)),
-            Some(ShareMessage::Share)
-        ));
+        // without a sheet of the system Enter saves
+        assert_eq!(
+            matches!(sharing.key(key!(enter)), Some(ShareMessage::Share)),
+            share::NATIVE
+        );
+        // nothing to choose but for an archive
+        assert!(sharing.key(key!(space)).is_none());
         assert!(matches!(sharing.key(key!(s)), Some(ShareMessage::Save)));
         assert!(matches!(sharing.key(BACK_KEY), Some(ShareMessage::Cancel)));
         assert!(sharing.key(key!(x)).is_none());
+        let archive = Sharing {
+            contacts: Some(ContactsChoice {
+                export: Export::Team("t".into()),
+                included: false,
+            }),
+            ..sharing
+        };
+        assert!(matches!(
+            archive.key(key!(space)),
+            Some(ShareMessage::Contacts)
+        ));
     }
 
     /// Saved where chosen: the bytes made, or a copy of the file.

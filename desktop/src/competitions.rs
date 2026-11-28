@@ -13,7 +13,7 @@ use {
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, space, text},
+        widget::{Column, Id, column, container, row, scrollable, text},
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{CompetitionListing, MobileError, Scout4All},
@@ -50,6 +50,15 @@ pub struct CompetitionsScreen {
 }
 
 impl CompetitionsScreen {
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     pub fn new(core: Arc<Scout4All>) -> Result<CompetitionsScreen, MobileError> {
         let listed = core.competition_listings()?;
         Ok(CompetitionsScreen {
@@ -209,11 +218,7 @@ impl CompetitionsScreen {
             ),
             Mode::Browse => self.list(s, c),
         };
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![error, body].spacing(10).into()
+        body
     }
 
     /// How wide the list is at most: a name, its season and its matches
@@ -227,7 +232,8 @@ impl CompetitionsScreen {
                 .clone()
                 .map_or_else(String::new, |season| format!("{season} · "));
             let line = row![
-                ui::list_row(
+                ui::box_row(
+                    ui::initials(competition.initials.clone(), c),
                     row![
                         column![
                             text(competition.name.clone())
@@ -249,27 +255,38 @@ impl CompetitionsScreen {
                     .spacing(10)
                     .align_y(Alignment::Center),
                     i == self.selected,
-                    Some(Message::Edit(i)),
+                    Message::Edit(i),
                     c,
                 ),
-                ui::icon_button(
-                    theme::icons::DELETE,
+                ui::tip(
+                    ui::icon_button(
+                        theme::icons::DELETE,
+                        s.delete_competition,
+                        Message::Delete(i),
+                        false,
+                        c,
+                    ),
                     s.delete_competition,
-                    Message::Delete(i),
-                    false,
                     c,
                 ),
             ]
-            .spacing(6)
+            .spacing(4)
             .align_y(Alignment::Center);
             line.into()
         });
-        let list: Element<'a, Message> = match self.listed.is_empty() {
-            true => ui::body(s.no_competitions).color(c.muted).into(),
-            false => scrollable(Column::with_children(rows).spacing(3))
+        let list: Element<'a, Message> =
+            match self.listed.is_empty() {
+                true => ui::body(s.no_competitions).color(c.muted).into(),
+                // the scrollbar beside the rows, not over their bins
+                false => scrollable(Column::with_children(rows).spacing(4).padding(
+                    iced::Padding {
+                        right: 14.0,
+                        ..iced::Padding::ZERO
+                    },
+                ))
                 .height(Length::Fill)
                 .into(),
-        };
+            };
         container(
             container(ui::panel(
                 Some(s.competitions),
@@ -309,7 +326,8 @@ mod tests {
 
     /// Cortona with its players, a match in "Serie C" and two in "Coppa".
     fn competitions_played(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, Vec<String>) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core
             .save_team(
                 None,
@@ -348,6 +366,19 @@ mod tests {
         (core, team, matches)
     }
 
+    #[test]
+    fn a_failure_of_the_page_is_told_over_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = scout4all_mobile::Scout4All::for_tests(
+            dir.path().to_string_lossy().into_owned(),
+            "en".into(),
+        )
+        .unwrap();
+        let mut screen = CompetitionsScreen::new(core).unwrap();
+        screen.error = Some("not saved".into());
+        crate::assert_told_over(crate::Screen::Competitions(Box::new(screen)), "not saved");
+    }
+
     /// From the home with "c" (or its pill): the competitions with their
     /// season, format and matches; Esc back.
     #[test]
@@ -370,6 +401,14 @@ mod tests {
         );
 
         let mut screen = CompetitionsScreen::new(core.clone()).unwrap();
+        assert_eq!(
+            screen
+                .listed
+                .iter()
+                .map(|c| c.initials.as_str())
+                .collect::<Vec<_>>(),
+            vec!["C", "SC"]
+        );
         assert_eq!(
             screen
                 .listed
@@ -397,7 +436,7 @@ mod tests {
         // none yet: they're made in the form of a match
         let empty = tempfile::tempdir().unwrap();
         let none =
-            Scout4All::new(empty.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+            Scout4All::for_tests(empty.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         assert!(CompetitionsScreen::new(none).unwrap().listed.is_empty());
     }
 
@@ -426,7 +465,7 @@ mod tests {
         };
         assert_eq!(editor.form.focused, 0);
         assert_eq!(
-            editor.form.error.as_deref(),
+            editor.form.told().as_deref(),
             Some("esiste già una competizione con questo nome e questa stagione")
         );
         // a country not found: on the country

@@ -20,7 +20,7 @@ use crate::{
     },
     storage::{Store, StoreEntry, layout},
 };
-use chrono::{DateTime, Datelike, FixedOffset, Local};
+use chrono::{DateTime, FixedOffset};
 
 /// The players: number, name, role.
 const PLAYERS: [(u8, &str, RoleEnum); 14] = [
@@ -91,12 +91,12 @@ pub async fn is_new_installation(
     Ok(!in_folder && !teams.any_team_ever()?)
 }
 
-/// Saves the example team, of this year.
+/// Saves the example team, of `year` (this one).
 pub async fn add_example_team(
     writer: &(dyn TeamWriter + Send + Sync),
     labels: &Labels,
+    year: u16,
 ) -> Result<TeamEntry, AppError> {
-    let year = u16::try_from(Local::now().year()).unwrap_or_default();
     writer.save(example_team(labels, year)).await
 }
 
@@ -106,9 +106,10 @@ pub async fn add_example_team_if_new(
     teams: &SqliteTeamReader,
     writer: &(dyn TeamWriter + Send + Sync),
     labels: &Labels,
+    year: u16,
 ) -> Result<Option<TeamEntry>, AppError> {
     match is_new_installation(store, teams).await? {
-        true => add_example_team(writer, labels).await.map(Some),
+        true => add_example_team(writer, labels, year).await.map(Some),
         false => Ok(None),
     }
 }

@@ -6,7 +6,9 @@
 //! of a language (`labels`), or holds a `Language` shared with the user
 //! interface.
 
+use crate::training::cycles::Window;
 use crate::{constants::DEFAULT_LANGUAGE, shapes::enums::LanguageEnum};
+use chrono::{Datelike, NaiveDate};
 use std::str::FromStr;
 use std::sync::{Arc, PoisonError, RwLock};
 
@@ -360,6 +362,8 @@ pub struct Labels {
     pub removed_player: &'static str,
     pub invalid_birth_date: &'static str,
     pub invalid_height: &'static str,
+    pub invalid_email: &'static str,
+    pub invalid_phone: &'static str,
     pub opponent_cannot_be_empty: &'static str,
     pub opponent_is_team_a: &'static str,
     pub scouting_both_needs_team: &'static str,
@@ -414,6 +418,10 @@ pub struct Labels {
     pub sheet_printed: &'static str,
     /// Monday to Sunday, short
     pub sheet_weekdays: [&'static str; 7],
+    /// a day in digits, in the order of the language: `{dd}`, `{mm}`, `{y}`
+    pub date_digits: &'static str,
+    /// day and month only
+    pub short_date_digits: &'static str,
     pub max_substitutions_below_existing_substitutions: &'static str,
     pub roster_too_small: &'static str,
     pub roster_too_large: &'static str,
@@ -438,6 +446,14 @@ pub struct Labels {
     pub terms_license: &'static str,
     pub terms_upload: &'static str,
     pub terms_full: &'static str,
+    /// the licenses of the parts of others the app carries (`licenses`):
+    /// the title, a line before them, what each part is for
+    pub third_party_licenses: &'static str,
+    pub third_party_intro: &'static str,
+    pub third_party_face_detection: &'static str,
+    pub third_party_background_removal: &'static str,
+    pub third_party_report_font: &'static str,
+    pub third_party_libraries: &'static str,
 }
 
 const EN: Labels = Labels {
@@ -735,6 +751,8 @@ const EN: Labels = Labels {
     removed_player: "removed player",
     invalid_birth_date: "invalid birth date: YYYY-MM-DD, not in the future",
     invalid_height: "invalid height: centimetres from 100 to 250",
+    invalid_email: "invalid email address",
+    invalid_phone: "invalid phone number for the country chosen",
     opponent_cannot_be_empty: "opponent cannot be empty",
     opponent_is_team_a: "team B can't be team A",
     scouting_both_needs_team: "to scout both teams, team B must be a team with players",
@@ -782,6 +800,8 @@ const EN: Labels = Labels {
     sheet_guest: "guest",
     sheet_printed: "printed on {}",
     sheet_weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    date_digits: "{mm}/{dd}/{y}",
+    short_date_digits: "{mm}/{dd}",
     max_substitutions_below_existing_substitutions: "substitutions per set cannot be less than the number already used in a set",
     roster_too_small: "the score sheet needs at least 7 players: six and the libero",
     roster_too_large: "at most 14 players on the score sheet",
@@ -801,6 +821,12 @@ const EN: Labels = Labels {
     terms_license: "License. Scout4all is released under the GNU Affero General Public License v3.0 (AGPL-3.0-only). You can use, copy, modify and distribute it, even for a fee, as long as you keep the copyright notice and release your changes under the same license, with their source code: also when you offer them as an online service. The program comes with NO WARRANTY.",
     terms_upload: "Data. Unless you turn it off below, the matches you scout are sent to the developer to compute statistics and diagnose bugs; aggregate statistics can be used in future services of the project. They hold no names: teams and players appear only as random identifiers, along with the date, the category, the gender and the country of the team and the events of the match. When you scout both teams of a match, the events of the opposing team are sent too, also as random identifiers. To recognize the same team and the same match among different users, the names of the team and of the opponent pass through the server, which turns them into codes that cannot be turned back into the names, and does not keep them. The server records your IP address in its logs. Data controller: Nicola Baldi. You can change your choice at any time in the settings.",
     terms_full: "Full texts: the LICENSE and DATA-PRIVACY files, on https://github.com/naighes/scoutforall. Contact: nic.baldi@gmail.com",
+    third_party_licenses: "third-party licenses",
+    third_party_intro: "Parts made by others that the app carries, each with its license.",
+    third_party_face_detection: "finds the face in a photo, to crop it",
+    third_party_background_removal: "removes the background of a photo",
+    third_party_report_font: "the font of the PDF reports",
+    third_party_libraries: "the libraries the app is built with",
 };
 
 const IT: Labels = Labels {
@@ -1098,6 +1124,8 @@ const IT: Labels = Labels {
     removed_player: "giocatore rimosso",
     invalid_birth_date: "data di nascita non valida: AAAA-MM-GG, non nel futuro",
     invalid_height: "altezza non valida: centimetri da 100 a 250",
+    invalid_email: "indirizzo email non valido",
+    invalid_phone: "numero di telefono non valido per il Paese scelto",
     opponent_cannot_be_empty: "l'avversario è obbligatorio",
     opponent_is_team_a: "la squadra B non può essere la squadra A",
     scouting_both_needs_team: "per rilevare entrambe le squadre, B deve essere una squadra con i suoi giocatori",
@@ -1145,6 +1173,8 @@ const IT: Labels = Labels {
     sheet_guest: "ospite",
     sheet_printed: "stampato il {}",
     sheet_weekdays: ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"],
+    date_digits: "{dd}/{mm}/{y}",
+    short_date_digits: "{dd}/{mm}",
     max_substitutions_below_existing_substitutions: "le sostituzioni per set non possono essere inferiori al numero già utilizzato in un set",
     roster_too_small: "a referto servono almeno 7 giocatori: sei e il libero",
     roster_too_large: "a referto al massimo 14 giocatori",
@@ -1164,6 +1194,12 @@ const IT: Labels = Labels {
     terms_license: "Licenza. Scout4all è distribuito con la licenza GNU Affero General Public License v3.0 (AGPL-3.0-only). Puoi usarlo, copiarlo, modificarlo e distribuirlo, anche a pagamento, purché mantenga la nota di copyright e distribuisca le tue modifiche con la stessa licenza, insieme al loro codice sorgente: anche quando le offri come servizio online. Il programma è fornito SENZA ALCUNA GARANZIA.",
     terms_upload: "Dati. Se non lo disattivi qui sotto, le partite che registri vengono inviate allo sviluppatore per calcolare statistiche e diagnosticare bug; le statistiche aggregate possono essere usate in futuri servizi del progetto. Non contengono nomi: squadre e atleti compaiono solo come identificativi casuali, insieme a data, categoria, genere e paese della squadra ed eventi della partita. Quando registri entrambe le squadre di una partita, vengono inviati anche gli eventi della squadra avversaria, sempre come identificativi casuali. Per riconoscere la stessa squadra e la stessa partita fra utenti diversi, i nomi della squadra e dell'avversario passano dal server, che li trasforma in codici da cui non si risale ai nomi, senza conservarli. Il server registra il tuo indirizzo IP nei suoi log. Titolare del trattamento: Nicola Baldi. Puoi cambiare la tua scelta in qualsiasi momento nelle impostazioni.",
     terms_full: "Testi completi: i file LICENSE e DATA-PRIVACY, su https://github.com/naighes/scoutforall. Contatto: nic.baldi@gmail.com",
+    third_party_licenses: "licenze di terze parti",
+    third_party_intro: "Parti realizzate da altri che l'app contiene, ciascuna con la sua licenza.",
+    third_party_face_detection: "trova il volto in una foto, per ritagliarla",
+    third_party_background_removal: "toglie lo sfondo a una foto",
+    third_party_report_font: "il carattere dei report PDF",
+    third_party_libraries: "le librerie con cui è fatta l'app",
 };
 
 const PT: Labels = Labels {
@@ -1461,6 +1497,8 @@ const PT: Labels = Labels {
     removed_player: "jogador removido",
     invalid_birth_date: "data de nascimento inválida: AAAA-MM-DD, não no futuro",
     invalid_height: "altura inválida: centímetros de 100 a 250",
+    invalid_email: "endereço de email inválido",
+    invalid_phone: "número de telefone inválido para o país escolhido",
     opponent_cannot_be_empty: "o adversário é obrigatório",
     opponent_is_team_a: "a equipe B não pode ser a equipe A",
     scouting_both_needs_team: "para registrar as duas equipes, B deve ser uma equipe com jogadores",
@@ -1508,6 +1546,8 @@ const PT: Labels = Labels {
     sheet_guest: "convidado",
     sheet_printed: "impresso em {}",
     sheet_weekdays: ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"],
+    date_digits: "{dd}/{mm}/{y}",
+    short_date_digits: "{dd}/{mm}",
     max_substitutions_below_existing_substitutions: "as substituições por set não podem ser menos do que as já usadas em um set",
     roster_too_small: "a súmula precisa de pelo menos 7 jogadores: seis e o líbero",
     roster_too_large: "no máximo 14 jogadores na súmula",
@@ -1527,6 +1567,12 @@ const PT: Labels = Labels {
     terms_license: "Licença. Scout4all é distribuído sob a GNU Affero General Public License v3.0 (AGPL-3.0-only). Você pode usá-lo, copiá-lo, modificá-lo e distribuí-lo, inclusive mediante pagamento, desde que mantenha o aviso de copyright e distribua suas modificações sob a mesma licença, junto com o código-fonte: também quando as oferecer como serviço online. O programa é fornecido SEM NENHUMA GARANTIA.",
     terms_upload: "Dados. A menos que você desative abaixo, as partidas que você registra são enviadas ao desenvolvedor para calcular estatísticas e diagnosticar bugs; as estatísticas agregadas podem ser usadas em futuros serviços do projeto. Elas não contêm nomes: equipes e atletas aparecem apenas como identificadores aleatórios, junto com a data, a categoria, o gênero e o país da equipe e os eventos da partida. Quando você registra as duas equipes de uma partida, os eventos da equipe adversária também são enviados, igualmente como identificadores aleatórios. Para reconhecer a mesma equipe e a mesma partida entre usuários diferentes, os nomes da equipe e do adversário passam pelo servidor, que os transforma em códigos dos quais não é possível obter os nomes, sem guardá-los. O servidor registra seu endereço IP em seus logs. Controlador dos dados: Nicola Baldi. Você pode mudar sua escolha a qualquer momento nas configurações.",
     terms_full: "Textos completos: os arquivos LICENSE e DATA-PRIVACY, em https://github.com/naighes/scoutforall. Contato: nic.baldi@gmail.com",
+    third_party_licenses: "licenças de terceiros",
+    third_party_intro: "Partes feitas por outros que o app contém, cada uma com sua licença.",
+    third_party_face_detection: "encontra o rosto em uma foto, para recortá-la",
+    third_party_background_removal: "remove o fundo de uma foto",
+    third_party_report_font: "a fonte dos relatórios em PDF",
+    third_party_libraries: "as bibliotecas com que a app é feita",
 };
 
 const PL: Labels = Labels {
@@ -1824,6 +1870,8 @@ const PL: Labels = Labels {
     removed_player: "usunięty zawodnik",
     invalid_birth_date: "nieprawidłowa data urodzenia: RRRR-MM-DD, nie w przyszłości",
     invalid_height: "nieprawidłowy wzrost: centymetry od 100 do 250",
+    invalid_email: "nieprawidłowy adres e-mail",
+    invalid_phone: "nieprawidłowy numer telefonu dla wybranego kraju",
     opponent_cannot_be_empty: "rywal jest wymagany",
     opponent_is_team_a: "drużyna B nie może być drużyną A",
     scouting_both_needs_team: "aby rejestrować obie drużyny, B musi być drużyną z zawodnikami",
@@ -1871,6 +1919,8 @@ const PL: Labels = Labels {
     sheet_guest: "gość",
     sheet_printed: "wydrukowano {}",
     sheet_weekdays: ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."],
+    date_digits: "{dd}.{mm}.{y}",
+    short_date_digits: "{dd}.{mm}",
     max_substitutions_below_existing_substitutions: "liczba zmian w secie nie może być mniejsza niż liczba zmian już wykonanych w secie",
     roster_too_small: "protokół wymaga co najmniej 7 zawodników: sześciu i libero",
     roster_too_large: "w protokole najwyżej 14 zawodników",
@@ -1890,6 +1940,12 @@ const PL: Labels = Labels {
     terms_license: "Licencja. Scout4all jest udostępniany na licencji GNU Affero General Public License v3.0 (AGPL-3.0-only). Możesz go używać, kopiować, modyfikować i rozpowszechniać, także odpłatnie, pod warunkiem zachowania informacji o prawach autorskich i udostępnienia swoich zmian na tej samej licencji, wraz z ich kodem źródłowym: również wtedy, gdy oferujesz je jako usługę online. Program jest dostarczany BEZ ŻADNEJ GWARANCJI.",
     terms_upload: "Dane. Jeśli nie wyłączysz tego poniżej, rejestrowane przez Ciebie mecze są wysyłane do twórcy w celu obliczania statystyk i diagnozowania błędów; zbiorcze statystyki mogą być wykorzystane w przyszłych usługach projektu. Nie zawierają nazwisk: drużyny i zawodnicy występują tylko jako losowe identyfikatory, wraz z datą, kategorią, płcią i krajem drużyny oraz zdarzeniami meczu. Gdy rejestrujesz obie drużyny meczu, wysyłane są także zdarzenia drużyny przeciwnej, również jako losowe identyfikatory. Aby rozpoznać tę samą drużynę i ten sam mecz u różnych użytkowników, nazwy drużyny i przeciwnika przechodzą przez serwer, który zamienia je na kody, z których nie da się odczytać nazw, i ich nie przechowuje. Serwer zapisuje Twój adres IP w swoich logach. Administrator danych: Nicola Baldi. Swój wybór możesz zmienić w każdej chwili w ustawieniach.",
     terms_full: "Pełne teksty: pliki LICENSE i DATA-PRIVACY na https://github.com/naighes/scoutforall. Kontakt: nic.baldi@gmail.com",
+    third_party_licenses: "licencje stron trzecich",
+    third_party_intro: "Elementy stworzone przez innych, zawarte w aplikacji, każdy z własną licencją.",
+    third_party_face_detection: "znajduje twarz na zdjęciu, aby je przyciąć",
+    third_party_background_removal: "usuwa tło ze zdjęcia",
+    third_party_report_font: "czcionka raportów PDF",
+    third_party_libraries: "biblioteki, z których zbudowana jest aplikacja",
 };
 
 const JA: Labels = Labels {
@@ -2187,6 +2243,8 @@ const JA: Labels = Labels {
     removed_player: "削除された選手",
     invalid_birth_date: "無効な生年月日 (YYYY-MM-DD、未来の日付は不可)",
     invalid_height: "無効な身長 (センチメートルで 100〜250)",
+    invalid_email: "無効なメールアドレス",
+    invalid_phone: "選択した国の電話番号として無効です",
     opponent_cannot_be_empty: "対戦相手は必須です",
     opponent_is_team_a: "チームBはチームAにできません",
     scouting_both_needs_team: "両チームを記録するには、Bは選手のいるチームである必要があります",
@@ -2234,6 +2292,8 @@ const JA: Labels = Labels {
     sheet_guest: "ゲスト",
     sheet_printed: "{}に印刷",
     sheet_weekdays: ["月", "火", "水", "木", "金", "土", "日"],
+    date_digits: "{y}/{mm}/{dd}",
+    short_date_digits: "{mm}/{dd}",
     max_substitutions_below_existing_substitutions: "セットごとの交代数は、すでにセットで使った交代数より少なくできません",
     roster_too_small: "スコアシートには少なくとも7人(6人とリベロ)が必要です",
     roster_too_large: "スコアシートは最大14人です",
@@ -2253,6 +2313,12 @@ const JA: Labels = Labels {
     terms_license: "ライセンス。Scout4all は GNU Affero General Public License v3.0（AGPL-3.0-only）で公開されています。著作権表示を残し、変更を同じライセンスでソースコードとともに公開する限り、有料であっても使用、複製、改変、配布ができます。変更をオンラインサービスとして提供する場合も同様です。本プログラムは一切の保証なしに提供されます。",
     terms_upload: "データ。下で無効にしない限り、記録した試合は統計の算出とバグの診断のために開発者へ送信されます。集計された統計は、プロジェクトの今後のサービスで使われることがあります。名前は含まれません。チームと選手はランダムな識別子としてのみ記録され、試合の日付、カテゴリー、性別、チームの国、イベントとともに送信されます。試合の両チームを記録した場合は、相手チームのイベントも同様にランダムな識別子として送信されます。異なるユーザー間で同じチームと同じ試合を見分けるため、チーム名と対戦相手名はサーバーを経由し、名前に戻せないコードに変換されます。名前は保存されません。サーバーはログに IP アドレスを記録します。データ管理者：Nicola Baldi。選択は設定でいつでも変更できます。",
     terms_full: "全文：https://github.com/naighes/scoutforall の LICENSE と DATA-PRIVACY ファイル。連絡先：nic.baldi@gmail.com",
+    third_party_licenses: "サードパーティのライセンス",
+    third_party_intro: "アプリに含まれる他者が作成した部品と、それぞれのライセンス。",
+    third_party_face_detection: "写真の顔を見つけて切り抜く",
+    third_party_background_removal: "写真の背景を取り除く",
+    third_party_report_font: "PDFレポートのフォント",
+    third_party_libraries: "アプリが使用しているライブラリ",
 };
 
 /// Returns the labels of a language.
@@ -2262,6 +2328,34 @@ impl Labels {
     pub const fn terms(&self, data: &'static str) -> [&'static str; 4] {
         [self.terms_free, self.terms_license, data, self.terms_full]
     }
+}
+
+impl Labels {
+    /// `day` in digits as the language writes it.
+    pub fn date(&self, day: NaiveDate) -> String {
+        digits(self.date_digits, day)
+    }
+
+    /// Day and month of `day`.
+    pub fn short_date(&self, day: NaiveDate) -> String {
+        digits(self.short_date_digits, day)
+    }
+
+    /// The first and last day of a window, one date when it is one day.
+    pub fn days(&self, window: Window) -> String {
+        let last = window.end.pred_opt().unwrap_or(window.start);
+        match last > window.start {
+            true => format!("{} – {}", self.date(window.start), self.date(last)),
+            false => self.date(window.start),
+        }
+    }
+}
+
+fn digits(pattern: &str, day: NaiveDate) -> String {
+    pattern
+        .replace("{dd}", &format!("{:02}", day.day()))
+        .replace("{mm}", &format!("{:02}", day.month()))
+        .replace("{y}", &day.year().to_string())
 }
 
 pub const fn labels(language: LanguageEnum) -> &'static Labels {

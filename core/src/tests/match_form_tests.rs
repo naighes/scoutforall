@@ -15,7 +15,7 @@ mod tests {
         },
         tests::EN,
     };
-    use chrono::{DateTime, FixedOffset, Utc};
+    use chrono::{DateTime, FixedOffset};
     use uuid::Uuid;
 
     fn date() -> DateTime<FixedOffset> {
@@ -84,7 +84,7 @@ mod tests {
 
     fn substitution() -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::R,
             player: Some(Uuid::new_v4()),
             eval: None,

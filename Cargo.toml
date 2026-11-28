@@ -50,6 +50,17 @@ panic = "deny"
 todo = "deny"
 unimplemented = "deny"
 unreachable = "deny"
+# the time only from a clock (see clippy.toml)
+disallowed_methods = "deny"
+
+# the builds of every day and of the tests: files and lines of our code in
+# the backtraces, nothing of the dependencies; with the full debug info a
+# test binary of the desktop was ~370 MB, and target/debug grew to 200 GB
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
 
 [profile.release]
 opt-level = 3

@@ -3,7 +3,7 @@ use crate::{
     shapes::{
         country::CountryCode,
         enums::{GenderEnum, RoleEnum, TeamClassificationEnum},
-        player::PlayerEntry,
+        player::{DominantHand, PlayerEntry},
         team::TeamEntry,
     },
 };
@@ -31,6 +31,43 @@ pub struct PlayerDetails {
     /// in centimetres
     pub height_cm: Option<u16>,
     pub notes: String,
+    pub nationality: Option<CountryCode>,
+    pub dominant_hand: Option<DominantHand>,
+    pub federation_id: String,
+    pub email: String,
+    /// in E.164
+    pub phone: String,
+    pub birth_place: String,
+}
+
+impl PlayerDetails {
+    /// `player` with these details, the rest of them kept. Every detail is
+    /// named, so one added here doesn't compile until it is handed on.
+    pub fn given_to(self, player: PlayerEntry) -> PlayerEntry {
+        let PlayerDetails {
+            birth_date,
+            height_cm,
+            notes,
+            nationality,
+            dominant_hand,
+            federation_id,
+            email,
+            phone,
+            birth_place,
+        } = self;
+        PlayerEntry {
+            birth_date,
+            height_cm,
+            notes,
+            nationality,
+            dominant_hand,
+            federation_id,
+            email,
+            phone,
+            birth_place,
+            ..player
+        }
+    }
 }
 
 pub enum PlayerInput {

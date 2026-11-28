@@ -61,7 +61,6 @@ import io.github.naighes.scout4all.core.GenderChoice
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.TeamField
 import io.github.naighes.scout4all.core.TeamForm
-import java.time.Year
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -117,7 +116,7 @@ class TeamFormViewModel(private val app: Scout4AllApplication, private val id: S
             mutableState.value = try {
                 app.core { core ->
                     val form = id?.let { core.team(it).form }
-                        ?: core.newTeamForm(Year.now().value.toUShort())
+                        ?: core.newTeamForm(app.clock.today().year.toUShort())
                     TeamFormState.Editing(
                         form = form,
                         classifications = core.classifications(),
@@ -143,6 +142,9 @@ class TeamFormViewModel(private val app: Scout4AllApplication, private val id: S
             else -> s
         }
     }
+
+    /** The dialog of what went wrong closed. */
+    fun dismissError() = mutableState.update { s -> (s as? TeamFormState.Editing)?.copy(error = null) ?: s }
 
     /** The country chosen in the list. */
     fun pickCountry(choice: CountryChoice) {
@@ -208,7 +210,7 @@ fun TeamFormScreen(id: String?, onBack: () -> Unit, onSaved: () -> Unit) {
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             TeamFormState.Loading, TeamFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
-            is TeamFormState.Failed -> Centered(modifier) { Text(s.message) }
+            is TeamFormState.Failed -> LoadFailed(s.message, modifier)
             is TeamFormState.Editing -> TeamFormContent(s, model, modifier)
         }
     }
@@ -232,13 +234,7 @@ private fun TeamFormContent(state: TeamFormState.Editing, model: TeamFormViewMod
                 onPickCountry = model::pickCountry,
             )
         }
-        state.error?.let {
-            Text(
-                it,
-                Modifier.padding(horizontal = 16.dp),
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         // big and at the bottom, where the thumb is
         Button(
             onClick = model::save,
@@ -263,7 +259,7 @@ private fun LogoPanel(shown: ByteArray?, onPick: (ByteArray) -> Unit, onRemove: 
             if (shown == null) {
                 Text(stringResource(R.string.no_logo), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
             } else {
-                LogoBox(shown, 96.dp)
+                TeamLogoBox(shown, 96.dp)
             }
         }
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -309,7 +305,7 @@ fun TeamFields(
         label = { Text(stringResource(R.string.name)) },
         singleLine = true,
         isError = error(TeamField.NAME) != null,
-        supportingText = error(TeamField.NAME)?.let { { Text(it) } },
+        supportingText = noteOf(error(TeamField.NAME)),
         keyboardOptions = KeyboardOptions(
             capitalization = KeyboardCapitalization.Words,
             imeAction = ImeAction.Next,
@@ -322,7 +318,7 @@ fun TeamFields(
         label = { Text(stringResource(R.string.year)) },
         singleLine = true,
         isError = error(TeamField.YEAR) != null,
-        supportingText = error(TeamField.YEAR)?.let { { Text(it) } },
+        supportingText = noteOf(error(TeamField.YEAR)),
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
     )
     FieldTitle(stringResource(R.string.gender), error(TeamField.GENDER))
@@ -349,7 +345,7 @@ fun TeamFields(
 @Composable
 fun FieldTitle(title: String, error: String?) = Column {
     Text(title, Modifier.title(), style = MaterialTheme.typography.titleSmall)
-    error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+    error?.let { FieldNote(it, Modifier.padding(top = 4.dp)) }
 }
 
 @Composable

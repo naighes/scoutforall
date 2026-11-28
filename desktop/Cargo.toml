@@ -85,6 +85,7 @@ self-update = ["self_update"]
 
 [dev-dependencies]
 rqrr = { version = "0.10", default-features = false }
+image = { version = "0.25", default-features = false, features = ["png"] }
 tempfile.workspace = true
 
 [build-dependencies]

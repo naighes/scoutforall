@@ -3,6 +3,7 @@ use crate::{
     errors::AppError,
     providers::{queue_reader::QueueReader, queue_writer::QueueWriter},
 };
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
@@ -29,10 +30,15 @@ impl<QR: QueueReader + Send + Sync + 'static, QW: QueueWriter + Send + Sync + 's
     }
 
     // enqueue a match for upload (thread-safe)
-    pub async fn enqueue(&self, team_id: Uuid, match_id: String) -> Result<(), AppError> {
+    pub async fn enqueue(
+        &self,
+        team_id: Uuid,
+        match_id: String,
+        at: DateTime<Utc>,
+    ) -> Result<(), AppError> {
         let _guard = self.lock.lock().await;
         let mut queue = self.queue_reader.load().await?;
-        queue.enqueue(team_id, match_id);
+        queue.enqueue(team_id, match_id, at);
         self.queue_writer.save(&queue).await
     }
 

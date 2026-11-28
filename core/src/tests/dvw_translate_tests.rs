@@ -2323,7 +2323,12 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
 
         #[async_trait::async_trait]
         impl FinishedMatches for Queued {
-            async fn finished(&self, team_id: Uuid, match_id: String) {
+            async fn finished(
+                &self,
+                team_id: Uuid,
+                match_id: String,
+                _at: chrono::DateTime<chrono::Utc>,
+            ) {
                 if let Ok(mut queued) = self.0.lock() {
                     queued.push((team_id, match_id));
                 }
@@ -2372,6 +2377,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                     &self.match_writer,
                     &self.set_writer,
                     &self.queued,
+                    crate::tests::clock::now(),
                 )
                 .await
             }
@@ -2391,6 +2397,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
                     &self.match_writer,
                     &self.set_writer,
                     &self.queued,
+                    crate::tests::clock::now(),
                 )
                 .await
             }
@@ -2497,6 +2504,7 @@ PP;3;L;O;Pallonetto alzatore;;;;;";
             let archive = crate::providers::sqlite::archive::export(
                 &p.db,
                 crate::providers::sqlite::archive::Subject::Match(id),
+                crate::tests::clock::now(),
             )
             .expect("the archive");
             let other = Providers::new();

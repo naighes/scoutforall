@@ -9,6 +9,7 @@ use super::{
 };
 use scout4all_core::{
     errors::AppError,
+    names,
     providers::sqlite::{persons::SqlitePersons, venues::SqliteVenues},
     training::{
         agenda::Period,
@@ -26,6 +27,8 @@ use uuid::Uuid;
 pub struct VenueRecord {
     pub id: String,
     pub name: String,
+    /// of the name, at the head of its row
+    pub initials: String,
     pub address: String,
     pub map_url: String,
     pub latitude: Option<f64>,
@@ -40,6 +43,7 @@ pub(crate) fn venue_record(v: &Venue) -> VenueRecord {
     VenueRecord {
         id: v.id.to_string(),
         name: v.name.clone(),
+        initials: names::initials(&v.name),
         address: v.address.clone(),
         map_url: v.map_url.clone(),
         latitude: v.coordinates.map(|(lat, _)| lat),
@@ -467,7 +471,7 @@ mod tests {
     use std::sync::Arc;
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
     }
 
     fn team(app: &Scout4All, name: &str) -> String {
@@ -743,6 +747,13 @@ mod tests {
                     birth_date: String::new(),
                     height_cm: String::new(),
                     notes: String::new(),
+                    nationality: None,
+                    dominant_hand: None,
+                    federation_id: String::new(),
+                    email: String::new(),
+                    phone_country: None,
+                    phone: String::new(),
+                    birth_place: String::new(),
                     person: None,
                 },
                 false,

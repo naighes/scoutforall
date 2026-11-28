@@ -118,7 +118,7 @@ private fun toneColor(tone: Tone) = gradeColor(
 @Composable
 fun Detail(
     detail: DetailStats?,
-    query: DetailQuery,
+    asked: DetailQuery,
     situation: SituationChoices? = null,
     // the analysis has them over every page
     filters: Boolean = true,
@@ -128,6 +128,10 @@ fun Detail(
     onQuery: (DetailQuery) -> Unit,
 ) {
     if (detail == null) return
+    // the phase may not have the fundamental asked for: the detail is of
+    // another one
+    val query = asked.takeIf { a -> detail.fundamentals.any { it.value == a.event } }
+        ?: asked.copy(event = detail.event)
     val filter = query.filter
     var choice by remember(query.event) { mutableStateOf(ClipChoice()) }
     Row(

@@ -1,5 +1,6 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -43,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -63,7 +65,9 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.OffsetMapping
 import androidx.compose.ui.text.input.TransformedText
 import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.github.naighes.scout4all.core.DetailFilter
 import io.github.naighes.scout4all.core.AnalysedMatch
 import io.github.naighes.scout4all.core.AnalysisPeriod
 import io.github.naighes.scout4all.core.CompetitionChoice
@@ -93,24 +97,62 @@ private enum class AnalysisPage(val title: Int) {
 }
 
 /** How the period is chosen. */
-private enum class PeriodKind { LastMonth, LastMatches, Between }
+internal enum class PeriodKind { LastMonth, Season, LastMatches, Between }
+
+/** The period as chosen: the days are the digits typed, YYYYMMDD. */
+internal data class PeriodChoice(
+    val kind: PeriodKind,
+    val count: Int = LAST_MATCHES,
+    val from: String = "",
+    val to: String = "",
+) {
+    /** Null with two days not both written: the one before stays. */
+    fun period(): AnalysisPeriod? = when (kind) {
+        PeriodKind.LastMonth -> AnalysisPeriod.LastMonth
+        PeriodKind.Season -> AnalysisPeriod.Season
+        PeriodKind.LastMatches -> AnalysisPeriod.LastMatches(count.toUInt())
+        PeriodKind.Between -> listOf(from, to).map(::dayOf).let { (first, last) ->
+            if (first != null && last != null) AnalysisPeriod.Between(first.toString(), last.toString()) else null
+        }
+    }
+
+    companion object {
+        val Saver = listSaver<PeriodChoice, Any>(
+            save = { listOf(it.kind.name, it.count, it.from, it.to) },
+            restore = { PeriodChoice(PeriodKind.valueOf(it[0] as String), it[1] as Int, it[2] as String, it[3] as String) },
+        )
+    }
+}
+
+/** The analysis narrowed to a player, from their profile, with its filters. */
+internal data class LockedAnalysis(val player: String, val choice: PeriodChoice, val competition: String?)
 
 /** The statistics of a team over the matches of a period: as for a match,
  * each figure match by match, a fundamental in detail; narrowed by the
  * filters, the situation of the game too, on every page. */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Clips) -> Unit = {}) {
+internal fun AnalysisScreen(
+    teamId: String,
+    onBack: () -> Unit,
+    onWatch: (VideoRequest.Clips) -> Unit = {},
+    locked: LockedAnalysis? = null,
+) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
-    var kind by rememberSaveable { mutableStateOf(PeriodKind.LastMonth) }
-    var count by rememberSaveable { mutableIntStateOf(LAST_MATCHES) }
-    // the digits typed, YYYYMMDD
-    var from by rememberSaveable { mutableStateOf("") }
-    var to by rememberSaveable { mutableStateOf("") }
+    var choice by rememberSaveable(stateSaver = PeriodChoice.Saver) {
+        mutableStateOf(locked?.choice ?: PeriodChoice(PeriodKind.LastMonth))
+    }
     var page by rememberSaveable { mutableIntStateOf(0) }
     // the competition the matches are narrowed to, none for every one
-    var competition by rememberSaveable { mutableStateOf<String?>(null) }
-    var query by remember { mutableStateOf(DetailQuery()) }
+    var competition by rememberSaveable { mutableStateOf(locked?.competition) }
+    val players = listOfNotNull(locked?.player)
+    var query by remember { mutableStateOf(DetailQuery(filter = DetailFilter(null, players = players))) }
+    // the player stays the one of the profile, whatever the page picks
+    val ask = { q: DetailQuery ->
+        query = if (locked == null) q else q.copy(filter = q.filter.copy(players = players))
+    }
+    // the player by name, in the title
+    var name by remember { mutableStateOf<String?>(null) }
     // the opponent the analysis is seen from, none for the team itself
     var opponent by rememberSaveable { mutableStateOf<String?>(null) }
     // the opponent and the team side by side, in their matches
@@ -119,23 +161,17 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     var opponents by remember { mutableStateOf<List<ScoutedOpponent>>(emptyList()) }
     LaunchedEffect(teamId) {
         try {
-            ours = app.core { it.team(teamId).name }
-            opponents = app.core { it.analysisOpponents(teamId) }
+            val team = app.core { it.team(teamId) }
+            ours = team.name
+            name = team.players.firstOrNull { it.id == locked?.player }?.name
+            // a player is of the team only
+            if (locked == null) opponents = app.core { it.analysisOpponents(teamId) }
         } catch (_: MobileException) {
         }
     }
     // the period read: two days only once both are
-    var period by remember { mutableStateOf<AnalysisPeriod>(AnalysisPeriod.LastMonth) }
-    LaunchedEffect(kind, count, from, to) {
-        when (kind) {
-            PeriodKind.LastMonth -> period = AnalysisPeriod.LastMonth
-            PeriodKind.LastMatches -> period = AnalysisPeriod.LastMatches(count.toUInt())
-            PeriodKind.Between -> {
-                val days = listOf(from, to).map(::dayOf)
-                if (days.all { it != null }) period = AnalysisPeriod.Between(days[0].toString(), days[1].toString())
-            }
-        }
-    }
+    var period by remember { mutableStateOf(choice.period() ?: AnalysisPeriod.LastMonth) }
+    LaunchedEffect(choice) { choice.period()?.let { period = it } }
     // the last one read stays while the next is
     var analysis by remember { mutableStateOf<TeamAnalysis?>(null) }
     var failed by remember { mutableStateOf<String?>(null) }
@@ -158,7 +194,10 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.analysis), Modifier.title()) },
+                title = {
+                    val title = listOfNotNull(name, stringResource(R.string.analysis)).joinToString(" – ")
+                    Text(title, Modifier.title(), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                },
                 navigationIcon = { BackButton(onBack) },
             )
         },
@@ -166,7 +205,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
         val modifier = Modifier.fillMaxSize().padding(padding)
         val a = analysis
         when {
-            a == null && failed != null -> Centered(modifier) { Text(failed.orEmpty()) }
+            a == null && failed != null -> LoadFailed(failed.orEmpty(), modifier)
             a == null -> Centered(modifier) { CircularProgressIndicator() }
             else -> Column(modifier) {
                 val pages = AnalysisPage.entries
@@ -182,6 +221,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                 ) {
                     if (opponents.isNotEmpty()) {
                         SeenFromChooser(
+                            teamId,
                             ours,
                             opponents,
                             opponent,
@@ -203,27 +243,9 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                     if (a.competitions.size > 1 || competition != null) {
                         CompetitionChooser(a.competitions, competition) { competition = it }
                     }
-                    PeriodChooser(
-                        kind,
-                        count,
-                        from,
-                        to,
-                        onKind = { k ->
-                            // the days from the period shown
-                            if (k == PeriodKind.Between && from.isEmpty() && to.isEmpty()) {
-                                from = a.from?.filter(Char::isDigit).orEmpty()
-                                to = a.to?.filter(Char::isDigit).orEmpty()
-                            }
-                            kind = k
-                        },
-                        onCount = { count = it.coerceIn(1, 99) },
-                        onDays = { f, t ->
-                            from = f
-                            to = t
-                        },
-                    )
-                    PeriodLine(a)
-                    failed?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                    PeriodChooser(choice, a.from, a.to) { choice = it }
+                    PeriodLine(a.from, a.to, a.matches.size, a.skipped)
+                    failed?.let { Banner(Level.ERROR, it) }
                     if (a.matches.isEmpty()) {
                         Text(stringResource(R.string.no_matches_period), color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
@@ -232,8 +254,8 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                             a.situation,
                             query.filter,
                             query.event.takeIf { pages[page] == AnalysisPage.Detail },
-                            filterPlayers(a, pages[page] == AnalysisPage.Detail, compare),
-                        ) { query = query.copy(filter = it) }
+                            filterPlayers(a, pages[page] == AnalysisPage.Detail, compare).takeIf { locked == null },
+                        ) { ask(query.copy(filter = it)) }
                         when (pages[page]) {
                             AnalysisPage.Summary -> if (compare) {
                                 versus?.let { Comparison(it, a.summary) }
@@ -247,7 +269,7 @@ fun AnalysisScreen(teamId: String, onBack: () -> Unit, onWatch: (VideoRequest.Cl
                                 TrendLegend(a.matches.size)
                                 a.trend.forEach { MatchTrendChart(it, a.matches) }
                             }
-                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = if (opponent == null) teamWatch(teamId, period, competition, onWatch) else null) { query = it }
+                            AnalysisPage.Detail -> Detail(a.detail, query, a.situation, filters = false, watch = teamWatch(teamId, period, competition, opponent, onWatch)) { ask(it) }
                         }
                     }
                 }
@@ -299,6 +321,7 @@ internal object DayMask : VisualTransformation {
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun SeenFromChooser(
+    oursId: String,
     ours: String,
     opponents: List<ScoutedOpponent>,
     chosen: String?,
@@ -309,9 +332,19 @@ private fun SeenFromChooser(
 ) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Text(stringResource(R.string.seen_from), style = MaterialTheme.typography.labelLarge)
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(selected = chosen == null, onClick = { onChoose(null) }, label = { Text(ours) })
+        FilterChip(
+            selected = chosen == null,
+            onClick = { onChoose(null) },
+            label = { Text(ours) },
+            leadingIcon = { TeamPicture(oursId, ours, FilterChipDefaults.IconSize) },
+        )
         opponents.forEach {
-            FilterChip(selected = chosen == it.id && !compare, onClick = { onChoose(it.id) }, label = { Text(it.name) })
+            FilterChip(
+                selected = chosen == it.id && !compare,
+                onClick = { onChoose(it.id) },
+                label = { Text(it.name) },
+                leadingIcon = { TeamPicture(it.id, it.name, FilterChipDefaults.IconSize) },
+            )
         }
         // the opponent chosen and the team side by side, on the summary
         if (chosen != null && comparable) {
@@ -323,7 +356,7 @@ private fun SeenFromChooser(
 /** The competitions of the matches scouted, one to narrow them to. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun CompetitionChooser(
+internal fun CompetitionChooser(
     competitions: List<CompetitionChoice>,
     chosen: String?,
     onChoose: (String?) -> Unit,
@@ -341,26 +374,33 @@ private fun CompetitionChooser(
     }
 }
 
+/** The kinds of period; [shownFrom] and [shownTo], the days of the one
+ * shown, start the two days. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun PeriodChooser(
-    kind: PeriodKind,
-    count: Int,
-    from: String,
-    to: String,
-    onKind: (PeriodKind) -> Unit,
-    onCount: (Int) -> Unit,
-    onDays: (String, String) -> Unit,
+internal fun PeriodChooser(
+    choice: PeriodChoice,
+    shownFrom: String?,
+    shownTo: String?,
+    onChange: (PeriodChoice) -> Unit,
 ) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    val kind = choice.kind
+    val count = choice.count
+    val onCount = { n: Int -> onChange(choice.copy(count = n.coerceIn(1, 99))) }
     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.Center) {
         FilterChip(
             selected = kind == PeriodKind.LastMonth,
-            onClick = { onKind(PeriodKind.LastMonth) },
+            onClick = { onChange(choice.copy(kind = PeriodKind.LastMonth)) },
             label = { Text(stringResource(R.string.last_month)) },
         )
         FilterChip(
+            selected = kind == PeriodKind.Season,
+            onClick = { onChange(choice.copy(kind = PeriodKind.Season)) },
+            label = { Text(stringResource(R.string.season_period)) },
+        )
+        FilterChip(
             selected = kind == PeriodKind.LastMatches,
-            onClick = { onKind(PeriodKind.LastMatches) },
+            onClick = { onChange(choice.copy(kind = PeriodKind.LastMatches)) },
             label = { Text(stringResource(R.string.last_matches, count)) },
         )
         if (kind == PeriodKind.LastMatches) {
@@ -373,11 +413,20 @@ private fun PeriodChooser(
         }
         FilterChip(
             selected = kind == PeriodKind.Between,
-            onClick = { onKind(PeriodKind.Between) },
+            onClick = {
+                val empty = choice.from.isEmpty() && choice.to.isEmpty()
+                onChange(
+                    choice.copy(
+                        kind = PeriodKind.Between,
+                        from = if (empty) shownFrom?.filter(Char::isDigit).orEmpty() else choice.from,
+                        to = if (empty) shownTo?.filter(Char::isDigit).orEmpty() else choice.to,
+                    ),
+                )
+            },
             label = { Text(stringResource(R.string.between)) },
         )
     }
-    if (kind == PeriodKind.Between) DaysChooser(from, to, onDays)
+    if (kind == PeriodKind.Between) DaysChooser(choice.from, choice.to) { f, t -> onChange(choice.copy(from = f, to = t)) }
 }
 
 /** The two days, typed or chosen on the calendar. */
@@ -435,7 +484,7 @@ private fun TypedDayField(label: String, digits: String, modifier: Modifier, onD
         placeholder = { Text(stringResource(R.string.date_placeholder)) },
         singleLine = true,
         isError = wrong,
-        supportingText = if (wrong) ({ Text(stringResource(R.string.not_a_day)) }) else null,
+        supportingText = noteOf(if (wrong) stringResource(R.string.not_a_day) else null),
         visualTransformation = DayMask,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
     )
@@ -443,16 +492,16 @@ private fun TypedDayField(label: String, digits: String, modifier: Modifier, onD
 
 /** The days of the period, how many matches, the ones left out. */
 @Composable
-private fun PeriodLine(a: TeamAnalysis) = Column {
-    val days = listOfNotNull(a.from, a.to).joinToString(" → ")
+internal fun PeriodLine(from: String?, to: String?, matches: Int, skipped: List<String>) = Column {
+    val days = listOfNotNull(from, to).joinToString(" → ")
     Text(
-        listOf(days, stringResource(R.string.matches_count, a.matches.size)).filter { it.isNotEmpty() }.joinToString(" · "),
+        listOf(days, stringResource(R.string.matches_count, matches)).filter { it.isNotEmpty() }.joinToString(" · "),
         style = MaterialTheme.typography.bodyMedium,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    if (a.skipped.isNotEmpty()) {
+    if (skipped.isNotEmpty()) {
         Text(
-            stringResource(R.string.skipped, a.skipped.joinToString(", ")),
+            stringResource(R.string.skipped, skipped.joinToString(", ")),
             style = MaterialTheme.typography.labelMedium,
             color = Lost,
         )
@@ -461,7 +510,7 @@ private fun PeriodLine(a: TeamAnalysis) = Column {
 
 /** The lines of the charts, said once. */
 @Composable
-private fun TrendLegend(matches: Int) = FlowRow(
+internal fun TrendLegend(matches: Int) = FlowRow(
     Modifier.notRead(),
     horizontalArrangement = Arrangement.spacedBy(12.dp),
 ) {
@@ -476,10 +525,8 @@ private fun TrendLegend(matches: Int) = FlowRow(
     legend("- - " + stringResource(R.string.matches_count, matches)) {}
 }
 
-private val shortDay = DateTimeFormatter.ofPattern("dd/MM")
-
 internal fun shortDay(day: String): String = try {
-    LocalDate.parse(day).format(shortDay)
+    LocalDate.parse(day).format(dayMonth())
 } catch (_: DateTimeException) {
     day
 }
@@ -488,7 +535,7 @@ internal fun shortDay(day: String): String = try {
  * line, the whole period dashed. A touch on
  * a match says it. */
 @Composable
-private fun MatchTrendChart(trend: MatchTrend, matches: List<AnalysedMatch>) = Column(Modifier.semantics(mergeDescendants = true) {}) {
+internal fun MatchTrendChart(trend: MatchTrend, matches: List<AnalysedMatch>) = Column(Modifier.semantics(mergeDescendants = true) {}) {
     var chosen by remember(matches) { mutableStateOf<Int?>(null) }
     Row(verticalAlignment = Alignment.Bottom) {
         Text(trend.name.replaceFirstChar { it.uppercase() }, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)

@@ -3,6 +3,7 @@
 //! with its totals and what it contains, and the forms to make, change,
 //! fill, duplicate and delete them.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::{
         calendar::{self, CalendarTab},
@@ -11,6 +12,7 @@ use {
     crate::{
         calendar::text_of,
         form::{self, Field, Form, Mask, Outcome, Value},
+        notice,
         strings::Strings,
         theme::{self, Colors, SIZE_SMALL},
         ui,
@@ -165,12 +167,13 @@ impl CycleEditor {
                 Mask::Date,
                 s.date_placeholder,
             )
-            .with_calendar(),
+            .with_calendar(core.clock().today()),
             _ => Field::text(s.cycle_weeks, draft.weeks.clone()),
         };
         let mut fields = vec![
             Field::text(s.session_title, draft.title.clone()),
-            Field::masked(s.cycle_start, &start, Mask::Date, s.date_placeholder).with_calendar(),
+            Field::masked(s.cycle_start, &start, Mask::Date, s.date_placeholder)
+                .with_calendar(core.clock().today()),
             span,
             Field::lines(s.objectives, draft.objectives.clone()),
             Field::lines(s.notes, draft.notes.clone()),
@@ -246,18 +249,19 @@ impl CycleEditor {
         match saved {
             Ok(cycle) => Edited::Saved(cycle.id),
             Err(e) => {
-                self.form.focused = match &e {
-                    MobileError::InvalidTraining { field, .. } => match field {
-                        TrainingField::Start => START,
-                        _ => SPAN,
-                    },
-                    _ => START,
-                };
                 self.detach = matches!(e, MobileError::ChildrenOutside { .. });
-                self.form.error = Some(match self.detach {
-                    true => format!("{}\n{}", e, s.detach_hint),
-                    false => e.to_string(),
-                });
+                match (&e, self.detach) {
+                    (MobileError::InvalidTraining { field, .. }, _) => self.form.reject(
+                        match field {
+                            TrainingField::Start => START,
+                            _ => SPAN,
+                        },
+                        e.to_string(),
+                    ),
+                    // saved again, the children detached: to know first
+                    (_, true) => self.form.warn(format!("{}\n{}", e, s.detach_hint)),
+                    (_, false) => self.form.fail(e.to_string()),
+                }
                 Edited::Stay
             }
         }
@@ -456,8 +460,8 @@ impl CyclesTab {
     #[cfg(test)]
     pub fn form_error(&self) -> Option<String> {
         match &self.mode {
-            Mode::Editor(e) => e.form.error.clone(),
-            Mode::Overlay(o) => o.form.error.clone(),
+            Mode::Editor(e) => e.form.told(),
+            Mode::Overlay(o) => o.form.told(),
             _ => None,
         }
     }
@@ -487,6 +491,28 @@ impl CyclesTab {
                 Some((Id::new(LIST), self.selected as f32 / last as f32))
             }
             _ => None,
+        }
+    }
+
+    /// What went wrong, here or in the week of the sheet: told over the
+    /// screen.
+    pub fn failure(&self) -> &Option<String> {
+        match (
+            &self.error,
+            self.card.as_ref().and_then(|k| k.week.as_ref()),
+        ) {
+            (None, Some(week)) => week.failure(),
+            _ => &self.error,
+        }
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        match (
+            self.error.is_some(),
+            self.card.as_mut().and_then(|k| k.week.as_mut()),
+        ) {
+            (false, Some(week)) => week.failure_mut(),
+            _ => &mut self.error,
         }
     }
 
@@ -599,7 +625,7 @@ impl CyclesTab {
                 first,
                 last,
                 children.iter().map(|c: &Child| c.id.clone()).collect(),
-                chrono::Local::now().date_naive(),
+                self.core.clock().today(),
             )),
             _ => None,
         };
@@ -894,7 +920,7 @@ impl CyclesTab {
                     );
                     overlay.warned = warning.is_some();
                     if warning.is_some() {
-                        overlay.form.error = warning;
+                        overlay.form.notice = warning.map(crate::notice::Notice::warning);
                         return;
                     }
                 }
@@ -913,7 +939,7 @@ impl CyclesTab {
                 self.mode = Mode::Card;
                 self.refresh();
             }
-            Err(e) => overlay.form.error = Some(e.to_string()),
+            Err(e) => overlay.form.fail(e.to_string()),
         }
     }
 
@@ -1109,8 +1135,8 @@ impl CyclesTab {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
-            Mode::Editor(e) => e.form.on_field(Form::hints(s)),
-            Mode::Overlay(_) => Form::hints(s),
+            Mode::Editor(e) => e.form.on_field(s, Form::hints(s)),
+            Mode::Overlay(o) => o.form.on_field(s, Form::hints(s)),
             Mode::Delete(deletion) => {
                 let mut hints = vec![("Enter".to_string(), s.delete.to_string())];
                 if deletion.children {
@@ -1163,10 +1189,9 @@ impl CyclesTab {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let notice: Element<'a, Message> = match (&self.error, &self.notice) {
-            (Some(e), _) => ui::body(e.clone()).color(c.danger).into(),
-            (None, Some(n)) => ui::body(n.clone()).color(c.accent).into(),
-            (None, None) => space::vertical().height(0).into(),
+        let notice: Element<'a, Message> = match &self.notice {
+            Some(n) => notice::banner(notice::Level::Info, n, c),
+            None => space::vertical().height(0).into(),
         };
         let centered = |form: Element<'a, Message>| -> Element<'a, Message> {
             container(container(form).max_width(720))
@@ -1518,7 +1543,8 @@ mod tests {
     }
 
     fn app(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core.tutorial_team().unwrap();
         (core, team)
     }

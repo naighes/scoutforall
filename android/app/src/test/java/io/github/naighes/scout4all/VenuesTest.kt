@@ -13,7 +13,6 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import java.time.LocalDate
 
 /** The gyms on the phone: written in their form, chosen in the form of a
  * session, asked about when another team holds the same one. */
@@ -73,7 +72,7 @@ class VenuesTest {
     fun aGymHeldByAnotherTeamAsksBeforeSaving() {
         val id = gym("Terontola")
         val other = saveTeam("Under 19")
-        val day = LocalDate.now().plusDays(1)
+        val day = testDay().plusDays(1)
         core { it.saveSession(other, null, it.newSessionDraft().copy(start = "${day}T18:00", duration = "90", venue = id)) }
         val saved = mutableListOf<String>()
         rule.setContent { Scout4AllTheme { SessionFormScreen(team, null, onBack = {}, onSaved = { saved += it }, day = day) } }
@@ -110,6 +109,10 @@ class VenuesTest {
         core { it.setVenuePinned(z, true) }
         rule.setContent { Scout4AllTheme { VenuesScreen(onBack = {}, onVenue = {}, onNew = {}) } }
         rule.waitForText("Zagabria")
+        // the initials at the head of each row
+        listOf("Z" to "Zagabria", "A" to "Arezzo", "T" to "Terontola").forEach { (initials, name) ->
+            rule.onNode(hasText(initials) and hasText(name) and hasClickAction()).assertExists()
+        }
         assertEquals(listOf("Zagabria", "Arezzo", "Terontola"), core { it.venues() }.map { it.name })
         assertNull(core { it.venue(a) }.latitude)
     }

@@ -5,6 +5,7 @@
 //! map, ⌫ deletes it (sessions and matches keep it). In the sheet ‹ › (or
 //! PgUp PgDn) change the week, Home goes back to this one.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
         calendar::{day_of, text_of, time_span},
@@ -13,7 +14,7 @@ use {
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
-    chrono::{Duration, Local, NaiveDate},
+    chrono::{Duration, NaiveDate},
     iced::{
         Alignment, Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
@@ -124,7 +125,7 @@ impl VenueEditor {
                 Ok(None) => {}
                 Err(e) => {
                     self.form.focused = LINK;
-                    self.form.error = Some(e.to_string());
+                    self.form.fail(e.to_string());
                     return None;
                 }
             }
@@ -140,7 +141,7 @@ impl VenueEditor {
                     },
                     _ => NAME,
                 };
-                self.form.error = Some(e.to_string());
+                self.form.fail(e.to_string());
                 None
             }
         }
@@ -193,15 +194,25 @@ pub struct VenuesScreen {
 }
 
 impl VenuesScreen {
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     pub fn new(core: Arc<Scout4All>) -> Result<VenuesScreen, MobileError> {
         let listed = core.venues()?;
+        let today = core.clock().today();
         Ok(VenuesScreen {
             core,
             back_to: None,
             listed,
             selected: 0,
             mode: Mode::Browse,
-            anchor: Local::now().date_naive(),
+            anchor: today,
             week: vec![],
             error: None,
         })
@@ -346,7 +357,7 @@ impl VenuesScreen {
     }
 
     fn go_today(&mut self) {
-        self.anchor = Local::now().date_naive();
+        self.anchor = self.core.clock().today();
         self.load_week();
     }
 
@@ -423,7 +434,7 @@ impl VenuesScreen {
             false => s.pin_venue,
         };
         match &self.mode {
-            Mode::Edit(editor) => editor.form.on_field(Form::hints(s)),
+            Mode::Edit(editor) => editor.form.on_field(s, Form::hints(s)),
             Mode::Delete(_) => vec![
                 ("Enter".to_string(), s.delete_venue.to_string()),
                 ("Esc".to_string(), s.cancel.to_string()),
@@ -472,11 +483,7 @@ impl VenuesScreen {
             Mode::Browse => self.list(s, c),
             Mode::Sheet => self.sheet(s, c),
         };
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![error, body].spacing(10).into()
+        body
     }
 
     /// How wide the list is at most.
@@ -484,43 +491,69 @@ impl VenuesScreen {
 
     fn list<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let rows = self.listed.iter().enumerate().map(|(i, v)| {
-            let detail = [v.address.clone()]
-                .into_iter()
-                .filter(|d| !d.is_empty())
-                .collect::<Vec<_>>()
-                .join(" · ");
             row![
-                ui::list_row(
-                    column![
-                        text(format!("{}{}", if v.pinned { "★ " } else { "" }, v.name))
-                            .size(SIZE_BODY)
-                            .font(theme::fonts().bold),
-                        text(detail).size(SIZE_SMALL).color(c.muted),
+                ui::box_row(
+                    ui::initials(v.initials.clone(), c),
+                    row![
+                        Column::new()
+                            .push(
+                                text(v.name.clone())
+                                    .size(SIZE_BODY)
+                                    .font(theme::fonts().bold)
+                            )
+                            // no empty line: the name stays in the middle
+                            .push((!v.address.is_empty()).then(|| {
+                                text(v.address.clone()).size(SIZE_SMALL).color(c.muted)
+                            }))
+                            .spacing(2)
+                            .width(Length::Fill),
+                        text(match v.pinned {
+                            true => "★",
+                            false => "",
+                        })
+                        .size(SIZE_BODY)
+                        .color(c.accent),
                     ]
-                    .spacing(2),
+                    .spacing(10)
+                    .align_y(Alignment::Center),
                     i == self.selected,
-                    Some(Message::Open(i)),
+                    Message::Open(i),
                     c,
                 ),
-                ui::icon_button(theme::icons::EDIT, s.edit_venue, Message::Edit(i), false, c),
-                ui::icon_button(
-                    theme::icons::DELETE,
+                ui::tip(
+                    ui::icon_button(theme::icons::EDIT, s.edit_venue, Message::Edit(i), false, c),
+                    s.edit_venue,
+                    c,
+                ),
+                ui::tip(
+                    ui::icon_button(
+                        theme::icons::DELETE,
+                        s.delete_venue,
+                        Message::Delete(i),
+                        false,
+                        c,
+                    ),
                     s.delete_venue,
-                    Message::Delete(i),
-                    false,
-                    c
+                    c,
                 ),
             ]
-            .spacing(6)
+            .spacing(4)
             .align_y(Alignment::Center)
             .into()
         });
-        let list: Element<'a, Message> = match self.listed.is_empty() {
-            true => ui::body(s.no_venues).color(c.muted).into(),
-            false => scrollable(Column::with_children(rows).spacing(3))
+        let list: Element<'a, Message> =
+            match self.listed.is_empty() {
+                true => ui::body(s.no_venues).color(c.muted).into(),
+                // the scrollbar beside the rows, not over their bins
+                false => scrollable(Column::with_children(rows).spacing(4).padding(
+                    iced::Padding {
+                        right: 14.0,
+                        ..iced::Padding::ZERO
+                    },
+                ))
                 .height(Length::Fill)
                 .into(),
-        };
+            };
         container(
             container(ui::panel_with(
                 s.venues,
@@ -558,7 +591,7 @@ impl VenuesScreen {
                     .into(),
             );
         }
-        let today = Local::now().date_naive();
+        let today = self.core.clock().today();
         let days = self.week.iter().map(|day| {
             let date = day_of(&day.date);
             let lit = date == Some(today);
@@ -625,7 +658,7 @@ impl VenuesScreen {
             }
         });
         let actions = vec![
-            ui::pill(s.today, false, Some(Message::Today), c),
+            ui::today_pill(s.today, Message::Today, c),
             ui::tip(
                 ui::pill("‹", false, Some(Message::Previous), c),
                 s.previous_week,
@@ -676,7 +709,43 @@ mod tests {
     };
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    #[test]
+    fn a_failure_of_the_page_is_told_over_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = scout4all_mobile::Scout4All::for_tests(
+            dir.path().to_string_lossy().into_owned(),
+            "en".into(),
+        )
+        .unwrap();
+        let mut screen = VenuesScreen::new(core).unwrap();
+        screen.error = Some("not saved".into());
+        crate::assert_told_over(crate::Screen::Venues(Box::new(screen)), "not saved");
+    }
+
+    /// The week of a gym starts on the day of the clock of the core, and
+    /// comes back to it: not the computer's.
+    #[test]
+    fn the_week_of_a_gym_is_on_the_clock_of_the_core() {
+        let dir = tempfile::tempdir().unwrap();
+        let day = NaiveDate::from_ymd_opt(2041, 3, 9).unwrap();
+        let clock = scout4all_mobile::clock::FixedClock::at(
+            day.and_hms_opt(0, 30, 0).unwrap(),
+            chrono::FixedOffset::east_opt(3600).unwrap(),
+        );
+        let core = Scout4All::with_clock(
+            dir.path().to_string_lossy().into_owned(),
+            "it".into(),
+            Arc::new(clock),
+        )
+        .unwrap();
+        let mut screen = VenuesScreen::new(core).unwrap();
+        assert_eq!(screen.anchor, day);
+        screen.shift(2);
+        screen.go_today();
+        assert_eq!(screen.anchor, day);
     }
 
     fn venue(core: &Scout4All, name: &str) -> String {
@@ -705,7 +774,7 @@ mod tests {
         assert!(matches!(screen.mode, Mode::Edit(_)));
         // no name: told, nothing made
         screen.update(s, Message::Form(form::Message::Save));
-        assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.error.is_some()));
+        assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.told().is_some()));
         screen.update(
             s,
             Message::Form(form::Message::Input(NAME, "Terontola".into())),
@@ -716,6 +785,14 @@ mod tests {
             screen.listed.iter().map(|v| v.name.clone()).collect()
         };
         assert_eq!(names(&screen), vec!["Montecchio", "Terontola"]);
+        assert_eq!(
+            screen
+                .listed
+                .iter()
+                .map(|v| v.initials.as_str())
+                .collect::<Vec<_>>(),
+            vec!["M", "T"]
+        );
         // the key of the pin says what it does to the one chosen
         let pin_hint = |screen: &VenuesScreen| -> String {
             screen
@@ -770,7 +847,7 @@ mod tests {
         form_of(&mut screen, NAME, "Cortona");
         form_of(&mut screen, LINK, "https://maps.app.goo.gl/abc");
         screen.update(s, Message::Form(form::Message::Save));
-        assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.error.is_some()));
+        assert!(matches!(&screen.mode, Mode::Edit(e) if e.form.told().is_some()));
         form_of(
             &mut screen,
             LINK,
@@ -829,7 +906,7 @@ mod tests {
             )
             .unwrap();
         let gym = venue(&core, "Terontola");
-        let today = Local::now().date_naive();
+        let today = core.clock().today();
         for (team, time) in [(&a, "18:00"), (&b, "18:30")] {
             core.save_session(
                 team.clone(),

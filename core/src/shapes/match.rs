@@ -25,6 +25,16 @@ pub struct MatchStatus {
     pub last_set: Option<SetEntry>,
 }
 
+/// How far a match is, as every list tells it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MatchStanding {
+    /// no set scouted yet
+    ToPlay,
+    /// some sets, also between one and the next
+    InProgress,
+    Over,
+}
+
 /// What a list shows of a match: kept in the cache of the database (see
 /// `providers::sqlite::summary`), so a list doesn't read nor replay its
 /// sets.
@@ -47,9 +57,21 @@ pub struct MatchSummary {
     /// without one; read from the match each time, not cached
     #[serde(default)]
     pub competition_id: Option<Uuid>,
+    /// the team the opponent is, none for a name only; read as
+    /// `competition_id`
+    #[serde(default)]
+    pub opponent_team: Option<Uuid>,
 }
 
 impl MatchSummary {
+    pub fn standing(&self) -> MatchStanding {
+        match (self.finished, self.sets) {
+            (true, _) => MatchStanding::Over,
+            (false, 0) => MatchStanding::ToPlay,
+            (false, _) => MatchStanding::InProgress,
+        }
+    }
+
     pub fn of(m: &MatchEntry, status: &MatchStatus) -> Self {
         MatchSummary {
             id: m.id.clone(),
@@ -63,15 +85,17 @@ impl MatchSummary {
             resume: status.last_incomplete_set.as_ref().map(|s| s.set_number),
             next_set_number: status.next_set_number,
             competition_id: None,
+            opponent_team: None,
         }
     }
 
     /// The summary of A's side as team B sees it: `opponent` is A, `home`
     /// whether B plays at home, the sets won the other way; nothing to go
     /// on with, as B isn't scouted.
-    pub fn seen_by_b(self, opponent: String, home: bool) -> Self {
+    pub fn seen_by_b(self, team_a: Uuid, opponent: String, home: bool) -> Self {
         MatchSummary {
             opponent,
+            opponent_team: Some(team_a),
             home,
             us_wins: self.them_wins,
             them_wins: self.us_wins,
@@ -80,6 +104,14 @@ impl MatchSummary {
             ..self
         }
     }
+}
+
+/// A match that scouted the players of a team, from its side.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ScoutedSummary {
+    pub summary: MatchSummary,
+    /// team A, when the team is B of a match scouted on both sides
+    pub team_a: Option<TeamEntry>,
 }
 
 /// A match a team plays, as its list shows it: from its side.

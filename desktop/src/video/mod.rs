@@ -27,6 +27,7 @@ mod strip;
 
 use {
     crate::{
+        notice::{self, Level},
         strings::Strings,
         theme::{self, Colors, SIZE_SMALL},
         ui,
@@ -169,8 +170,26 @@ pub enum Outcome {
     Share(PathBuf, String),
 }
 
-/// The matches left out of the video of the actions of the team, and why;
-/// none when none is.
+/// What of the actions picked their video can't hold, as said.
+#[derive(Debug, PartialEq)]
+enum Outside {
+    Some(String),
+    /// none in the video: nothing to make
+    All(String),
+}
+
+/// How many of the actions aren't in the video, `duration_ms` long.
+fn outside_count(events: &[VideoEvent], duration_ms: Option<u64>) -> usize {
+    events
+        .iter()
+        .filter(|e| !inside(e.offset_ms, duration_ms))
+        .count()
+}
+
+fn outside_said(outside: usize, count: usize, s: &Strings) -> String {
+    ui::fill(s.montage_outside, &[outside.to_string(), count.to_string()])
+}
+
 fn left_out_said(left_out: &[(String, LeftOut)], s: &Strings) -> Option<String> {
     let said: Vec<String> = left_out
         .iter()
@@ -250,6 +269,10 @@ pub struct VideoScreen {
     pub team_id: String,
     pub match_id: String,
     the_match: MatchEntry,
+    /// beside the names over the video: ours, then the opponent's
+    pictures: [ui::TeamPicture; 2],
+    /// beside who touched in the events, by player id: only who has one
+    photos: std::collections::HashMap<String, image::Handle>,
     /// the match of B: its events told by the touches (`Scout4All::
     /// origins_of_b`) the profile of A keeps them by
     of_b: Option<Origins>,
@@ -314,7 +337,10 @@ pub struct VideoScreen {
     /// the video of the actions of the team, before making it
     summary: Option<Summary>,
     /// why the video of the actions picked wasn't made
-    montage_error: Option<String>,
+    /// what went wrong saving or making something: the app tells it
+    failed: Option<String>,
+    /// "video not made", in the language the montage was asked in
+    not_made: &'static str,
 }
 
 /// The matches of a team with actions picked in its statistics, each with
@@ -341,6 +367,7 @@ struct TourMatch {
     the_match: MatchEntry,
     day: String,
     files: Vec<PathBuf>,
+    duration_ms: u64,
     /// all its events in its video, for the score
     all: Vec<VideoEvent>,
     picked: Vec<VideoEvent>,
@@ -351,6 +378,8 @@ struct TourMatch {
 struct Summary {
     plan: montage::Plan,
     actions: usize,
+    /// the actions of the matches in it not in their video
+    outside: usize,
     left_out: Vec<(String, LeftOut)>,
 }
 
@@ -380,12 +409,15 @@ impl VideoScreen {
             StoredProfile::Newer(_) => None,
         };
         let seconds = core.video_seconds();
+        let pictures = team_pictures(&core, &the_match);
         let mut screen = VideoScreen {
             core,
             dir,
             team_id,
             match_id,
             the_match,
+            pictures,
+            photos: Default::default(),
             of_b,
             profile,
             player: None,
@@ -416,12 +448,18 @@ impl VideoScreen {
             panel: None,
             montage: None,
             summary: None,
-            montage_error: None,
+            failed: None,
+            not_made: "",
         };
         screen.margins = Margins::read(&screen.dir);
         // the durations of the files first: the events in them
         screen.open_player();
         screen.load_events()?;
+        let players = screen.all_events.iter();
+        screen.photos = crate::editors::person_photos(
+            &screen.core,
+            players.filter_map(|e| Some(e.event.event.player.as_ref()?.id.clone())),
+        );
         screen.after_start();
         Ok(screen)
     }
@@ -454,7 +492,6 @@ impl VideoScreen {
     pub fn with_tour(
         core: Arc<Scout4All>,
         dir: PathBuf,
-        team_id: String,
         matches: Vec<MatchClips>,
         title: String,
     ) -> Result<VideoScreen, MobileError> {
@@ -469,9 +506,9 @@ impl VideoScreen {
         let mut screen = VideoScreen::with_clips(
             core,
             dir,
-            team_id,
+            first.team_id,
             first.match_id,
-            MatchSide::A,
+            first.side,
             first.events,
             title,
         )?;
@@ -496,9 +533,9 @@ impl VideoScreen {
         let opened = VideoScreen::with_clips(
             self.core.clone(),
             self.dir.clone(),
-            self.team_id.clone(),
+            m.team_id,
             m.match_id,
-            MatchSide::A,
+            m.side,
             m.events,
             clips.title.clone(),
         );
@@ -512,7 +549,7 @@ impl VideoScreen {
             }
             Err(e) => {
                 self.tour = Some(tour);
-                self.error = Some(e.to_string());
+                self.failed = Some(e.to_string());
             }
         }
     }
@@ -566,6 +603,7 @@ impl VideoScreen {
             &self.all_events,
             self.margins.before_s,
             self.margins.after_s,
+            self.status.as_ref().map(|st| st.duration_ms),
         );
         let count = pieces.len();
         montage::MatchPlan {
@@ -590,6 +628,7 @@ impl VideoScreen {
         self.margins.overlay.then(|| montage::Board {
             team: the_match.team.name.clone(),
             opponent: the_match.opponent.clone(),
+            emblems: emblems(&self.core, the_match),
             set_n: s.set_n,
             side_out: s.side_out_phase,
             break_point: s.break_phase,
@@ -618,6 +657,10 @@ impl VideoScreen {
             }
         }
         let count: usize = kept.iter().map(|t| self.tour_pieces(t).len()).sum();
+        let outside = kept
+            .iter()
+            .map(|t| outside_count(&t.picked, Some(t.duration_ms)))
+            .sum();
         let mut n = 0;
         let mut actions = 0;
         let matches = kept
@@ -660,6 +703,7 @@ impl VideoScreen {
                 output: montage::output(&self.clips_title()),
             },
             actions,
+            outside,
             left_out,
         }
     }
@@ -667,7 +711,13 @@ impl VideoScreen {
     /// The pieces of the actions picked of a match of the team.
     fn tour_pieces<'a>(&self, t: &'a TourMatch) -> Vec<Piece<'a>> {
         let picked: Vec<&VideoEvent> = t.picked.iter().collect();
-        pieces(&picked, &t.all, self.margins.before_s, self.margins.after_s)
+        pieces(
+            &picked,
+            &t.all,
+            self.margins.before_s,
+            self.margins.after_s,
+            Some(t.duration_ms),
+        )
     }
 
     /// A match of the team: its files, all its events in its video and the
@@ -675,7 +725,11 @@ impl VideoScreen {
     fn tour_match(&self, m: &MatchClips) -> Result<TourMatch, LeftOut> {
         let (the_match, stored) = self
             .core
-            .video(&self.team_id, &m.match_id)
+            .video_of(&m.team_id, &m.match_id, m.side)
+            .map_err(|_| LeftOut::Unreadable)?;
+        let of_b = (m.side == MatchSide::B)
+            .then(|| self.core.origins_of_b(&m.team_id, &m.match_id))
+            .transpose()
             .map_err(|_| LeftOut::Unreadable)?;
         let profile = match stored {
             StoredProfile::Profile(p) if !p.files.is_empty() => p,
@@ -694,7 +748,7 @@ impl VideoScreen {
             .map_err(|_| LeftOut::Unreadable)?;
         let all = self
             .core
-            .video_events(&the_match, &profile, &durations, None)
+            .video_events(&the_match, &profile, &durations, of_b.as_ref())
             .map_err(|_| LeftOut::Unreadable)?;
         let picked = all
             .iter()
@@ -702,6 +756,7 @@ impl VideoScreen {
             .cloned()
             .collect();
         Ok(TourMatch {
+            duration_ms: durations.iter().sum(),
             the_match,
             day: m.day.clone(),
             files,
@@ -727,12 +782,8 @@ impl VideoScreen {
     /// thread; of the matches of a team summed up first (what's in, what's
     /// left out), made once asked (`make_montage`).
     pub fn start_montage(&mut self, s: &'static Strings) {
-        self.montage_error = None;
-        let several = self
-            .tour
-            .as_ref()
-            .filter(|t| t.matches.len() + t.without_video.len() > 1);
-        match several {
+        self.not_made = s.video_not_made;
+        match self.several() {
             Some(tour) => self.summary = Some(self.tour_summary(tour, s)),
             None => {
                 let plan = montage::Plan {
@@ -742,6 +793,45 @@ impl VideoScreen {
                 self.make(plan);
             }
         }
+    }
+
+    /// The matches of a team, when the actions picked are of more than
+    /// one.
+    fn several(&self) -> Option<&Tour> {
+        self.tour
+            .as_ref()
+            .filter(|t| t.matches.len() + t.without_video.len() > 1)
+    }
+
+    /// With the actions of a single match picked and its video open, what
+    /// of them its video can't hold, to say before making it: how many are
+    /// outside, or that all are. Of several matches said when summed up.
+    fn outside_notice(&self, s: &Strings) -> Option<Outside> {
+        let status = self.status.as_ref()?;
+        match (&self.clips, self.several()) {
+            (Some(_), None) => {
+                let count = self.events.len();
+                match outside_count(&self.events, Some(status.duration_ms)) {
+                    0 => None,
+                    n if n == count => Some(Outside::All(s.montage_none.to_string())),
+                    n => Some(Outside::Some(outside_said(n, count, s))),
+                }
+            }
+            _ => None,
+        }
+    }
+
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.failed
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.failed
+    }
+
+    fn montage_failed(&mut self, why: String) {
+        self.failed = Some(format!("{}: {why}", self.not_made));
     }
 
     /// The video of the actions of the team made, as summed up.
@@ -756,7 +846,7 @@ impl VideoScreen {
             return;
         }
         if let Err(e) = montage::prepare(&plan.output) {
-            self.montage_error = Some(e);
+            self.montage_failed(e);
             return;
         }
         self.montage = Some(montage::Montage::start(plan));
@@ -809,7 +899,7 @@ impl VideoScreen {
     fn set_margin(&mut self, margin: Margin, seconds: u32) {
         self.margins = self.margins.with(margin, seconds);
         if let Err(e) = self.margins.write(&self.dir) {
-            self.error = Some(e);
+            self.failed = Some(e);
         }
     }
 
@@ -818,7 +908,7 @@ impl VideoScreen {
     fn toggle_overlay(&mut self) {
         self.margins.overlay = !self.margins.overlay;
         if let Err(e) = self.margins.write(&self.dir) {
-            self.error = Some(e);
+            self.failed = Some(e);
         }
     }
 
@@ -895,10 +985,10 @@ impl VideoScreen {
             Ok(()) => {
                 self.profile = Some(profile);
                 if let Err(e) = self.load_events() {
-                    self.error = Some(e.to_string());
+                    self.failed = Some(e.to_string());
                 }
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => self.failed = Some(e.to_string()),
         }
     }
 
@@ -1172,7 +1262,7 @@ impl VideoScreen {
             self.montage = None;
             match made {
                 Ok(path) => return Outcome::Share(path, self.clips_title()),
-                Err(e) => self.montage_error = Some(e),
+                Err(e) => self.montage_failed(e),
             }
         }
         self.status = self.player.as_ref().and_then(Player::status);
@@ -1306,11 +1396,11 @@ impl VideoScreen {
                 self.profile = Some(profile);
                 self.open_player();
                 if let Err(e) = self.load_events() {
-                    self.error = Some(e.to_string());
+                    self.failed = Some(e.to_string());
                 }
                 self.after_start();
             }
-            Err(e) => self.error = Some(e.to_string()),
+            Err(e) => self.failed = Some(e.to_string()),
         }
     }
 
@@ -1629,11 +1719,16 @@ impl VideoScreen {
             Some(status) => self.controls(status, s, c),
             None => space::vertical().height(0).into(),
         };
+        let level = match self.profile {
+            Some(_) => Level::Error,
+            None => Level::Warning,
+        };
         let notice: Element<'a, Message> = match notice {
-            Some(n) => ui::body(n).color(c.danger).into(),
+            Some(n) => notice::banner(level, &n, c),
             None => space::vertical().height(0).into(),
         };
         let video = column![notice, screen, controls, file_line].spacing(10);
+        let beside = Length::Fixed(list::width(!self.photos.is_empty()));
         let events: Element<'a, Message> = match (self.events.is_empty(), &self.clips) {
             (true, None) => space::horizontal().width(0).into(),
             (true, Some(_)) => iced::widget::container(ui::panel(
@@ -1641,11 +1736,11 @@ impl VideoScreen {
                 ui::body(s.clips_none).color(c.muted),
                 c,
             ))
-            .width(Length::Fixed(400.0))
+            .width(beside)
             .into(),
             (false, None) => {
                 iced::widget::container(ui::panel(Some(s.match_events), self.events_view(s, c), c))
-                    .width(Length::Fixed(400.0))
+                    .width(beside)
                     .into()
             }
             (false, Some(clips)) => iced::widget::container(ui::panel(
@@ -1663,7 +1758,7 @@ impl VideoScreen {
                 .spacing(6),
                 c,
             ))
-            .width(Length::Fixed(400.0))
+            .width(beside)
             .into(),
         };
         row![video.width(Length::Fill), events].spacing(14).into()
@@ -1757,7 +1852,15 @@ impl VideoScreen {
         let anchored = self.anchored();
         column![
             said,
-            list::view(&self.events, self.selected, anchored, duration, s, c),
+            list::view(
+                &self.events,
+                &self.photos,
+                self.selected,
+                anchored,
+                duration,
+                s,
+                c,
+            ),
         ]
         .spacing(10)
         .height(Length::Fill)
@@ -1775,7 +1878,7 @@ impl VideoScreen {
                 match self.standing().filter(|_| self.margins.overlay) {
                     Some(st) => stack![
                         frame,
-                        container(overlay_view(st, &self.the_match, s, c))
+                        container(overlay_view(st, &self.the_match, &self.pictures, s, c))
                             .padding(16)
                             .width(Length::Fill)
                             .height(Length::Fill)
@@ -1913,11 +2016,15 @@ impl VideoScreen {
                         },
                     }),
                 match (self.invalid_time, self.time_effect()) {
-                    (true, _) => text(s.invalid_time).size(SIZE_SMALL).color(c.danger),
-                    (false, Some(TimeEffect::OnlyThis)) => {
-                        text(s.time_only_this).size(SIZE_SMALL).color(c.muted)
-                    }
-                    (false, _) => text(s.time_aligns_all).size(SIZE_SMALL).color(c.muted),
+                    (true, _) => notice::field_note(s.invalid_time, c),
+                    (false, Some(TimeEffect::OnlyThis)) => text(s.time_only_this)
+                        .size(SIZE_SMALL)
+                        .color(c.muted)
+                        .into(),
+                    (false, _) => text(s.time_aligns_all)
+                        .size(SIZE_SMALL)
+                        .color(c.muted)
+                        .into(),
                 },
             ]
             .spacing(4)
@@ -2173,11 +2280,15 @@ impl VideoScreen {
         ]
         .spacing(10)
         .align_y(Alignment::Center);
-        let left_out: Element<'a, Message> = match left_out_said(&summary.left_out, s) {
-            Some(said) => text(said).size(SIZE_SMALL).color(c.muted).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![line, left_out].spacing(4).into()
+        let outside = (summary.outside > 0)
+            .then(|| outside_said(summary.outside, summary.actions + summary.outside, s));
+        outside
+            .into_iter()
+            .chain(left_out_said(&summary.left_out, s))
+            .fold(column![line].spacing(4), |col, said| {
+                col.push(text(said).size(SIZE_SMALL).color(c.muted))
+            })
+            .into()
     }
 
     /// With the actions picked: their video to share, or how far it got
@@ -2186,8 +2297,13 @@ impl VideoScreen {
         if let (Some(_), None, Some(summary)) = (&self.clips, &self.montage, &self.summary) {
             return self.summary_view(summary, s, c);
         }
+        let said = |said: String| text(said).size(SIZE_SMALL).color(c.muted);
+        let notice = self.outside_notice(s);
         let line: Element<'a, Message> = match (&self.clips, &self.montage) {
             (None, _) => return space::vertical().height(0).into(),
+            (Some(_), None) if matches!(notice, Some(Outside::All(_))) => {
+                space::vertical().height(0).into()
+            }
             (Some(_), Some(montage)) => row![
                 text(ui::fill(
                     s.making_video,
@@ -2210,17 +2326,12 @@ impl VideoScreen {
             )
             .into(),
         };
-        let error: Element<'a, Message> = match &self.montage_error {
-            Some(e) => text(format!("{}: {e}", s.video_not_made))
-                .size(SIZE_SMALL)
-                .color(c.danger)
-                .into(),
-            None => space::horizontal().width(0).into(),
-        };
-        row![line, error]
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .into()
+        match notice {
+            Some(Outside::Some(notice) | Outside::All(notice)) => {
+                column![line, said(notice)].spacing(4).into()
+            }
+            None => line,
+        }
     }
 
     /// With the actions picked, where their clips are in the video, from
@@ -2332,6 +2443,28 @@ fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message>
         })
 }
 
+/// The side of the logo of a team over the video.
+const OVERLAY_PICTURE: f32 = 24.0;
+
+/// What stands for the teams of the match beside their names, ours first:
+/// their logos, or their initials (also when the logos can't be read).
+fn team_pictures(core: &Scout4All, the_match: &MatchEntry) -> [ui::TeamPicture; 2] {
+    let logos = core.video_logos(the_match).unwrap_or_default();
+    [
+        ui::TeamPicture::from_png(logos.team.as_deref(), &the_match.team.name),
+        ui::TeamPicture::from_png(logos.opponent.as_deref(), &the_match.opponent),
+    ]
+}
+
+/// `team_pictures` as drawn on the video made.
+fn emblems(core: &Scout4All, the_match: &MatchEntry) -> [montage::Emblem; 2] {
+    let logos = core.video_logos(the_match).unwrap_or_default();
+    [
+        montage::Emblem::of(logos.team.as_deref(), &the_match.team.name),
+        montage::Emblem::of(logos.opponent.as_deref(), &the_match.opponent),
+    ]
+}
+
 /// How the match stands, over the corner of the video: on a veil, not a
 /// box, the letters as large as the body's or more. A line a team, ours
 /// first, as on TV: the ball by the one to serve, its name, the sets won
@@ -2340,6 +2473,7 @@ fn black<'a>(content: Element<'a, Message>) -> container::Container<'a, Message>
 fn overlay_view<'a>(
     st: Standing,
     m: &MatchEntry,
+    pictures: &[ui::TeamPicture; 2],
     s: &'static Strings,
     c: Colors,
 ) -> Element<'a, Message> {
@@ -2356,13 +2490,15 @@ fn overlay_view<'a>(
     let letters = names.iter().map(|n| n.chars().count()).max().unwrap_or(0);
     let letter = theme::SIZE_BODY * 0.6;
     let score_letter = (theme::SIZE_TITLE + 4.0) * 0.6;
-    let team = |serving: bool, name: String, sets: u8, points: u8| {
+    let team = |serving: bool, picture: &ui::TeamPicture, name: String, sets: u8, points: u8| {
         let ball: Element<'a, Message> = match serving {
             true => ui::icon(theme::icons::VOLLEYBALL, 16.0, white).into(),
             false => space::horizontal().width(Length::Fixed(16.0)).into(),
         };
         row![
             container(ball).width(Length::Fixed(16.0)),
+            // on the veil, dark in both themes
+            ui::team_picture(picture, OVERLAY_PICTURE, theme::DARK),
             text(name)
                 .size(theme::SIZE_BODY)
                 .font(bold)
@@ -2384,6 +2520,7 @@ fn overlay_view<'a>(
         .align_y(Alignment::Center)
     };
     let [us, them] = names;
+    let [ours, theirs] = pictures;
     let serving_us = st.phase == PhaseEnum::Break;
     let divider = container(space::vertical().height(Length::Fixed(44.0)))
         .width(Length::Fixed(1.0))
@@ -2394,8 +2531,8 @@ fn overlay_view<'a>(
     container(
         row![
             column![
-                team(serving_us, us, st.sets_us, st.score_us),
-                team(!serving_us, them, st.sets_them, st.score_them),
+                team(serving_us, ours, us, st.sets_us, st.score_us),
+                team(!serving_us, theirs, them, st.sets_them, st.score_them),
             ]
             .spacing(2),
             divider,
@@ -2483,7 +2620,8 @@ pub(crate) mod screen_tests {
         dir: &tempfile::TempDir,
         opponent: DvwOpponent,
     ) -> (Arc<Scout4All>, String, String) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
             opponent,
@@ -2539,6 +2677,75 @@ pub(crate) mod screen_tests {
         assert_eq!(screen.events.len(), refs.len());
     }
 
+    /// The actions of team B in its analysis, match after match: the match
+    /// scouted on both sides is in it, its video A's, the actions B's.
+    #[test]
+    fn the_actions_of_a_team_seen_as_b() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team, m) = imported_with(&dir, DvwOpponent::NewTeam);
+        let (the_match, _) = core.video(&team, &m).unwrap();
+        let path = dir.path().join("a.mp4");
+        std::fs::copy(
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/src/video/testdata/two_seconds.mp4"
+            ),
+            &path,
+        )
+        .unwrap();
+        let profile = VideoProfile {
+            files: vec![VideoFile {
+                path: video::stored_path(dir.path(), &path),
+                start: None,
+            }],
+            ..Default::default()
+        };
+        core.save_video(&the_match, &profile).unwrap();
+        let team_b = core.analysis_opponents(team.clone()).unwrap()[0]
+            .id
+            .to_string();
+        let pick = scout4all_mobile::ClipPick {
+            scope: scout4all_mobile::StatsScope::Match,
+            event: scout4all_core::shapes::enums::EventTypeEnum::S,
+            filter: scout4all_mobile::DetailFilter::default(),
+            evals: vec![],
+            zone: None,
+            target: None,
+        };
+        let refs = core.match_clips_of(&team, &m, MatchSide::B, &pick).unwrap();
+        let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
+        let matches = core
+            .team_clips(&team_b, &period, None, None, &pick)
+            .unwrap();
+        assert_eq!(
+            matches
+                .iter()
+                .map(|c| (c.match_id.as_str(), c.team_id.as_str(), c.side, c.has_video))
+                .collect::<Vec<_>>(),
+            [(m.as_str(), team.as_str(), MatchSide::B, true)]
+        );
+        assert_eq!(matches[0].events, refs);
+        // the same, from team A with B the opponent chosen
+        let b = core.analysis_opponents(team.clone()).unwrap()[0].id;
+        assert_eq!(
+            core.team_clips(&team, &period, None, Some(b), &pick)
+                .unwrap(),
+            matches
+        );
+        let screen = VideoScreen::with_tour(
+            core,
+            dir.path().to_path_buf(),
+            matches.clone(),
+            "Serve".into(),
+        )
+        .unwrap();
+        assert_eq!(screen.events.len(), refs.len());
+        // in the video made: B's match, its actions
+        let made = screen.tour_match(&matches[0]).unwrap();
+        assert_eq!(made.the_match.team.id.to_string(), team_b);
+        assert_eq!(made.picked.len(), refs.len());
+    }
+
     /// The video seen from B is changed too: the profile is A's, so it's
     /// saved under A's team and the event of B told by its own touch.
     #[test]
@@ -2563,6 +2770,73 @@ pub(crate) mod screen_tests {
             panic!("no profile saved");
         };
         assert_eq!(saved.correction(event), Some(5_000));
+    }
+
+    /// Over the video each team has its logo or its initials; seen from B,
+    /// B's are first.
+    #[test]
+    fn the_teams_over_the_video_have_their_logos() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team, m) = imported_with(&dir, DvwOpponent::NewTeam);
+        let open = |side| {
+            VideoScreen::new(
+                core.clone(),
+                dir.path().to_path_buf(),
+                team.clone(),
+                m.clone(),
+                side,
+            )
+            .unwrap()
+        };
+        let logos = |screen: &VideoScreen| {
+            screen
+                .pictures
+                .each_ref()
+                .map(|p| matches!(p, ui::TeamPicture::Logo(_)))
+        };
+        assert_eq!(logos(&open(MatchSide::A)), [false, false]);
+        let b = core.analysis_opponents(team.clone()).unwrap()[0].id;
+        core.set_team_logo(b.to_string(), Some(crate::scouting::tests::PNG.to_vec()))
+            .unwrap();
+        assert_eq!(logos(&open(MatchSide::A)), [false, true]);
+        assert_eq!(logos(&open(MatchSide::B)), [true, false]);
+        // and on the video made
+        let screen = open(MatchSide::A);
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let board = screen
+            .board(&screen.the_match, screen.all_events.clone(), s)
+            .unwrap();
+        assert!(matches!(
+            board.emblems,
+            [montage::Emblem::Initials(_), montage::Emblem::Logo(..)]
+        ));
+    }
+
+    /// Beside the events the photo of who touched, read for who has one.
+    #[test]
+    fn the_photos_of_the_players_in_the_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team, m) = imported_with(&dir, DvwOpponent::NewTeam);
+        let open = || {
+            VideoScreen::new(
+                core.clone(),
+                dir.path().to_path_buf(),
+                team.clone(),
+                m.clone(),
+                MatchSide::A,
+            )
+            .unwrap()
+        };
+        let screen = open();
+        assert!(screen.photos.is_empty());
+        let player = screen
+            .events
+            .iter()
+            .find_map(|e| Some(e.event.event.player.as_ref()?.id.clone()))
+            .unwrap();
+        core.set_person_photo(player.clone(), Some(crate::scouting::tests::PNG.to_vec()))
+            .unwrap();
+        assert_eq!(open().photos.keys().collect::<Vec<_>>(), vec![&player]);
     }
 
     fn with_file(dir: &tempfile::TempDir, name: &str) -> VideoScreen {
@@ -3174,7 +3448,7 @@ pub(crate) mod screen_tests {
         let temp = tempfile::tempdir().unwrap();
         let kept = std::env::var("S4A_CLIPS_DIR").map(PathBuf::from).ok();
         let dir = kept.as_deref().unwrap_or(temp.path());
-        let core = Scout4All::new(dir.to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core = Scout4All::for_tests(dir.to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = std::fs::read(downloads.join("&And03 CORTONA V vs POLISPORTIV.dvw")).unwrap();
         let day = core.preview_dvw(bytes.clone()).unwrap().days[0].clone();
         let choice = DvwChoice {
@@ -3297,7 +3571,8 @@ pub(crate) mod screen_tests {
     fn the_actions_of_a_team_match_after_match() {
         use crate::stats::tests::{match_against, team_with_two_matches, with_a_video};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let (arezzo, siena) = (
             match_against(&core, &team, "Arezzo"),
@@ -3314,16 +3589,11 @@ pub(crate) mod screen_tests {
             target: None,
         };
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
-        let matches = core.team_clips(&team, &period, None, &pick).unwrap();
+        let matches = core.team_clips(&team, &period, None, None, &pick).unwrap();
         assert_eq!(matches.len(), 2);
-        let mut screen = VideoScreen::with_tour(
-            core,
-            dir.path().to_path_buf(),
-            team,
-            matches,
-            "Serve".into(),
-        )
-        .unwrap();
+        let mut screen =
+            VideoScreen::with_tour(core, dir.path().to_path_buf(), matches, "Serve".into())
+                .unwrap();
         assert_eq!(screen.match_id, arezzo);
         assert_eq!(screen.events.len(), 3);
         // the clips of Arezzo one after the other, then Siena
@@ -3360,7 +3630,8 @@ pub(crate) mod screen_tests {
         use crate::stats::tests::{match_against, team_with_two_matches};
         let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let (arezzo, siena) = (
             match_against(&core, &team, "Arezzo"),
@@ -3409,11 +3680,10 @@ pub(crate) mod screen_tests {
         };
         let period = scout4all_mobile::AnalysisPeriod::LastMatches { count: 4 };
         let summed = |core: &Arc<Scout4All>| {
-            let matches = core.team_clips(&team, &period, None, &pick).unwrap();
+            let matches = core.team_clips(&team, &period, None, None, &pick).unwrap();
             let mut screen = VideoScreen::with_tour(
                 core.clone(),
                 dir.path().to_path_buf(),
-                team.clone(),
                 matches,
                 "Battute".into(),
             )
@@ -3508,7 +3778,7 @@ pub(crate) mod screen_tests {
     #[test]
     fn the_seconds_chosen_in_the_settings() {
         let dir = tempfile::tempdir().unwrap();
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into())
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into())
             .unwrap()
             .set_video_seconds(VideoSeconds {
                 step_s: 12,
@@ -3643,7 +3913,7 @@ pub(crate) mod screen_tests {
             screen.tick();
         }
         assert!(screen.montage.is_none());
-        assert!(screen.montage_error.is_some());
+        assert!(screen.failure().is_some());
         whole.key(BACK_KEY);
     }
 
@@ -3686,6 +3956,60 @@ pub(crate) mod screen_tests {
             (0, 0),
             "the first set counted"
         );
+    }
+
+    /// The actions picked its video can't hold are said before making it,
+    /// and left out of it; all of them outside, nothing to make.
+    #[test]
+    fn the_actions_outside_the_video_said() {
+        let dir = tempfile::tempdir().unwrap();
+        let whole = with_file(&dir, "20150125 000000.mp4");
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let all: Vec<EventRef> = whole.events.iter().map(event_ref).collect();
+        let count = all.len();
+        let mut screen = VideoScreen::with_clips(
+            whole.core.clone(),
+            dir.path().to_path_buf(),
+            whole.team_id.clone(),
+            whole.match_id.clone(),
+            MatchSide::A,
+            all,
+            "Tutto".into(),
+        )
+        .unwrap();
+        let lasting = |ms: u64| {
+            Some(Status {
+                frame: None,
+                position_ms: 0,
+                duration_ms: ms,
+                playing: false,
+                speed: 1.0,
+                error: None,
+            })
+        };
+        screen.status = lasting(u64::MAX / 2);
+        assert_eq!(screen.outside_notice(s), None);
+        let half = screen.events[count / 2].offset_ms.unwrap().unsigned_abs();
+        screen.status = lasting(half);
+        let outside = outside_count(&screen.events, Some(half));
+        assert!(outside > 0 && outside < count);
+        assert_eq!(
+            screen.outside_notice(s),
+            Some(Outside::Some(format!(
+                "Azioni fuori dal video, non incluse: {outside} su {count}"
+            )))
+        );
+        assert!(screen.match_plan(s).pieces.iter().all(|p| p.from_ms < half));
+        // a video ending before the first action
+        screen.status = lasting(0);
+        screen.events.retain(|e| e.offset_ms > Some(0));
+        assert_eq!(
+            screen.outside_notice(s),
+            Some(Outside::All(s.montage_none.to_string()))
+        );
+        assert!(screen.match_plan(s).pieces.is_empty());
+        screen.start_montage(s);
+        assert!(screen.montage.is_none());
     }
 
     /// The events of the list marked: theirs (their point, their error),
@@ -3926,5 +4250,25 @@ pub(crate) mod screen_tests {
         assert_eq!(screen.event_target(0), None);
         let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
         assert_eq!(screen.alignment(s), (s.not_aligned.to_string(), false));
+    }
+
+    /// A change of the video not saved is told by the app, not over the
+    /// player.
+    #[test]
+    fn a_failure_of_the_video_is_told_over_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = scout4all_mobile::Scout4All::for_tests(
+            dir.path().to_string_lossy().into_owned(),
+            "en".into(),
+        )
+        .unwrap();
+        let (team, m) = crate::scouting::tests::both_sides_started(&core);
+        let mut screen =
+            VideoScreen::new(core, dir.path().join("gone"), team, m, MatchSide::A).unwrap();
+        screen.toggle_overlay();
+        let why = screen.failed.clone().unwrap_or_default();
+        assert!(!why.is_empty());
+        assert_eq!(screen.error, None);
+        crate::assert_told_over(crate::Screen::Video(Box::new(screen)), &why);
     }
 }

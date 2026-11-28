@@ -3,6 +3,7 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::clock::UtcNow;
     use crate::{
         constants::DEFAULT_MAX_SUBSTITUTIONS,
         localization::Language,
@@ -28,7 +29,7 @@ mod tests {
         tests::{EN, Sqlite},
     };
     use EventTypeEnum::*;
-    use chrono::Utc;
+
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -61,6 +62,11 @@ mod tests {
     /// with its first `roster` players on the roster: without a roster for
     /// the whole team.
     async fn scouting_of(roles: &[RoleEnum], roster: usize) -> Scouting {
+        scouting_at(roles, roster, crate::tests::clock::utc_now()).await
+    }
+
+    /// As `scouting_of`, the touches at the time `now` tells.
+    async fn scouting_at(roles: &[RoleEnum], roster: usize, now: UtcNow) -> Scouting {
         let p = Sqlite::new();
         let players: Vec<PlayerEntry> = roles
             .iter()
@@ -75,6 +81,12 @@ mod tests {
                 birth_date: None,
                 height_cm: None,
                 notes: String::new(),
+                nationality: None,
+                dominant_hand: None,
+                federation_id: String::new(),
+                email: String::new(),
+                phone: String::new(),
+                birth_place: String::new(),
             })
             .collect();
         let ids: Vec<Uuid> = players.iter().map(|p| p.id).collect();
@@ -97,7 +109,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -125,7 +137,7 @@ mod tests {
             .unwrap();
         let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
         Scouting {
-            session: ScoutingSession::new(m, set, snapshot, set_writer),
+            session: ScoutingSession::new(m, set, snapshot, set_writer, now),
             db: p.db,
             players: ids,
         }
@@ -168,6 +180,22 @@ mod tests {
         let saved = saved_events(&s).await;
         assert_eq!(event_types(&saved), vec![S]);
         assert_eq!(saved[0].technique, Some(spin));
+    }
+
+    /// A touch is saved at the time the app tells, not the system's.
+    #[tokio::test]
+    async fn a_touch_is_saved_at_the_time_of_the_app() {
+        let at = chrono::DateTime::parse_from_rfc3339("2041-03-09T00:30:00+01:00")
+            .unwrap()
+            .to_utc();
+        let mut s = scouting_at(&ROLES, ROLES.len(), Arc::new(move || at)).await;
+        s.session.choose_event(S).await.unwrap();
+        s.session.choose_eval(EvalEnum::Positive).await.unwrap();
+        let saved = saved_events(&s).await;
+        assert_eq!(
+            saved.iter().map(|e| e.timestamp).collect::<Vec<_>>(),
+            vec![at]
+        );
     }
 
     /// Where our serve went is told along with its evaluation, or not:
@@ -678,7 +706,13 @@ mod tests {
         let set = s.session.set().clone();
         let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
         let set_writer = Arc::new(SqliteSetWriter::new(s.db.clone(), Language::default()));
-        let mut again = ScoutingSession::new(m.clone(), set.clone(), snapshot, set_writer.clone());
+        let mut again = ScoutingSession::new(
+            m.clone(),
+            set.clone(),
+            snapshot,
+            set_writer.clone(),
+            crate::tests::clock::utc_now(),
+        );
         assert!(again.inverted_p1());
         again.set_inverted_p1(false);
         again.choose_event(OE).await.unwrap();
@@ -707,14 +741,24 @@ mod tests {
                 m.clone(),
                 next.clone(),
                 snapshot.clone(),
-                set_writer.clone()
+                set_writer.clone(),
+                crate::tests::clock::utc_now()
             )
             .inverted_p1()
         );
         if let Some(last) = m.sets[0].events.last_mut() {
             last.flags = last.flags.with_inverted_p1(true);
         }
-        assert!(ScoutingSession::new(m, next, snapshot, set_writer).inverted_p1());
+        assert!(
+            ScoutingSession::new(
+                m,
+                next,
+                snapshot,
+                set_writer,
+                crate::tests::clock::utc_now()
+            )
+            .inverted_p1()
+        );
     }
 
     /// A dig needs the player, then the evaluation; a fault the player only.
@@ -966,7 +1010,7 @@ mod tests {
     async fn event_that_does_not_apply_is_not_saved() {
         let mut s = scouting().await;
         let event = |event_type, player, target_player| EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval: None,
@@ -1176,6 +1220,47 @@ mod tests {
         assert!(saved_events(&s).await.is_empty());
     }
 
+    /// The middle blocker out for the libero can be substituted, and the
+    /// choice says so: the scout doesn't see them on court. The libero is
+    /// never offered; who comes in comes from the bench.
+    #[tokio::test]
+    async fn the_one_out_for_the_libero_is_offered_as_such() {
+        let mut s = scouting().await;
+        let libero = s.players[6];
+        let out = s
+            .session
+            .snapshot()
+            .current_lineup
+            .get_lineup_choices()
+            .into_iter()
+            .filter_map(|(_, (_, id))| id)
+            .find(|id| {
+                s.session
+                    .snapshot()
+                    .current_lineup
+                    .is_out_for_the_libero(id)
+            })
+            .unwrap();
+        s.session.choose_event(R).await.unwrap();
+        let choices = s.session.player_choices();
+        assert!(choices.iter().all(|c| c.id != libero));
+        assert_eq!(
+            choices
+                .iter()
+                .filter(|c| c.out_for_the_libero)
+                .map(|c| c.id)
+                .collect::<Vec<_>>(),
+            vec![out]
+        );
+        s.session.choose_player(out).await.unwrap();
+        assert!(
+            s.session
+                .replacement_choices()
+                .iter()
+                .all(|c| !c.out_for_the_libero)
+        );
+    }
+
     /// Only the player on the diagonal of the setter can become the setter:
     /// anyone else would move the libero. Up to v0.10 any player on court
     /// but the libero could.
@@ -1327,7 +1412,8 @@ mod tests {
             .unwrap();
         let snapshot = set.compute_snapshot(m.max_substitutions).unwrap();
         let mut session =
-            ScoutingSession::new(m, set, snapshot, set_writer).with_order(ChoiceOrder::PlayerFirst);
+            ScoutingSession::new(m, set, snapshot, set_writer, crate::tests::clock::utc_now())
+                .with_order(ChoiceOrder::PlayerFirst);
         let efficiency = |session: &ScoutingSession| {
             session.match_stats().metric_percentage(
                 S,

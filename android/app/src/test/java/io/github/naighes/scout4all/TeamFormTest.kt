@@ -60,7 +60,7 @@ class TeamFormTest {
     private fun chooseCountry(typed: String, name: String) {
         rule.onNode(hasText(string(R.string.country)) and hasClickAction()).performScrollTo().performClick()
         rule.onNode(hasSetTextAction() and hasText(string(R.string.search_country))).performTextInput(typed)
-        rule.waitUntil(5_000) {
+        rule.waitUntil(WAIT_MS) {
             rule.onAllNodes(hasText(name) and hasClickAction()).fetchSemanticsNodes().size == 1
         }
         rule.onNode(hasText(name) and hasClickAction()).performClick()
@@ -78,11 +78,11 @@ class TeamFormTest {
         show()
         fill("Italia")
         rule.save()
-        rule.waitForText("country is required")
+        rule.waitForText("Country is required")
         assertEquals(0, saved)
         // chosen, the error goes and the team is saved
         chooseCountry("ital", "Italy")
-        rule.onAllNodesWithText("country is required").assertCountEquals(0)
+        rule.onAllNodesWithText("Country is required").assertCountEquals(0)
         rule.save()
         rule.waitFor { saved == 1 }
         assertEquals("IT", core { it.team(teams().single().id) }.form.country)

@@ -103,6 +103,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -163,13 +164,7 @@ fun VideoScreen(request: VideoRequest, onBack: () -> Unit) {
     val chooseFiles = { choose.launch(arrayOf("video/*")) }
     var montage by remember { mutableStateOf(false) }
     if (montage) MontageDialog(model) { montage = false }
-    model.error?.let { message ->
-        AlertDialog(
-            onDismissRequest = model::dismissError,
-            text = { Text(message) },
-            confirmButton = { TextButton(onClick = model::dismissError) { Text(stringResource(android.R.string.ok)) } },
-        )
-    }
+    model.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
     Turning()
     Immersive(landscape)
     when {
@@ -597,6 +592,8 @@ private fun EventsList(model: VideoModel, modifier: Modifier) {
         }
         return
     }
+    val photos = model.photos
+    val pictured = events.any { it.event.event.player?.id in photos }
     LazyColumn(modifier.fillMaxWidth(), state = list) {
         itemsIndexed(events, key = { _, e -> "${e.setNumber}-${e.event.index}" }) { i, e ->
             val newSet = i == 0 || events[i - 1].setNumber != e.setNumber
@@ -610,7 +607,9 @@ private fun EventsList(model: VideoModel, modifier: Modifier) {
             }
             // the score before it, from 0-0 at each set
             val before = events.getOrNull(i - 1)?.takeIf { !newSet }?.event
-            EventRow(e, eventMark(e, before?.scoreUs ?: 0u, before?.scoreThem ?: 0u), i == model.selected, model.total) {
+            val mark = eventMark(e, before?.scoreUs ?: 0u, before?.scoreThem ?: 0u)
+            val photo = e.event.event.player?.id?.let { photos[it] }
+            EventRow(e, mark, pictured, photo, i == model.selected, model.total) {
                 model.goToEvent(i)
             }
         }
@@ -637,9 +636,18 @@ internal fun eventMark(e: VideoEventRow, us: UByte, them: UByte): EventMark {
 
 /** An event: a bar of its team on the left (ours light blue, theirs pink),
  * its symbol red on a direct error, its score green or red on the point it
- * ended; TalkBack says which. */
+ * ended; TalkBack says which. `pictured` when some event listed has a
+ * photo: `photo` beside the name, else its place empty. */
 @Composable
-private fun EventRow(e: VideoEventRow, mark: EventMark, chosen: Boolean, total: Long, onClick: () -> Unit) {
+private fun EventRow(
+    e: VideoEventRow,
+    mark: EventMark,
+    pictured: Boolean,
+    photo: ByteArray?,
+    chosen: Boolean,
+    total: Long,
+    onClick: () -> Unit,
+) {
     val muted = !e.inside || !e.event.editable
     val color = if (muted) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface
     val s = e.event.event
@@ -663,6 +671,7 @@ private fun EventRow(e: VideoEventRow, mark: EventMark, chosen: Boolean, total: 
             style = MaterialTheme.typography.labelMedium.copy(fontFamily = FontFamily.Monospace),
             color = if (chosen) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (pictured) RowPhoto(photo)
         Column(Modifier.weight(1f)) {
             val symbol = s.symbol ?: "✕".takeIf { mark.error }
             Text(
@@ -870,13 +879,12 @@ private fun TimeDialog(model: VideoModel, initial: String, onDismiss: () -> Unit
                 modifier = Modifier.focusRequester(focus),
                 singleLine = true,
                 isError = invalid,
-                supportingText = {
+                supportingText = noteOf(if (invalid) stringResource(R.string.video_invalid_time) else null) ?: {
                     Text(
                         stringResource(
-                            when {
-                                invalid -> R.string.video_invalid_time
-                                onlyThis -> R.string.video_time_only_this
-                                else -> R.string.video_time_aligns_all
+                            when (onlyThis) {
+                                true -> R.string.video_time_only_this
+                                false -> R.string.video_time_aligns_all
                             },
                         ),
                     )
@@ -942,7 +950,11 @@ private fun Overlay(st: VideoStanding, model: VideoModel, compact: Boolean, modi
     val review = model.review ?: return
     // upright, over a small video, shorter
     val room = if (compact) 14 else 22
-    val names = remember(review, room) { listOf(overlayName(review.team(), room), overlayName(review.opponent(), room)) }
+    val teams = remember(review) { listOf(review.team(), review.opponent()) }
+    val names = remember(teams, room) { teams.map { overlayName(it, room) } }
+    val logos = model.logos
+    // grows with the font, so that the initials fit
+    val picture = with(LocalDensity.current) { (if (compact) 16.sp else 24.sp).toDp() }
     val serving = st.phase == PhaseEnum.BREAK
     val (color, phase) = when (serving) {
         true -> BreakPoint to stringResource(R.string.break_phase)
@@ -956,11 +968,12 @@ private fun Overlay(st: VideoStanding, model: VideoModel, compact: Boolean, modi
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Column {
-            listOf(Triple(names[0], st.setsUs, st.scoreUs) to serving, Triple(names[1], st.setsThem, st.scoreThem) to !serving).forEach { (team, serves) ->
+            listOf(Triple(names[0], st.setsUs, st.scoreUs) to serving, Triple(names[1], st.setsThem, st.scoreThem) to !serving).forEachIndexed { i, (team, serves) ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Box(Modifier.size(if (compact) 10.dp else 14.dp)) {
                         if (serves) Icon(painterResource(R.drawable.ic_ball), contentDescription = null, tint = Color.White)
                     }
+                    LogoOrInitials(if (i == 0) logos?.team else logos?.opponent, teams[i], picture)
                     Text(team.first, fontSize = body, fontWeight = FontWeight.Bold, color = Color.White, maxLines = 1)
                     Text(team.second.toString(), fontSize = body, color = Color.White.copy(alpha = 0.8f))
                     Text(team.third.toString(), fontSize = points, fontWeight = FontWeight.Bold, color = Color.White)
@@ -1037,8 +1050,17 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 val summed = plan
+                // said before the video is made, and kept while and after
+                if (summed != null && summed.outside > 0) {
+                    Text(stringResource(R.string.montage_outside, summed.outside, summed.actions + summed.outside))
+                }
                 when {
-                    failed != null -> Text(stringResource(R.string.video_not_made) + (failed?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""))
+                    // a single match with no action in its video
+                    summed != null && !several && summed.actions == 0 -> Text(stringResource(R.string.montage_none))
+                    failed != null -> Banner(
+                        Level.ERROR,
+                        stringResource(R.string.video_not_made) + (failed?.takeIf { it.isNotEmpty() }?.let { ": $it" } ?: ""),
+                    )
                     made != null -> Text(stringResource(R.string.video_made))
                     summed != null && !asked -> MontageSummary(summed)
                     summed == null || montage == null -> LinearProgressIndicator(Modifier.fillMaxWidth())
@@ -1065,7 +1087,8 @@ private fun MontageDialog(model: VideoModel, onDismiss: () -> Unit) {
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text(stringResource(if (made == null && failed == null) android.R.string.cancel else R.string.close))
+                val over = made != null || failed != null || (!several && plan?.actions == 0)
+                Text(stringResource(if (over) R.string.close else android.R.string.cancel))
             }
         },
     )

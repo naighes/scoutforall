@@ -43,13 +43,14 @@ fun Comparison(a: LiveStats, b: LiveStats) = Column(verticalArrangement = Arrang
     a.fundamentals.zip(b.fundamentals).forEach { (fa, fb) ->
         PercentRow(fa.name.replaceFirstChar { it.uppercase() }, fundamentalCell(fa), fundamentalCell(fb))
     }
-    PercentRow(stringResource(R.string.side_out), phaseCell(a.sideOut), phaseCell(b.sideOut))
-    PercentRow(stringResource(R.string.break_points), phaseCell(a.breakPoints), phaseCell(b.breakPoints))
+    if (a.sideOutShown) PercentRow(stringResource(R.string.side_out), phaseCell(a.sideOut), phaseCell(b.sideOut))
+    if (a.breakShown) PercentRow(stringResource(R.string.break_points), phaseCell(a.breakPoints), phaseCell(b.breakPoints))
     Section(R.string.stats_errors)
-    listOf(
+    listOfNotNull(
         Triple(R.string.unforced_errors, a.unforcedErrors, b.unforcedErrors),
         Triple(R.string.forced_errors, a.forcedErrors, b.forcedErrors),
-        Triple(R.string.aces, a.aces, b.aces),
+        // our aces: none without our serves
+        Triple(R.string.aces, a.aces, b.aces).takeIf { a.breakShown },
         Triple(R.string.opponent_errors, a.opponentErrors, b.opponentErrors),
     ).forEach { (name, x, y) -> CountLine(name, x, y) }
     Section(R.string.stats_distribution)

@@ -313,6 +313,9 @@ fn fail(e: AppError) -> String {
     format!("{e:?}")
 }
 
+// a program run by hand, the edge as the clock of the apps: it reads the
+// time of the system (see clippy.toml)
+#[allow(clippy::disallowed_methods)]
 async fn plan(
     data: PathBuf,
     team_id: Uuid,
@@ -487,6 +490,9 @@ async fn plan(
     Ok(())
 }
 
+// a program run by hand, the edge as the clock of the apps: it reads the
+// time of the system (see clippy.toml)
+#[allow(clippy::disallowed_methods)]
 #[tokio::main]
 async fn main() -> Result<(), String> {
     let args: Vec<String> = std::env::args().skip(1).collect();

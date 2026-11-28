@@ -5,7 +5,7 @@
 //! own team.
 
 use {
-    crate::{strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
+    crate::{notice, strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
     iced::{
         Element, Length,
         widget::{Column, Id, column, container, row, scrollable, space, text},
@@ -89,7 +89,7 @@ impl HistoryTab {
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         if let Some(e) = &self.error {
-            return ui::body(e.clone()).color(c.danger).into();
+            return notice::banner(notice::Level::Error, e, c);
         }
         if self.seasons.is_empty() {
             // alone on the page: a capital, as on Android
@@ -196,7 +196,8 @@ mod tests {
     #[test]
     fn the_earlier_seasons_of_the_team_are_read_with_their_totals() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = |name: &str, year: u16| {
             let form = scout4all_core::team_form::TeamForm {
                 name: name.to_string(),

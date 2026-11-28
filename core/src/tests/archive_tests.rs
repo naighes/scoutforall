@@ -130,7 +130,8 @@ mod tests {
     /// imported into a new database.
     async fn moved(from: &Providers, m: &MatchEntry) -> (Providers, TeamEntry, MatchEntry) {
         let id = Uuid::parse_str(&m.id).unwrap();
-        let archive = archives::export(&from.db, Subject::Match(id)).unwrap();
+        let archive =
+            archives::export(&from.db, Subject::Match(id), crate::tests::clock::now()).unwrap();
         let to = Providers::new();
         archives::import(&to.db, &archive, &Language::default()).unwrap();
         let team = to.team_reader.read_single(&m.team.id).await.unwrap();

@@ -3,6 +3,7 @@
 //! made an MP4. A camera of the computer here; one on the network in
 //! `network`.
 
+use scout4all_mobile::clock::Clock;
 use {
     super::{
         picture::{self, I420},
@@ -11,7 +12,7 @@ use {
     },
     crate::video::Picture as Frame,
     bytes::Bytes,
-    chrono::{DateTime, Local},
+    chrono::{DateTime, FixedOffset},
     nokhwa::{
         Camera,
         pixel_format::RgbFormat,
@@ -145,7 +146,7 @@ impl Recording {
 pub struct Done {
     pub mp4: PathBuf,
     pub base: PathBuf,
-    pub started: DateTime<Local>,
+    pub started: DateTime<FixedOffset>,
     pub result: Result<raw::Remuxed, String>,
     /// stopped as the disk was almost full
     pub out_of_space: bool,
@@ -183,7 +184,7 @@ pub enum Source {
 pub(super) enum Command {
     Record {
         base: PathBuf,
-        started: DateTime<Local>,
+        started: DateTime<FixedOffset>,
         quality: Quality,
     },
     Stop,
@@ -201,7 +202,7 @@ pub struct Capture {
 
 impl Capture {
     /// The source opened on its thread, its preview at once.
-    pub fn open(source: Source) -> Capture {
+    pub fn open(source: Source, clock: Arc<dyn Clock>) -> Capture {
         let (commands, received) = mpsc::channel();
         let status = Arc::new(Mutex::new(Status::default()));
         let shared = status.clone();
@@ -211,11 +212,15 @@ impl Capture {
             }
             Source::Network(network) => {
                 let reading = super::network::Reading::Pull(network);
-                std::thread::spawn(move || super::network::run(reading, received, &shared));
+                std::thread::spawn(move || {
+                    super::network::run(reading, &*clock, received, &shared)
+                });
             }
             Source::Receiver(receiver) => {
                 let reading = super::network::Reading::Receive(receiver);
-                std::thread::spawn(move || super::network::run(reading, received, &shared));
+                std::thread::spawn(move || {
+                    super::network::run(reading, &*clock, received, &shared)
+                });
             }
         }
         Capture {
@@ -237,7 +242,7 @@ impl Capture {
             .unwrap_or_default()
     }
 
-    pub fn record(&self, base: PathBuf, started: DateTime<Local>, quality: Quality) {
+    pub fn record(&self, base: PathBuf, started: DateTime<FixedOffset>, quality: Quality) {
         let _ = self.commands.send(Command::Record {
             base,
             started,
@@ -349,7 +354,7 @@ fn to_i420(buffer: &nokhwa::Buffer) -> Option<I420> {
 pub(super) struct Take {
     raw: RawWriter,
     base: PathBuf,
-    started: DateTime<Local>,
+    started: DateTime<FixedOffset>,
     clock: Instant,
     frames: u64,
     /// the bytes of the frames so far
@@ -364,14 +369,14 @@ pub(super) struct Take {
 }
 
 impl Take {
-    pub(super) fn start(base: PathBuf, started: DateTime<Local>) -> Result<Take, String> {
+    pub(super) fn start(base: PathBuf, started: DateTime<FixedOffset>) -> Result<Take, String> {
         Take::start_on(base, started, space::free)
     }
 
     /// As `start`, the free space told by `free`.
     pub(super) fn start_on(
         base: PathBuf,
-        started: DateTime<Local>,
+        started: DateTime<FixedOffset>,
         free: fn(&Path) -> Option<u64>,
     ) -> Result<Take, String> {
         if let Some(folder) = base.parent() {
@@ -492,7 +497,7 @@ struct Recorder {
 impl Recorder {
     fn start(
         base: PathBuf,
-        started: DateTime<Local>,
+        started: DateTime<FixedOffset>,
         quality: Quality,
     ) -> Result<Recorder, String> {
         let config = EncoderConfig::new()
@@ -598,7 +603,7 @@ fn run(index: CameraIndex, commands: Receiver<Command>, status: &Mutex<Status>) 
 
 /// The name of a recording started at `at`, in `folder`: as the cameras
 /// name their files, the start read back from it.
-pub fn base_name(folder: &Path, at: DateTime<Local>) -> PathBuf {
+pub fn base_name(folder: &Path, at: DateTime<FixedOffset>) -> PathBuf {
     folder.join(at.format("%Y%m%d %H%M%S").to_string())
 }
 

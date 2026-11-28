@@ -15,6 +15,7 @@
 //! of the day), `n` a new session, `r` a new series, `c` the microcycle of
 //! the marked, ⌫ deletes the session chosen. No dragging.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::screen::{PERIODS, Period, period_name},
     crate::{
@@ -26,7 +27,7 @@ use {
     chrono::{Datelike, Days, Duration, Months, NaiveDate, NaiveTime},
     iced::{
         Alignment, Background, Element, Length, Padding,
-        widget::{Column, Id, Row, column, container, row, scrollable, space, text},
+        widget::{Column, Id, Row, column, container, row, rule, scrollable, space, text},
     },
     scout4all_core::{
         training::SessionStatus,
@@ -236,7 +237,7 @@ pub fn segments<'a>(
 
 impl CalendarTab {
     pub fn new(core: Arc<Scout4All>, team_id: String) -> CalendarTab {
-        let today = chrono::Local::now().date_naive();
+        let today = core.clock().today();
         let mut tab = CalendarTab {
             core,
             team_id,
@@ -422,6 +423,15 @@ impl CalendarTab {
     #[cfg(test)]
     pub fn marked_count(&self) -> usize {
         self.marked.len()
+    }
+
+    /// What went wrong doing something: told over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
     }
 
     /// Read again, after a change or a move.
@@ -1044,10 +1054,7 @@ impl CalendarTab {
     /// The sheet's calendar: the week of the window, with the arrows
     /// between its weeks when it holds more than one.
     pub fn window_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let body: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => self.week(s, c),
-        };
+        let body = self.week(s, c);
         match self.window_weeks() {
             false => body,
             true => {
@@ -1138,57 +1145,81 @@ impl CalendarTab {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let mut controls: Vec<Element<'a, Message>> = [
-            (View::Week, s.week),
-            (View::Month, s.calendar_month),
-            (View::List, s.calendar_list),
+        // the views, a separator, then whose and where; what can be added
+        // stays at the right end
+        let mut bar: Vec<Element<'a, Message>> = [
+            (View::Week, theme::icons::VIEW_WEEK, s.week),
+            (View::Month, theme::icons::VIEW_MONTH, s.calendar_month),
+            (View::List, theme::icons::VIEW_LIST, s.calendar_list),
         ]
         .into_iter()
-        .map(|(view, label)| ui::pill(label, self.view == view, Some(Message::View(view)), c))
+        .map(|(view, icon, label)| {
+            ui::bar_item(icon, label, self.view == view, Message::View(view), c)
+        })
         .collect();
-        // the list holds a period of its own, chosen below: nothing to move
+        bar.push(
+            container(rule::vertical(1))
+                .height(Length::Fixed(34.0))
+                .padding([0, 6])
+                .into(),
+        );
+        let (whose_icon, whose) = match self.all_teams {
+            true => (theme::icons::ALL_TEAMS, s.all_teams),
+            false => (theme::icons::THIS_TEAM, s.this_team),
+        };
+        bar.push(ui::bar_item(
+            whose_icon,
+            whose,
+            self.all_teams,
+            Message::AllTeams,
+            c,
+        ));
+        // without gyms there is nothing to filter by
+        if !self.venues.is_empty() {
+            bar.push(ui::bar_item(
+                theme::icons::GYM,
+                self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
+                self.venue.is_some(),
+                Message::NextVenue,
+                c,
+            ));
+        }
+        let mut controls: Vec<Element<'a, Message>> = Vec::new();
+        // the list holds a period of its own, at its head: nothing to move
         let moves = match self.view {
             View::Week => Some((s.previous_week, s.next_week)),
             View::Month => Some((s.previous_month, s.next_month)),
             View::List => None,
         };
-        // one pill that goes round the periods: the row has room for it
-        if self.view == View::List {
-            controls.push(ui::tip(
-                ui::pill(
-                    period_name(s, self.period),
-                    self.period != Period::Any,
-                    Some(Message::NextPeriod),
-                    c,
-                ),
-                s.period,
-                c,
-            ));
-        }
         if let Some((previous, next)) = moves {
             controls.extend([
+                ui::today_pill(s.today, Message::Today, c),
                 ui::tip(
                     ui::pill("‹", false, Some(Message::Previous), c),
                     previous,
                     c,
                 ),
+                ui::tip(ui::pill("›", false, Some(Message::Next), c), next, c),
                 text(self.title(s))
                     .size(SIZE_BODY)
                     .font(theme::fonts().bold)
                     .into(),
-                ui::tip(ui::pill("›", false, Some(Message::Next), c), next, c),
             ]);
-            let (first, last) = period(self.view, self.anchor);
-            if first > self.today || last < self.today {
-                controls.push(ui::pill(s.today, false, Some(Message::Today), c));
-            }
         }
-        controls.push(space::horizontal().width(Length::Fill).into());
-        controls.push(ui::pill(s.new_session, false, Some(Message::New), c));
-        controls.push(ui::pill(s.new_match, false, Some(Message::NewMatch), c));
-        // the filter in every view, then whose and where (a row that goes
-        // on below when it's narrow); the count of the list; the
-        // microcycle only once sessions are marked
+        let actions = row![
+            ui::bar_action(theme::icons::CALENDAR, s.new_session, Message::New, c),
+            ui::bar_action(theme::icons::VOLLEYBALL, s.new_match, Message::NewMatch, c),
+        ]
+        .spacing(6);
+        // the list has nothing to move: no empty row under the bar
+        let moves = (!controls.is_empty()).then(|| {
+            Row::with_children(controls)
+                .spacing(6)
+                .align_y(Alignment::Center)
+                .into()
+        });
+        // the filter in every view (a row that goes on below when it's
+        // narrow); the microcycle only once sessions are marked
         let mut choices: Vec<Element<'a, Message>> = FILTERS
             .iter()
             .map(|f| {
@@ -1200,40 +1231,6 @@ impl CalendarTab {
                 )
             })
             .collect();
-        choices.push(space::horizontal().width(Length::Fixed(12.0)).into());
-        choices.push(ui::pill(
-            match self.all_teams {
-                true => s.all_teams,
-                false => s.this_team,
-            },
-            self.all_teams,
-            Some(Message::AllTeams),
-            c,
-        ));
-        // without gyms there is nothing to filter by
-        if !self.venues.is_empty() {
-            choices.push(ui::pill(
-                self.venue.as_ref().map_or(s.all_venues, |(_, name)| name),
-                self.venue.is_some(),
-                Some(Message::NextVenue),
-                c,
-            ));
-        }
-        if self.view == View::List {
-            let sessions = self
-                .days
-                .iter()
-                .flat_map(|d| &d.events)
-                .filter(|e| matches!(e.item, AgendaItemRecord::Session { .. }))
-                .count();
-            choices.push(space::horizontal().width(Length::Fixed(12.0)).into());
-            choices.push(
-                text(s.count(s.sessions_of, sessions))
-                    .size(SIZE_SMALL)
-                    .color(c.muted)
-                    .into(),
-            );
-        }
         if !self.marked.is_empty() {
             choices.push(ui::pill(
                 &format!("{} ({})", s.create_microcycle, self.marked.len()),
@@ -1242,29 +1239,70 @@ impl CalendarTab {
                 c,
             ));
         }
-        let body: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => match self.view {
-                View::Week => self.week(s, c),
-                View::Month => scrollable(self.month(s, c))
-                    .id(Id::new(MONTH))
-                    .height(Length::Fill)
-                    .into(),
-                View::List => self.list(s, c),
-            },
+        let body: Element<'a, Message> = match self.view {
+            View::Week => self.week(s, c),
+            View::Month => scrollable(self.month(s, c))
+                .id(Id::new(MONTH))
+                .height(Length::Fill)
+                .into(),
+            View::List => column![self.list_head(s, c), self.list(s, c)]
+                .spacing(10)
+                .height(Length::Fill)
+                .into(),
         };
-        column![
-            Row::with_children(controls)
-                .spacing(6)
-                .align_y(Alignment::Center),
-            Row::with_children(choices)
-                .spacing(6)
-                .align_y(Alignment::Center)
-                .wrap(),
-            body
+        // the choices wrap in what the actions leave them
+        let head = row![
+            container(
+                Row::with_children(bar)
+                    .spacing(4)
+                    .align_y(Alignment::Center)
+                    .wrap()
+            )
+            .width(Length::Fill),
+            actions
         ]
-        .spacing(10)
-        .height(Length::Fill)
+        .spacing(8)
+        .align_y(Alignment::Center);
+        column![head]
+            .extend(moves)
+            .push(
+                Row::with_children(choices)
+                    .spacing(6)
+                    .align_y(Alignment::Center)
+                    .wrap(),
+            )
+            .push(body)
+            .spacing(10)
+            .height(Length::Fill)
+            .into()
+    }
+
+    /// The period is not a view: it heads the list it bounds, with its
+    /// count. One pill that goes round the periods.
+    fn list_head<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
+        let sessions = self
+            .days
+            .iter()
+            .flat_map(|d| &d.events)
+            .filter(|e| matches!(e.item, AgendaItemRecord::Session { .. }))
+            .count();
+        row![
+            ui::tip(
+                ui::pill(
+                    period_name(s, self.period),
+                    self.period != Period::Any,
+                    Some(Message::NextPeriod),
+                    c,
+                ),
+                s.period,
+                c,
+            ),
+            text(s.count(s.sessions_of, sessions))
+                .size(SIZE_SMALL)
+                .color(c.muted)
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center)
         .into()
     }
 
@@ -1319,21 +1357,27 @@ impl CalendarTab {
                 c,
             );
             let events = Column::with_children(day.events.iter().enumerate().map(|(i, e)| {
-                event_card(
-                    e,
-                    s,
-                    c,
-                    Look {
-                        compact: false,
-                        with_team: self.all_teams,
-                        chosen: date == self.anchor && i == self.slot,
-                        span: true,
-                        unrecorded: self.unrecorded(e),
-                    },
-                    Some(Message::Event(date, i)),
-                    self.mark_of(e),
-                    LIST_EVENT,
-                )
+                let told = crate::agenda::Told {
+                    with_team: self.all_teams,
+                    // the end of a session; a match is told by its start
+                    times: matches!(e.item, AgendaItemRecord::Session { .. })
+                        .then(|| crate::calendar::time_span(&e.start, e.minutes)),
+                    unrecorded: self.unrecorded(e),
+                };
+                let chosen = date == self.anchor && i == self.slot;
+                let boxed =
+                    crate::agenda::event_box(e, s, c, told, chosen, Message::Event(date, i));
+                // a place for the mark in every row: they stay aligned
+                row![
+                    boxed,
+                    container(match self.mark_of(e) {
+                        Some((marked, toggle)) => mark_button(marked, toggle, LIST_MARK_SIZE, c),
+                        None => space::horizontal().width(0).into(),
+                    })
+                    .width(Length::Fixed(LIST_MARK))
+                ]
+                .align_y(Alignment::Center)
+                .into()
             }))
             .spacing(3)
             .width(Length::Fill);
@@ -1570,8 +1614,6 @@ impl CalendarTab {
                         compact: tall < TWO_LINES,
                         with_team: self.all_teams,
                         chosen: here && i == self.slot,
-                        span: false,
-                        unrecorded: false,
                     },
                     date.map(|d| Message::Event(d, i)),
                     self.mark_of(event),
@@ -1678,8 +1720,6 @@ impl CalendarTab {
                     compact: true,
                     with_team: self.all_teams,
                     chosen: false,
-                    span: false,
-                    unrecorded: false,
                 },
                 Some(Message::Event(day, i)),
                 self.mark_of(e),
@@ -1735,8 +1775,10 @@ const MONTH_EVENT: f32 = 20.0;
 /// The height of a day of the month.
 const CELL_HEIGHT: f32 = 112.0;
 
-/// The height of an event in the list: room for its details.
-const LIST_EVENT: f32 = 44.0;
+/// The width of the place of the mark beside an event of the list.
+const LIST_MARK: f32 = 30.0;
+/// The size of that mark: as large as the rows ask.
+const LIST_MARK_SIZE: f32 = 22.0;
 
 /// The width of the date on the left of the list.
 const LIST_DATE: f32 = 96.0;
@@ -1749,10 +1791,6 @@ struct Look {
     with_team: bool,
     /// the one of the cursor
     chosen: bool,
-    /// the time it ends too (the list, where its height doesn't tell)
-    span: bool,
-    /// a completed session whose attendance isn't written
-    unrecorded: bool,
 }
 
 /// The date of a day of the list: a click chooses it, the one of the
@@ -1770,13 +1808,13 @@ fn button_day<'a>(
 
 /// The box of a free session in its event: a click marks it (the event
 /// itself opens the session).
-fn mark_button<'a>(marked: bool, message: Message, c: Colors) -> Element<'a, Message> {
+fn mark_button<'a>(marked: bool, message: Message, size: f32, c: Colors) -> Element<'a, Message> {
     iced::widget::button(
         text(match marked {
             true => "☑",
             false => "☐",
         })
-        .size(SIZE_SMALL),
+        .size(size),
     )
     .padding(Padding::from([0, 2]))
     .on_press(message)
@@ -1847,7 +1885,7 @@ fn event_card<'a>(
     let inside: Element<'a, Message> = match mark {
         Some((marked, toggle)) => row![
             stripe,
-            container(mark_button(marked, toggle, c))
+            container(mark_button(marked, toggle, SIZE_SMALL, c))
                 .padding(Padding::ZERO.left(2))
                 .height(Length::Fill)
                 .align_y(Alignment::Center),
@@ -1896,10 +1934,7 @@ fn event_text<'a>(
     look: &Look,
 ) -> Element<'a, Message> {
     let (compact, with_team) = (look.compact, look.with_team);
-    let time = match look.span {
-        true => crate::calendar::time_span(&event.start, event.minutes),
-        false => event.start.get(11..16).unwrap_or_default().to_string(),
-    };
+    let time = event.start.get(11..16).unwrap_or_default().to_string();
     let (icon, color, title, detail) = match &event.item {
         AgendaItemRecord::Session {
             title,
@@ -1913,9 +1948,6 @@ fn event_text<'a>(
             }
             if *to_close {
                 flags.push(s.to_close.to_string());
-            }
-            if look.unrecorded {
-                flags.push(s.attendance_not_recorded.to_string());
             }
             (
                 theme::icons::CALENDAR,
@@ -2013,7 +2045,7 @@ mod tests {
     }
 
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
     }
 
     fn session(core: &Scout4All, team: &str, start: &str) -> String {
@@ -2159,7 +2191,8 @@ mod tests {
     #[test]
     fn the_gym_filter_is_there_only_with_gyms() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core.tutorial_team().unwrap();
         let mut tab = CalendarTab::new(core.clone(), team);
         assert!(!offers_venues(&tab));

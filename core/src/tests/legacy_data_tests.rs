@@ -32,7 +32,7 @@ mod tests {
         storage::fs::FsStore,
         tests::{EN, Sqlite},
     };
-    use chrono::Utc;
+
     use serde_json::json;
     use std::{io::Write, path::Path};
     use tempfile::TempDir;
@@ -191,6 +191,7 @@ mod tests {
         let p = Sqlite::new();
         let backups = TempDir::new().unwrap();
         let backup = Backup {
+            day: crate::tests::clock::today(),
             dir: backups.path().to_path_buf(),
             prefix: "backup".into(),
         };
@@ -275,7 +276,8 @@ mod tests {
             .expect("expected the imported match to load");
         assert_eq!(replayed(&again), replayed(m));
         let id = Uuid::parse_str(&m.id).unwrap();
-        let archive = archives::export(&from.db, Subject::Match(id)).unwrap();
+        let archive =
+            archives::export(&from.db, Subject::Match(id), crate::tests::clock::now()).unwrap();
         let to = Sqlite::new();
         archives::import(&to.db, &archive, &language).expect("expected the match to import");
         let team = to.team_reader.read_single(&m.team.id).await.unwrap();
@@ -510,7 +512,7 @@ mod tests {
         technique: Option<TechniqueEnum>,
     ) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: Some(player),
             eval: Some(eval),
@@ -612,7 +614,7 @@ mod tests {
 
     fn freeball(event_type: EventTypeEnum, player: Option<Uuid>) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval: None,

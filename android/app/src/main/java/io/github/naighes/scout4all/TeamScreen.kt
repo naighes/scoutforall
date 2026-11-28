@@ -1,12 +1,16 @@
 package io.github.naighes.scout4all
 
-import java.time.LocalDate
-import io.github.naighes.scout4all.core.AgendaSpan
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.material.icons.filled.Home
+import android.widget.Toast
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.foundation.Image
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -20,6 +24,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
@@ -27,9 +32,6 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.FilledTonalButton
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Scaffold
@@ -50,10 +52,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.layout.size
+import io.github.naighes.scout4all.core.AgendaEventRecord
 import io.github.naighes.scout4all.core.MatchListing
+import io.github.naighes.scout4all.core.MatchStanding
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Player
 import io.github.naighes.scout4all.core.TeamDetails
@@ -121,6 +125,7 @@ fun TeamScreen(
         }
     }
     var tab by rememberSaveable { mutableIntStateOf(PLAYERS_TAB) }
+    val appointments by rememberAppointments(id, matches)
     val loaded = state is TeamState.Loaded
     unreadable?.let { folder ->
         Deletion(
@@ -167,9 +172,33 @@ fun TeamScreen(
                         val name = (state as? TeamState.Loaded)?.team?.name.orEmpty()
                         val exporter = rememberExporter { it.exportTeam(id) }
                         val delete = rememberTeamDeletion(id, name, onDeleted)
+                        var hidden by rememberSaveable { mutableStateOf(false) }
+                        LaunchedEffect(id) {
+                            hidden = try {
+                                app.core { it.teamHidden(id) }
+                            } catch (_: MobileException) {
+                                false
+                            }
+                        }
+                        val scope = rememberCoroutineScope()
                         MoreMenu { close ->
                             ExportEntries(exporter, close)
                             MenuEntry(stringResource(R.string.edit_team), Icons.Filled.Edit, close, onEdit)
+                            MenuEntry(stringResource(R.string.new_season), Icons.Filled.Refresh, close, onNewSeason)
+                            MenuEntry(
+                                stringResource(if (hidden) R.string.show_in_home else R.string.hide_from_home),
+                                Icons.Filled.Home,
+                                close,
+                            ) {
+                                scope.launch {
+                                    try {
+                                        app.core { it.setHidden(id, !hidden) }
+                                        hidden = !hidden
+                                    } catch (e: MobileException) {
+                                        Toast.makeText(app, e.reason, Toast.LENGTH_LONG).show()
+                                    }
+                                }
+                            }
                             MenuEntry(stringResource(R.string.delete_team), Icons.Filled.Delete, close, delete)
                         }
                     }
@@ -192,19 +221,23 @@ fun TeamScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             TeamState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is TeamState.Failed -> Centered(modifier) { Text(s.message) }
+            is TeamState.Failed -> LoadFailed(s.message, modifier)
             is TeamState.Loaded -> Column(modifier) {
                 Row(
                     Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    TeamLogo(id, 48.dp)
+                    TeamPicture(id, s.team.name, 48.dp, boxed = true)
                     Text(
                         listOfNotNull(s.team.year.toString(), s.team.classification, s.team.gender)
                             .joinToString(" · "),
                         style = MaterialTheme.typography.bodyLarge,
                     )
+                }
+                // what the team has today, over the tabs
+                appointments?.today?.takeIf { it.isNotEmpty() }?.let { events ->
+                    TodayAppointments(events, { _, m -> onMatch(m) }, { _, s -> onSession(s) })
                 }
                 PrimaryTabRow(selectedTabIndex = tab) {
                     val players = s.team.players.size
@@ -222,122 +255,124 @@ fun TeamScreen(
                 }
                 val content = Modifier.fillMaxSize()
                 when (tab) {
-                    PLAYERS_TAB -> Players(s.team, onPlayer, onNewSeason, content)
-                    else -> Matches(id, matches, onMatch, onSession, content, onUnreadable = { unreadable = it })
+                    PLAYERS_TAB -> Players(s.team, onPlayer, content)
+                    // the calendar is where the programming opens
+                    else -> Matches(matches, appointments?.laterMatch, onTraining, onMatch, content, onUnreadable = { unreadable = it })
                 }
             }
         }
     }
 }
 
-/** The players, then the new season of the team (D15): last, the players
- * first in sight. */
 @Composable
-private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, onNewSeason: () -> Unit, modifier: Modifier) {
-    val season = @Composable {
-        FilledTonalButton(
-            onClick = onNewSeason,
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-        ) { Text(stringResource(R.string.new_season)) }
-    }
+private fun Players(team: TeamDetails, onPlayer: (String) -> Unit, modifier: Modifier) {
     when {
-        team.players.isEmpty() -> Column(modifier, verticalArrangement = Arrangement.Center) {
-            Text(stringResource(R.string.no_players), Modifier.align(Alignment.CenterHorizontally).padding(16.dp))
-            season()
+        team.players.isEmpty() -> Centered(modifier) {
+            Text(stringResource(R.string.no_players), Modifier.padding(16.dp))
         }
         // room at the bottom: the button doesn't cover the last player
         else -> LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
-            items(team.players, key = { it.id }) { PlayerRow(it, onPlayer) }
-            item(key = "season") { season() }
+            items(team.players, key = { it.id }) { p ->
+                PortraitRow(
+                    p.id, p.name, p.role, p.initials, p.number.toInt(), { onPlayer(p.id) },
+                    Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                )
+            }
         }
     }
 }
 
 @Composable
 private fun Matches(
-    teamId: String,
     state: MatchesState,
+    next: AgendaEventRecord?,
+    onCalendar: () -> Unit,
     onMatch: (String) -> Unit,
-    onSession: (String) -> Unit,
     modifier: Modifier,
     onUnreadable: (String) -> Unit,
 ) = when (state) {
     MatchesState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-    is MatchesState.Failed -> Centered(modifier) { Text(state.message) }
+    is MatchesState.Failed -> LoadFailed(state.message, modifier)
     // room at the bottom: the button doesn't cover the last match
-    is MatchesState.Loaded -> {
-        var day by rememberSaveable { mutableStateOf(LocalDate.now()) }
-        val week by rememberAgenda(teamId, AgendaSpan.WEEK, day, state)
-        LazyColumn(modifier, contentPadding = PaddingValues(bottom = 88.dp)) {
-            // the week above the matches
-            agendaWeek(
-                week, LocalDate.now(), withTeam = false,
-                onPrevious = { day = day.minusWeeks(1) },
-                onNext = { day = day.plusWeeks(1) },
-                onToday = { day = LocalDate.now() },
-                onMatch = { _, m -> onMatch(m) },
-                onSession = { _, s -> onSession(s) },
-            )
-            if (state.matches.isEmpty()) {
-                item { Text(stringResource(R.string.no_matches), Modifier.padding(16.dp)) }
-            } else {
-                items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
-            }
+    is MatchesState.Loaded -> LazyColumn(modifier, contentPadding = PaddingValues(top = 8.dp, bottom = 88.dp)) {
+        // the next official match above the matches, when there is one
+        next?.let { item(key = "next-match") { NextMatch(it, onCalendar) { _, m -> onMatch(m) } } }
+        if (state.matches.isEmpty()) {
+            item { Text(stringResource(R.string.no_matches), Modifier.padding(16.dp)) }
+        } else {
+            items(state.matches) { MatchRow(it, onMatch, onUnreadable) }
         }
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (String) -> Unit) = when (m) {
-    is MatchListing.Match -> ListItem(
-        modifier = Modifier.clickable { onMatch(m.id) },
-        // home or away at a glance, in the grey of the secondary text
-        leadingContent = {
-            val place = stringResource(if (m.home) R.string.home else R.string.away)
-            // read as a text: a description would hide the rest of the row
-            when {
-                m.home -> Icon(Icons.Outlined.Home, contentDescription = null, Modifier.readAs(place))
-                else -> Icon(painterResource(R.drawable.ic_away), contentDescription = null, Modifier.readAs(place))
-            }
-        },
-        headlineContent = { Text(m.opponent) },
-        supportingContent = {
-            Column {
-                Row {
-                    Text(matchDate(m.date))
-                    if (!m.finished) {
-                        Text(" · ", Modifier.notRead())
-                        Text(stringResource(R.string.in_progress), color = MaterialTheme.colorScheme.primary)
+private fun MatchRow(m: MatchListing, onMatch: (String) -> Unit, onUnreadable: (String) -> Unit) {
+    val modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+    val grey = MaterialTheme.colorScheme.onSurfaceVariant
+    when (m) {
+        is MatchListing.Match -> BoxRow(
+            onClick = { onMatch(m.id) },
+            modifier = modifier,
+            head = { TeamPicture(m.opponentTeam, m.opponent) },
+            // the sets of the team first, green when it won, red when it lost
+            tail = {
+                // nothing to show of a match not started
+                if (m.standing != MatchStanding.TO_PLAY) {
+                    TailFigure(
+                        "${m.won}-${m.lost}",
+                        resultColor(m.standing == MatchStanding.OVER, m.won.toInt(), m.lost.toInt()),
+                        Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
+                    )
+                }
+            },
+        ) {
+            Text(m.opponent, style = MaterialTheme.typography.bodyLarge)
+            // the state under the date when both don't fit
+            FlowRow(itemVerticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // home or away at a glance
+                    val place = stringResource(if (m.home) R.string.home else R.string.away)
+                    // read as a text: a description would hide the rest of the row
+                    val icon = Modifier.padding(end = 6.dp).size(18.dp).readAs(place)
+                    when {
+                        m.home -> Icon(Icons.Outlined.Home, contentDescription = null, icon, tint = grey)
+                        else -> Icon(painterResource(R.drawable.ic_away), contentDescription = null, icon, tint = grey)
+                    }
+                    Text(matchDate(m.date), style = MaterialTheme.typography.bodyMedium, color = grey)
+                }
+                val state = when (m.standing) {
+                    MatchStanding.TO_PLAY -> R.string.to_play to grey
+                    MatchStanding.IN_PROGRESS -> R.string.in_progress to MaterialTheme.colorScheme.primary
+                    MatchStanding.OVER -> null
+                }
+                state?.let { (label, color) ->
+                    Row {
+                        Text(" · ", Modifier.notRead(), style = MaterialTheme.typography.bodyMedium, color = grey)
+                        Text(stringResource(label), style = MaterialTheme.typography.bodyMedium, color = color)
                     }
                 }
-                // B of a match scouted by A: only its result here
-                if (m.scoutedBy != null) Text(stringResource(R.string.scouted_by_opponent))
             }
-        },
-        // the sets of the team first, green when it won, red when it lost
-        trailingContent = {
+            // B of a match scouted by A: only its result here
+            if (m.scoutedBy != null) {
+                Text(stringResource(R.string.scouted_by_opponent), style = MaterialTheme.typography.bodyMedium, color = grey)
+            }
+        }
+        // why, when it's known: e.g. a set this version doesn't replay
+        // a touch deletes it, once confirmed
+        is MatchListing.Unreadable -> BoxRow(
+            onClick = { onUnreadable(m.folder) },
+            modifier = modifier,
+            head = { Icon(painterResource(Level.ERROR.icon), contentDescription = null, Modifier.size(32.dp), tint = Level.ERROR.color) },
+        ) {
+            Text(stringResource(R.string.unreadable_match), style = MaterialTheme.typography.bodyLarge)
             Text(
-                "${m.won}-${m.lost}",
-                Modifier.readAs(stringResource(R.string.sets_score, m.won.toInt(), m.lost.toInt())),
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.SemiBold,
-                color = when {
-                    !m.finished -> MaterialTheme.colorScheme.onSurface
-                    m.won > m.lost -> Won
-                    else -> Lost
-                },
+                listOfNotNull(m.folder, m.reason, stringResource(R.string.unreadable_match_delete)).joinToString("\n"),
+                style = MaterialTheme.typography.bodyMedium,
+                color = grey,
             )
-        },
-    )
-    // why, when it's known: e.g. a set this version doesn't replay
-    // a touch deletes it, once confirmed
-    is MatchListing.Unreadable -> ListItem(
-        modifier = Modifier.clickable { onUnreadable(m.folder) },
-        headlineContent = { Text(stringResource(R.string.unreadable_match)) },
-        supportingContent = {
-            Text(listOfNotNull(m.folder, m.reason, stringResource(R.string.unreadable_match_delete)).joinToString("\n"))
-        },
-    )
+        }
+    }
 }
 
 /** The date in the language of the phone, as it was where the match was
@@ -348,26 +383,42 @@ fun matchDate(date: String): String = try {
     date
 }
 
+/** A box of a list of players: the square portrait at its head (the
+ * initials without a photo), the name and the role if any, the number at its
+ * tail. The team's list, who comes in. */
 @Composable
-private fun PlayerRow(player: Player, onPlayer: (String) -> Unit) = ListItem(
-    modifier = Modifier.clickable { onPlayer(player.id) },
-    leadingContent = {
-        // the number first: it's what the scout looks for
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.width(40.dp), contentAlignment = Alignment.CenterEnd) {
-                Text(
-                    player.number.toString(),
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.SemiBold,
-                )
-            }
-            Spacer(Modifier.width(8.dp))
-            PlayerPhoto(player.id, 40.dp)
-        }
-    },
-    headlineContent = { Text(player.name) },
-    supportingContent = player.role?.let { { Text(it) } },
-)
+internal fun PortraitRow(
+    id: String,
+    name: String,
+    role: String?,
+    initials: String,
+    number: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) = BoxRow(
+    onClick = onClick,
+    modifier = modifier,
+    head = { Portrait(id, initials) },
+    tail = { TailFigure(number.toString(), MaterialTheme.colorScheme.primary) },
+) {
+    Text(name, style = MaterialTheme.typography.bodyLarge)
+    role?.let {
+        Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+/** The initials at the head of a `BoxRow`, in place of a missing picture. */
+@Composable
+internal fun Initials(initials: String) =
+    Text(initials, style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+/** A transparent photo shows the grey of the box, an old one fills the
+ * square. */
+@Composable
+private fun Portrait(id: String, initials: String) = when (val photo = photoOf(id)) {
+    null -> Initials(initials)
+    else -> Image(photo, contentDescription = null, Modifier.fillMaxSize().testTag(SHOWN_IMAGE), contentScale = ContentScale.Crop)
+}
 
 @Composable
 fun BackButton(onBack: () -> Unit) = IconButton(onClick = onBack) {
@@ -422,13 +473,7 @@ private fun rememberTeamDeletion(id: String, name: String, onDeleted: () -> Unit
         delete = { it.deleteTeam(id) },
         onDeleted = onDeleted,
     )
-    error?.let {
-        AlertDialog(
-            onDismissRequest = { error = null },
-            text = { Text(it) },
-            confirmButton = { TextButton(onClick = { error = null }) { Text(stringResource(android.R.string.ok)) } },
-        )
-    }
+    FailureDialog(error) { error = null }
     return {
         scope.launch {
             try {

@@ -10,6 +10,8 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import io.github.naighes.scout4all.core.EvalEnum
 import io.github.naighes.scout4all.core.MatchForm
@@ -158,6 +160,26 @@ class SetStartTest {
         show(match)
         rule.onNode(hasText(string(R.string.position_spoken, 1)) and hasClickAction()).performClick()
         pick("Carlotta Cambi")
+    }
+
+    /** A set that can't start is told in the dialog over the page, as on the
+     * desktop, and gone once closed. */
+    @Test
+    fun aSetThatCannotStartIsToldInADialog() {
+        show()
+        rule.onNode(hasText("Italia") and hasClickAction()).performClick()
+        rule.onNode(hasText(string(R.string.position_spoken, 1)) and hasClickAction()).performClick()
+        nationalTeam.take(6).forEach { (name, _, _) -> pick(name) }
+        pick("Alessia Orro")
+        pick("Monica De Gennaro")
+        rule.waitFor { runCatching { start().assertIsEnabled() }.isSuccess }
+        // the match is deleted elsewhere while the lineup is chosen
+        core { it.deleteMatch(team, match) }
+        start().performClick()
+        rule.waitFor { rule.onAllNodesWithTag(NOTICE_TAG).fetchSemanticsNodes().isNotEmpty() }
+        assertEquals(0, started)
+        rule.onNode(hasText(string(R.string.ok)) and hasClickAction()).performClick()
+        rule.onNodeWithTag(NOTICE_TAG).assertDoesNotExist()
     }
 
     /** Who serves by the names of the teams; the ball by the one chosen. */

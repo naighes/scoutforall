@@ -76,6 +76,7 @@ import io.github.naighes.scout4all.core.RosterPlayer
 import java.time.DateTimeException
 import java.time.Instant
 import java.time.LocalDate
+import java.time.LocalTime
 import java.time.OffsetDateTime
 import java.time.ZoneId
 import java.time.ZoneOffset
@@ -213,8 +214,8 @@ class MatchFormViewModel(
                 app.core { core ->
                     val form = when (matchId) {
                         null -> when (example) {
-                            true -> core.tutorialMatchForm(teamId, rfc3339(OffsetDateTime.now()))
-                            false -> core.newMatchForm(rfc3339(day?.let { onDay(it, null) } ?: OffsetDateTime.now()))
+                            true -> core.tutorialMatchForm(teamId, rfc3339(app.clock.offsetNow()))
+                            false -> core.newMatchForm(rfc3339(day?.let { onDay(it, app.clock.now().toLocalTime()) } ?: app.clock.offsetNow()))
                         }
                         else -> core.matchForm(teamId, matchId)
                     }
@@ -396,6 +397,9 @@ class MatchFormViewModel(
 
     fun dismissClashes() = update { it.copy(clashes = null) }
 
+    /** The dialog of what went wrong closed. */
+    fun dismissError() = update { it.copy(error = null) }
+
     /** The gym held by another team at that time asks first, unless
      * `confirmed`. */
     fun save(confirmed: Boolean) {
@@ -566,7 +570,7 @@ fun MatchFormScreen(
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             MatchFormState.Loading, is MatchFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
-            is MatchFormState.Failed -> Centered(modifier) { Text(s.message) }
+            is MatchFormState.Failed -> LoadFailed(s.message, modifier)
             is MatchFormState.Editing -> {
                 when {
                     s.b != null || s.onRoster -> RosterContent(s, model, modifier)
@@ -609,6 +613,7 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                     onSelect = model::chooseTeam,
                 )
             }
+            val choices = remember(state.opponents) { state.opponents.associateBy { it.label() } }
             val opponents = remember(state.opponents) { state.opponents.map { it.label() } }
             SuggestField(
                 form.opponent,
@@ -617,6 +622,9 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 error(MatchField.OPPONENT),
                 onChange = { opponent -> model.change(MatchField.OPPONENT) { it.copy(opponent = opponent) } },
                 onPick = model::pickOpponent,
+                leading = { label ->
+                    choices[label]?.let { TeamPicture(it.team, it.name, 32.dp) }
+                },
             )
             // a name, not a team: it may become one
             if (form.opponent.isNotBlank() && form.opponentTeam == null) {
@@ -631,12 +639,13 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 })
             }
             // the day of the match: the time of day stays
+            val clock = clock()
             val date = form.date?.let(::parseDate)
             DayField(
                 stringResource(R.string.date),
                 date?.toLocalDate(),
                 onDay = { day ->
-                    day?.let { d -> model.change(MatchField.DATE) { it.copy(date = rfc3339(onDay(d, date))) } }
+                    day?.let { d -> model.change(MatchField.DATE) { it.copy(date = rfc3339(onDay(d, date?.toLocalTime() ?: clock.now().toLocalTime()))) } }
                 },
                 otherwise = form.date.orEmpty(),
                 error = error(MatchField.DATE),
@@ -689,14 +698,12 @@ private fun MatchFormContent(state: MatchFormState.Editing, model: MatchFormView
                 label = { Text(stringResource(R.string.max_substitutions)) },
                 singleLine = true,
                 isError = error(MatchField.MAX_SUBSTITUTIONS) != null,
-                supportingText = error(MatchField.MAX_SUBSTITUTIONS)?.let { { Text(it) } },
+                supportingText = noteOf(error(MatchField.MAX_SUBSTITUTIONS)),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Done),
             )
             NotesField(form.notes) { notes -> model.change(null) { it.copy(notes = notes) } }
         }
-        state.error?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         // big and at the bottom, where the thumb is
         Button(
             onClick = model::next,
@@ -780,9 +787,7 @@ private fun RosterContent(state: MatchFormState.Editing, model: MatchFormViewMod
                 ) { model.toggle(player.id) }
             }
         }
-        state.error?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         // the players of B may not be on its team yet
         if (b != null) {
             OutlinedButton(
@@ -839,10 +844,9 @@ private fun parseDate(date: String): OffsetDateTime? = try {
     null
 }
 
-/** `day`, at the time of `date` (now without one), with the offset of the
- * phone on that day. */
-private fun onDay(day: LocalDate, date: OffsetDateTime?): OffsetDateTime =
-    day.atTime((date ?: OffsetDateTime.now()).toLocalTime())
+/** `day` at `time`, with the offset of the phone on that day. */
+private fun onDay(day: LocalDate, time: LocalTime): OffsetDateTime =
+    day.atTime(time)
         .atZone(ZoneId.systemDefault())
         .toOffsetDateTime()
 

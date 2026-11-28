@@ -1,5 +1,7 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.onAllNodesWithTag
+import io.github.naighes.scout4all.core.MatchForm
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.ui.test.hasClickAction
@@ -42,6 +44,19 @@ class ImportTest {
             rule.waitForText(string(R.string.import_team_title))
             rule.onNode(hasText(string(R.string.import_archive)) and hasClickAction()).performClick()
             rule.waitFor { core { it.teams() }.filterIsInstance<TeamListing.Team>().size == 1 }
+        }
+    }
+
+    /** A match opened outside a team: the one it goes into has its picture. */
+    @Test
+    fun theTeamOfAnImportedMatchShowsItsPicture() {
+        val team = saveNationalTeam()
+        val match = core { c -> c.saveMatch(team, null, MatchForm("Cuba", "2026-10-25T18:00:00+02:00", true, "6")) }
+        val archive = core { it.exportMatch(team, match) }.bytes
+        open(archive).use {
+            rule.waitForText(string(R.string.import_match_title))
+            // the initials of Italia, without a logo
+            rule.waitFor { rule.onAllNodesWithTag(initialsTag("I"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         }
     }
 

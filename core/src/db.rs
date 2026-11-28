@@ -30,6 +30,10 @@ pub const MIGRATIONS: &[&str] = &[
     include_str!("migrations/0006_match_venue.sql"),
     // v7: TODO/011, the images of the teams and of the persons
     include_str!("migrations/0007_assets.sql"),
+    // v8: TODO/011, optional details of a person
+    include_str!("migrations/0008_person_details.sql"),
+    // v9: TODO/011, the contacts of a person
+    include_str!("migrations/0009_person_contacts.sql"),
 ];
 
 /// The version of the schema this app writes.

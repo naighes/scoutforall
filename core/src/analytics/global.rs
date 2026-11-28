@@ -3,6 +3,7 @@ use crate::{
     errors::AppError,
     providers::{queue_reader::QueueReader, queue_writer::QueueWriter},
 };
+use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -24,7 +25,12 @@ pub fn uploads_enabled() -> bool {
 
 #[async_trait::async_trait]
 pub trait GlobalQueueManager: Send + Sync {
-    async fn enqueue(&self, team_id: Uuid, match_id: String) -> Result<(), AppError>;
+    async fn enqueue(
+        &self,
+        team_id: Uuid,
+        match_id: String,
+        at: DateTime<Utc>,
+    ) -> Result<(), AppError>;
 }
 
 struct QueueManagerWrapper<
@@ -38,8 +44,13 @@ struct QueueManagerWrapper<
 impl<QR: QueueReader + Send + Sync + 'static, QW: QueueWriter + Send + Sync + 'static>
     GlobalQueueManager for QueueManagerWrapper<QR, QW>
 {
-    async fn enqueue(&self, team_id: Uuid, match_id: String) -> Result<(), AppError> {
-        self.inner.enqueue(team_id, match_id).await
+    async fn enqueue(
+        &self,
+        team_id: Uuid,
+        match_id: String,
+        at: DateTime<Utc>,
+    ) -> Result<(), AppError> {
+        self.inner.enqueue(team_id, match_id, at).await
     }
 }
 
@@ -59,9 +70,13 @@ pub fn init_global_queue_manager<
 }
 
 // enqueue a match for upload (thread-safe, uses global queue manager)
-pub async fn enqueue_match_for_upload(team_id: Uuid, match_id: String) -> Result<(), AppError> {
+pub async fn enqueue_match_for_upload(
+    team_id: Uuid,
+    match_id: String,
+    at: DateTime<Utc>,
+) -> Result<(), AppError> {
     match GLOBAL_QUEUE_MANAGER.get() {
-        Some(manager) => manager.enqueue(team_id, match_id).await,
+        Some(manager) => manager.enqueue(team_id, match_id, at).await,
         None => Err(AppError::IO(crate::errors::IOError::Msg(
             "Queue manager not initialized".to_string(),
         ))),

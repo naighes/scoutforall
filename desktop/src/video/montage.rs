@@ -1,7 +1,7 @@
 //! The actions picked made a single video, to share: their pieces of the
 //! video one after the other, each after a card telling the action (who,
 //! the set, the score), and over them how the match stands, as on screen
-//! (`overlay_view`). The actions of a team, match after match: each match
+//! (`overlay_view`), the logos or initials of the teams included. The actions of a team, match after match: each match
 //! after a card of its own (the opponent, the day). On a thread: decoded (`player::Frames`), drawn on
 //! (tiny-skia, the fonts and the icons of the app), encoded (openh264) and
 //! made an MP4 as a recording is (`live::raw`). No sound: the player
@@ -12,14 +12,14 @@ use {
         Standing,
         player::{Frame, Frames},
     },
-    crate::{live::raw, theme},
+    crate::{live::raw, theme, ui},
     ab_glyph::{Font, FontRef, PxScale, ScaleFont, point},
     openh264::{
         OpenH264API,
         encoder::{BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, UsageType},
         formats::{RgbaSliceU8, YUVBuffer},
     },
-    scout4all_core::shapes::enums::PhaseEnum,
+    scout4all_core::{assets::logo_tone, names::initials, shapes::enums::PhaseEnum},
     std::{
         path::{Path, PathBuf},
         sync::{
@@ -60,11 +60,33 @@ pub struct Card {
 pub struct Board {
     pub team: String,
     pub opponent: String,
+    /// beside the names: ours, then the opponent's
+    pub emblems: [Emblem; 2],
     pub set_n: &'static str,
     pub side_out: &'static str,
     pub break_point: &'static str,
     /// how the match stands at a time of the video
     pub at: Box<dyn Fn(u64) -> Option<Standing> + Send>,
+}
+
+/// What stands for a team beside its name: its logo, on a backdrop when it
+/// would vanish on the veil, or its initials.
+pub enum Emblem {
+    Logo(Pixmap, Option<Color>),
+    Initials(String),
+}
+
+impl Emblem {
+    /// Of the team `name`, from the PNG of its logo: its initials without
+    /// one that can be read.
+    pub fn of(png: Option<&[u8]>, name: &str) -> Emblem {
+        png.and_then(|png| {
+            // on the veil, dark in both themes
+            let backdrop = ui::backdrop_fill(logo_tone(png), true).map(rgb);
+            Some(Emblem::Logo(Pixmap::decode_png(png).ok()?, backdrop))
+        })
+        .unwrap_or_else(|| Emblem::Initials(initials(name)))
+    }
 }
 
 /// What to make: the matches one after the other.
@@ -310,7 +332,7 @@ struct Fonts {
 
 impl Fonts {
     fn new() -> Result<Fonts, String> {
-        let [regular, bold] = theme::fonts().bytes;
+        let [regular, bold, _] = theme::fonts().bytes;
         Ok(Fonts {
             regular: FontRef::try_from_slice(regular).map_err(|e| e.to_string())?,
             bold: FontRef::try_from_slice(bold).map_err(|e| e.to_string())?,
@@ -416,8 +438,8 @@ impl Painter<'_> {
         Ok(pixmap)
     }
 
-    /// As `overlay_view`: a line a team (the ball by the one to serve, the
-    /// name, the sets, the points), the set and the phase beside, on a
+    /// As `overlay_view`: a line a team (the ball by the one to serve, its
+    /// emblem, the name, the sets, the points), the set and the phase beside, on a
     /// veil in the corner.
     fn board(&self, pixmap: &mut Pixmap, board: &Board, st: &Standing) {
         let k = self.k();
@@ -437,6 +459,7 @@ impl Painter<'_> {
         let digit_body = text_width(&self.fonts.regular, body, "0");
         let digit_score = text_width(&self.fonts.bold, score, "0");
         let ball = 22.0 * k;
+        let emblem = 28.0 * k;
         let (phase_color, phase_icon, phase_name) = match st.phase {
             PhaseEnum::Break => (colors.break_point, theme::icons::BREAK, board.break_point),
             PhaseEnum::SideOut => (colors.side_out, theme::icons::SIDE_OUT, board.side_out),
@@ -447,7 +470,8 @@ impl Painter<'_> {
             + gap
             + text_width(&self.fonts.bold, body, &st.rotation);
         let right_w = phase_w.max(text_width(&self.fonts.regular, body, &set));
-        let left_w = ball + gap + name_w + gap + digit_body * 2.0 + gap + digit_score * 2.0;
+        let left_w =
+            ball + gap + emblem + gap + name_w + gap + digit_body * 2.0 + gap + digit_score * 2.0;
         let row_h = score * 1.15;
         let (x0, y0) = (24.0 * k, 24.0 * k);
         let box_w = pad_x * 2.0 + left_w + gap * 2.0 + 1.0 + right_w;
@@ -466,7 +490,9 @@ impl Painter<'_> {
             (serving_us, &names[0], st.sets_us, st.score_us),
             (!serving_us, &names[1], st.sets_them, st.score_them),
         ];
-        for (i, (serving, name, sets, points)) in rows.into_iter().enumerate() {
+        for (i, ((serving, name, sets, points), team)) in
+            rows.into_iter().zip(&board.emblems).enumerate()
+        {
             let middle = y0 + pad_y + row_h * (i as f32 + 0.5);
             let baseline = |size: f32| middle + size * 0.35;
             let mut x = x0 + pad_x;
@@ -481,6 +507,8 @@ impl Painter<'_> {
                 );
             }
             x += ball + gap;
+            self.emblem(pixmap, team, x, middle - emblem / 2.0, emblem);
+            x += emblem + gap;
             draw_text(
                 pixmap,
                 &self.fonts.bold,
@@ -568,6 +596,44 @@ impl Painter<'_> {
             &st.rotation,
         );
     }
+
+    /// The emblem of a team in the square of `size` at `x`, `y`.
+    fn emblem(&self, pixmap: &mut Pixmap, emblem: &Emblem, x: f32, y: f32, size: f32) {
+        match emblem {
+            Emblem::Logo(logo, None) => contain(pixmap, logo, x, y, size),
+            Emblem::Logo(logo, Some(backdrop)) => {
+                fill_rounded(pixmap, x, y, size, size, size * 0.15, *backdrop);
+                contain(pixmap, logo, x + size * 0.1, y + size * 0.1, size * 0.8);
+            }
+            Emblem::Initials(letters) => {
+                let small = size * 0.65;
+                let width = text_width(&self.fonts.regular, small, letters);
+                draw_text(
+                    pixmap,
+                    &self.fonts.regular,
+                    small,
+                    x + (size - width) / 2.0,
+                    y + size / 2.0 + small * 0.35,
+                    rgb(theme::DARK.muted),
+                    letters,
+                );
+            }
+        }
+    }
+}
+
+/// `source` whole in the square of `size` at `x`, `y`, in its middle.
+fn contain(pixmap: &mut Pixmap, source: &Pixmap, x: f32, y: f32, size: f32) {
+    let (w, h) = (source.width() as f32, source.height() as f32);
+    let scale = size / w.max(h).max(1.0);
+    let transform =
+        Transform::from_translate(x + (size - w * scale) / 2.0, y + (size - h * scale) / 2.0)
+            .pre_scale(scale, scale);
+    let paint = PixmapPaint {
+        quality: FilterQuality::Bicubic,
+        ..PixmapPaint::default()
+    };
+    pixmap.draw_pixmap(0, 0, source.as_ref(), &paint, transform, None);
 }
 
 fn fill_rounded(pixmap: &mut Pixmap, x: f32, y: f32, w: f32, h: f32, r: f32, color: Color) {
@@ -732,6 +798,10 @@ mod tests {
         Board {
             team: "CORTONA VOLLEY 2026".into(),
             opponent: "POLISPORTIVA SAVINESE".into(),
+            emblems: [
+                Emblem::of(None, "CORTONA VOLLEY 2026"),
+                Emblem::of(None, "POLISPORTIVA SAVINESE"),
+            ],
             set_n: "Set",
             side_out: "SIDE-OUT",
             break_point: "BREAK",
@@ -884,6 +954,49 @@ mod tests {
         assert_eq!(at(154, 48).red(), 0);
         assert_eq!(at(80, 1).red(), 255);
         assert_eq!(at(80, 94).red(), 255);
+    }
+
+    /// How the match stands has the logo of a team before its name, the
+    /// initials of the one without it.
+    #[test]
+    fn the_logos_over_the_video_made() {
+        let mut red = Pixmap::new(8, 8).unwrap();
+        red.fill(Color::from_rgba8(255, 0, 0, 255));
+        let red = red.encode_png().unwrap();
+        let frame = Frame {
+            serial: 0,
+            width: 160,
+            height: 90,
+            rgba: [0, 0, 0, 255].repeat(160 * 90).into(),
+        };
+        // the red pixels of each of the two lines
+        let red_by_line = |emblems: [Emblem; 2]| {
+            let board = Board { emblems, ..board() };
+            let painter = Painter {
+                width: 1280,
+                height: 720,
+                fonts: Fonts::new().unwrap(),
+                board: Some(&board),
+            };
+            let pixmap = painter.frame(&frame, 0).unwrap();
+            [36..70, 71..105].map(|lines| {
+                lines
+                    .flat_map(|y| (0..640).map(move |x| (x, y)))
+                    .filter_map(|(x, y)| pixmap.pixel(x, y))
+                    .filter(|p| p.red() > 200 && p.green() < 40 && p.blue() < 40)
+                    .count()
+            })
+        };
+        let [first, second] = red_by_line([
+            Emblem::of(Some(&red), "Cortona"),
+            Emblem::of(Some(b"no image"), "Savinese"),
+        ]);
+        assert!(first > 400, "{first}");
+        assert_eq!(second, 0);
+        assert!(
+            matches!(Emblem::of(Some(b"no image"), "Savinese"), Emblem::Initials(s) if s == "S")
+        );
+        assert_eq!(red_by_line(board().emblems), [0, 0]);
     }
 
     /// Stopped: no video.

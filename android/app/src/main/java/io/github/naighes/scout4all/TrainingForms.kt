@@ -73,6 +73,9 @@ import java.time.LocalTime
 import java.time.format.TextStyle
 import java.util.Locale
 
+/** What an entry of a series may miss, each on its field. */
+private enum class EntryField { DAY, TIME, DURATION, UNTIL }
+
 /** The text under the field an error is about, or at the bottom. */
 internal class Failure(val field: TrainingField?, val text: String)
 
@@ -174,7 +177,7 @@ private fun SessionFields(
     val first = remember {
         draft.start?.let(LocalDateTime::parse)
             ?: initialDay?.atTime(initialTime ?: LocalTime.of(18, 0))
-            ?: LocalDateTime.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
+            ?: app.clock.now().plusHours(1).withMinute(0).withSecond(0).withNano(0)
     }
     val busyDays = rememberBusyDays(teamId)
     var day by rememberSaveable { mutableStateOf<LocalDate?>(first.toLocalDate()) }
@@ -191,7 +194,8 @@ private fun SessionFields(
     var micro by rememberSaveable { mutableStateOf(draft.microcycle) }
     var touched by rememberSaveable { mutableStateOf(false) }
     var failure by remember { mutableStateOf<Failure?>(null) }
-    var entryInvalid by remember { mutableStateOf(false) }
+    // the field to correct for the entry of a series to be whole
+    var wrong by remember { mutableStateOf<EntryField?>(null) }
     var conflicts by remember { mutableStateOf<List<SeriesConflictRecord>?>(null) }
     // the draft of a session of a series, waiting for where it goes
     var asking by remember { mutableStateOf<SessionDraft?>(null) }
@@ -203,7 +207,7 @@ private fun SessionFields(
     }
     fun edit(change: () -> Unit) {
         change()
-        entryInvalid = false
+        wrong = null
         onChanged()
     }
     fun current(): SessionDraft = draft.copy(
@@ -267,24 +271,24 @@ private fun SessionFields(
             busy = false
         }
     }
-    // the entry in the form, if whole
+    // the entry in the form, if whole: else its first field to correct
     fun entry(): SeriesDraft? {
-        val d = day ?: return null
-        val t = time ?: return null
-        val m = duration.trim().toUShortOrNull()?.takeIf { it > 0u } ?: return null
-        val last = until?.takeIf { !it.isBefore(d) } ?: return null
+        fun refused(field: EntryField): Nothing? {
+            wrong = field
+            return null
+        }
+        val d = day ?: return refused(EntryField.DAY)
+        val t = time ?: return refused(EntryField.TIME)
+        val m = duration.trim().toUShortOrNull()?.takeIf { it > 0u } ?: return refused(EntryField.DURATION)
+        val last = until?.takeIf { !it.isBefore(d) } ?: return refused(EntryField.UNTIL)
         return SeriesDraft(d.toString(), last.toString(), listOf(SeriesBand(d.dayOfWeek.value.toUByte(), t.format(HOUR_MINUTE), m, venue)))
     }
     // Continue: the entry kept, the form ready for the next (the day after)
     fun next() {
-        val e = entry()
-        if (e == null) {
-            entryInvalid = true
-            return
-        }
+        val e = entry() ?: return
         entries.add(e)
         day = day?.plusDays(1)
-        entryInvalid = false
+        wrong = null
         onChanged()
     }
     fun make(all: List<SeriesDraft>, others: Boolean, confirmed: Boolean) {
@@ -312,13 +316,11 @@ private fun SessionFields(
     }
     // Finish: all the entries, the one in the form last
     fun finish(others: Boolean = false, confirmed: Boolean = false) {
-        val e = entry()
-        if (e == null) {
-            entryInvalid = true
-            return
-        }
+        val e = entry() ?: return
         make(entries + e, others, confirmed)
     }
+    val entryNote = stringResource(R.string.tr_entry_invalid)
+    fun noteFor(field: EntryField): String? = entryNote.takeIf { series && wrong == field }
     clashes?.let {
         ClashDialog(it, onConfirm = {
             clashes = null
@@ -377,14 +379,14 @@ private fun SessionFields(
                 stringResource(R.string.date),
                 day,
                 onDay = { d -> edit { day = d } },
-                error = ErrorFor(failure, TrainingField.START),
+                error = noteFor(EntryField.DAY) ?: ErrorFor(failure, TrainingField.START),
                 busy = busyDays,
             )
-            TimeField(stringResource(R.string.tr_time), time, onTime = { t -> edit { time = t } })
-            NumberField(R.string.tr_session_duration, duration, ErrorFor(failure, TrainingField.DURATION)) { edit { duration = it } }
+            TimeField(stringResource(R.string.tr_time), time, onTime = { t -> edit { time = t } }, error = noteFor(EntryField.TIME))
+            NumberField(R.string.tr_session_duration, duration, noteFor(EntryField.DURATION) ?: ErrorFor(failure, TrainingField.DURATION)) { edit { duration = it } }
             VenueChoice(teamId, venue, onVenue = { v -> edit { venue = v } })
             if (series) {
-                DayField(stringResource(R.string.tr_until), until, onDay = { d -> edit { until = d } }, busy = busyDays)
+                DayField(stringResource(R.string.tr_until), until, onDay = { d -> edit { until = d } }, error = noteFor(EntryField.UNTIL), busy = busyDays)
             } else {
                 OutlinedTextField(
                     title,
@@ -406,11 +408,7 @@ private fun SessionFields(
                 NumberField(R.string.tr_session_actual, actual, ErrorFor(failure, TrainingField.ACTUAL_DURATION)) { edit { actual = it } }
             }
         }
-        val message = when {
-            entryInvalid -> stringResource(R.string.tr_entry_invalid)
-            else -> failure.elsewhere(TrainingField.START, TrainingField.DURATION, TrainingField.ACTUAL_DURATION)
-        }
-        message?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+        FailureDialog(failure.elsewhere(TrainingField.START, TrainingField.DURATION, TrainingField.ACTUAL_DURATION)) { failure = null }
         // big and at the bottom, where the thumb is
         if (series) {
             Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -509,7 +507,7 @@ internal fun NumberField(label: Int, value: String, error: String?, onChange: (S
     label = { Text(stringResource(label)) },
     singleLine = true,
     isError = error != null,
-    supportingText = error?.let { { Text(it) } },
+    supportingText = noteOf(error),
     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number, imeAction = ImeAction.Next),
 )
 
@@ -627,7 +625,7 @@ private fun ActivityFields(
                 label = { Text(stringResource(R.string.name)) },
                 singleLine = true,
                 isError = ErrorFor(failure, TrainingField.NAME) != null,
-                supportingText = ErrorFor(failure, TrainingField.NAME)?.let { { Text(it) } },
+                supportingText = noteOf(ErrorFor(failure, TrainingField.NAME)),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.Next),
             )
             OutlinedTextField(
@@ -652,9 +650,7 @@ private fun ActivityFields(
                 onSelect = { edit { status = it } },
             )
         }
-        failure.elsewhere(TrainingField.NAME, TrainingField.PLANNED, TrainingField.ACTUAL)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        FailureDialog(failure.elsewhere(TrainingField.NAME, TrainingField.PLANNED, TrainingField.ACTUAL)) { failure = null }
         Button(
             onClick = {
                 busy = true
@@ -825,9 +821,7 @@ private fun DuplicateFields(
             CheckRow(stringResource(R.string.tr_copy_objectives), objectives, onChecked = { objectives = it })
             CheckRow(stringResource(R.string.tr_copy_activities), activities, onChecked = { activities = it })
         }
-        failure.elsewhere(TrainingField.START)?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        FailureDialog(failure.elsewhere(TrainingField.START)) { failure = null }
         Button(
             onClick = { duplicate(false) },
             enabled = !busy,

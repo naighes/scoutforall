@@ -328,17 +328,28 @@ class NarrowedSummaryTest {
             rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).assertExists()
         }
         rule.onNode(hasText(string(R.string.stats_summary)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        // side out only: the aces are gone
+        // side out only: no aces of ours, no break points, no serve
+        val shown = { id: Int -> rule.onAllNodes(hasText(string(id), substring = true)).fetchSemanticsNodes().isNotEmpty() }
+        assert(shown(R.string.break_points))
         rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.onNode(hasText("side-out", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        rule.waitFor { aces("0") }
+        rule.waitFor { !shown(R.string.break_points) }
+        assert(!aces("2") && !aces("0"))
+        assert(rule.onAllNodes(hasText("Serve", ignoreCase = true)).fetchSemanticsNodes().isEmpty())
         // the detail has the same phase
         rule.onNode(hasText(string(R.string.stats_detail)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitFor { rule.onAllNodes(hasText("side-out", ignoreCase = true) and hasClickAction()).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasText(string(R.string.filter_phase)) and hasClickAction()).assertDoesNotExist()
+        // at break point: no attack on our reception to choose
+        rule.onNode(hasText(string(R.string.stats_distribution)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        val chip = hasText(string(R.string.first_attack)) and hasClickAction()
+        rule.waitFor { rule.onAllNodes(chip).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasText("side-out", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText("break", substring = true, ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitFor { rule.onAllNodes(chip).fetchSemanticsNodes().isEmpty() }
         // and back to all of them: the aces are there again
         rule.onNode(hasText(string(R.string.stats_summary)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        rule.onNode(hasText("side-out", ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNode(hasText("break", substring = true, ignoreCase = true) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.onNode(hasText(string(R.string.filter_all)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitFor { aces("2") }
     }

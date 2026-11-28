@@ -77,7 +77,8 @@ mod tests {
     fn a_removed_gym_is_told_as_removed() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core.tutorial_team().unwrap();
         let gym = core
             .save_venue(

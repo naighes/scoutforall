@@ -34,7 +34,7 @@ mod tests {
             technique::{ServeTypeEnum, TechniqueEnum},
         },
     };
-    use chrono::{DateTime, Duration, FixedOffset, Utc};
+    use chrono::{DateTime, Duration, FixedOffset};
     use rusqlite::params;
     use uuid::Uuid;
 
@@ -105,7 +105,7 @@ mod tests {
 
     fn serve(player: Uuid) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::S,
             player: Some(player),
             eval: Some(EvalEnum::Positive),

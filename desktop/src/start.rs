@@ -173,6 +173,15 @@ impl StartScreen {
         self.error = Some(reason);
     }
 
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
+    }
+
     fn go_to(&mut self, step: Step) {
         self.step = step;
         self.lineup = self.start.lineup();
@@ -409,10 +418,6 @@ impl StartScreen {
     }
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         let left = container(ui::panel(
             Some(&self.step_title(s)),
             self.choices_view(s, c),
@@ -434,7 +439,7 @@ impl StartScreen {
             .height(Length::Fill)
             .into(),
         };
-        column![error, body].spacing(10).into()
+        body
     }
 
     fn choices_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
@@ -753,6 +758,13 @@ mod tests {
                 birth_date: String::new(),
                 height_cm: String::new(),
                 notes: String::new(),
+                nationality: None,
+                dominant_hand: None,
+                federation_id: String::new(),
+                email: String::new(),
+                phone_country: None,
+                phone: String::new(),
+                birth_place: String::new(),
                 person: None,
             };
             app.save_player(team.clone(), None, player, false).unwrap();
@@ -765,7 +777,8 @@ mod tests {
     #[test]
     fn the_photo_of_a_player_is_read_for_the_lineup() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = new_match(&app);
         let first = app.team(team.clone()).unwrap().players[0].id.clone();
         let open = |app: &Scout4All| {
@@ -778,6 +791,20 @@ mod tests {
         assert_eq!(open(&app).photo_ids(), vec![first]);
     }
 
+    /// A set that can't start is told by the app in its dialog, and gone
+    /// once closed.
+    #[test]
+    fn a_failure_of_the_start_is_told_over_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let (team, m) = new_match(&app);
+        let start = app.set_start(team.clone(), m.clone()).unwrap();
+        let mut screen = StartScreen::new(start, None, team, m);
+        screen.failed("no set".into());
+        crate::assert_told_over(crate::Screen::Start(Box::new(screen)), "no set");
+    }
+
     fn press(screen: &mut StartScreen, ck: KeyCombination) -> Outcome {
         screen.key(ck)
     }
@@ -785,7 +812,8 @@ mod tests {
     #[test]
     fn the_set_starts_from_the_keys_and_esc_undoes() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = new_match(&app);
         let start = app.set_start(team.clone(), m.clone()).unwrap();
         let mut screen = StartScreen::new(start, None, team.clone(), m.clone());
@@ -829,7 +857,8 @@ mod tests {
     #[test]
     fn a_position_clicked_is_chosen_again_then_the_choices_go_on() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let (team, m) = new_match(&app);
         let start = app.set_start(team.clone(), m.clone()).unwrap();
         let mut screen = StartScreen::new(start, None, team, m);
@@ -879,7 +908,8 @@ mod tests {
     #[test]
     fn esc_on_the_first_choice_goes_back() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team, m) = new_match(&app);
         let start = app.set_start(team.clone(), m.clone()).unwrap();
         let mut screen = StartScreen::new(start, None, team, m);
@@ -897,7 +927,8 @@ mod tests {
     #[test]
     fn both_sides_choose_the_lineup_of_b_after_the_one_of_a() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = team_of_seven(&app, "Cortona");
         let b = team_of_seven(&app, "Arezzo");
         let form = MatchForm {

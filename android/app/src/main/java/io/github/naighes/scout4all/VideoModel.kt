@@ -28,6 +28,7 @@ import io.github.naighes.scout4all.core.TeamClipMatch
 import io.github.naighes.scout4all.core.VideoAlignment
 import io.github.naighes.scout4all.core.VideoEventRow
 import io.github.naighes.scout4all.core.VideoFileRow
+import io.github.naighes.scout4all.core.VideoLogos
 import io.github.naighes.scout4all.core.VideoReview
 import io.github.naighes.scout4all.core.VideoStanding
 import kotlinx.coroutines.Dispatchers
@@ -35,7 +36,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.TimeZone
 
 /** What the video screen opens: the whole match, or the actions picked in
  * the statistics, of a match or of the matches of a team one after the
@@ -54,9 +54,6 @@ sealed interface VideoRequest {
         val matches: List<TeamClipMatch>,
         /** the ones without a video: left out of the video made, said */
         val leftOut: List<TeamClipMatch> = emptyList(),
-        /** the team of the matches: B's actions are seen in the video of
-         * A, only to see */
-        val side: MatchSide = MatchSide.A,
     ) : VideoRequest
 }
 
@@ -66,12 +63,12 @@ sealed interface VideoRequest {
 const val CLIPS_KEY = "clips"
 
 /** The actions to watch as the screen saves them. */
-fun VideoRequest.Clips.saved(): String = saveClips(SavedClips(teamId, pick, title, matches, leftOut, side))
+fun VideoRequest.Clips.saved(): String = saveClips(SavedClips(teamId, pick, title, matches, leftOut))
 
 /** The actions to watch as the screen saved them; none when they can't be
  * read. */
 fun savedClips(saved: String?): VideoRequest.Clips? =
-    saved?.let(::restoreClips)?.let { VideoRequest.Clips(it.teamId, it.pick, it.title, it.matches, it.leftOut, it.side) }
+    saved?.let(::restoreClips)?.let { VideoRequest.Clips(it.teamId, it.pick, it.title, it.matches, it.leftOut) }
 
 /** How far a touch shifts the sync. */
 const val SHIFT_MS = 500L
@@ -134,6 +131,13 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         private set
     var standing by mutableStateOf<VideoStanding?>(null)
         private set
+    /** the logos of the teams of the match shown, for how it stands */
+    var logos by mutableStateOf<VideoLogos?>(null)
+        private set
+    /** the photos of who touched in the events, by player id: only who has
+     * one */
+    var photos by mutableStateOf<Map<String, ByteArray>>(emptyMap())
+        private set
 
     /** the event chosen follows the video: off once chosen by hand, on
      * again when the video is moved or played */
@@ -151,6 +155,9 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         is VideoRequest.Match -> request.matchId
         is VideoRequest.Clips -> request.matches.getOrNull(at)?.matchId.orEmpty()
     }
+    /** with the actions of a team, the match shown: its team A (the video
+     * is its), the side of the actions */
+    private val shown: TeamClipMatch? get() = clips?.matches?.getOrNull(at)
 
     init {
         player.addListener(object : Player.Listener {
@@ -183,12 +190,18 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
         at = index
         val pick = clips?.pick
         review = try {
-            app.core { it.videoReview(request.teamId, matchId, clips?.side ?: MatchSide.A, pick) }
+            app.core { it.videoReview(shown?.teamId ?: request.teamId, matchId, shown?.side ?: MatchSide.A, pick) }
         } catch (e: MobileException) {
             error = e.reason
             null
         }
+        logos = try {
+            review?.let { r -> app.core { r.logos() } }
+        } catch (e: MobileException) {
+            null
+        }
         loadFiles()
+        photos = app.personPhotos(events.mapNotNull { it.event.event.player?.id })
         loading = false
         if (clips != null) events.indices.firstOrNull { target(it) != null }?.let { goToEvent(it) }
     }
@@ -471,7 +484,7 @@ class VideoModel(private val app: Scout4AllApplication, private val request: Vid
             }
             NewVideoFile(uri.toString(), displayName(context, uri))
         }
-        val offset = TimeZone.getDefault().getOffset(System.currentTimeMillis()) / 1000
+        val offset = app.clock.offset().totalSeconds
         change(files = true) { it.addFiles(added, offset) }
     }
 

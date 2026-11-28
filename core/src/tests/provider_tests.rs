@@ -35,7 +35,7 @@ mod tests {
             technique::{ServeTypeEnum, TechniqueEnum},
         },
     };
-    use chrono::{Duration, Utc};
+    use chrono::Duration;
     use uuid::Uuid;
 
     struct Providers {
@@ -89,6 +89,12 @@ mod tests {
             birth_date: None,
             height_cm: None,
             notes: String::new(),
+            nationality: None,
+            dominant_hand: None,
+            federation_id: String::new(),
+            email: String::new(),
+            phone: String::new(),
+            birth_place: String::new(),
         })
         .collect()
     }
@@ -110,7 +116,7 @@ mod tests {
 
     fn serve(player: Uuid) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::S,
             player: Some(player),
             eval: Some(EvalEnum::Positive),
@@ -122,7 +128,7 @@ mod tests {
 
     fn their_error() -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type: EventTypeEnum::OE,
             player: None,
             eval: None,
@@ -142,7 +148,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -333,6 +339,56 @@ mod tests {
         assert_eq!(saved, read);
     }
 
+    /// A new player is written with every detail given.
+    #[tokio::test]
+    async fn a_new_player_keeps_every_detail() {
+        let db = database();
+        let p = sqlite(&db);
+        let mut team = team(&p, players()).await;
+        let details = crate::providers::team_writer::PlayerDetails {
+            birth_date: chrono::NaiveDate::from_ymd_opt(2004, 5, 6),
+            height_cm: Some(178),
+            notes: "notes".into(),
+            nationality: crate::shapes::country::CountryCode::parse("IT"),
+            dominant_hand: Some(crate::shapes::player::DominantHand::Left),
+            federation_id: "FIPAV-1".into(),
+            email: "anna@example.com".into(),
+            phone: "+393331234567".into(),
+            birth_place: "Cortona".into(),
+        };
+        let saved = p
+            .team_writer
+            .save_player(
+                PlayerInput::New {
+                    name: "Anna".into(),
+                    role: RoleEnum::Setter,
+                    number: 10,
+                    details: details.clone(),
+                },
+                &mut team,
+            )
+            .await
+            .unwrap();
+        let read = p.team_reader.read_single(&team.id).await.unwrap();
+        let expected = PlayerEntry {
+            id: saved.id,
+            name: "Anna".into(),
+            role: Some(RoleEnum::Setter),
+            number: 10,
+            deleted: false,
+            birth_date: details.birth_date,
+            height_cm: details.height_cm,
+            notes: details.notes,
+            nationality: details.nationality,
+            dominant_hand: details.dominant_hand,
+            federation_id: details.federation_id,
+            email: details.email,
+            phone: details.phone,
+            birth_place: details.birth_place,
+        };
+        assert_eq!(read.find_player(saved.id), Some(&expected));
+    }
+
     /// A player no match tells of leaves the team; one a match tells of (in
     /// a lineup, in an event) stays for it, without the personal details,
     /// out of the active players.
@@ -410,7 +466,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "B",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     6,
                     "",
@@ -453,7 +509,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "B",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     6,
                     "",
@@ -463,8 +519,8 @@ mod tests {
             .await
             .unwrap();
         let mut queue = UploadQueue::default();
-        queue.enqueue(team.id, first.id.clone());
-        queue.enqueue(team.id, second.id.clone());
+        queue.enqueue(team.id, first.id.clone(), crate::tests::clock::now());
+        queue.enqueue(team.id, second.id.clone(), crate::tests::clock::now());
         queue.mark_retry(&team.id, &first.id);
         p.queue_writer.save(&queue).await.unwrap();
         let read = p.queue_reader.load().await.unwrap();
@@ -824,7 +880,7 @@ mod tests {
 
         // exported and imported elsewhere
         let uuid = Uuid::parse_str(&m.id).unwrap();
-        let zip = archive::export(&db, Subject::Match(uuid)).unwrap();
+        let zip = archive::export(&db, Subject::Match(uuid), crate::tests::clock::now()).unwrap();
         let target = database();
         archive::import(&target, &zip, &Language::default()).unwrap();
         let target = sqlite(&target);
@@ -853,7 +909,7 @@ mod tests {
         let (setter, oh1, mb2, opposite, oh2, mb1, libero) =
             (ids[0], ids[1], ids[2], ids[3], ids[4], ids[5], ids[6]);
         let act = |event_type, player, eval| EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player: Some(player),
             eval: Some(eval),
@@ -872,7 +928,7 @@ mod tests {
                         team,
                         crate::match_form::MatchInput::against(
                             "Cortona Volley",
-                            Utc::now().fixed_offset(),
+                            crate::tests::clock::now().fixed_offset(),
                             true,
                             DEFAULT_MAX_SUBSTITUTIONS,
                             "",

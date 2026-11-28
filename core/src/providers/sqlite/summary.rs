@@ -94,6 +94,18 @@ pub(crate) fn competition_of(tx: &Transaction, match_id: Uuid) -> Result<Option<
     .map(Option::flatten)
 }
 
+/// The team B of the match, none for a name only, read from the match.
+pub(crate) fn opponent_of(tx: &Transaction, match_id: Uuid) -> Result<Option<Uuid>, AppError> {
+    tx.query_row(
+        "SELECT team_b FROM matches WHERE id = ?1",
+        [Sql(match_id)],
+        |r| r.get::<_, Option<Sql<Uuid>>>(0).map(|c| c.map(|c| c.0)),
+    )
+    .optional()
+    .map_err(sqlite)
+    .map(Option::flatten)
+}
+
 /// No row for the match: the next listing replays it.
 pub(crate) fn forget(tx: &Transaction, match_id: Uuid) -> Result<(), AppError> {
     tx.execute(
@@ -145,6 +157,7 @@ pub(crate) fn cached(
                         resume: r.get(8)?,
                         next_set_number: r.get(9)?,
                         competition_id: r.get::<_, Option<Sql<Uuid>>>(10)?.map(|c| c.0),
+                        opponent_team: r.get::<_, Option<Sql<Uuid>>>(0)?.map(|id| id.0),
                     },
                 ))
             },

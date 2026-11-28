@@ -69,7 +69,7 @@ fun MatchStatsScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             MatchStatsState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is MatchStatsState.Failed -> Centered(modifier) { Text(s.message) }
+            is MatchStatsState.Failed -> LoadFailed(s.message, modifier)
             is MatchStatsState.Loaded -> Column(modifier) {
                 StatsPages(
                     s.stats,

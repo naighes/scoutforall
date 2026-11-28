@@ -23,7 +23,7 @@ mod tests {
         storage::{Store, layout, memory::MemoryStore},
         tests::EN,
     };
-    use chrono::{Datelike, Local};
+    use chrono::Datelike;
     use std::{collections::HashSet, sync::Arc};
 
     fn store() -> Arc<dyn Store> {
@@ -78,13 +78,25 @@ mod tests {
     async fn a_new_installation_gets_the_national_team_once() {
         let store = store();
         let (reader, writer) = database();
-        let added = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
-            .await
-            .unwrap();
+        let added = add_example_team_if_new(
+            store.as_ref(),
+            &reader,
+            &writer,
+            EN,
+            crate::tests::clock::this_year(),
+        )
+        .await
+        .unwrap();
         assert!(added.is_some());
-        let again = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
-            .await
-            .unwrap();
+        let again = add_example_team_if_new(
+            store.as_ref(),
+            &reader,
+            &writer,
+            EN,
+            crate::tests::clock::this_year(),
+        )
+        .await
+        .unwrap();
         assert!(again.is_none());
 
         let teams = reader.read_all().await.unwrap();
@@ -94,7 +106,7 @@ mod tests {
             _ => unreachable!("the example team should be readable"),
         };
         assert_eq!(team.name, "Italy");
-        assert_eq!(i32::from(team.year), Local::now().year());
+        assert_eq!(i32::from(team.year), crate::tests::clock::now().year());
         assert_eq!(
             team.classification,
             Some(TeamClassificationEnum::TopInternational)
@@ -121,9 +133,15 @@ mod tests {
         let store = store();
         store.write(layout::CONFIG, b"{}").await.unwrap();
         let (reader, writer) = database();
-        let added = add_example_team_if_new(store.as_ref(), &reader, &writer, EN)
-            .await
-            .unwrap();
+        let added = add_example_team_if_new(
+            store.as_ref(),
+            &reader,
+            &writer,
+            EN,
+            crate::tests::clock::this_year(),
+        )
+        .await
+        .unwrap();
         assert!(added.is_none());
         assert!(!reader.any_team_ever().unwrap());
     }
@@ -134,10 +152,16 @@ mod tests {
         let add = || async {
             let store = store();
             let (reader, writer) = database();
-            add_example_team_if_new(store.as_ref(), &reader, &writer, labels(LanguageEnum::It))
-                .await
-                .unwrap()
-                .unwrap()
+            add_example_team_if_new(
+                store.as_ref(),
+                &reader,
+                &writer,
+                labels(LanguageEnum::It),
+                crate::tests::clock::this_year(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
         };
         let (one, other) = (add().await, add().await);
         assert_eq!(one.name, "Italia");
@@ -190,7 +214,7 @@ mod tests {
 
     #[test]
     fn the_match_of_the_tutorial_is_at_home_against_brazil() {
-        let date = chrono::Utc::now().fixed_offset();
+        let date = crate::tests::clock::now().fixed_offset();
         let form = tutorial_match(labels(LanguageEnum::It), date, &[]);
         assert_eq!(form.opponent, "Brasile");
         assert!(form.home);
@@ -201,7 +225,7 @@ mod tests {
     /// Seen again the same day: another match, not one already there.
     #[test]
     fn the_match_of_the_tutorial_seen_again_is_numbered() {
-        let date = chrono::Utc::now().fixed_offset();
+        let date = crate::tests::clock::now().fixed_offset();
         let id = |opponent: &str| crate::shapes::r#match::MatchEntry::id_of(opponent, &date);
         let taken = vec![id("Brazil"), id("Brazil 2")];
         assert_eq!(tutorial_match(EN, date, &taken).opponent, "Brazil 3");

@@ -1,9 +1,14 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -41,6 +46,18 @@ class ScreensLayoutTest(private val screen: Size) {
         button?.let { rule.assertWhole(hasText(it) and hasClickAction()) }
     }
 
+    /** The lines of `text` end between words, never within one. */
+    private fun assertWholeWords(text: String) {
+        val layouts = mutableListOf<TextLayoutResult>()
+        rule.onNode(hasText(text), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        val broken = (0 until layout.lineCount - 1)
+            .map { layout.getLineEnd(it) }
+            .filterNot { text[it - 1].isWhitespace() || text[it].isWhitespace() }
+        assertEquals(emptyList<Int>(), broken)
+    }
+
     @Test
     fun theTeams() {
         saveNationalTeam()
@@ -54,9 +71,16 @@ class ScreensLayoutTest(private val screen: Size) {
         val team = saveNationalTeam()
         startFirstSet(team, "Cortona Volley Pallavolo Femminile Valdichiana")
         winMatch(team, "Serbia")
-        assertFits("home", string(R.string.resume), string(R.string.resume)) {
+        assertFits("home", string(R.string.resume)) {
             TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
         }
+        // the calendar above may push the match below a short screen: the
+        // home scrolls, and its button must be whole once there
+        val resume = hasText(string(R.string.resume)) and hasClickAction()
+        rule.onNode(resume).performScrollTo()
+        rule.assertWhole(resume)
+        // beside the button on a narrow screen the name would break a word
+        assertWholeWords("Cortona Volley Pallavolo Femminile Valdichiana")
     }
 
     @Test
@@ -78,18 +102,17 @@ class ScreensLayoutTest(private val screen: Size) {
         }
         rule.waitForText("Monica De Gennaro")
         rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
-        // today, always in the week, may push the match below a short screen
-        rule.waitForText(string(R.string.agenda_week))
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(hasScrollToNodeAction()).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText("Cortona"))
         rule.waitForText("Cortona")
         rule.shot("screen-team-matches-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
-    /** A training today: in the home and in the team, in the week (above
-     * the matches in the team), in the block of today. */
+    /** A training today: in the week of the home, and over the tabs of the
+     * team, in the block of today. */
     private fun planTraining(team: String): String {
-        val start = java.time.LocalDate.now().toString() + "T18:00"
+        val start = testDay().toString() + "T18:00"
         core { it.saveSession(team, null, it.newSessionDraft().copy(start = start, duration = "90", title = "Ricezione")) }
         return "Ricezione"
     }
@@ -115,12 +138,12 @@ class ScreensLayoutTest(private val screen: Size) {
                 TeamsScreen(TeamsViewModel(app), onTeam = {}, onNewTeam = {}, onSettings = {}, onMatch = { _, _ -> })
             }
         }
-        rule.waitUntil(10_000) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
         rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText(string(R.string.agenda_nothing)))).assertExists()
     }
 
     @Test
-    fun theWeekOfTheTeam() {
+    fun theTodayOfTheTeam() {
         val team = saveNationalTeam()
         val title = planTraining(team)
         rule.setContent {
@@ -129,9 +152,10 @@ class ScreensLayoutTest(private val screen: Size) {
             }
         }
         rule.waitForText("Monica De Gennaro")
-        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        // over the tabs: there before choosing one
         rule.waitForText(title)
-        rule.shot("screen-team-week-$screen")
+        rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText(title))).assertExists()
+        rule.shot("screen-team-today-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
 
@@ -143,7 +167,7 @@ class ScreensLayoutTest(private val screen: Size) {
             it.saveSession(
                 team, null,
                 it.newSessionDraft().copy(
-                    start = java.time.LocalDate.now().plusDays(1).toString() + "T18:00",
+                    start = testDay().plusDays(1).toString() + "T18:00",
                     duration = "90", title = "Ricezione e attacco", venue = gym,
                     objectives = "Ricezione a tre, cambio palla", notes = "Portare i palloni leggeri",
                 ),
@@ -153,6 +177,37 @@ class ScreensLayoutTest(private val screen: Size) {
             core { it.saveActivity(session.id, null, it.newActivityDraft().copy(name = name, planned = "20")) }
         }
         return session.id
+    }
+
+    /** Today's official match in the block of today, the one after it in
+     * the matches, with the way to the calendar: never the same twice, a
+     * friendly never the next one. */
+    @Test
+    fun theNextOfficialMatchOfTheTeam() {
+        val team = saveNationalTeam()
+        fun plan(opponent: String, days: Long, friendly: Boolean = false) = core {
+            val date = "${testDay().plusDays(days)}T18:00:00+01:00"
+            it.saveMatch(team, null, MatchForm(opponent, date, true, "6", friendly = friendly))
+        }
+        plan("Serbia", 0)
+        plan("Brasile", 2, friendly = true)
+        plan("Polonia", 5)
+        var calendar = 0
+        rule.setContent {
+            Scout4AllTheme {
+                TeamScreen(team, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {}, onTraining = { calendar++ })
+            }
+        }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(hasTestTag(TODAY_TAG)).fetchSemanticsNodes().isNotEmpty() }
+        rule.onNode(hasTestTag(TODAY_TAG) and hasAnyDescendant(hasText("Serbia"))).assertExists()
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForText(string(R.string.agenda_next_match))
+        rule.onNode(hasTestTag(NEXT_MATCH_TAG) and hasAnyDescendant(hasText("Polonia"))).assertExists()
+        rule.onAllNodes(hasContentDescription(string(R.string.agenda_next_week))).assertCountEquals(0)
+        rule.shot("screen-team-next-match-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        rule.onNodeWithText(string(R.string.agenda_see_calendar)).performClick()
+        assertEquals(1, calendar)
     }
 
     @Test
@@ -171,7 +226,7 @@ class ScreensLayoutTest(private val screen: Size) {
     )
 
     private fun week(team: String): String = core {
-        val monday = java.time.LocalDate.now().let { d -> d.minusDays((d.dayOfWeek.value - 1).toLong()) }
+        val monday = testDay().let { d -> d.minusDays((d.dayOfWeek.value - 1).toLong()) }
         it.saveCycle(
             team, io.github.naighes.scout4all.core.Level.MICROCYCLE, null,
             it.newCycleDraft().copy(title = "Settimana di ricezione", start = monday.toString(), weeks = "1"),
@@ -405,6 +460,9 @@ class ScreensLayoutTest(private val screen: Size) {
 
     @Test
     fun theAbout() = assertFits("about", string(R.string.report_problem)) { AboutScreen(onBack = {}) }
+
+    @Test
+    fun theLicenses() = assertFits("licenses", "SeetaFace Engine") { LicensesScreen(onBack = {}) }
 
     @Test
     fun theTerms() = assertFits("terms", string(R.string.accept_terms), string(R.string.accept_terms)) {

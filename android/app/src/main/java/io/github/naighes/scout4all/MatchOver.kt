@@ -45,10 +45,10 @@ import io.github.naighes.scout4all.core.ScoutingState
 import kotlin.math.sin
 import kotlin.random.Random
 
-/** The last set ended the match: the set, then the match with its sets and
- * the points of each, a word for the team. Won, the trophy and a short
- * fall of confetti, once; lost, nothing that moves. Back to the match, or
- * undo the last point if it was a mistake. */
+/** The last set ended the match: the match with its sets and the points of
+ * each, under the icon of how it went. Won, also a short fall of confetti,
+ * once; lost, nothing that moves. Back to the match, or undo the last point
+ * if it was a mistake. */
 @Composable
 fun MatchOverDialog(state: ScoutingState, result: MatchResult, onUndo: () -> Unit, onDone: () -> Unit) {
     val won = result.won > result.lost
@@ -68,14 +68,12 @@ fun MatchOverDialog(state: ScoutingState, result: MatchResult, onUndo: () -> Uni
                 tonalElevation = AlertDialogDefaults.TonalElevation,
             ) {
                 Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    if (won) {
-                        Icon(
-                            painterResource(R.drawable.ic_trophy),
-                            contentDescription = null,
-                            Modifier.size(40.dp),
-                            tint = MaterialTheme.colorScheme.primary,
-                        )
-                    }
+                    Icon(
+                        painterResource(if (won) R.drawable.ic_trophy else R.drawable.ic_match_lost),
+                        contentDescription = null,
+                        Modifier.size(40.dp),
+                        tint = if (won) MaterialTheme.colorScheme.primary else Lost,
+                    )
                     Text(
                         stringResource(if (won) R.string.match_won else R.string.match_lost),
                         Modifier.padding(top = 8.dp).title(),
@@ -97,12 +95,6 @@ fun MatchOverDialog(state: ScoutingState, result: MatchResult, onUndo: () -> Uni
                         ),
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                    )
-                    Text(
-                        stringResource(if (won) R.string.match_won_cheer else R.string.match_lost_cheer),
-                        Modifier.padding(top = 16.dp),
-                        style = MaterialTheme.typography.bodyLarge,
                         textAlign = TextAlign.Center,
                     )
                     Row(

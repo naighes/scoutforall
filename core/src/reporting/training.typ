@@ -41,7 +41,7 @@
 // the text of the user keeps its lines
 #let lines(body) = body.split("\n").join(linebreak())
 
-#let header() = {
+#let heading-lines = {
   text(8.5pt, fill: muted, tracking: 0.3pt, upper(sheet.kind))
   v(-2pt)
   text(20pt, weight: "semibold", if sheet.title != "" { sheet.title } else { sheet.team })
@@ -49,6 +49,18 @@
   text(11pt, fill: accent, sheet.subtitle)
   v(-2pt)
   text(9pt, fill: muted, [#sheet.team · #labels.season #sheet.season])
+}
+
+#let header() = {
+  if sheet.logo == none { heading-lines } else {
+    grid(
+      columns: (auto, 1fr),
+      column-gutter: 12pt,
+      align: horizon,
+      team-logo(sheet.logo, 48pt),
+      heading-lines,
+    )
+  }
   v(2pt)
   line(length: 100%, stroke: strong-rule)
 }
@@ -130,9 +142,9 @@
 #if sheet.table {
   objectives(sheet.objectives)
   overview()
-  for s in sheet.sessions {
+  for s in sheet.sessions.filter(s => s.heading != none) {
     block(breakable: true, {
-      section(strike-if(s.cancelled, [#s.day #s.time · #s.title]))
+      section(strike-if(s.cancelled, s.heading))
       if s.cancelled { text(fill: muted, labels.cancelled) }
       activities(s)
     })

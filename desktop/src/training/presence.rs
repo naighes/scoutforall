@@ -4,10 +4,11 @@
 //! ones are present, who was unavailable stays out of it, the guests are
 //! not here.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::screen::{Period, period_name},
-    crate::{calendar::text_of, strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
-    chrono::{Local, NaiveDate},
+    crate::{calendar::text_of, notice, strings::Strings, theme::Colors, theme::SIZE_SMALL, ui},
+    chrono::NaiveDate,
     iced::{
         Alignment, Element, Length,
         widget::{Column, Id, column, row, scrollable, text},
@@ -58,7 +59,8 @@ pub struct PresenceTab {
 
 impl PresenceTab {
     pub fn new(core: Arc<Scout4All>, team_id: String) -> PresenceTab {
-        PresenceTab::at(core, team_id, Local::now().date_naive())
+        let today = core.clock().today();
+        PresenceTab::at(core, team_id, today)
     }
 
     pub fn at(core: Arc<Scout4All>, team_id: String, today: NaiveDate) -> PresenceTab {
@@ -214,7 +216,7 @@ impl PresenceTab {
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         if let Some(e) = &self.error {
-            return ui::body(e.clone()).color(c.danger).into();
+            return notice::banner(notice::Level::Error, e, c);
         }
         let header = row![
             ui::pill("‹", false, Some(Message::Previous), c),
@@ -293,7 +295,8 @@ mod tests {
 
     fn core() -> (tempfile::TempDir, Arc<Scout4All>) {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         (dir, core)
     }
 

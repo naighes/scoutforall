@@ -5,7 +5,12 @@
 
 use {
     super::capture::Status,
-    crate::{theme::Colors, ui, video::Picture},
+    crate::{
+        notice::{self, Level},
+        theme::Colors,
+        ui,
+        video::Picture,
+    },
     iced::{
         ContentFit, Element, Length,
         advanced::image::Allocation,
@@ -83,7 +88,7 @@ impl Preview {
     }
 
     /// The picture on black, as large as it fits; until there's one,
-    /// what's wrong (in red) or what's awaited.
+    /// what's wrong (in a banner) or what's awaited.
     pub fn view<'a, M: 'a>(
         &self,
         notice: Option<String>,
@@ -96,10 +101,18 @@ impl Preview {
                 .width(Length::Fill)
                 .height(Length::Fill)
                 .into(),
-            (None, Some(n)) => container(ui::body(n).color(c.danger))
-                .padding(24)
-                .center(Length::Fill)
-                .into(),
+            // on a panel: the tint of the banner is for the theme, not
+            // for the black
+            (None, Some(n)) => container(container(notice::banner(Level::Error, &n, c)).style(
+                move |_| container::Style {
+                    background: Some(c.panel.into()),
+                    border: iced::border::rounded(8),
+                    ..container::Style::default()
+                },
+            ))
+            .padding(24)
+            .center(Length::Fill)
+            .into(),
             (None, None) => container(ui::body(waiting.to_string()).color(c.muted))
                 .center(Length::Fill)
                 .into(),

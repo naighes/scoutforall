@@ -4,12 +4,13 @@
 //! play the files (the desktop with its own decoder, Android with its
 //! player) and ask the review the rest: the logic is the same on both.
 
+use crate::clock::ClockExt;
 use crate::{
     AnalysisPeriod, ClipPick, MatchSide, MobileError, Origins, Scout4All, SetEvent, VideoEvent,
     clips_of, count_of,
     strip::{ClipSpan, clip_spans},
 };
-use chrono::{FixedOffset, Local, Offset};
+use chrono::FixedOffset;
 use scout4all_core::{
     shapes::{enums::PhaseEnum, r#match::MatchEntry},
     video::{self, Anchor, AnchorSource, EventRef, StoredProfile, VideoFile, VideoProfile},
@@ -132,6 +133,14 @@ pub struct VideoStanding {
     pub phase: PhaseEnum,
 }
 
+/// The logos drawn by how the match stands (`VideoStanding`): of the team
+/// the video is told by and of its opponent, none without one.
+#[derive(Debug, Clone, Default, PartialEq, uniffi::Record)]
+pub struct VideoLogos {
+    pub team: Option<Vec<u8>>,
+    pub opponent: Option<Vec<u8>>,
+}
+
 /// A piece of the video of the actions picked: from its margin before to
 /// its margin after, the actions overlapping as one (the first one's card,
 /// the others counted).
@@ -166,6 +175,13 @@ pub struct FileSpan {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, uniffi::Record)]
 pub struct TeamClipMatch {
     pub match_id: String,
+    /// team A of the match, whose video it is (`video_review`): empty
+    /// when saved by a version without it (`restore_clips`)
+    #[serde(default)]
+    pub team_id: String,
+    /// the side the actions are of: B's in a match scouted on both sides
+    #[serde(default)]
+    pub side: MatchSide,
     pub opponent: String,
     /// `YYYY-MM-DD`
     pub day: String,
@@ -259,20 +275,24 @@ impl Scout4All {
     }
 
     /// The matches of the period with actions the pick keeps (every set),
-    /// in the order of the analysis.
+    /// in the order of the analysis; with `opponent`, its actions in the
+    /// matches scouted on both sides (`opponent_analysis`).
     pub fn team_clip_matches(
         &self,
         team_id: String,
         period: AnalysisPeriod,
         competition: Option<Uuid>,
+        opponent: Option<Uuid>,
         pick: ClipPick,
     ) -> Result<Vec<TeamClipMatch>, MobileError> {
         Ok(self
-            .team_clips(&team_id, &period, competition, &pick)?
+            .team_clips(&team_id, &period, competition, opponent, &pick)?
             .into_iter()
             .map(|m| TeamClipMatch {
                 actions: count_of(m.events.len()),
                 match_id: m.match_id,
+                team_id: m.team_id,
+                side: m.side,
                 opponent: m.opponent,
                 day: m.day,
                 has_video: m.has_video,
@@ -310,6 +330,19 @@ impl Scout4All {
     }
 }
 
+impl Scout4All {
+    /// The logos of the teams of the match, as the team of `the_match`
+    /// sees them (of the side B, its own first).
+    pub fn video_logos(&self, the_match: &MatchEntry) -> Result<VideoLogos, MobileError> {
+        let team = the_match.team.id.to_string();
+        Ok(VideoLogos {
+            team: self.team_logo(team.clone())?,
+            opponent: scout4all_core::assets::opponent_logo(&self.db, &the_match.id, &team)?
+                .map(|image| image.data),
+        })
+    }
+}
+
 #[uniffi::export]
 impl VideoReview {
     /// Whether a newer version wrote the profile: shown, not changed.
@@ -323,6 +356,11 @@ impl VideoReview {
 
     pub fn team(&self) -> String {
         self.state().the_match.team.name.clone()
+    }
+
+    pub fn logos(&self) -> Result<VideoLogos, MobileError> {
+        let the_match = self.state().the_match.clone();
+        self.core.video_logos(&the_match)
     }
 
     /// Whether only the actions picked in the statistics are shown.
@@ -391,7 +429,7 @@ impl VideoReview {
         utc_offset_s: i32,
     ) -> Result<(), MobileError> {
         let offset =
-            FixedOffset::east_opt(utc_offset_s).unwrap_or_else(|| Local::now().offset().fix());
+            FixedOffset::east_opt(utc_offset_s).unwrap_or_else(|| self.core.clock.offset());
         let mut st = self.state();
         let Some(profile) = st.profile.clone() else {
             return Ok(());
@@ -592,12 +630,22 @@ impl VideoReview {
         standing(&st.all, position_ms)
     }
 
+    /// How many of the actions shown aren't in the video, left out of its
+    /// `pieces`.
+    pub fn outside(&self) -> u32 {
+        let st = self.state();
+        let total = Some(st.total()).filter(|t| *t > 0);
+        count_of(st.shown().filter(|e| !inside(e.offset_ms, total)).count())
+    }
+
     /// The pieces of the video of the actions shown: each from `before_s`
-    /// before it to `after_s` after it, the ones overlapping as one.
+    /// before it to `after_s` after it, the ones overlapping as one; the
+    /// ones not in the video left out.
     pub fn pieces(&self, before_s: u32, after_s: u32) -> Vec<MontagePiece> {
         let st = self.state();
         let shown: Vec<&VideoEvent> = st.shown().collect();
-        pieces(&shown, &st.all, before_s, after_s)
+        let total = Some(st.total()).filter(|t| *t > 0);
+        pieces(&shown, &st.all, before_s, after_s, total)
             .into_iter()
             .map(|p| MontagePiece {
                 event: st.row(p.event),
@@ -869,17 +917,20 @@ pub struct Piece<'a> {
 }
 
 /// The pieces of the actions `picked`: each from `before_s` before it to
-/// `after_s` after it, the ones overlapping as one; the score before each
-/// from `all` the events.
+/// `after_s` after it, the ones overlapping as one, the ones not in the
+/// video (`total_ms` long when known) left out; the score before each from
+/// `all` the events.
 pub fn pieces<'a>(
     picked: &[&'a VideoEvent],
     all: &[VideoEvent],
     before_s: u32,
     after_s: u32,
+    total_ms: Option<u64>,
 ) -> Vec<Piece<'a>> {
     let (before, after) = (i64::from(before_s) * 1000, u64::from(after_s) * 1000);
     let mut sorted: Vec<(u64, u64, &VideoEvent)> = picked
         .iter()
+        .filter(|e| inside(e.offset_ms, total_ms))
         .filter_map(|e| {
             Some((
                 target(e, before)?,
@@ -959,10 +1010,14 @@ pub struct SavedClips {
     pub matches: Vec<TeamClipMatch>,
     /// without a video: left out, said
     pub left_out: Vec<TeamClipMatch>,
-    /// the team of the matches: B's actions of a match scouted on both
-    /// sides (missing when saved by a version without it: A)
+}
+
+/// What the versions before the team and the side of each match saved:
+/// one side for all of them (missing in older ones: A).
+#[derive(Deserialize)]
+struct SavedSide {
     #[serde(default)]
-    pub side: MatchSide,
+    side: MatchSide,
 }
 
 /// The actions picked written to be saved (empty if they can't be: then
@@ -976,7 +1031,19 @@ pub fn save_clips(clips: SavedClips) -> String {
 /// read (written empty, by another version).
 #[uniffi::export]
 pub fn restore_clips(saved: &str) -> Option<SavedClips> {
-    serde_json::from_str(saved).ok()
+    let mut clips: SavedClips = serde_json::from_str(saved).ok()?;
+    let side = serde_json::from_str::<SavedSide>(saved).ok()?.side;
+    let team_id = clips.team_id.clone();
+    clips
+        .matches
+        .iter_mut()
+        .chain(clips.left_out.iter_mut())
+        .filter(|m| m.team_id.is_empty())
+        .for_each(|m| {
+            m.team_id = team_id.clone();
+            m.side = side;
+        });
+    Some(clips)
 }
 
 /// The name of the video of the actions picked, from what they are: the
@@ -1057,6 +1124,7 @@ pub fn written(ms: u64) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::PNG;
     use crate::{DetailFilter, DvwChoice, DvwOpponent, DvwSide, StatsScope};
     use scout4all_core::shapes::{
         country::CountryCode,
@@ -1103,6 +1171,8 @@ mod tests {
             title: "Attack · #".to_string(),
             matches: vec![TeamClipMatch {
                 match_id: "m1".to_string(),
+                team_id: "t".to_string(),
+                side: MatchSide::A,
                 opponent: "Brasile".to_string(),
                 day: "2026-11-01".to_string(),
                 actions: 7,
@@ -1110,22 +1180,39 @@ mod tests {
             }],
             left_out: vec![TeamClipMatch {
                 match_id: "m2".to_string(),
+                team_id: "a".to_string(),
+                side: MatchSide::B,
                 opponent: "Japan".to_string(),
                 day: "2026-11-02".to_string(),
                 actions: 2,
                 has_video: false,
             }],
-            side: MatchSide::B,
         };
         assert_eq!(
             restore_clips(&save_clips(clips.clone())),
             Some(clips.clone())
         );
-        // saved before the side: A
+        // saved before the team and the side of each match: the team of
+        // the clips, their one side (A when not saved either)
+        let old = |side: &str| {
+            let saved = save_clips(clips.clone())
+                .replace(r#""team_id":"t","side":"A","#, "")
+                .replace(r#""team_id":"a","side":"B","#, "")
+                .replace(r#""left_out""#, &format!(r#"{side}"left_out""#));
+            restore_clips(&saved).map(|c| {
+                c.matches
+                    .iter()
+                    .chain(&c.left_out)
+                    .map(|m| (m.team_id.clone(), m.side))
+                    .collect::<Vec<_>>()
+            })
+        };
+        let t = |side| ("t".to_string(), side);
         assert_eq!(
-            restore_clips(&save_clips(clips.clone()).replace(r#","side":"B""#, "")).map(|c| c.side),
-            Some(MatchSide::A)
+            old(r#""side":"B","#),
+            Some(vec![t(MatchSide::B), t(MatchSide::B)])
         );
+        assert_eq!(old(""), Some(vec![t(MatchSide::A), t(MatchSide::A)]));
         assert_eq!(restore_clips(""), None);
         assert_eq!(restore_clips("{\"team_id\": 3}"), None);
     }
@@ -1162,7 +1249,8 @@ mod tests {
 
     /// The match of the fixture imported, its team and its id.
     fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let choice = DvwChoice {
             opponent: DvwOpponent::Name,
             side: DvwSide::Home,
@@ -1345,7 +1433,8 @@ mod tests {
     #[test]
     fn the_video_of_b_is_corrected_by_the_touches() {
         let dir = tempfile::tempdir().unwrap();
-        let app = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let choice = DvwChoice {
             opponent: DvwOpponent::NewTeam,
             side: DvwSide::Home,
@@ -1382,6 +1471,15 @@ mod tests {
             .clone()
             .video_review(team.clone(), m.clone(), MatchSide::B, None)
             .unwrap();
+        // over the video each side sees its own logo first
+        assert_eq!(of_a.logos().unwrap(), VideoLogos::default());
+        let b = app.analysis_opponents(team.clone()).unwrap()[0].id;
+        app.set_team_logo(b.to_string(), Some(PNG.to_vec()))
+            .unwrap();
+        let theirs = of_a.logos().unwrap();
+        assert_eq!((theirs.team, theirs.opponent.is_some()), (None, true));
+        let ours = of_b.logos().unwrap();
+        assert_eq!((ours.team.is_some(), ours.opponent), (true, None));
         // the video is A's: B's events are placed in it
         assert_eq!(of_b.files().len(), 1);
         of_b.set_durations(vec![9_000_000]).unwrap();
@@ -1469,7 +1567,7 @@ mod tests {
             .unwrap();
         let period = AnalysisPeriod::LastMatches { count: 4 };
         let matches = app
-            .team_clip_matches(team.clone(), period, None, pick.clone())
+            .team_clip_matches(team.clone(), period, None, None, pick.clone())
             .unwrap();
         assert_eq!(matches.len(), 1);
         assert_eq!((matches[0].actions, matches[0].has_video), (count, true));
@@ -1528,6 +1626,29 @@ mod tests {
         let at = review.locate(1_805_000);
         assert_eq!((at.file, at.from_ms), (1, 5_000));
         assert_eq!(review.locate(99_999_999).file, 1);
+    }
+
+    #[test]
+    fn the_actions_outside_the_video_are_in_no_piece() {
+        let dir = tempfile::tempdir().unwrap();
+        let (app, team, id) = imported(&dir);
+        let review = app.video_review(team, id, MatchSide::A, None).unwrap();
+        review.add_files(vec![file("a.mp4")], 0).unwrap();
+        review.set_durations(vec![3 * 3600 * 1000]).unwrap();
+        review.anchor_here(0, 10_000).unwrap();
+        assert_eq!(review.outside(), 0);
+        let count = u32::try_from(review.events().len()).unwrap();
+        // a video that ends half way through the events
+        let half = review.events()[count as usize / 2].offset_ms.unwrap();
+        review.set_durations(vec![half.unsigned_abs()]).unwrap();
+        let outside = review.outside();
+        assert!(outside > 0 && outside < count, "{outside} of {count}");
+        let pieces = review.pieces(5, 5);
+        assert_eq!(
+            pieces.iter().map(|p| p.actions).sum::<u32>(),
+            count - outside
+        );
+        assert!(pieces.iter().all(|p| p.from_ms < half.unsigned_abs()));
     }
 
     #[test]

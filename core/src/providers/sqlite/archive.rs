@@ -20,10 +20,18 @@
 //! - the **training** of a team is an archive of its own (`contents:
 //!   "training"` in the manifest, `training_archive`): the training rows of
 //!   the team, its row, the persons of the attendance;
+//! - the contacts of the persons (email, phone, birth place) only when
+//!   asked for (`Contacts`): without them they're empty, and importing
+//!   leaves those here as they are;
 //! - not the video (paths of a computer), the upload queue (of a device),
 //!   the cache of the lists (derived).
 //!
-//! Importing, all in one transaction (D10):
+//! The manifest always says the schema of this version: the versions before
+//! don't read the archive, and ask to update. Every table is written, empty
+//! ones too.
+//!
+//! Importing (the archives of the versions before too), all in one
+//! transaction (D10):
 //! - the rows are first loaded in a database in memory, with the schema
 //!   of the archive (the manifest says which): its constraints check them,
 //!   its migrations bring them to this version; an archive of a newer
@@ -85,8 +93,8 @@ pub enum Kind {
     Match,
 }
 
-/// What an archive of a team holds besides the usual: the manifest of
-/// versions before it doesn't tell, and reads as an archive of the team.
+/// What an archive of a team holds besides the usual (absent in the
+/// manifest: the team).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Contents {
@@ -101,8 +109,8 @@ pub struct Manifest {
     /// the version of the schema of its rows
     pub schema: i64,
     pub kind: Kind,
-    /// what it holds, when not what `kind` says (absent: as before)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// what it holds, when not what `kind` says
+    #[serde(default)]
     pub contents: Option<Contents>,
     /// the team or the match
     pub id: Uuid,
@@ -121,6 +129,18 @@ pub enum Subject {
     /// the training of the team, apart (`training_archive`)
     Training(Uuid),
 }
+
+/// Whether the contacts of the persons (email, phone, birth place) go in
+/// an archive: data of people often under age, left out unless asked for.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Contacts {
+    Included,
+    #[default]
+    Left,
+}
+
+/// The columns of `persons` that are contacts.
+const CONTACTS: [&str; 3] = ["email", "phone", "birth_place"];
 
 /// What an import did with the rows of a kind already here or not.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -232,14 +252,19 @@ pub(crate) fn invalid(labels: &Labels, why: impl std::fmt::Display) -> AppError 
     AppError::IO(IOError::Msg(format!("{}: {why}", labels.invalid_archive)))
 }
 
-/// The schema of the versions before the training and the gyms (v1.1.0):
-/// an archive with neither has rows as they were then (`venue_id` empty is
-/// left out), so it says this one and those versions read it instead of
-/// asking to update.
-const SCHEMA_BEFORE_TRAINING: i64 = 4;
+/// The archive of `subject` without the contacts, as zip bytes, exported
+/// `now`.
+pub fn export(db: &Database, subject: Subject, now: DateTime<Utc>) -> Result<Vec<u8>, AppError> {
+    export_with(db, subject, Contacts::Left, now)
+}
 
-/// The archive of `subject`, as zip bytes.
-pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
+/// The archive of `subject`, as `export`, with the contacts or not.
+pub fn export_with(
+    db: &Database,
+    subject: Subject,
+    contacts: Contacts,
+    now: DateTime<Utc>,
+) -> Result<Vec<u8>, AppError> {
     let (kind, id, contents) = match subject {
         Subject::Match(id) => (Kind::Match, id, None),
         Subject::Team(id) | Subject::TeamWithMatches(id) => (Kind::Team, id, None),
@@ -259,28 +284,21 @@ pub fn export(db: &Database, subject: Subject) -> Result<Vec<u8>, AppError> {
             Ok((tables, images))
         })?,
     };
-    let gyms = tables
-        .iter()
-        .any(|(t, rows)| *t == "venues" && !rows.is_empty());
-    let schema = match (contents, gyms) {
-        (None, false) => SCHEMA_BEFORE_TRAINING,
-        _ => db::schema_version(),
+    let tables: Vec<(&str, Vec<Row>)> = match contacts {
+        Contacts::Included => tables,
+        Contacts::Left => tables.into_iter().map(without_contacts).collect(),
     };
     let manifest = Manifest {
         format: FORMAT,
-        schema,
+        schema: db::schema_version(),
         kind,
         contents,
         id,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
-        exported_at: Utc::now(),
+        exported_at: now,
     };
     let mut files = vec![(MANIFEST.to_string(), pretty(&manifest)?)];
-    // without gyms the archive is as it was before them
-    for (table, rows) in tables
-        .iter()
-        .filter(|(t, r)| *t != "venues" || !r.is_empty())
-    {
+    for (table, rows) in &tables {
         files.push((format!("{table}.json"), pretty(rows)?));
     }
     files.extend(images);
@@ -450,25 +468,48 @@ pub(crate) fn dump(
                 })
                 .collect())
         }
-        // a match without a gym is written as before the gyms, so that the
-        // versions that don't know them read it
-        "matches" => Ok(rows
-            .into_iter()
-            .map(|mut row| {
-                if row.get("venue_id") == Some(&Json::Null) {
-                    row.remove("venue_id");
-                }
-                row
-            })
-            .collect()),
         _ => Ok(rows),
     }
 }
 
+/// The rows of the table, those of the persons with no contacts.
+fn without_contacts((table, rows): (&str, Vec<Row>)) -> (&str, Vec<Row>) {
+    let rows = match table {
+        "persons" => rows
+            .into_iter()
+            .map(|mut row| {
+                for column in CONTACTS {
+                    row.insert(column.into(), Json::from(""));
+                }
+                row
+            })
+            .collect(),
+        _ => rows,
+    };
+    (table, rows)
+}
+
+/// The details of a person: the columns, empty text or null when not given.
+const DETAILS: [(&str, Option<&str>); 9] = [
+    ("birth_date", None),
+    ("height_cm", None),
+    ("notes", Some("")),
+    ("nationality", None),
+    ("dominant_hand", None),
+    ("federation_id", Some("")),
+    ("email", Some("")),
+    ("phone", Some("")),
+    ("birth_place", Some("")),
+];
+
+fn empty_detail(empty: Option<&str>) -> Json {
+    empty.map_or(Json::Null, Json::from)
+}
+
 fn only_name(mut row: Row) -> Row {
-    row.insert("birth_date".into(), Json::Null);
-    row.insert("height_cm".into(), Json::Null);
-    row.insert("notes".into(), Json::from(""));
+    for (column, empty) in DETAILS {
+        row.insert(column.into(), empty_detail(empty));
+    }
     row.insert("photo_asset_id".into(), Json::Null);
     row
 }
@@ -600,13 +641,16 @@ pub struct MatchPreview {
     pub status: MatchStatus,
 }
 
-/// What the archive holds, read as the import would (the same checks):
-/// nothing is written here.
-pub fn preview(archive: &[u8], language: &Language) -> Result<Preview, AppError> {
+/// What the archive holds, read as the import would (the same checks),
+/// and the logo it has for its team: nothing is written here.
+pub fn preview(
+    archive: &[u8],
+    language: &Language,
+) -> Result<(Preview, Option<Vec<u8>>), AppError> {
     let (manifest, staging) = staged(archive, language.labels())?;
     let staged = Database::new(staging);
     let missing = || not_found(&format!("{:?} {}", manifest.kind, manifest.id));
-    staged.read(|tx| match (manifest.kind, manifest.contents) {
+    let preview = staged.read(|tx| match (manifest.kind, manifest.contents) {
         (Kind::Team, Some(Contents::Training)) => training_archive::preview(tx, &manifest.id),
         (Kind::Team, None) => read_team(tx, &manifest.id).map(Preview::Team),
         (Kind::Match, _) => {
@@ -619,7 +663,14 @@ pub fn preview(archive: &[u8], language: &Language) -> Result<Preview, AppError>
                 status,
             })))
         }
-    })
+    })?;
+    let team = match &preview {
+        Preview::Team(team) => team,
+        Preview::Match(m) => &m.team,
+        Preview::Training(t) => &t.team,
+    };
+    let logo = crate::assets::team_logo(&staged, &team.id.to_string())?;
+    Ok((preview, logo.map(|image| image.data)))
 }
 
 /// Adds what the archive holds that isn't here: see the module.
@@ -809,8 +860,13 @@ fn load(
                 None => Ok(vec![]),
             }?;
             let known = columns(staging, table)?;
-            rows.iter()
-                .try_for_each(|row| insert(staging, table, &known, row))
+            // the images are only those of their index (`archive_assets`):
+            // v1.3.0 left pointers, to none, in the rows of the training
+            rows.into_iter()
+                .try_for_each(|mut row| {
+                    archive_assets::strip(&mut row);
+                    insert(staging, table, &known, &row)
+                })
                 .map_err(|e| invalid(labels, e))
         })
 }
@@ -856,10 +912,9 @@ pub(crate) fn deleted(row: &Row) -> bool {
 /// for the details it lacks (exported with only the name).
 pub(crate) fn agrees_person(local: &Row, row: &Row) -> bool {
     row.iter().all(|(column, value)| {
-        let lacking = matches!(
-            (column.as_str(), value),
-            ("birth_date" | "height_cm", Json::Null) | ("notes", Json::String(_))
-        ) && value.as_str().is_none_or(str::is_empty);
+        let lacking = DETAILS
+            .iter()
+            .any(|(detail, empty)| detail == column && *value == empty_detail(*empty));
         lacking || local.get(column) == Some(value)
     })
 }

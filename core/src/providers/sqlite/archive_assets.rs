@@ -1,8 +1,7 @@
 //! The images in the archives (TODO/011 §4): apart from the JSON, one file
 //! each under `assets/` and an index, `assets.json`, that tells whose they
 //! are. The rows of `teams` and `persons` never carry the columns that
-//! point to them, so the versions before the images read the archive as
-//! it was (they skip the files they don't know).
+//! point to them.
 //!
 //! Importing, the image of a team or a person is taken only when the one
 //! here has none: the local data win.

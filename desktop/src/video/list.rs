@@ -2,6 +2,7 @@
 //! time in the video, the one chosen lit. Each marked by its team (a bar on
 //! the left: ours light blue, theirs pink), the point it ended won or lost
 //! (its score green or red) and a direct error (its symbol red, a cross).
+//! The photo of who touched beside their name.
 
 use {
     super::{Message, clock},
@@ -16,7 +17,20 @@ use {
     },
     scout4all_core::video::EventRef,
     scout4all_mobile::{VideoEvent, video::inside},
+    std::collections::HashMap,
 };
+
+/// The space between the parts of a row.
+const GAP: f32 = 8.0;
+
+/// The width of the panel of the events: wider by the photos when there are
+/// some, so that the names keep theirs.
+pub fn width(pictured: bool) -> f32 {
+    match pictured {
+        true => 400.0 + ui::ROW_PHOTO + GAP,
+        false => 400.0,
+    }
+}
 
 /// The list, to keep the event chosen in sight.
 pub const LIST: &str = "video-events";
@@ -76,6 +90,8 @@ fn row_of<'a>(
     e: &VideoEvent,
     i: usize,
     mark: Mark,
+    // its place, empty without one; none when no event listed has a photo
+    photo: Option<Option<&iced::widget::image::Handle>>,
     chosen: bool,
     anchored: bool,
     duration_ms: Option<u64>,
@@ -163,7 +179,7 @@ fn row_of<'a>(
     };
     let bar = iced::widget::container(iced::widget::space::vertical())
         .width(Length::Fixed(4.0))
-        .height(Length::Fixed(32.0))
+        .height(Length::Fixed(ui::ROW_PHOTO))
         .style(move |_| iced::widget::container::Style {
             background: Some(team.into()),
             border: iced::Border {
@@ -181,10 +197,11 @@ fn row_of<'a>(
             .color(symbol.1)
             .shaping(text::Shaping::Advanced)
             .width(Length::Fixed(16.0)),
-        column![text(name).size(SIZE_BODY).color(color), player].width(Length::Fill),
-        score,
     ]
-    .spacing(8)
+    .push(photo.map(ui::row_photo))
+    .push(column![text(name).size(SIZE_BODY).color(color), player].width(Length::Fill))
+    .push(score)
+    .spacing(GAP)
     .align_y(Alignment::Center);
     ui::list_row(body, chosen, Some(Message::Event(i)), c)
 }
@@ -192,6 +209,7 @@ fn row_of<'a>(
 /// The events, under the title of their set.
 pub fn view<'a>(
     events: &[VideoEvent],
+    photos: &HashMap<String, iced::widget::image::Handle>,
     selected: usize,
     anchored: Option<EventRef>,
     duration_ms: Option<u64>,
@@ -202,6 +220,8 @@ pub fn view<'a>(
     let mut set = None;
     // the score before each event, from 0–0 at each set
     let mut before = (0, 0);
+    let photo_of = |e: &VideoEvent| photos.get(&e.event.event.player.as_ref()?.id);
+    let pictured = events.iter().any(|e| photo_of(e).is_some());
     for (i, e) in events.iter().enumerate() {
         if set != Some(e.set_number) {
             set = Some(e.set_number);
@@ -216,6 +236,7 @@ pub fn view<'a>(
             e,
             i,
             mark,
+            pictured.then(|| photo_of(e)),
             i == selected,
             is_anchored,
             duration_ms,

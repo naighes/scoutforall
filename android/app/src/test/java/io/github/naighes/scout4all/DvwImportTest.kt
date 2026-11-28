@@ -7,6 +7,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
@@ -172,6 +173,7 @@ class DvwImportTest {
                 "Only the side of Home, without the touches of Visiting: set 1, line 34",
                 substring = true,
             )
+            rule.onNodeWithTag(BANNER_TAG, useUnmergedTree = true).assertExists()
         }
     }
 
@@ -220,14 +222,14 @@ class DvwImportTest {
             next()
             rule.waitForText(string(R.string.dvw_new_team_of, "Home", "2014"))
             next()
-            rule.waitForText("classification is required")
+            rule.waitForText("Classification is required")
             classification(TeamClassificationEnum.REGIONAL)
-            rule.onAllNodesWithText("classification is required").assertCountEquals(0)
+            rule.onAllNodesWithText("Classification is required").assertCountEquals(0)
             next()
-            rule.waitForText("gender is required")
+            rule.waitForText("Gender is required")
             gender(GenderEnum.WOMEN)
             next()
-            rule.waitForText("country is required")
+            rule.waitForText("Country is required")
             rule.onNodeWithText(string(R.string.dvw_new_team_of, "Home", "2014")).assertExists()
             assertTrue(teams().isEmpty())
         }

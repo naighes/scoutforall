@@ -1,23 +1,29 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -27,7 +33,9 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
@@ -35,7 +43,9 @@ import androidx.compose.ui.unit.dp
 import io.github.naighes.scout4all.core.AgendaDay
 import io.github.naighes.scout4all.core.AgendaEventRecord
 import io.github.naighes.scout4all.core.AgendaItemRecord
+import io.github.naighes.scout4all.core.MatchStanding
 import io.github.naighes.scout4all.core.AgendaSpan
+import io.github.naighes.scout4all.core.AppointmentsRecord
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.SessionStatus
 import java.time.LocalDate
@@ -71,6 +81,20 @@ fun rememberAgendaBetween(teamId: String?, from: LocalDate?, to: LocalDate?, rea
     }
 }
 
+/** The week of the home holding [day], without the teams hidden from it.
+ * Empty until read, and when it can't be. */
+@Composable
+fun rememberHomeWeek(day: LocalDate, refresh: Any?): State<List<AgendaDay>> {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+    return produceState(emptyList(), day, refresh) {
+        value = try {
+            app.core { it.homeWeek(day.toString()) }
+        } catch (_: MobileException) {
+            emptyList()
+        }
+    }
+}
+
 /** The week of [monday], with the buttons to move it: the days with
  * something planned, and today, always there and lit. */
 fun LazyListScope.agendaWeek(
@@ -82,50 +106,143 @@ fun LazyListScope.agendaWeek(
     onToday: () -> Unit,
     onMatch: (teamId: String, matchId: String) -> Unit,
     onSession: (teamId: String, sessionId: String) -> Unit = { _, _ -> },
-) {
-    item(key = "agenda-week") {
+) = weekPieces(days, today, withTeam, onPrevious, onNext, onToday, onMatch, onSession).forEach { (key, piece) ->
+    item(key = key) { piece() }
+}
+
+/** The pieces of `agendaWeek`, each with its key: the rows of a lazy
+ * list, or of a block. */
+internal fun weekPieces(
+    days: List<AgendaDay>,
+    today: LocalDate,
+    withTeam: Boolean,
+    onPrevious: () -> Unit,
+    onNext: () -> Unit,
+    onToday: () -> Unit,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+    onSession: (teamId: String, sessionId: String) -> Unit,
+): List<Pair<String, @Composable () -> Unit>> = buildList {
+    add("agenda-week" to {
         Row(
             Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                stringResource(R.string.agenda_week),
+                weekRange(days.map { it.date }),
                 Modifier.weight(1f).title(),
                 style = MaterialTheme.typography.titleSmall,
                 color = MaterialTheme.colorScheme.primary,
             )
-            IconButton(onClick = onPrevious) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
-            }
-            TextButton(onClick = onToday) { Text(stringResource(R.string.agenda_today)) }
-            IconButton(onClick = onNext) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
-            }
+            PeriodButtons(onPrevious, onToday, onNext)
         }
-    }
+    })
     // the phone is narrow: only the days with something and today, or a
     // line saying there is nothing
     val shown = days.filter { it.events.isNotEmpty() || it.date == today.toString() }
     if (shown.isEmpty()) {
-        item(key = "agenda-nothing") { NothingPlanned() }
+        add("agenda-nothing" to { NothingPlanned() })
     }
     shown.forEach { day ->
         val date = LocalDate.parse(day.date)
         if (date == today) {
             // today as one block, on a background of its own
-            item(key = "day/${day.date}") {
+            add("day/${day.date}" to {
                 TodayBox {
                     DayHeader(date, true)
                     if (day.events.isEmpty()) NothingPlanned()
                     day.events.forEach { EventRow(it, withTeam, onMatch, onSession, lit = true) }
                 }
-            }
+            })
         } else {
-            item(key = "day/${day.date}") { DayHeader(date, false) }
-            items(day.events, key = { "${day.date}/${it.teamId}/${it.start}/${it.id()}" }) { EventRow(it, withTeam, onMatch, onSession) }
+            add("day/${day.date}" to { DayHeader(date, false) })
+            day.events.forEach { event ->
+                add("${day.date}/${event.teamId}/${event.start}/${event.id()}" to {
+                    EventRow(event, withTeam, onMatch, onSession)
+                })
+            }
         }
     }
 }
+
+/** The way back to today, looking like a button, and the arrows that move
+ * the period shown. */
+@Composable
+internal fun PeriodButtons(onPrevious: () -> Unit, onToday: () -> Unit, onNext: () -> Unit) =
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        OutlinedButton(onClick = onToday, contentPadding = ButtonDefaults.ButtonWithIconContentPadding) {
+            Icon(painterResource(R.drawable.ic_today), contentDescription = null, Modifier.size(ButtonDefaults.IconSize))
+            Spacer(Modifier.width(ButtonDefaults.IconSpacing))
+            Text(stringResource(R.string.agenda_today))
+        }
+        IconButton(onClick = onPrevious) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = stringResource(R.string.agenda_previous_week))
+        }
+        IconButton(onClick = onNext) {
+            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = stringResource(R.string.agenda_next_week))
+        }
+    }
+
+/** Today's appointments of the team and its next official matches; null
+ * until read, and when they can't be. */
+@Composable
+fun rememberAppointments(teamId: String, refresh: Any?): State<AppointmentsRecord?> {
+    val app = androidx.compose.ui.platform.LocalContext.current.applicationContext as Scout4AllApplication
+    return produceState<AppointmentsRecord?>(null, teamId, refresh) {
+        value = try {
+            app.core { it.teamAppointments(teamId) }
+        } catch (_: MobileException) {
+            null
+        }
+    }
+}
+
+/** What the team has today, in a small box of its own: an official match
+ * stands out. Several events scroll in it, the list below keeps its room. */
+@Composable
+internal fun TodayAppointments(
+    events: List<AgendaEventRecord>,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+    onSession: (teamId: String, sessionId: String) -> Unit,
+) = TodayBox {
+    Text(
+        stringResource(R.string.agenda_today),
+        Modifier.padding(start = 16.dp, top = 6.dp).title(),
+        style = MaterialTheme.typography.labelLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+    )
+    Column(Modifier.heightIn(max = TODAY_MAX).verticalScroll(rememberScrollState())) {
+        events.forEach { EventRow(it, false, onMatch, onSession, lit = true, featured = it.official()) }
+    }
+}
+
+/** The next official match, with the way to the calendar. */
+@Composable
+internal fun NextMatch(
+    match: AgendaEventRecord,
+    onCalendar: () -> Unit,
+    onMatch: (teamId: String, matchId: String) -> Unit,
+) = Column(Modifier.testTag(NEXT_MATCH_TAG)) {
+    Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            stringResource(R.string.agenda_next_match),
+            // the button right after it: at the end the + would cover it
+            Modifier.weight(1f, fill = false).title(),
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.primary,
+        )
+        TextButton(onClick = onCalendar) { Text(stringResource(R.string.agenda_see_calendar)) }
+    }
+    DayHeader(LocalDate.parse(match.start.substringBefore('T')), false)
+    EventRow(match, false, onMatch, { _, _ -> }, featured = true)
+}
+
+/** The test tag of the box of the next match. */
+const val NEXT_MATCH_TAG = "agenda-next-match"
+
+private val TODAY_MAX = 168.dp
+
+private fun AgendaEventRecord.official() = (item as? AgendaItemRecord.Match)?.friendly == false
 
 /** The line of a day, or a week, without anything. */
 @Composable
@@ -170,7 +287,8 @@ internal fun DayHeader(date: LocalDate, today: Boolean) = Text(
 internal fun fullDayText(date: LocalDate): String =
     date.format(DateTimeFormatter.ofLocalizedDate(FormatStyle.FULL).withLocale(java.util.Locale.getDefault()))
 
-/** A session or a match: the time, what, where; the match opens. */
+/** A session or a match: the time at its head over the icon, what, where,
+ * the score of a match at its tail; a touch opens it. */
 @Composable
 internal fun EventRow(
     e: AgendaEventRecord,
@@ -180,68 +298,88 @@ internal fun EventRow(
     lit: Boolean = false,
     unrecorded: Boolean = false,
     mark: Pair<Boolean, () -> Unit>? = null,
+    // an official match told apart: in words and with a frame
+    featured: Boolean = false,
 ) {
-    // on today's background the rows are clear, to let it show
-    val colors = if (lit) ListItemDefaults.colors(containerColor = Color.Transparent) else ListItemDefaults.colors()
-    val time = e.start.substringAfter('T', "").take(5)
-    when (val i = e.item) {
-        is AgendaItemRecord.Session -> {
-            val cancelled = i.status == SessionStatus.CANCELLED
-            ListItem(
-                colors = colors,
-                modifier = Modifier.clickable { onSession(e.teamId, i.id) },
-                overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam && i.title.isNotBlank() }).joinToString(" · ")) },
-                headlineContent = {
-                    Text(
-                        i.title.ifBlank { e.teamName },
-                        textDecoration = if (cancelled) TextDecoration.LineThrough else null,
-                    )
-                },
-                supportingContent = {
-                    val note = when {
-                        cancelled -> stringResource(R.string.agenda_cancelled)
-                        i.toClose -> stringResource(R.string.agenda_to_close)
-                        else -> null
-                    }
-                    val missing = stringResource(R.string.tr_attendance_not_recorded).takeIf { unrecorded }
-                    val line = listOfNotNull(e.venueText(), note, missing).joinToString(" · ")
-                    if (line.isNotEmpty()) Text(line, color = e.clashColor())
-                },
-                // the box on the right: the rows without it (matches,
-                // sessions already in a microcycle) stay aligned
-                trailingContent = if (e.sharedVenue || mark != null) {
-                    {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (e.sharedVenue) ClashMark()
-                            mark?.let { (marked, toggle) -> MarkBox(i.title.ifBlank { e.teamName }, marked, toggle) }
-                        }
-                    }
-                } else null,
+    val item = e.item
+    val session = item as? AgendaItemRecord.Session
+    val cancelled = session?.status == SessionStatus.CANCELLED
+    val title = when (item) {
+        is AgendaItemRecord.Session -> item.title.ifBlank { e.teamName }
+        is AgendaItemRecord.Match -> item.opponent
+    }
+    // a session without a title is already called by its team
+    val team = e.teamName.takeIf { withTeam && session?.title?.isBlank() != true }
+    val note = when {
+        cancelled -> stringResource(R.string.agenda_cancelled)
+        session?.toClose == true -> stringResource(R.string.agenda_to_close)
+        else -> null
+    }
+    val missing = stringResource(R.string.tr_attendance_not_recorded).takeIf { unrecorded }
+    val detail = listOfNotNull(e.venueText(), note, missing).joinToString(" · ")
+    BoxRow(
+        onClick = {
+            when (item) {
+                is AgendaItemRecord.Session -> onSession(e.teamId, item.id)
+                is AgendaItemRecord.Match -> onMatch(e.teamId, item.id)
+            }
+        },
+        // today's block has a margin of its own: the rows stay aligned
+        modifier = Modifier.padding(horizontal = if (lit) 4.dp else 12.dp, vertical = 4.dp),
+        border = BorderStroke(2.dp, BreakPoint).takeIf { featured },
+        head = { EventHead(e.start.substringAfter('T', "").take(5), session != null) },
+        tail = { EventTail(e, title, mark) },
+    ) {
+        team?.let { Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+        if (featured) {
+            Text(stringResource(R.string.agenda_official_match), style = MaterialTheme.typography.labelMedium, color = BreakPoint)
+        }
+        Text(
+            title,
+            style = MaterialTheme.typography.bodyLarge,
+            textDecoration = if (cancelled) TextDecoration.LineThrough else null,
+        )
+        if (detail.isNotEmpty()) {
+            Text(
+                detail,
+                style = MaterialTheme.typography.bodyMedium,
+                color = e.clashColor().takeOrElse { MaterialTheme.colorScheme.onSurfaceVariant },
             )
         }
-        is AgendaItemRecord.Match -> ListItem(
-            colors = colors,
-            modifier = Modifier.clickable { onMatch(e.teamId, i.id) },
-            overlineContent = { Text(listOfNotNull(time, e.teamName.takeIf { withTeam }).joinToString(" · ")) },
-            headlineContent = { Text(i.opponent) },
-            supportingContent = e.venueText()?.let { { Text(it, color = e.clashColor()) } },
-            trailingContent = {
-                if (e.sharedVenue) ClashMark()
-                val ours = i.ours
-                val theirs = i.theirs
-                if (i.played && ours != null && theirs != null) {
-                    Text(
-                        "$ours–$theirs",
-                        Modifier.readAs(stringResource(R.string.sets_score, ours.toInt(), theirs.toInt())),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = resultColor(true, ours.toInt(), theirs.toInt()),
-                    )
-                }
-            },
-        )
     }
 }
+
+/** The time of an event over the icon that tells a session from a match. */
+@Composable
+private fun EventHead(time: String, session: Boolean) = Column(horizontalAlignment = Alignment.CenterHorizontally) {
+    Text(time, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+    Icon(
+        painterResource(if (session) R.drawable.ic_calendar else R.drawable.ic_ball),
+        contentDescription = null,
+        Modifier.size(20.dp),
+        tint = if (session) MaterialTheme.colorScheme.primary else BreakPoint,
+    )
+}
+
+/** The sign of a shared gym, the box of a free session, the score. */
+@Composable
+private fun EventTail(e: AgendaEventRecord, title: String, mark: Pair<Boolean, () -> Unit>?) =
+    Row(Modifier.padding(end = if (mark == null) 12.dp else 4.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (e.sharedVenue) ClashMark()
+        mark?.let { (marked, toggle) -> MarkBox(title, marked, toggle) }
+        val match = e.item as? AgendaItemRecord.Match
+        val ours = match?.ours
+        val theirs = match?.theirs
+        if (match != null && ours != null && theirs != null) {
+            Text(
+                "$ours–$theirs",
+                Modifier.padding(start = 8.dp).readAs(stringResource(R.string.sets_score, ours.toInt(), theirs.toInt())),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = resultColor(match.standing == MatchStanding.OVER, ours.toInt(), theirs.toInt()),
+            )
+        }
+    }
 
 /** The name of the gym of an event, "deleted gym" for a removed one. */
 @Composable

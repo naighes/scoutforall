@@ -16,11 +16,11 @@ use crate::{
             not_found,
             rows::{
                 insert_match, insert_roster_entry, match_ids, match_rows, matches_as_b,
-                matches_both, team_row, write_team,
+                matches_both, matches_scouted_as_b, team_row, write_team,
             },
             sets::numbered,
             sqlite,
-            summary::{cached, competition_of, forget, refresh, save},
+            summary::{cached, competition_of, forget, opponent_of, refresh, save},
             teams::read_team,
             training::check_match,
             venues::find_or_create,
@@ -29,7 +29,9 @@ use crate::{
     },
     shapes::{
         listed::{Listed, Unreadable},
-        r#match::{MatchEntry, MatchSource, MatchStatus, MatchSummary, PlayedMatch},
+        r#match::{
+            MatchEntry, MatchSource, MatchStatus, MatchSummary, PlayedMatch, ScoutedSummary,
+        },
         team::TeamEntry,
     },
 };
@@ -257,6 +259,7 @@ impl SqliteMatchReader {
                         Ok((m, status)) => {
                             let summary = MatchSummary {
                                 competition_id: competition_of(tx, match_uuid(id)?)?,
+                                opponent_team: opponent_of(tx, match_uuid(id)?)?,
                                 ..MatchSummary::of(&m, &status)
                             };
                             save(tx, match_uuid(id)?, &summary).map(|()| Ok(summary))
@@ -303,7 +306,7 @@ impl SqliteMatchReader {
                 .zip(&readable)
                 .map(|(listed, (a, _, home))| {
                     listed.map(|summary| PlayedMatch {
-                        summary: summary.seen_by_b(a.name.clone(), home.is_b()),
+                        summary: summary.seen_by_b(a.id, a.name.clone(), home.is_b()),
                         scouted_by: Some(a.id),
                     })
                 });
@@ -311,6 +314,47 @@ impl SqliteMatchReader {
         let mut played: Vec<_> = as_a.chain(as_b).chain(unreadable).collect();
         played.sort_by(|a, b| recent_first(a, b, |m| m.summary.date));
         Ok(played)
+    }
+
+    /// The summaries of the matches that scouted the players of `team`
+    /// (as `read_scouted` reads them), each from its side, in order of
+    /// date. The unreadable ones are left out.
+    pub async fn scouted_summaries(
+        &self,
+        team: &TeamEntry,
+    ) -> Result<Vec<ScoutedSummary>, AppError> {
+        let as_a = self
+            .read_summaries(team)
+            .await?
+            .into_iter()
+            .filter_map(Result::ok)
+            .map(|summary| ScoutedSummary {
+                summary,
+                team_a: None,
+            });
+        let as_b: Vec<_> = self.db.read(|tx| {
+            Ok(matches_scouted_as_b(tx, team.id)?
+                .into_iter()
+                .filter_map(|(id, a, home)| read_team(tx, &a).ok().map(|a| (a, id, home)))
+                .collect())
+        })?;
+        let matches: Vec<_> = as_b
+            .iter()
+            .map(|(a, id, _)| (a.clone(), id.clone()))
+            .collect();
+        let as_b =
+            self.summaries(&matches)?
+                .into_iter()
+                .zip(as_b)
+                .filter_map(|(listed, (a, _, home))| {
+                    listed.ok().map(|summary| ScoutedSummary {
+                        summary: summary.seen_by_b(a.id, a.name.clone(), home.is_b()),
+                        team_a: Some(a),
+                    })
+                });
+        let mut scouted: Vec<_> = as_a.chain(as_b).collect();
+        scouted.sort_by_key(|m| m.summary.date);
+        Ok(scouted)
     }
 
     /// The matches of team A `team` scouted on both sides, with the team B
@@ -330,6 +374,26 @@ impl SqliteMatchReader {
                 })
                 .collect())
         })
+    }
+
+    /// The matches that scouted the players of `team`, each from its side:
+    /// those it's A of, and those scouted on both sides it's B of. The
+    /// unreadable ones are left out, as in the analysis.
+    pub async fn read_scouted(&self, team: &TeamEntry) -> Result<Vec<MatchEntry>, AppError> {
+        let as_a = self.read_all(team).await?;
+        let as_b = self.db.read(|tx| matches_scouted_as_b(tx, team.id))?;
+        let as_b = as_b.into_iter().filter_map(|(id, a, _)| {
+            self.db
+                .read(|tx| read_team(tx, &a))
+                .and_then(|a| self.read_of_b(&a, &id))
+                .ok()
+                .flatten()
+        });
+        Ok(as_a
+            .into_iter()
+            .filter_map(Result::ok)
+            .chain(as_b)
+            .collect())
     }
 
     /// The match in which `team` is B, as B sees it: team A, and whether

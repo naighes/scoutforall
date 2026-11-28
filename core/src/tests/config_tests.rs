@@ -14,7 +14,7 @@ mod tests {
         tests::Sqlite,
         util::{config_var, config_var_in},
     };
-    use chrono::Utc;
+
     use std::io::{Cursor, Read};
 
     // no test changes the environment of the process: tests run in parallel
@@ -71,7 +71,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley".to_string(),
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",

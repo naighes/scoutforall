@@ -2,8 +2,8 @@
 //! attendance, series, duplicates, cycles, the agenda, the totals and the
 //! sheets. The dates travel as text: `YYYY-MM-DD` a day, `YYYY-MM-DDTHH:MM`
 //! a moment (local, without offset, as the core keeps them).
-use super::{MobileError, Scout4All, failed, parse_id};
-use chrono::{Local, NaiveDate, NaiveDateTime, NaiveTime, Weekday};
+use super::{MatchStanding, MobileError, Scout4All, failed, parse_id};
+use chrono::{NaiveDate, NaiveDateTime, NaiveTime, Weekday};
 use scout4all_core::{
     errors::AppError,
     providers::{
@@ -21,7 +21,10 @@ use scout4all_core::{
     training::{
         Activity, ActivityHit, ActivityStatus, AttendanceInput, AttendanceRow, AttendanceStatus,
         Move, SessionInput, SessionStatus, TrainingSession,
-        agenda::{AgendaEvent, AgendaItem, MatchState, Period, busy_days, by_day, hours, lanes},
+        agenda::{
+            AgendaEvent, AgendaItem, MatchState, Period, appointments, busy_days, by_day, hours,
+            lanes,
+        },
         cycles::{
             Child, Cycle, CycleForm, Level, Span, Window, proposed_container, proposed_microcycle,
         },
@@ -328,11 +331,23 @@ pub enum AgendaItemRecord {
         id: String,
         opponent: String,
         opponent_team: Option<String>,
-        played: bool,
-        /// the points sets of the team and of the opponent, once played
+        standing: MatchStanding,
+        /// the sets of the team and of the opponent, once it has some
         ours: Option<u8>,
         theirs: Option<u8>,
+        friendly: bool,
     },
+}
+
+/// What a team has ahead.
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
+pub struct AppointmentsRecord {
+    /// today's sessions and matches, the official ones only still to play
+    pub today: Vec<AgendaEventRecord>,
+    /// the first official match still to play, from today on
+    pub next_match: Option<AgendaEventRecord>,
+    /// the first one after today, never one of `today`
+    pub later_match: Option<AgendaEventRecord>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Record)]
@@ -653,6 +668,22 @@ fn child_record(c: &Child) -> ChildRecord {
     }
 }
 
+fn standing_of(state: &MatchState) -> MatchStanding {
+    match state {
+        MatchState::Scheduled => MatchStanding::ToPlay,
+        MatchState::InProgress(_) => MatchStanding::InProgress,
+        MatchState::Over(..) => MatchStanding::Over,
+    }
+}
+
+fn sets_of(state: &MatchState) -> Option<(u8, u8)> {
+    match *state {
+        MatchState::InProgress(sets) => sets,
+        MatchState::Over(ours, theirs) => Some((ours, theirs)),
+        MatchState::Scheduled => None,
+    }
+}
+
 fn event_record(e: &AgendaEvent) -> AgendaEventRecord {
     AgendaEventRecord {
         team_id: e.team_id.to_string(),
@@ -676,19 +707,15 @@ fn event_record(e: &AgendaEvent) -> AgendaEventRecord {
                 opponent,
                 opponent_team,
                 state,
+                friendly,
             } => AgendaItemRecord::Match {
                 id: id.to_string(),
                 opponent: opponent.clone(),
                 opponent_team: opponent_team.map(|t| t.to_string()),
-                played: matches!(state, MatchState::Played(_)),
-                ours: match state {
-                    MatchState::Played(Some((ours, _))) => Some(*ours),
-                    MatchState::Played(None) | MatchState::Scheduled => None,
-                },
-                theirs: match state {
-                    MatchState::Played(Some((_, theirs))) => Some(*theirs),
-                    MatchState::Played(None) | MatchState::Scheduled => None,
-                },
+                standing: standing_of(state),
+                ours: sets_of(state).map(|(ours, _)| ours),
+                theirs: sets_of(state).map(|(_, theirs)| theirs),
+                friendly: *friendly,
             },
         },
         venue: e.venue.as_ref().map(|v| VenueRefRecord {
@@ -753,7 +780,7 @@ impl Scout4All {
 
     /// The sessions of the team, by start.
     pub fn training_sessions(&self, team_id: String) -> Result<Vec<SessionRecord>, MobileError> {
-        let now = Local::now().naive_local();
+        let now = self.clock.now();
         let sessions = self
             .runtime
             .block_on(self.training().sessions(&parse_id(&team_id)?))?;
@@ -764,7 +791,7 @@ impl Scout4All {
         let session = self
             .runtime
             .block_on(self.training().session(&parse_id(&session_id)?))?;
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     /// A form for a new session: the usual duration, planned.
@@ -798,7 +825,7 @@ impl Scout4All {
                 .runtime
                 .block_on(training.create_session(&parse_id(&team_id)?, input))?,
         };
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     /// Whether saving the draft (or, with none, removing the session) asks
@@ -856,7 +883,7 @@ impl Scout4All {
                 input,
                 scope,
             ))?;
-        let now = Local::now().naive_local();
+        let now = self.clock.now();
         written
             .first()
             .map(|s| session_record(s, now))
@@ -873,7 +900,7 @@ impl Scout4All {
             self.training()
                 .set_session_status(&parse_id(&session_id)?, status),
         )?;
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     /// Completes the session and the planned activities chosen.
@@ -886,7 +913,7 @@ impl Scout4All {
             self.training()
                 .complete_session(&parse_id(&session_id)?, ids(&activities)?),
         )?;
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     pub fn remove_session(&self, session_id: String) -> Result<(), MobileError> {
@@ -1116,7 +1143,7 @@ impl Scout4All {
             inputs,
             create_others,
         ))?;
-        let now = Local::now().naive_local();
+        let now = self.clock.now();
         Ok(SeriesResult {
             created: outcome
                 .created
@@ -1178,7 +1205,7 @@ impl Scout4All {
             self.training()
                 .duplicate_session(&parse_id(&session_id)?, input),
         )?;
-        Ok(session_record(&session, Local::now().naive_local()))
+        Ok(session_record(&session, self.clock.now()))
     }
 
     // ---- cycles
@@ -1411,7 +1438,7 @@ impl Scout4All {
         let events = self.runtime.block_on(self.training().agenda(
             team.as_ref(),
             period,
-            Local::now().naive_local(),
+            self.clock.now(),
         ))?;
         Ok(by_day(&period, &events)
             .iter()
@@ -1450,7 +1477,7 @@ impl Scout4All {
         let events = self.runtime.block_on(self.training().agenda(
             team.as_ref(),
             period,
-            Local::now().naive_local(),
+            self.clock.now(),
         ))?;
         Ok(busy_days(&events)
             .iter()
@@ -1459,6 +1486,26 @@ impl Scout4All {
                 events: events.iter().map(event_record).collect(),
             })
             .collect())
+    }
+
+    /// Today's appointments of the team and its next official matches.
+    pub fn team_appointments(&self, team_id: String) -> Result<AppointmentsRecord, MobileError> {
+        let now = self.clock.now();
+        let today = now.date();
+        let period = Period {
+            from: today,
+            to: NaiveDate::from_ymd_opt(9999, 12, 31).unwrap_or(NaiveDate::MAX),
+        };
+        let team = parse_id(&team_id)?;
+        let events = self
+            .runtime
+            .block_on(self.training().agenda(Some(&team), period, now))?;
+        let found = appointments(today, &events);
+        Ok(AppointmentsRecord {
+            today: found.today.iter().map(event_record).collect(),
+            next_match: found.next_match.as_ref().map(event_record),
+            later_match: found.later_match.as_ref().map(event_record),
+        })
     }
 
     pub fn training_totals(
@@ -1535,10 +1582,10 @@ impl Scout4All {
     /// The archive of the training of the team: cycles, sessions,
     /// activities and attendance.
     pub fn export_training(&self, team_id: String) -> Result<super::ExportedArchive, MobileError> {
-        use scout4all_core::providers::sqlite::archive::{self as archives, Subject};
+        use scout4all_core::providers::sqlite::archive::Subject;
         let id = parse_id(&team_id)?;
         self.read_team(&team_id)?;
-        let bytes = archives::export(&self.db, Subject::Training(id))?;
+        let bytes = self.export_archive(Subject::Training(id))?;
         Ok(super::ExportedArchive {
             file_name: format!("{id}-training.zip"),
             bytes,
@@ -1565,8 +1612,9 @@ impl Scout4All {
             self.language.labels(),
             &Context {
                 team: &team.name,
+                logo: self.pdf_logo(&team.id.to_string())?,
                 year: team.year,
-                printed: Local::now().naive_local(),
+                printed: self.clock.now(),
                 venues: &venues,
             },
             &session,
@@ -1607,8 +1655,9 @@ impl Scout4All {
             self.language.labels(),
             &Context {
                 team: &team.name,
+                logo: self.pdf_logo(&team.id.to_string())?,
                 year: team.year,
-                printed: Local::now().naive_local(),
+                printed: self.clock.now(),
                 venues: &venues,
             },
             &cycle,
@@ -1739,12 +1788,27 @@ mod tests {
     };
     use std::sync::Arc;
 
+    /// The images a PDF draws from.
+    fn image_count(pdf: &[u8]) -> usize {
+        let image = b"/Subtype/Image";
+        pdf.windows(image.len()).filter(|w| w == image).count()
+    }
+
+    /// A 1×1 PNG.
+    const PNG: &[u8] = &[
+        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44,
+        0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f,
+        0x15, 0xc4, 0x89, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x38,
+        0x21, 0x27, 0xf7, 0x1f, 0x00, 0x04, 0xba, 0x02, 0x04, 0x3e, 0x57, 0x1f, 0xc7, 0x00, 0x00,
+        0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+    ];
+
     fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
         app_in(dir)
     }
 
     fn app_in(dir: &tempfile::TempDir) -> Arc<Scout4All> {
-        Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
     }
 
     fn team(app: &Scout4All, name: &str) -> String {
@@ -1832,6 +1896,13 @@ mod tests {
                 birth_date: String::new(),
                 height_cm: String::new(),
                 notes: String::new(),
+                nationality: None,
+                dominant_hand: None,
+                federation_id: String::new(),
+                email: String::new(),
+                phone_country: None,
+                phone: String::new(),
+                birth_place: String::new(),
                 person: None,
             },
             false,
@@ -1898,6 +1969,28 @@ mod tests {
     }
 
     #[test]
+    fn a_session_is_to_close_by_the_time_of_the_clock_given() {
+        use crate::clock::FixedClock;
+        let dir = tempfile::tempdir().unwrap();
+        let at = |time: &str| {
+            let now = chrono::NaiveDateTime::parse_from_str(time, "%Y-%m-%dT%H:%M").unwrap();
+            let clock = FixedClock::at(now, chrono::FixedOffset::east_opt(3600).unwrap());
+            Scout4All::with_clock(
+                dir.path().to_string_lossy().into_owned(),
+                "it".into(),
+                Arc::new(clock),
+            )
+            .unwrap()
+        };
+        let morning = at("2026-03-04T10:00");
+        let team = team(&morning, "Cortona");
+        let evening = session(&morning, &team, "2026-03-04T18:30");
+        assert!(!evening.to_close);
+        let next_day = at("2026-03-05T10:00");
+        assert!(next_day.training_sessions(team).unwrap()[0].to_close);
+    }
+
+    #[test]
     fn a_bad_form_names_its_field() {
         let dir = tempfile::tempdir().unwrap();
         let app = app(&dir);
@@ -1949,7 +2042,7 @@ mod tests {
         else {
             unreachable!("not an overlap");
         };
-        assert!(reason.contains("2030-03-04 18:30"), "{reason}");
+        assert!(reason.contains("04/03/2030 18:30"), "{reason}");
     }
 
     #[test]
@@ -2498,6 +2591,7 @@ mod tests {
                 year: 2026,
                 sessions: 1,
                 cycles: 0,
+                logo: None,
             }
         );
         to.import_team(zip.bytes, None).unwrap();
@@ -2511,11 +2605,12 @@ mod tests {
         let app = app(&dir);
         let team = team(&app, "Cortona");
         let s = session(&app, &team, "2030-03-04T18:30");
+        let s_id = s.id.clone();
         let pdf = app.session_pdf(s.id.clone(), true, true).unwrap();
         assert!(pdf.starts_with(b"%PDF"));
         let micro = app
             .save_cycle(
-                team,
+                team.clone(),
                 Level::Microcycle,
                 None,
                 CycleDraft {
@@ -2528,6 +2623,12 @@ mod tests {
                 false,
             )
             .unwrap();
-        assert!(app.microcycle_pdf(micro.id).unwrap().starts_with(b"%PDF"));
+        let plan = || app.microcycle_pdf(micro.id.clone()).unwrap();
+        let sheet = || app.session_pdf(s_id.clone(), false, false).unwrap();
+        assert!(plan().starts_with(b"%PDF"));
+        assert_eq!((image_count(&plan()), image_count(&sheet())), (0, 0));
+        // the logo of the team on both
+        app.set_team_logo(team, Some(PNG.to_vec())).unwrap();
+        assert!(image_count(&plan()) > 0 && image_count(&sheet()) > 0);
     }
 }

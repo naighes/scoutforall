@@ -47,6 +47,9 @@ versionCode follows from it (0.9.0 is 900). The release is shrunk by R8
 ./gradlew assembleRelease   # an apk, to try it on a phone
 ```
 
+`scripts/install-android.sh` builds the release and installs it on the
+connected phone, keeping its data (`--debug` for the debug build).
+
 Both are signed with the upload key, from these entries of
 `local.properties` (or the environment variables `UPLOAD_STORE_FILE`,
 `UPLOAD_STORE_PASSWORD`, `UPLOAD_KEY_ALIAS`, `UPLOAD_KEY_PASSWORD`):

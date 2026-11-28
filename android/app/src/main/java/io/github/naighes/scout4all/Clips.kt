@@ -55,19 +55,20 @@ fun matchWatch(teamId: String, matchId: String, side: MatchSide, scope: StatsSco
         clear = clear,
         lines = listOf(stringResource(if (hasVideo) R.string.clips_pick_hint else R.string.clips_no_video)),
     ) {
-        val match = TeamClipMatch(matchId, "", "", (count ?: 0).toUInt(), true)
-        onWatch(VideoRequest.Clips(teamId, pick, title, listOf(match), side = side))
+        val match = TeamClipMatch(matchId, teamId, side, "", "", (count ?: 0).toUInt(), true)
+        onWatch(VideoRequest.Clips(teamId, pick, title, listOf(match)))
     }
 }
 
 /** The actions of a statistic of the team over a period, match after match
- * (the ones with a video). */
-fun teamWatch(teamId: String, period: AnalysisPeriod, competition: String?, onWatch: (VideoRequest.Clips) -> Unit) = Watch { detail, query, choice, clear ->
+ * (the ones with a video); with `opponent`, of the opponent in the matches
+ * scouted on both sides. */
+fun teamWatch(teamId: String, period: AnalysisPeriod, competition: String?, opponent: String?, onWatch: (VideoRequest.Clips) -> Unit) = Watch { detail, query, choice, clear ->
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val pick = pickOf(StatsScope.Match, query, choice)
-    val matches by produceState<List<TeamClipMatch>?>(null, pick, period, competition) {
+    val matches by produceState<List<TeamClipMatch>?>(null, pick, period, competition, opponent) {
         value = try {
-            app.core { it.teamClipMatches(teamId, period, competition, pick) }
+            app.core { it.teamClipMatches(teamId, period, competition, opponent, pick) }
         } catch (_: MobileException) {
             null
         }

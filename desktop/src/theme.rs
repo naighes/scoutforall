@@ -4,7 +4,7 @@
 
 use iced::{
     Color, Font, Theme,
-    font::{Family, Weight},
+    font::{Family, Style, Weight},
     theme::Palette,
 };
 
@@ -35,7 +35,9 @@ pub const TEAM_THEM: Color = rgb(0xE394B4);
 pub struct Fonts {
     pub regular: Font,
     pub bold: Font,
-    pub bytes: [&'static [u8]; 2],
+    /// bold and italic
+    pub italic: Font,
+    pub bytes: [&'static [u8]; 3],
 }
 
 const PLEX: Fonts = Fonts {
@@ -45,9 +47,16 @@ const PLEX: Fonts = Fonts {
         weight: Weight::Semibold,
         ..Font::DEFAULT
     },
+    italic: Font {
+        family: Family::Name("IBM Plex Mono"),
+        weight: Weight::Semibold,
+        style: Style::Italic,
+        ..Font::DEFAULT
+    },
     bytes: [
         include_bytes!("../assets/fonts/IBMPlexMono-Regular.ttf"),
         include_bytes!("../assets/fonts/IBMPlexMono-SemiBold.ttf"),
+        include_bytes!("../assets/fonts/IBMPlexMono-SemiBoldItalic.ttf"),
     ],
 };
 
@@ -92,6 +101,9 @@ pub struct Colors {
     pub court: Color,
     pub court_lines: Color,
     pub danger: Color,
+    /// what to know before going on, and what is only told
+    pub warning: Color,
+    pub info: Color,
     /// the score of a match won, of one lost
     pub won: Color,
     pub lost: Color,
@@ -115,6 +127,8 @@ pub const DARK: Colors = Colors {
     court: rgb(0x1B2A44),
     court_lines: rgb(0xCBD5E1),
     danger: LOST,
+    warning: rgb(0xFB923C),
+    info: rgb(0x38BDF8),
     won: WON,
     lost: LOST,
     side_out: rgb(0x38BDF8),
@@ -136,6 +150,8 @@ pub const LIGHT: Colors = Colors {
     court: rgb(0xE6EEF8),
     court_lines: rgb(0x334155),
     danger: rgb(0xB91C1C),
+    warning: rgb(0xC2410C),
+    info: rgb(0x0369A1),
     // darker, to read on white
     won: rgb(0x15803D),
     lost: rgb(0xB91C1C),
@@ -212,6 +228,16 @@ pub const WORDMARK: &[u8] = include_bytes!("../assets/wordmark.svg");
 
 /// The icons, the ones of the Android app (`assets/icons`).
 pub mod icons {
+    pub const VIEW_WEEK: &[u8] = include_bytes!("../assets/icons/view_week.svg");
+    pub const VIEW_MONTH: &[u8] = include_bytes!("../assets/icons/view_month.svg");
+    pub const VIEW_LIST: &[u8] = include_bytes!("../assets/icons/view_list.svg");
+    pub const THIS_TEAM: &[u8] = include_bytes!("../assets/icons/this_team.svg");
+    pub const ALL_TEAMS: &[u8] = include_bytes!("../assets/icons/all_teams.svg");
+    pub const MAIL: &[u8] = include_bytes!("../assets/icons/mail.svg");
+    pub const CALL: &[u8] = include_bytes!("../assets/icons/call.svg");
+    /// the glyph of WhatsApp as in its brand resources: a trademark, its
+    /// shape and color not to be changed
+    pub const WHATSAPP: &[u8] = include_bytes!("../assets/icons/whatsapp.svg");
     pub const HOME: &[u8] = include_bytes!("../assets/icons/home.svg");
     pub const AWAY: &[u8] = include_bytes!("../assets/icons/away.svg");
     pub const BACK: &[u8] = include_bytes!("../assets/icons/back.svg");
@@ -235,6 +261,10 @@ pub mod icons {
     pub const WON: &[u8] = include_bytes!("../assets/icons/emoji_events.svg");
     pub const LOST: &[u8] = include_bytes!("../assets/icons/cancel.svg");
     pub const COIN: &[u8] = include_bytes!("../assets/icons/toll.svg");
+    pub const TODAY: &[u8] = include_bytes!("../assets/icons/today.svg");
+    /// a block open, or closed
+    pub const EXPAND_MORE: &[u8] = include_bytes!("../assets/icons/expand_more.svg");
+    pub const CHEVRON_RIGHT: &[u8] = include_bytes!("../assets/icons/chevron_right.svg");
     pub const CALENDAR: &[u8] = include_bytes!("../assets/icons/event.svg");
     /// a hall with an arched roof: the gyms
     pub const GYM: &[u8] = include_bytes!("../assets/icons/gym.svg");
@@ -246,4 +276,8 @@ pub mod icons {
     pub const SAVE: &[u8] = include_bytes!("../assets/icons/save.svg");
     pub const DELETE: &[u8] = include_bytes!("../assets/icons/delete.svg");
     pub const WARNING: &[u8] = include_bytes!("../assets/icons/warning.svg");
+    /// the levels of a notice, outlined
+    pub const ERROR_OUTLINE: &[u8] = include_bytes!("../assets/icons/error_outline.svg");
+    pub const WARNING_OUTLINE: &[u8] = include_bytes!("../assets/icons/warning_amber.svg");
+    pub const INFO: &[u8] = include_bytes!("../assets/icons/info.svg");
 }

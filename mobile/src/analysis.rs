@@ -3,11 +3,12 @@
 //! match, each figure match by match with its moving average, and the
 //! choices of the filters on the situation.
 use super::{
-    ClipPick, CompetitionChoice, DetailFilter, DetailStats, GradeBand, LiveStats, MobileError,
-    RoleChoice, Scout4All, ScoutingPlayer, StatsScope, choosable, clips_of, detail_of, narrowed,
-    series_name, summary, touched,
+    ClipPick, CompetitionChoice, DetailFilter, DetailStats, GradeBand, LiveStats, MatchSide,
+    MobileError, RoleChoice, Scout4All, ScoutingPlayer, StatsScope, choosable, clips_of, detail_of,
+    narrowed, series_name, summary, touched,
 };
-use chrono::{Local, NaiveDate};
+use crate::clock::ClockExt;
+use chrono::NaiveDate;
 use scout4all_core::player_form::name_the_removed;
 use scout4all_core::providers::match_reader::MatchReader;
 use scout4all_core::{
@@ -17,7 +18,7 @@ use scout4all_core::{
         enums::{EvalEnum, EventTypeEnum, FriendlyName, RoleEnum},
         flags::ReceptionSchemeEnum,
         r#match::{MatchEntry, MatchSummary},
-        stats::EvalSet,
+        stats::{EvalSet, Metric, Stats, StatsFilter},
         team::TeamEntry,
         technique::{SetTypeEnum, TechniqueEnum},
     },
@@ -32,6 +33,8 @@ use uuid::Uuid;
 pub enum AnalysisPeriod {
     /// from the same day of the month before, today included
     LastMonth,
+    /// every one: a team lasts one season
+    Season,
     /// the last ones played
     LastMatches { count: u32 },
     /// both days included, as `YYYY-MM-DD`
@@ -148,6 +151,87 @@ pub struct ScoutedOpponent {
     pub matches: u32,
 }
 
+/// The figure a fundamental of a player is told by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, uniffi::Enum)]
+pub enum PlayerMeasure {
+    Efficiency,
+    Positivity,
+}
+
+/// A fundamental the player touched, as the detail of the analysis tells
+/// it.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlayerFundamental {
+    pub event: EventTypeEnum,
+    pub name: String,
+    pub measure: PlayerMeasure,
+    /// in percent
+    pub value: Option<f64>,
+    /// of an efficiency, for the level of the team
+    pub grade: Option<f64>,
+    pub total: u32,
+    /// the points scored (the aces of the serve), only for an attack, a
+    /// serve or a block
+    pub points: Option<u32>,
+    pub errors: u32,
+}
+
+/// The statistics of a player of a team over the matches of a period: the
+/// analysis of the team narrowed to the player.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlayerStatistics {
+    pub period: AnalysisPeriod,
+    pub competition: Option<Uuid>,
+    /// the competitions of the matches scouted, to choose from
+    pub competitions: Vec<CompetitionChoice>,
+    /// the days of the period (`YYYY-MM-DD`), `None` with no matches
+    pub from: Option<String>,
+    pub to: Option<String>,
+    /// in order of date
+    pub matches: Vec<AnalysedMatch>,
+    /// the opponents of the matches left out: a set doesn't replay
+    pub skipped: Vec<String>,
+    /// every day with a match played by the team, to mark on a calendar
+    pub played_days: Vec<String>,
+    /// attack, reception, serve, block, dig: only the ones touched
+    pub fundamentals: Vec<PlayerFundamental>,
+    /// match by match, of the fundamentals touched that have a trend:
+    /// attack, reception, serve
+    pub trend: Vec<PlayerTrend>,
+}
+
+/// The figure of a fundamental of a player match by match: the same of its
+/// box.
+#[derive(Debug, Clone, PartialEq, uniffi::Record)]
+pub struct PlayerTrend {
+    pub measure: PlayerMeasure,
+    /// with a positivity there's no band nor grade: the levels are of the
+    /// efficiencies
+    pub line: MatchTrend,
+}
+
+/// The fundamentals of a player, in the order they're shown, with the
+/// figure of each and its trend, when the analysis has one.
+const PLAYER_FUNDAMENTALS: [(EventTypeEnum, PlayerMeasure, Option<Series>); 5] = [
+    (
+        EventTypeEnum::A,
+        PlayerMeasure::Efficiency,
+        Some(Series::Attack),
+    ),
+    (
+        EventTypeEnum::P,
+        PlayerMeasure::Positivity,
+        Some(Series::Reception),
+    ),
+    (
+        EventTypeEnum::S,
+        PlayerMeasure::Efficiency,
+        Some(Series::Serve),
+    ),
+    (EventTypeEnum::B, PlayerMeasure::Efficiency, None),
+    (EventTypeEnum::D, PlayerMeasure::Positivity, None),
+];
+
 const DAY: &str = "%Y-%m-%d";
 
 fn parse_day(text: &str) -> Result<NaiveDate, MobileError> {
@@ -160,6 +244,7 @@ impl AnalysisPeriod {
     fn period(&self) -> Result<Period, MobileError> {
         Ok(match self {
             AnalysisPeriod::LastMonth => Period::LastMonth,
+            AnalysisPeriod::Season => Period::Season,
             AnalysisPeriod::LastMatches { count } => Period::LastMatches(*count),
             AnalysisPeriod::Between { from, to } => {
                 let (from, to) = (parse_day(from)?, parse_day(to)?);
@@ -186,9 +271,10 @@ impl Scout4All {
         filter: DetailFilter,
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
-        let today = Local::now().date_naive();
+        let today = self.clock.today();
         let (all, chosen) = self.chosen_matches(&team, &period, competition, today)?;
         let competitions = self.competitions_played(&all, today)?;
+        let chosen = entries(chosen);
         team_analysis(
             &team,
             &all,
@@ -201,6 +287,79 @@ impl Scout4All {
             filter,
             self.language.labels(),
         )
+    }
+
+    /// The statistics of the player in the matches of the team in the
+    /// period, from either side.
+    pub fn player_statistics(
+        &self,
+        team_id: String,
+        player_id: String,
+        period: AnalysisPeriod,
+        competition: Option<Uuid>,
+    ) -> Result<PlayerStatistics, MobileError> {
+        let team = self.read_team(&team_id)?;
+        let today = self.clock.today();
+        let (all, chosen) = self.chosen_matches(&team, &period, competition, today)?;
+        let competitions = self.competitions_played(&all, today)?;
+        let chosen = entries(chosen);
+        let labels = self.language.labels();
+        let filter = DetailFilter {
+            players: vec![player_id],
+            ..DetailFilter::default()
+        };
+        let narrowed = narrowed(&filter)?;
+        let matches: Vec<&MatchEntry> = chosen.iter().collect();
+        let days = period.period()?.days(&matches, today);
+        let analysis = Analysis::of(&matches);
+        let total = analysis.total();
+        let teams: Vec<&TeamEntry> = std::iter::once(&team)
+            .chain(analysis.matches.iter().map(|m| &m.entry.team))
+            .collect();
+        let mut fundamentals = vec![];
+        let mut trend = vec![];
+        for (event, measure, series) in PLAYER_FUNDAMENTALS {
+            let detail = detail_of(&total, &total, &teams, labels, event, filter.clone())?;
+            let Some(d) = detail.fundamental.filter(|d| d.total > 0) else {
+                continue;
+            };
+            let (value, grade) = match measure {
+                PlayerMeasure::Efficiency => (d.efficiency, d.grade),
+                PlayerMeasure::Positivity => (d.positiveness, None),
+            };
+            fundamentals.push(PlayerFundamental {
+                event,
+                name: event.friendly_name(labels).to_string(),
+                measure,
+                value,
+                grade,
+                total: d.total,
+                points: d.points,
+                errors: d.errors,
+            });
+            trend.extend(series.map(|series| {
+                let line = match_trend(series, &analysis, &total, &narrowed, &team, labels);
+                let line = match measure {
+                    PlayerMeasure::Efficiency => line,
+                    PlayerMeasure::Positivity => {
+                        positivity_trend(line, event, &analysis, &total, &narrowed)
+                    }
+                };
+                PlayerTrend { measure, line }
+            }));
+        }
+        Ok(PlayerStatistics {
+            period,
+            competition,
+            competitions,
+            from: days.map(|(from, _)| from.format(DAY).to_string()),
+            to: days.map(|(_, to)| to.format(DAY).to_string()),
+            matches: analysed_matches(&analysis, &all),
+            skipped: skipped_opponents(&analysis),
+            played_days: played_days(&all),
+            fundamentals,
+            trend,
+        })
     }
 
     /// The teams the team has played scouted on both sides, to analyse
@@ -237,10 +396,11 @@ impl Scout4All {
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
         let team_b = self.read_team(&opponent.to_string())?;
-        let today = Local::now().date_naive();
+        let today = self.clock.today();
         let (all, chosen) =
             self.chosen_matches_of_b(&team, &opponent, &period, competition, today)?;
         let competitions = self.competitions_played(&all, today)?;
+        let chosen = entries(chosen);
         team_analysis(
             &team_b,
             &all,
@@ -268,12 +428,13 @@ impl Scout4All {
         filter: DetailFilter,
     ) -> Result<TeamAnalysis, MobileError> {
         let team = self.read_team(&team_id)?;
-        let today = Local::now().date_naive();
+        let today = self.clock.today();
         let against = self.both_against(&team, &opponent)?;
         let (all, chosen) = self.chosen_matches_among(&team, &period, competition, today, |m| {
             against.contains_key(&m.id)
         })?;
         let competitions = self.competitions_played(&all, today)?;
+        let chosen = entries(chosen);
         team_analysis(
             &team,
             &all,
@@ -299,6 +460,10 @@ impl Scout4All {
 #[derive(Debug, Clone, PartialEq)]
 pub struct MatchClips {
     pub match_id: String,
+    /// team A of the match, whose video it is (`video_of`)
+    pub team_id: String,
+    /// the side the actions are of: B's by their own indexes
+    pub side: MatchSide,
     pub opponent: String,
     /// `YYYY-MM-DD`, where it was played
     pub day: String,
@@ -312,17 +477,27 @@ pub struct MatchClips {
 impl Scout4All {
     /// The actions picked of each match of the period with some, in the
     /// order of the analysis (the scope of the pick left aside: every set).
+    /// With `opponent`, of the opponent in the matches scouted on both
+    /// sides, as `opponent_analysis` counts them.
     pub fn team_clips(
         &self,
         team_id: &str,
         period: &AnalysisPeriod,
         competition: Option<Uuid>,
+        opponent: Option<Uuid>,
         pick: &ClipPick,
     ) -> Result<Vec<MatchClips>, MobileError> {
         let team = self.read_team(team_id)?;
-        let (_, chosen) =
-            self.chosen_matches(&team, period, competition, Local::now().date_naive())?;
-        let matches: Vec<&MatchEntry> = chosen.iter().collect();
+        let today = self.clock.today();
+        let (_, chosen) = match opponent {
+            Some(o) => self.chosen_matches_of_b(&team, &o, period, competition, today)?,
+            None => self.chosen_matches(&team, period, competition, today)?,
+        };
+        let videos: HashMap<&str, (Uuid, MatchSide)> = chosen
+            .iter()
+            .map(|c| (c.entry.id.as_str(), (c.team_a, c.side)))
+            .collect();
+        let matches: Vec<&MatchEntry> = chosen.iter().map(|c| &c.entry).collect();
         let analysis = Analysis::of(&matches);
         let pick = ClipPick {
             scope: StatsScope::Match,
@@ -331,12 +506,15 @@ impl Scout4All {
         let mut found = vec![];
         for m in analysis.matches.iter().map(|m| m.entry) {
             let events = clips_of(m, &pick)?;
-            if events.is_empty() {
+            let (Some(&(team_a, side)), false) = (videos.get(m.id.as_str()), events.is_empty())
+            else {
                 continue;
-            }
-            let profile = self.runtime.block_on(self.videos.read(&m.team.id, &m.id));
+            };
+            let profile = self.runtime.block_on(self.videos.read(&team_a, &m.id));
             found.push(MatchClips {
                 match_id: m.id.clone(),
+                team_id: team_a.to_string(),
+                side,
                 opponent: m.opponent.clone(),
                 day: day(m).format(DAY).to_string(),
                 events,
@@ -387,7 +565,7 @@ impl Scout4All {
         period: &AnalysisPeriod,
         competition: Option<Uuid>,
         today: NaiveDate,
-    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
+    ) -> Result<(Vec<MatchSummary>, Vec<Chosen>), MobileError> {
         let against = self.both_against(team, opponent)?;
         let all: Vec<MatchSummary> = self
             .runtime
@@ -397,7 +575,7 @@ impl Scout4All {
             .filter_map(|m| {
                 against
                     .get(&m.id)
-                    .map(|home_b| m.seen_by_b(team.name.clone(), *home_b))
+                    .map(|home_b| m.seen_by_b(team.id, team.name.clone(), *home_b))
             })
             .collect();
         let chosen = period
@@ -405,10 +583,7 @@ impl Scout4All {
             .select_in(&all, today, competition)
             .into_iter()
             .filter_map(|m| self.match_reader.read_of_b(team, &m.id).ok().flatten())
-            .map(|mut m: MatchEntry| {
-                name_the_removed(&mut m.team, self.language.labels());
-                m
-            })
+            .map(|entry| self.chosen(entry, team.id, MatchSide::B))
             .collect();
         Ok((all, chosen))
     }
@@ -423,7 +598,7 @@ impl Scout4All {
         period: &AnalysisPeriod,
         competition: Option<Uuid>,
         today: NaiveDate,
-    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
+    ) -> Result<(Vec<MatchSummary>, Vec<Chosen>), MobileError> {
         self.chosen_matches_among(team, period, competition, today, |_| true)
     }
 
@@ -435,32 +610,67 @@ impl Scout4All {
         competition: Option<Uuid>,
         today: NaiveDate,
         keep: impl Fn(&MatchSummary) -> bool,
-    ) -> Result<(Vec<MatchSummary>, Vec<MatchEntry>), MobileError> {
-        let all: Vec<MatchSummary> = self
+    ) -> Result<(Vec<MatchSummary>, Vec<Chosen>), MobileError> {
+        let (all, team_a): (Vec<MatchSummary>, Vec<Option<TeamEntry>>) = self
             .runtime
-            .block_on(self.match_reader.read_summaries(team))?
+            .block_on(self.match_reader.scouted_summaries(team))?
             .into_iter()
-            .filter_map(Result::ok)
-            .filter(|m| keep(m))
+            .filter(|m| keep(&m.summary))
+            .map(|m| (m.summary, m.team_a))
+            .unzip();
+        // the matches the team is B of, with their team A
+        let as_b: HashMap<&str, &TeamEntry> = all
+            .iter()
+            .zip(&team_a)
+            .filter_map(|(m, a)| a.as_ref().map(|a| (m.id.as_str(), a)))
             .collect();
-        let ids: Vec<String> = period
+        let chosen = period
             .period()?
             .select_in(&all, today, competition)
             .into_iter()
-            .map(|m| m.id.clone())
-            .collect();
-        let chosen = self
-            .runtime
-            .block_on(self.match_reader.read_some(team, &ids))
-            .into_iter()
-            .filter_map(Result::ok)
-            .map(|mut m: MatchEntry| {
-                name_the_removed(&mut m.team, self.language.labels());
-                m
+            .filter_map(|m| match as_b.get(m.id.as_str()) {
+                Some(a) => self
+                    .match_reader
+                    .read_of_b(a, &m.id)
+                    .ok()
+                    .flatten()
+                    .map(|entry| self.chosen(entry, a.id, MatchSide::B)),
+                None => self
+                    .runtime
+                    .block_on(
+                        self.match_reader
+                            .read_some(team, std::slice::from_ref(&m.id)),
+                    )
+                    .into_iter()
+                    .find_map(Result::ok)
+                    .map(|entry| self.chosen(entry, team.id, MatchSide::A)),
             })
             .collect();
         Ok((all, chosen))
     }
+
+    /// The match read of the period, its removed players named.
+    fn chosen(&self, mut entry: MatchEntry, team_a: Uuid, side: MatchSide) -> Chosen {
+        name_the_removed(&mut entry.team, self.language.labels());
+        Chosen {
+            entry,
+            team_a,
+            side,
+        }
+    }
+}
+
+/// A match of the period read in full, as the team of the analysis sees
+/// it, and where its video is: the match of team A `team_a`, from `side`.
+struct Chosen {
+    entry: MatchEntry,
+    team_a: Uuid,
+    side: MatchSide,
+}
+
+/// The matches read, without where their video is.
+fn entries(chosen: Vec<Chosen>) -> Vec<MatchEntry> {
+    chosen.into_iter().map(|c| c.entry).collect()
 }
 
 /// The analysis of the matches of the team (see `Scout4All::team_analysis`).
@@ -478,11 +688,6 @@ pub(crate) fn team_analysis(
 ) -> Result<TeamAnalysis, MobileError> {
     let matches: Vec<&MatchEntry> = chosen.iter().collect();
     let days = period.period()?.days(&matches, today);
-    // the score of each match, as the index tells it
-    let scores: HashMap<&str, (u8, u8)> = all
-        .iter()
-        .map(|m| (m.id.as_str(), (m.us_wins, m.them_wins)))
-        .collect();
     let analysis = Analysis::of(&matches);
     let narrowed = narrowed(&filter)?;
     let total = analysis.total();
@@ -491,66 +696,20 @@ pub(crate) fn team_analysis(
     let teams: Vec<&TeamEntry> = std::iter::once(team)
         .chain(analysis.matches.iter().map(|m| &m.entry.team))
         .collect();
-    let level = |series: Series, value: Option<f64>| {
-        value.and_then(|v| grade(team.classification, team.gender, series.measure(), v))
-    };
     let trend = Series::ALL
         .iter()
-        .map(|series| {
-            let overall = series.value_in(&total, &narrowed);
-            MatchTrend {
-                series: *series,
-                name: series_name(*series, labels),
-                band: team
-                    .classification
-                    .zip(team.gender)
-                    .map(|(level, gender)| band(level, gender, series.measure()))
-                    .map(|b| GradeBand {
-                        low: b.low,
-                        high: b.high,
-                    }),
-                values: analysis.series(*series, &narrowed),
-                moving: analysis.moving(*series, &narrowed, MOVING_WINDOW),
-                touches: analysis.touches(*series, &narrowed),
-                overall,
-                overall_grade: level(*series, overall),
-            }
-        })
+        .filter(|series| of_the_players(**series, &narrowed))
+        .map(|series| match_trend(*series, &analysis, &total, &narrowed, team, labels))
         .collect();
-    let mut played_days: Vec<String> = all
-        .iter()
-        .filter(|m| m.scouted())
-        .map(|m| day(m).format(DAY).to_string())
-        .collect();
-    played_days.sort();
-    played_days.dedup();
+    let played_days = played_days(all);
     Ok(TeamAnalysis {
         period,
         competition,
         competitions,
         from: days.map(|(from, _)| from.format(DAY).to_string()),
         to: days.map(|(_, to)| to.format(DAY).to_string()),
-        matches: analysis
-            .matches
-            .iter()
-            .map(|m| {
-                let (won, lost) = scores.get(m.entry.id.as_str()).copied().unwrap_or_default();
-                AnalysedMatch {
-                    id: m.entry.id.clone(),
-                    opponent: m.entry.opponent.clone(),
-                    date: m.entry.date.to_rfc3339(),
-                    day: day(m.entry).format(DAY).to_string(),
-                    home: m.entry.home,
-                    won,
-                    lost,
-                }
-            })
-            .collect(),
-        skipped: analysis
-            .skipped
-            .iter()
-            .map(|m| m.opponent.clone())
-            .collect(),
+        matches: analysed_matches(&analysis, all),
+        skipped: skipped_opponents(&analysis),
         played_days,
         summary: summary(&total, &narrowed, team, labels),
         trend,
@@ -558,6 +717,110 @@ pub(crate) fn team_analysis(
         detail: detail_of(&total, &total, &teams, labels, event, filter)?,
         situation: situation_choices(labels),
     })
+}
+
+/// The matches of the analysis, the score of each as the index tells it.
+pub(crate) fn analysed_matches(analysis: &Analysis, all: &[MatchSummary]) -> Vec<AnalysedMatch> {
+    let scores: HashMap<&str, (u8, u8)> = all
+        .iter()
+        .map(|m| (m.id.as_str(), (m.us_wins, m.them_wins)))
+        .collect();
+    analysis
+        .matches
+        .iter()
+        .map(|m| {
+            let (won, lost) = scores.get(m.entry.id.as_str()).copied().unwrap_or_default();
+            AnalysedMatch {
+                id: m.entry.id.clone(),
+                opponent: m.entry.opponent.clone(),
+                date: m.entry.date.to_rfc3339(),
+                day: day(m.entry).format(DAY).to_string(),
+                home: m.entry.home,
+                won,
+                lost,
+            }
+        })
+        .collect()
+}
+
+/// The opponents of the matches left out: a set doesn't replay.
+pub(crate) fn skipped_opponents(analysis: &Analysis) -> Vec<String> {
+    analysis
+        .skipped
+        .iter()
+        .map(|m| m.opponent.clone())
+        .collect()
+}
+
+/// Every day with a match played, once each.
+pub(crate) fn played_days(all: &[MatchSummary]) -> Vec<String> {
+    let mut days: Vec<String> = all
+        .iter()
+        .filter(|m| m.scouted())
+        .map(|m| day(m).format(DAY).to_string())
+        .collect();
+    days.sort();
+    days.dedup();
+    days
+}
+
+/// Whether the figure is shown with the filter: side out and break point
+/// are of the team, its rallies, not with players chosen.
+fn of_the_players(series: Series, filter: &StatsFilter) -> bool {
+    !matches!(
+        (series, filter.of_players()),
+        (Series::SideOut | Series::BreakPoint, true)
+    )
+}
+
+/// A figure match by match, narrowed by the filter, graded for the level
+/// of the team.
+pub(crate) fn match_trend(
+    series: Series,
+    analysis: &Analysis,
+    total: &Stats,
+    narrowed: &StatsFilter,
+    team: &TeamEntry,
+    labels: &scout4all_core::localization::Labels,
+) -> MatchTrend {
+    let overall = series.value_in(total, narrowed);
+    MatchTrend {
+        series,
+        name: series_name(series, labels),
+        band: team
+            .classification
+            .zip(team.gender)
+            .map(|(level, gender)| band(level, gender, series.measure()))
+            .map(|b| GradeBand {
+                low: b.low,
+                high: b.high,
+            }),
+        values: analysis.series(series, narrowed),
+        moving: analysis.moving(series, narrowed, MOVING_WINDOW),
+        touches: analysis.touches(series, narrowed),
+        overall,
+        overall_grade: overall
+            .and_then(|v| grade(team.classification, team.gender, series.measure(), v)),
+    }
+}
+
+/// The line with the positivity of the fundamental in place of its figure.
+fn positivity_trend(
+    line: MatchTrend,
+    event: EventTypeEnum,
+    analysis: &Analysis,
+    total: &Stats,
+    narrowed: &StatsFilter,
+) -> MatchTrend {
+    let value = |stats: &Stats| stats.metric_percentage(event, Metric::Positive, narrowed);
+    MatchTrend {
+        band: None,
+        values: analysis.series_of(value),
+        moving: analysis.moving_of(value, MOVING_WINDOW),
+        overall: value(total),
+        overall_grade: None,
+        ..line
+    }
 }
 
 /// The choices of the filters.

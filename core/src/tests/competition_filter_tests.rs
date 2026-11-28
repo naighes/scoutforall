@@ -48,6 +48,7 @@ mod tests {
             resume: None,
             next_set_number: None,
             competition_id: competition,
+            opponent_team: None,
         }
     }
 
@@ -180,7 +181,7 @@ mod tests {
     #[test]
     fn the_summary_seen_by_b_keeps_the_competition() {
         let league = Uuid::new_v4();
-        let seen = summary("m", 1, 3, Some(league)).seen_by_b("A".into(), false);
+        let seen = summary("m", 1, 3, Some(league)).seen_by_b(Uuid::nil(), "A".into(), false);
         assert_eq!(seen.competition_id, Some(league));
         assert_eq!(seen.competition(), Some(league));
     }

@@ -115,7 +115,9 @@ fn team_rows_where(
     };
     let sql = format!(
         "SELECT tm.person_id, tm.position, tm.number, tm.role, tm.deleted,
-                p.name, p.birth_date, p.height_cm, p.notes, p.deleted
+                p.name, p.birth_date, p.height_cm, p.notes, p.deleted,
+                p.nationality, p.dominant_hand, p.federation_id,
+                p.email, p.phone, p.birth_place
          FROM team_members tm JOIN persons p ON p.id = tm.person_id
          WHERE tm.team_id = ?1 AND ({members})
          ORDER BY tm.position"
@@ -134,6 +136,12 @@ fn team_rows_where(
                             height_cm: r.get(7)?,
                             notes: r.get(8)?,
                             deleted: r.get(9)?,
+                            nationality: r.get(10)?,
+                            dominant_hand: r.get(11)?,
+                            federation_id: r.get(12)?,
+                            email: r.get(13)?,
+                            phone: r.get(14)?,
+                            birth_place: r.get(15)?,
                         },
                         Membership {
                             team_id: team,
@@ -191,20 +199,31 @@ pub(crate) fn write_team(tx: &Transaction, team: &TeamEntry) -> Result<(), AppEr
             player.name,
             player.birth_date.map(Sql),
             player.height_cm,
-            player.notes
+            player.notes,
+            player.nationality,
+            player.dominant_hand,
+            player.federation_id,
+            player.email,
+            player.phone,
+            player.birth_place
         ];
         let sql = match player.deleted {
             false => {
-                "INSERT INTO persons (id, name, birth_date, height_cm, notes)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                "INSERT INTO persons (id, name, birth_date, height_cm, notes, nationality, dominant_hand, federation_id,
+                     email, phone, birth_place)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
                  ON CONFLICT (id) DO UPDATE SET name = excluded.name,
                      birth_date = excluded.birth_date, height_cm = excluded.height_cm,
-                     notes = excluded.notes
+                     notes = excluded.notes, nationality = excluded.nationality,
+                     dominant_hand = excluded.dominant_hand, federation_id = excluded.federation_id,
+                     email = excluded.email, phone = excluded.phone,
+                     birth_place = excluded.birth_place
                  WHERE persons.deleted = 0"
             }
             true => {
-                "INSERT INTO persons (id, name, birth_date, height_cm, notes)
-                 VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT (id) DO NOTHING"
+                "INSERT INTO persons (id, name, birth_date, height_cm, notes, nationality, dominant_hand, federation_id,
+                     email, phone, birth_place)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11) ON CONFLICT (id) DO NOTHING"
             }
         };
         tx.execute(sql, person).map_err(sqlite)?;
@@ -258,6 +277,27 @@ pub(crate) fn matches_as_b(
 ) -> Result<Vec<(String, Uuid, Home)>, AppError> {
     tx.prepare(
         "SELECT id, team_a, home FROM matches WHERE team_b = ?1 AND deleted = 0
+         ORDER BY start, id",
+    )
+    .and_then(|mut statement| {
+        statement
+            .query_map([Sql(team)], |row| {
+                Ok((row.get(0)?, id(row, 1)?, row.get::<_, Home>(2)?))
+            })?
+            .collect::<Result<_, _>>()
+    })
+    .map_err(sqlite)
+}
+
+/// The matches not removed in which `team` is B and scouted: id, team A
+/// and court.
+pub(crate) fn matches_scouted_as_b(
+    tx: &Transaction,
+    team: Uuid,
+) -> Result<Vec<(String, Uuid, Home)>, AppError> {
+    tx.prepare(
+        "SELECT id, team_a, home FROM matches
+         WHERE team_b = ?1 AND scouting = 'both' AND deleted = 0
          ORDER BY start, id",
     )
     .and_then(|mut statement| {

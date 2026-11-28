@@ -183,6 +183,21 @@ impl SessionPage {
         }
     }
 
+    /// What went wrong, in the roll or in the sheet: told over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        match &self.mode {
+            Mode::Roll(roll) if roll.failure().is_some() => roll.failure(),
+            _ => &self.error,
+        }
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        match &mut self.mode {
+            Mode::Roll(roll) if roll.failure().is_some() => roll.failure_mut(),
+            _ => &mut self.error,
+        }
+    }
+
     /// Everything read again after a change.
     fn reload(&mut self) {
         let read = (
@@ -606,8 +621,10 @@ impl SessionPage {
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.mode {
             Mode::Session(e) => e.hints(s),
-            Mode::Activity(e) => e.form.on_field(Form::hints(s)),
-            Mode::Copy(_) | Mode::Duplicate(_) | Mode::Pdf(_) => Form::hints(s),
+            Mode::Activity(e) => e.form.on_field(s, Form::hints(s)),
+            Mode::Copy(e) => e.form.on_field(s, Form::hints(s)),
+            Mode::Duplicate(e) => e.form.on_field(s, Form::hints(s)),
+            Mode::Pdf(f) => f.on_field(s, Form::hints(s)),
             Mode::Roll(r) => r.hints(s),
             Mode::Complete(_) => vec![
                 ("↑ ↓".to_string(), String::new()),
@@ -711,11 +728,7 @@ impl SessionPage {
             .height(Length::Fill)
             .into(),
         };
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
-        column![error, body].spacing(10).into()
+        body
     }
 
     fn completion<'a>(
@@ -1149,7 +1162,8 @@ mod tests {
 
     /// The app, its team and a session on 2 March at 18:00 titled "Prima".
     fn page(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, SessionPage) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = core.tutorial_team().unwrap();
         let id = session(&core, &team, "2026-03-02T18:00", "Prima");
         let page = SessionPage::new(core.clone(), team.clone(), id).unwrap();

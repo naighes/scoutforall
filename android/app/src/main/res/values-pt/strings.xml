@@ -33,7 +33,7 @@
     <string name="irreversible">A exclusão é PERMANENTE: não pode ser desfeita.</string>
     <string name="delete_team_text">A equipe %1$s será excluída com as suas partidas (%2$d): scout, relatórios e estatísticas. Os jogadores continuam no cadastro.</string>
     <string name="delete_match_text">A partida %1$s será excluída com todos os seus sets: scout, relatório e estatísticas.</string>
-    <string name="delete_player_text">O jogador %1$s será tirado da equipe. Ele continua nas partidas já jogadas e no cadastro, de onde pode ser adicionado de novo.</string>
+    <string name="delete_player_text">O jogador %1$s será removido da equipe. Ele continua nas partidas já jogadas e no cadastro, de onde pode ser adicionado de novo.</string>
     <string name="unreadable_match_delete">Toque para excluí-la.</string>
     <string name="cancel">Cancelar</string>
     <string name="matches">Partidas</string>
@@ -42,10 +42,21 @@
     <string name="home">em casa</string>
     <string name="away">fora</string>
     <string name="in_progress">em andamento</string>
-    <string name="home_in_progress">Em andamento</string>
-    <string name="home_recent">Últimas partidas</string>
+    <string name="to_play">a jogar</string>
+    <string name="home_in_progress">Para retomar ou jogar</string>
+    <string name="home_recent">Últimos resultados</string>
+    <string name="home_calendar">Calendário</string>
+    <string name="home_matches">Partidas</string>
+    <string name="hide_from_home">Ocultar da tela inicial</string>
+    <string name="show_in_home">Mostrar na tela inicial</string>
+    <string name="show_hidden">Mostrar ocultas (%1$d)</string>
+    <string name="hide_hidden">Recolher as ocultas</string>
+    <string name="home_open_close">Abrir ou fechar</string>
+    <string name="home_no_matches">Nenhuma partida</string>
     <string name="agenda_today">Hoje</string>
-    <string name="agenda_week">Semana</string>
+    <string name="agenda_next_match">Próxima partida</string>
+    <string name="agenda_see_calendar">Ver calendário</string>
+    <string name="agenda_official_match">Partida oficial</string>
     <string name="agenda_training">Treino</string>
     <string name="agenda_cancelled">cancelado</string>
     <string name="agenda_to_close">a fechar</string>
@@ -83,6 +94,7 @@
     <string name="setter">Levantador</string>
     <string name="libero">Líbero</string>
     <string name="fallback_libero">Segundo líbero</string>
+    <string name="out_for_the_libero">fora pelo líbero</string>
     <string name="none">Nenhum</string>
     <string name="empty_position">Esvaziar a posição</string>
     <string name="no_available_players">Nenhum jogador disponível</string>
@@ -109,8 +121,6 @@
     <string name="set_lost">Set %d perdido</string>
     <string name="match_won">Partida ganha</string>
     <string name="match_lost">Partida perdida</string>
-    <string name="match_won_cheer">Parabéns a toda a equipe!</string>
-    <string name="match_lost_cheer">Cabeça erguida, vamos à próxima!</string>
     <string name="break_phase">BREAK</string>
     <string name="side_out_phase">SIDE-OUT</string>
     <string name="inverted_p1">P1 inv.</string>
@@ -234,6 +244,7 @@
     <string name="version">Versão</string>
     <string name="license">Licença</string>
     <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="third_party_licenses">Licenças de terceiros</string>
     <string name="data_privacy">Dados e privacidade</string>
     <string name="source_code">Código-fonte</string>
     <string name="report_problem">Relatar um problema</string>
@@ -241,6 +252,7 @@
     <string name="report_title">Problema no app Android</string>
     <string name="report_body">O que aconteceu?\n\nO que você esperava?\n\n---\n%1$s</string>
     <string name="no_app_to_open">Nenhum app pode abrir isto</string>
+    <string name="settings_not_saved">Não foi possível salvar as configurações: %1$s</string>
     <!-- archives -->
     <string name="export_team">Compartilhar equipe</string>
     <string name="export_match">Compartilhar partida</string>
@@ -368,6 +380,7 @@
     <string name="analysis">Análise</string>
     <string name="period">Período</string>
     <string name="last_month">Último mês</string>
+    <string name="season_period">Temporada inteira</string>
     <string name="last_matches">Últimas %1$d</string>
     <string name="between">De – até</string>
     <string name="from_day">De</string>
@@ -409,7 +422,7 @@
     <string name="video_aligned_file">Alinhada pelo início do arquivo: %1$s</string>
     <string name="video_aligned_chosen">Alinhada manualmente</string>
     <string name="video_not_aligned">Não alinhada ao vídeo: o nome do arquivo não diz quando começa. Escolha um evento, leve o vídeo ao seu momento e toque em Sincronizar o evento aqui.</string>
-    <string name="video_outside">%1$d eventos fora do vídeo</string>
+    <string name="video_outside">Eventos fora do vídeo: %1$d</string>
     <string name="video_events">Eventos</string>
     <string name="video_sync">Sincronização</string>
     <string name="video_files">Arquivos</string>
@@ -467,6 +480,8 @@
     <string name="clips_without_video">Sem vídeo, deixadas de fora: %1$d</string>
     <string name="clips_match_of">Partida %1$d de %2$d</string>
     <string name="montage_left_out">Deixadas de fora: %1$s</string>
+    <string name="montage_outside">Ações fora do vídeo, não incluídas: %1$d de %2$d</string>
+    <string name="montage_none">Nenhuma ação está dentro do vídeo: nada para criar</string>
     <string name="left_out_no_video">sem vídeo</string>
     <string name="left_out_unreadable">vídeo ilegível</string>
     <string name="left_out_not_lined_up">não sincronizada com o vídeo</string>
@@ -535,6 +550,7 @@
     <string name="tr_programming">Programação</string>
     <string name="tr_sessions">Sessões</string>
     <string name="tr_new_session">Nova sessão</string>
+    <string name="tr_new_event">Novo evento</string>
     <string name="tr_edit_session">Editar a sessão</string>
     <string name="tr_session_title">Título</string>
     <string name="tr_session_duration">Duração prevista (min)</string>
@@ -716,4 +732,27 @@
     <string name="no_photo">Sem foto</string>
     <string name="no_face">Nenhum rosto encontrado na foto: escolha uma em que o rosto esteja nítido.</string>
     <string name="many_faces">%1$d rostos encontrados na foto: escolha uma com uma só pessoa.</string>
+    <string name="nationality">Nacionalidade</string>
+    <string name="profile">Perfil</string>
+    <string name="sets">Sets</string>
+    <string name="attendance">Presenças</string>
+    <string name="no_matches_played">Nenhum jogo disputado</string>
+    <string name="also_plays_in">Também joga em</string>
+    <string name="player_out_of">de %1$d</string>
+    <string name="player_points_detail">Ataque %1$d · Bloqueio %2$d · Serviço %3$d</string>
+    <string name="dominant_hand">Mão dominante</string>
+    <string name="right_hand">Direita</string>
+    <string name="left_hand">Esquerda</string>
+    <string name="federation_id">Registro federativo</string>
+    <string name="notice_error">Ocorreu um problema</string>
+    <string name="notice_warning">Atenção</string>
+    <string name="notice_info">Concluído</string>
+    <string name="birth_place">Local de nascimento</string>
+    <string name="contacts">Contatos</string>
+    <string name="email">Email</string>
+    <string name="phone_prefix">Prefixo</string>
+    <string name="phone">Telefone</string>
+    <string name="write_email">Escrever email</string>
+    <string name="call">Ligar</string>
+    <string name="include_contacts">Incluir contatos (email, telefone, local de nascimento)</string>
 </resources>

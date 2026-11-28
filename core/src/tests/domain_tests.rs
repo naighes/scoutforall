@@ -405,7 +405,7 @@ mod tests {
             .with_timezone(&Utc);
         assert_eq!(read_value(&Sql(time)), "2026-11-12T17:30:00.123456Z");
         assert_eq!(through_sqlite(&Sql(time)).1, Sql(time));
-        let now = Utc::now();
+        let now = crate::tests::clock::now();
         assert_eq!(through_sqlite(&Sql(now)).1, Sql(now));
         // another offset: the same moment
         assert_eq!(
@@ -846,6 +846,12 @@ mod tests {
                 birth_date: NaiveDate::from_ymd_opt(2008, 2, n),
                 height_cm: Some(180),
                 notes: format!("notes {n}"),
+                nationality: None,
+                dominant_hand: None,
+                federation_id: String::new(),
+                email: String::new(),
+                phone: String::new(),
+                birth_place: String::new(),
                 deleted: false,
             })
             .collect();

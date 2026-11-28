@@ -134,6 +134,14 @@ class SetStartViewModel(
 
     // the choices are in memory, in the core: no need to leave the main thread
 
+    /** The error told, closed. */
+    fun dismissError() = mutableState.update { s ->
+        when (s) {
+            is SetStartState.Choosing -> s.copy(error = null)
+            else -> s
+        }
+    }
+
     fun open(pick: Pick?) = mutableState.update { s ->
         when (s) {
             is SetStartState.Choosing -> s.copy(pick = pick)
@@ -281,7 +289,7 @@ fun SetStartScreen(
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             SetStartState.Loading, SetStartState.Started -> Centered(modifier) { CircularProgressIndicator() }
-            is SetStartState.Failed -> Centered(modifier) { Text(s.message) }
+            is SetStartState.Failed -> LoadFailed(s.message, modifier)
             is SetStartState.Choosing -> SetStartContent(s, model, modifier)
         }
     }
@@ -351,9 +359,7 @@ private fun Choices(state: SetStartState.Choosing, model: SetStartViewModel, mod
                 }
             }
         }
-        state.error?.let {
-            Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error)
-        }
+        FailureDialog(state.error) { model.dismissError() }
         // big and at the bottom, where the thumb is
         // scouting both sides, the lineup of A is followed by the one of B
         val toB = state.both && !state.onB

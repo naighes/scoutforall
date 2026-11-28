@@ -32,7 +32,7 @@ mod tests {
         },
         team_form::TeamForm,
     };
-    use chrono::{NaiveDate, Utc};
+    use chrono::NaiveDate;
     use uuid::Uuid;
 
     struct P {
@@ -66,6 +66,12 @@ mod tests {
             birth_date: NaiveDate::from_ymd_opt(2008, 3, 14),
             height_cm: Some(180),
             notes: format!("{name} notes"),
+            nationality: crate::shapes::country::CountryCode::parse("IT"),
+            dominant_hand: Some(crate::shapes::player::DominantHand::Left),
+            federation_id: format!("{name} 42"),
+            email: format!("{}@example.com", name.to_lowercase().replace(' ', ".")),
+            phone: "+393331234567".into(),
+            birth_place: format!("{name} town"),
         }
     }
 
@@ -252,7 +258,7 @@ mod tests {
                 &t,
                 MatchInput::against(
                     "Arezzo",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -491,6 +497,14 @@ mod tests {
         );
         assert_eq!(new.players[1].height_cm, Some(180));
         assert_eq!(new.players[1].notes, "Anna notes");
+        assert_eq!(
+            (
+                new.players[1].nationality,
+                new.players[1].dominant_hand,
+                new.players[1].federation_id.as_str()
+            ),
+            (players[0].nationality, players[0].dominant_hand, "Anna 42")
+        );
         assert_eq!(count(&p.db, "SELECT count(*) FROM persons"), persons);
         // the old team as it was
         assert_eq!(read(&p, &old).await, old);
@@ -519,7 +533,7 @@ mod tests {
                 &t,
                 MatchInput::against(
                     "Arezzo",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",

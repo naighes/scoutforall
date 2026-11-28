@@ -40,6 +40,7 @@ import java.time.LocalDate
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import java.util.Locale
 
 /** How a day is written in the fields: in the language of the phone, the
  * same everywhere ("14 novembre 2026"). */
@@ -52,6 +53,20 @@ internal fun windowText(first: String, last: String): String {
     val days = runCatching { LocalDate.parse(first).format(written) to LocalDate.parse(last).format(written) }
         .getOrDefault(first to last)
     return if (first == last) days.first else "${days.first} – ${days.second}"
+}
+
+/** Day and month in digits, in the order of the language. */
+internal fun dayMonth(): DateTimeFormatter {
+    val locale = Locale.getDefault()
+    return DateTimeFormatter.ofPattern(android.text.format.DateFormat.getBestDateTimePattern(locale, "Md"), locale)
+}
+
+/** The days of a week from the first to the last ("11/23 – 11/29"), day
+ * and month in the order of the language; nothing until they are read. */
+internal fun weekRange(days: List<String>): String {
+    if (days.isEmpty()) return ""
+    val written = dayMonth()
+    return listOf(days.first(), days.last()).joinToString(" – ") { LocalDate.parse(it).format(written) }
 }
 
 /** The field of a day, the same in every form (the match, the birth of a
@@ -99,13 +114,13 @@ internal fun DayField(
         },
         singleLine = true,
         isError = error != null,
-        supportingText = error?.let { { Text(it) } },
+        supportingText = noteOf(error),
         interactionSource = presses,
     )
     if (picking) {
         // the picker counts days in UTC
         val millis = { d: LocalDate -> d.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli() }
-        val today = LocalDate.now()
+        val today = clock().today()
         val picker = rememberDatePickerState(
             initialSelectedDateMillis = day?.let(millis),
             initialDisplayedMonthMillis = millis(day ?: opensAt ?: today),
@@ -198,7 +213,7 @@ internal fun TimeField(
         },
         singleLine = true,
         isError = error != null,
-        supportingText = error?.let { { Text(it) } },
+        supportingText = noteOf(error),
         interactionSource = presses,
     )
     if (picking) {

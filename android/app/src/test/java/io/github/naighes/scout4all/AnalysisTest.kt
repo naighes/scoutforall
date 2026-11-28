@@ -1,8 +1,14 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasScrollToNodeAction
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.hasText
@@ -13,7 +19,9 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.text.AnnotatedString
 import java.time.LocalDate
+import io.github.naighes.scout4all.core.AnalysisPeriod
 import io.github.naighes.scout4all.core.EvalEnum
+import io.github.naighes.scout4all.core.Scout4All
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -57,6 +65,44 @@ class AnalysisLayoutTest(private val screen: Size) {
         rule.shot("analysis-between-$screen")
         assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
     }
+
+    /** The statistics tab of the profile, then the analysis narrowed to the
+     * player: no player to choose. */
+    @Test
+    fun theStatisticsOfAPlayer() {
+        val team = saveNationalTeam()
+        winMatch(team, "Cortona")
+        val server = core { c -> c.playerStatisticsOfAll(team) }
+        var detail by mutableStateOf<LockedAnalysis?>(null)
+        rule.setContent {
+            Scout4AllTheme {
+                when (val locked = detail) {
+                    null -> PlayerProfileScreen(team, server, onBack = {}, onEdit = {}, onTeam = {}, onDeleted = {}, onDetail = { detail = it })
+                    else -> AnalysisScreen(team, onBack = {}, locked = locked)
+                }
+            }
+        }
+        rule.waitForText("ALESSIA ORRO", substring = true)
+        // a phone on its side is short: the header scrolls away first
+        val scrollTo = { text: String -> rule.onNode(hasScrollToNodeAction()).performScrollToNode(hasText(text)) }
+        scrollTo(string(R.string.statistics))
+        click(string(R.string.statistics))
+        rule.waitForIdle()
+        rule.waitFor {
+            runCatching { scrollTo(string(R.string.stats_detail)) }.isSuccess
+        }
+        rule.shot("player-statistics-$screen")
+        assertEquals(emptyList<String>(), rule.misfits(scrolls = true) + rule.inaccessible())
+        click(string(R.string.stats_detail))
+        rule.waitForText(string(R.string.stats_trend))
+        rule.onAllNodesWithText(string(R.string.filter_player)).assertCountEquals(0)
+        assertEquals(PeriodKind.Season, detail?.choice?.kind)
+    }
+
+    /** The first player of the team with a touch. */
+    private fun Scout4All.playerStatisticsOfAll(team: String): String = team(team).players.first {
+        playerStatistics(team, it.id, AnalysisPeriod.Season, null).fundamentals.isNotEmpty()
+    }.id
 
     private fun click(text: String) {
         rule.onNode(hasText(text) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
@@ -110,7 +156,7 @@ class AnalysisTest {
     fun theAnalysisSeenFromAnOpponentScoutedOnBothSides() {
         val team = saveNationalTeam()
         winMatch(team, "Cortona")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.matches_count, 1), substring = true)
         rule.onAllNodesWithText(string(R.string.seen_from)).assertCountEquals(0)
     }
@@ -119,9 +165,11 @@ class AnalysisTest {
     fun theAnalysisSeenFromTheOpponent() {
         val both = saveNationalTeam()
         serve(both, startFirstSetBoth(both), EvalEnum.PERFECT)
-        rule.setContent { Scout4AllTheme { AnalysisScreen(both, onBack = {}) } }
+        open(both)
         rule.waitForText(string(R.string.seen_from))
         val chip = { name: String -> rule.onNode(hasText(name) and hasClickAction()) }
+        // each with its picture: the initials, without a logo
+        rule.waitFor { rule.onAllNodesWithTag(initialsTag("A"), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
         chip("Arezzo").performClick()
         rule.waitFor { runCatching { chip("Arezzo").assertIsSelected() }.isSuccess }
         rule.waitForText(string(R.string.matches_count, 1), substring = true)
@@ -133,7 +181,7 @@ class AnalysisTest {
     fun theTeamAndTheOpponentSideBySide() {
         val both = saveNationalTeam()
         serve(both, startFirstSetBoth(both), EvalEnum.PERFECT)
-        rule.setContent { Scout4AllTheme { AnalysisScreen(both, onBack = {}) } }
+        open(both)
         rule.waitForText(string(R.string.seen_from))
         // none until an opponent is chosen
         rule.onAllNodesWithText(string(R.string.compare)).assertCountEquals(0)
@@ -153,7 +201,7 @@ class AnalysisTest {
     fun oneCompetitionIsNotOffered() {
         val team = saveNationalTeam()
         winMatch(team, "Cortona", "Coppa")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.matches_count, 1), substring = true)
         assertEquals(0, rule.onAllNodesWithText(string(R.string.all_competitions)).fetchSemanticsNodes().size)
     }
@@ -165,7 +213,7 @@ class AnalysisTest {
         val team = saveNationalTeam()
         winMatch(team, "Cortona", "Coppa")
         winMatch(team, "Arezzo", "Serie A")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.all_competitions))
         rule.waitForText(string(R.string.matches_count, 2), substring = true)
         rule.onNode(hasText("Coppa") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
@@ -179,7 +227,7 @@ class AnalysisTest {
     fun aFilterOfTheSituation() {
         val team = saveNationalTeam()
         winMatch(team, "Cortona")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.rally_reception))
         rule.onNode(hasText(string(R.string.rally_reception)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         // `!` among the bad ones
@@ -193,13 +241,23 @@ class AnalysisTest {
     fun twoRotationsAtATime() {
         val team = saveNationalTeam()
         winMatch(team, "Cortona")
-        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        open(team)
         rule.waitForText(string(R.string.filter_rotation))
         rule.onNode(hasText(string(R.string.filter_rotation)) and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText("S1")
         rule.onNode(hasText("S1") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.onNode(hasText("S3") and hasClickAction()).performSemanticsAction(SemanticsActions.OnClick)
         rule.waitForText(string(R.string.filter_rotation) + " S1 S3")
+    }
+
+    /** The analysis of the team, of its last matches: the default period, the
+     * last month, would leave the matches of the tests out as time passes. */
+    private fun open(team: String) {
+        rule.setContent { Scout4AllTheme { AnalysisScreen(team, onBack = {}) } }
+        val last = hasText(string(R.string.last_matches, 5)) and hasClickAction()
+        rule.waitForText(string(R.string.last_matches, 5))
+        rule.onNode(last).performSemanticsAction(SemanticsActions.OnClick)
+        rule.waitForIdle()
     }
 
     private fun days(from: String, to: String) {

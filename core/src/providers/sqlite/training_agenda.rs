@@ -1,11 +1,12 @@
 //! The agenda of a team, or of all, from the tables: the matches are read
-//! as rows of `matches` and a summary, never replayed.
+//! as rows of `matches` and a summary, replayed only when the summary is
+//! missing (forgotten by an edit of the team, say), to be written again.
 
 use crate::{
     domain::sql::Sql,
     errors::AppError,
     providers::{
-        sqlite::{sqlite, training::SqliteTraining, venues::occupations},
+        sqlite::{sqlite, summary, training::SqliteTraining, venues::occupations},
         training_agenda::TrainingAgenda,
     },
     training::{
@@ -86,9 +87,30 @@ struct MatchRow {
     b: Option<Side>,
     b_name: Option<String>,
     played: bool,
-    wins: Option<(u8, u8)>,
+    /// the sets won and whether the match is over
+    summary: Option<(u8, u8, bool)>,
     span: Option<(NaiveDateTime, NaiveDateTime)>,
     venue: Option<VenueRef>,
+    friendly: bool,
+}
+
+/// The matches of the period with sets and no summary.
+fn unsummarized(tx: &Transaction, period: &Period) -> Result<Vec<Uuid>, AppError> {
+    tx.prepare(
+        "SELECT m.id FROM matches m
+         WHERE m.deleted = 0
+           AND substr(m.start, 1, 10) >= ?1 AND substr(m.start, 1, 10) < ?2
+           AND EXISTS (SELECT 1 FROM sets s WHERE s.match_id = m.id AND s.deleted = 0)
+           AND NOT EXISTS (SELECT 1 FROM match_summary ms WHERE ms.match_id = m.id)",
+    )
+    .and_then(|mut statement| {
+        statement
+            .query_map(params![Sql(period.from), Sql(period.to)], |row| {
+                row.get::<_, Sql<Uuid>>(0).map(|id| id.0)
+            })?
+            .collect::<Result<_, _>>()
+    })
+    .map_err(sqlite)
 }
 
 fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError> {
@@ -103,7 +125,7 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
                 (SELECT MAX(e.timestamp) FROM events e JOIN sets s
                    ON s.match_id = e.match_id AND s.number = e.set_number
                   WHERE e.match_id = m.id AND e.deleted = 0 AND s.deleted = 0),
-                v.id, v.name, v.deleted
+                v.id, v.name, v.deleted, m.friendly, ms.finished
          FROM matches m
            LEFT JOIN venues v ON v.id = m.venue_id
            JOIN teams ta ON ta.id = m.team_a
@@ -119,8 +141,12 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
                 .get::<_, Option<Sql<DateTime<FixedOffset>>>>(i)?
                 .map(|t| t.0.naive_local()))
         };
-        let wins = match (row.get::<_, Option<u8>>(9)?, row.get::<_, Option<u8>>(10)?) {
-            (Some(a), Some(b)) => Some((a, b)),
+        let summary = match (
+            row.get::<_, Option<u8>>(9)?,
+            row.get::<_, Option<u8>>(10)?,
+            row.get::<_, Option<bool>>(17)?,
+        ) {
+            (Some(a), Some(b), Some(finished)) => Some((a, b, finished)),
             _ => None,
         };
         let b = match (
@@ -142,9 +168,10 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
             b,
             b_name: row.get(7)?,
             played: row.get(8)?,
-            wins,
+            summary,
             span,
             venue: venue_ref(row, 13)?,
+            friendly: row.get(16)?,
         })
     })
     .map_err(sqlite)?
@@ -154,9 +181,14 @@ fn matches(tx: &Transaction, period: &Period) -> Result<Vec<MatchRow>, AppError>
 
 /// The match as an event of the team `me` (`a_side`: it is A), against `other`.
 fn event_of(m: &MatchRow, me: &Side, a_side: bool, other: Option<&Side>) -> AgendaEvent {
-    let state = match m.played {
-        false => MatchState::Scheduled,
-        true => MatchState::Played(m.wins.map(|(a, b)| score_of(a_side, a, b))),
+    let state = match (m.played, m.summary) {
+        (false, _) => MatchState::Scheduled,
+        (true, None) => MatchState::InProgress(None),
+        (true, Some((a, b, false))) => MatchState::InProgress(Some(score_of(a_side, a, b))),
+        (true, Some((a, b, true))) => {
+            let (ours, theirs) = score_of(a_side, a, b);
+            MatchState::Over(ours, theirs)
+        }
     };
     let minutes = match (m.played, m.span) {
         (true, Some((first, last))) => played_minutes(first, last),
@@ -175,6 +207,7 @@ fn event_of(m: &MatchRow, me: &Side, a_side: bool, other: Option<&Side>) -> Agen
                 .unwrap_or_default(),
             opponent_team: other.map(|o| o.0),
             state,
+            friendly: m.friendly,
         },
         venue: m.venue.clone(),
         shared_venue: false,
@@ -203,6 +236,14 @@ impl TrainingAgenda for SqliteTraining {
         period: Period,
         now: NaiveDateTime,
     ) -> Result<Vec<AgendaEvent>, AppError> {
+        // a match played without its summary would read as in progress
+        let missing = self.db().read(|tx| unsummarized(tx, &period))?;
+        match missing.is_empty() {
+            true => Ok(()),
+            false => self
+                .db()
+                .write(|tx| missing.iter().try_for_each(|id| summary::refresh(tx, *id))),
+        }?;
         self.db().read(|tx| {
             let mut events = sessions(tx, team_id, &period, now)?;
             events.extend(match_events(&matches(tx, &period)?, team_id));

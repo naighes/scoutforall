@@ -15,7 +15,7 @@ mod tests {
     };
     use crate::tests::EN;
     use EventTypeEnum::*;
-    use chrono::Utc;
+
     use uuid::Uuid;
 
     /// The starting six in rotation 0 (the setter in position 1), the two
@@ -76,7 +76,7 @@ mod tests {
         eval: Option<EvalEnum>,
     ) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval,

@@ -2,6 +2,7 @@
 //! user allows them. The TUI uses the global queue and flag; an app with
 //! more than one data folder in a process (the tests of `mobile`) gives
 //! each scouting its own.
+use chrono::{DateTime, Utc};
 
 use crate::{
     analytics::{
@@ -21,7 +22,7 @@ use uuid::Uuid;
 pub trait FinishedMatches: Send + Sync {
     /// The match is over: queued for the statistics, if the user allows
     /// them. The match stays saved anyway: an upload not queued is lost.
-    async fn finished(&self, team_id: Uuid, match_id: String);
+    async fn finished(&self, team_id: Uuid, match_id: String, at: DateTime<Utc>);
 }
 
 /// The global queue and flag, of the TUI.
@@ -29,10 +30,10 @@ pub struct GlobalFinishedMatches;
 
 #[async_trait]
 impl FinishedMatches for GlobalFinishedMatches {
-    async fn finished(&self, team_id: Uuid, match_id: String) {
+    async fn finished(&self, team_id: Uuid, match_id: String, at: DateTime<Utc>) {
         // the global flag: the settings may change while scouting
         if uploads_enabled() {
-            let _ = enqueue_match_for_upload(team_id, match_id).await;
+            let _ = enqueue_match_for_upload(team_id, match_id, at).await;
         }
     }
 }
@@ -51,9 +52,9 @@ pub struct QueuedFinishedMatches<
 impl<QR: QueueReader + Send + Sync + 'static, QW: QueueWriter + Send + Sync + 'static>
     FinishedMatches for QueuedFinishedMatches<QR, QW>
 {
-    async fn finished(&self, team_id: Uuid, match_id: String) {
+    async fn finished(&self, team_id: Uuid, match_id: String, at: DateTime<Utc>) {
         if self.enabled.load(Ordering::Relaxed) {
-            let _ = self.queue.enqueue(team_id, match_id).await;
+            let _ = self.queue.enqueue(team_id, match_id, at).await;
         }
     }
 }

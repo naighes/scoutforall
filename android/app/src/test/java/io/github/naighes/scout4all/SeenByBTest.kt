@@ -1,5 +1,9 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.onNodeWithTag
+import android.graphics.Bitmap
+import java.io.ByteArrayOutputStream
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
@@ -11,12 +15,8 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
-import io.github.naighes.scout4all.core.DvwChoice
-import io.github.naighes.scout4all.core.DvwOpponent
-import io.github.naighes.scout4all.core.DvwSide
 import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.MatchSide
-import io.github.naighes.scout4all.core.TeamListing
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -56,6 +56,33 @@ class SeenByBTest {
         assertEquals(match, opened)
     }
 
+    /** At the head of a match: the logo of the opponent, or the initials of
+     * one that is a name only. */
+    @Test
+    fun theOpponentOfAMatchShowsItsLogoOrItsInitials() {
+        val png = Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).let { bitmap ->
+            ByteArrayOutputStream().also { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }.toByteArray()
+        }
+        core { c ->
+            c.setTeamLogo(serbia, png)
+            c.saveMatch(italia, null, MatchForm("Zeta Volley", "2026-10-18T18:00:00+02:00", true, "6"))
+        }
+        rule.setContent {
+            Scout4AllTheme {
+                TeamScreen(italia, onBack = {}, onEdit = {}, onNewPlayer = {}, onPlayer = {}, onNewMatch = {}, onMatch = {})
+            }
+        }
+        rule.waitForText("Italia")
+        rule.onNode(hasText(string(R.string.matches)) and hasClickAction()).performClick()
+        rule.waitForText("Zeta Volley")
+        rule.onNodeWithTag(initialsTag("ZV"), useUnmergedTree = true).assertExists()
+        // the only logo: Italia has none
+        rule.waitFor {
+            listOf(LOGO_AS_IT_IS, LOGO_BACKDROP)
+                .sumOf { rule.onAllNodesWithTag(it, useUnmergedTree = true).fetchSemanticsNodes().size } == 1
+        }
+    }
+
     @Test
     fun theMatchOfBShowsItsResultAndOpensAsA() {
         var openedAs: String? = null
@@ -75,26 +102,6 @@ class SeenByBTest {
         rule.onNode(hasText(string(R.string.match_stats))).assertDoesNotExist()
         rule.onNode(hasText(string(R.string.open_as_team, "Italia")) and hasClickAction()).performClick()
         assertEquals(italia, openedAs)
-    }
-
-    /** "Home"–"Visiting" of the TUI fixture, imported into "Home" on both
-     * sides, "Visiting" a new team: the match of A and the team B. */
-    private fun bothSides(): Triple<String, String, String> {
-        val home = saveTeam("Home")
-        val bytes = javaClass.classLoader!!.getResourceAsStream("three_sets.dvw")!!.use { it.readBytes() }
-        val choice = DvwChoice(
-            side = DvwSide.HOME,
-            day = "2015-01-25",
-            maxSubstitutions = 6u,
-            teamId = home,
-            classification = null,
-            gender = null,
-            country = null,
-            opponent = DvwOpponent.NewTeam,
-        )
-        val m = core { it.importDvw(bytes, choice) }.matchId
-        val b = core { it.teams() }.firstNotNullOf { t -> (t as? TeamListing.Team)?.takeIf { it.name == "Visiting" }?.id }
-        return Triple(home, m, b)
     }
 
     @Test

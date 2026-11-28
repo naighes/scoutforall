@@ -42,10 +42,21 @@
     <string name="home">ホーム</string>
     <string name="away">アウェイ</string>
     <string name="in_progress">進行中</string>
-    <string name="home_in_progress">進行中</string>
-    <string name="home_recent">最近の試合</string>
+    <string name="to_play">試合前</string>
+    <string name="home_in_progress">再開・開始する試合</string>
+    <string name="home_recent">最近の結果</string>
+    <string name="home_calendar">カレンダー</string>
+    <string name="home_matches">試合</string>
+    <string name="hide_from_home">ホームから隠す</string>
+    <string name="show_in_home">ホームに表示</string>
+    <string name="show_hidden">非表示を表示（%1$d）</string>
+    <string name="hide_hidden">非表示を閉じる</string>
+    <string name="home_open_close">開閉</string>
+    <string name="home_no_matches">試合なし</string>
     <string name="agenda_today">今日</string>
-    <string name="agenda_week">週</string>
+    <string name="agenda_next_match">次の公式戦</string>
+    <string name="agenda_see_calendar">カレンダーを見る</string>
+    <string name="agenda_official_match">公式戦</string>
     <string name="agenda_training">練習</string>
     <string name="agenda_cancelled">中止</string>
     <string name="agenda_to_close">要完了</string>
@@ -83,6 +94,7 @@
     <string name="setter">セッター</string>
     <string name="libero">リベロ</string>
     <string name="fallback_libero">控えのリベロ</string>
+    <string name="out_for_the_libero">リベロと交代中</string>
     <string name="none">なし</string>
     <string name="empty_position">ポジションを空ける</string>
     <string name="no_available_players">出場できる選手がいません</string>
@@ -109,8 +121,6 @@
     <string name="set_lost">第%dセット 負け</string>
     <string name="match_won">試合に勝利</string>
     <string name="match_lost">試合に敗戦</string>
-    <string name="match_won_cheer">チームのみんな、おめでとう！</string>
-    <string name="match_lost_cheer">次の試合に切り替えよう！</string>
     <string name="break_phase">ブレイク</string>
     <string name="side_out_phase">サイドアウト</string>
     <string name="inverted_p1">S1反転</string>
@@ -233,6 +243,7 @@
     <string name="version">バージョン</string>
     <string name="license">ライセンス</string>
     <string name="license_name">GNU Affero General Public License v3.0</string>
+    <string name="third_party_licenses">サードパーティのライセンス</string>
     <string name="data_privacy">データとプライバシー</string>
     <string name="source_code">ソースコード</string>
     <string name="report_problem">問題を報告</string>
@@ -240,6 +251,7 @@
     <string name="report_title">Android アプリの問題</string>
     <string name="report_body">何が起きましたか？\n\n本来はどうなるはずでしたか？\n\n---\n%1$s</string>
     <string name="no_app_to_open">開けるアプリがありません</string>
+    <string name="settings_not_saved">設定を保存できませんでした: %1$s</string>
     <!-- archives -->
     <string name="export_team">チームを共有</string>
     <string name="export_match">試合を共有</string>
@@ -367,6 +379,7 @@
     <string name="analysis">分析</string>
     <string name="period">期間</string>
     <string name="last_month">直近1か月</string>
+    <string name="season_period">シーズン全体</string>
     <string name="last_matches">直近%1$d試合</string>
     <string name="between">期間指定</string>
     <string name="from_day">開始</string>
@@ -466,6 +479,8 @@
     <string name="clips_without_video">ビデオなしで除外: %1$d</string>
     <string name="clips_match_of">試合 %1$d / %2$d</string>
     <string name="montage_left_out">除外: %1$s</string>
+    <string name="montage_outside">ビデオ外のため含まれないアクション: %2$d件中%1$d件</string>
+    <string name="montage_none">ビデオ内にアクションがないため作成できません</string>
     <string name="left_out_no_video">ビデオなし</string>
     <string name="left_out_unreadable">ビデオを読み込めません</string>
     <string name="left_out_not_lined_up">ビデオと未同期</string>
@@ -533,6 +548,7 @@
     <string name="tr_programming">計画</string>
     <string name="tr_sessions">セッション</string>
     <string name="tr_new_session">新しいセッション</string>
+    <string name="tr_new_event">新しい予定</string>
     <string name="tr_edit_session">セッションを編集</string>
     <string name="tr_session_title">タイトル</string>
     <string name="tr_session_duration">予定時間（分）</string>
@@ -710,4 +726,27 @@
     <string name="no_photo">写真なし</string>
     <string name="no_face">写真に顔が見つかりません。顔がはっきり写っている写真を選んでください。</string>
     <string name="many_faces">写真に%1$d人の顔が見つかりました。1人だけ写っている写真を選んでください。</string>
+    <string name="nationality">国籍</string>
+    <string name="profile">プロフィール</string>
+    <string name="sets">セット</string>
+    <string name="attendance">出席率</string>
+    <string name="no_matches_played">出場した試合はありません</string>
+    <string name="also_plays_in">他の所属チーム</string>
+    <string name="player_out_of">全%1$d試合</string>
+    <string name="player_points_detail">攻撃 %1$d · ブロック %2$d · サーブ %3$d</string>
+    <string name="dominant_hand">利き手</string>
+    <string name="right_hand">右</string>
+    <string name="left_hand">左</string>
+    <string name="federation_id">連盟登録番号</string>
+    <string name="notice_error">問題が発生しました</string>
+    <string name="notice_warning">ご注意ください</string>
+    <string name="notice_info">完了</string>
+    <string name="birth_place">出生地</string>
+    <string name="contacts">連絡先</string>
+    <string name="email">メール</string>
+    <string name="phone_prefix">国番号</string>
+    <string name="phone">電話番号</string>
+    <string name="write_email">メールを書く</string>
+    <string name="call">電話する</string>
+    <string name="include_contacts">連絡先を含める（メール、電話番号、出生地）</string>
 </resources>

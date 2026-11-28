@@ -21,10 +21,16 @@ mod field;
 mod form;
 mod game;
 mod general;
+mod head;
 mod home;
 mod keymap;
 mod live;
+mod notice;
 mod paths;
+mod period;
+mod player_stats;
+mod profile;
+mod reveal;
 mod scouting;
 mod settings;
 mod share;
@@ -43,6 +49,7 @@ mod venue_choice;
 mod venues;
 mod video;
 
+use scout4all_mobile::clock::{ClockExt, SystemClock};
 use {
     game::MatchScreen,
     home::HomeScreen,
@@ -81,11 +88,8 @@ fn data_dir() -> Option<PathBuf> {
 /// A new empty folder for the data when theirs can't be opened, gone at
 /// the next start of the system.
 fn empty_data_dir() -> PathBuf {
-    let stamp = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or_default();
-    std::env::temp_dir().join(format!("scout4all-{}-{stamp}", std::process::id()))
+    let unique = uuid::Uuid::new_v4().simple();
+    std::env::temp_dir().join(format!("scout4all-{}-{unique}", std::process::id()))
 }
 
 /// What was done, then what to tell of it, if anything, below.
@@ -137,6 +141,52 @@ enum Screen {
     Training(Box<training::screen::TrainingScreen>),
 }
 
+impl Screen {
+    /// What went wrong doing something on the screen: told in a dialog
+    /// over it, until closed.
+    fn failure(&self) -> Option<&String> {
+        match self {
+            Screen::Team(screen) => screen.failure().as_ref(),
+            Screen::Start(screen) => screen.failure().as_ref(),
+            Screen::Events(screen) => screen.failure().as_ref(),
+            Screen::Match(screen) => screen.failure().as_ref(),
+            Screen::Venues(screen) => screen.failure().as_ref(),
+            Screen::Competitions(screen) => screen.failure().as_ref(),
+            Screen::Video(screen) => screen.failure().as_ref(),
+            Screen::Live(screen) => screen.failure().as_ref(),
+            Screen::Training(screen) => screen.failure().as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The failure of the screen, to close.
+    fn failure_mut(&mut self) -> Option<&mut Option<String>> {
+        match self {
+            Screen::Team(screen) => Some(screen.failure_mut()),
+            Screen::Start(screen) => Some(screen.failure_mut()),
+            Screen::Events(screen) => Some(screen.failure_mut()),
+            Screen::Match(screen) => Some(screen.failure_mut()),
+            Screen::Venues(screen) => Some(screen.failure_mut()),
+            Screen::Competitions(screen) => Some(screen.failure_mut()),
+            Screen::Video(screen) => Some(screen.failure_mut()),
+            Screen::Live(screen) => Some(screen.failure_mut()),
+            Screen::Training(screen) => Some(screen.failure_mut()),
+            _ => None,
+        }
+    }
+}
+
+/// What went wrong on `screen` is told by the app in its dialog, and gone
+/// once closed.
+#[cfg(test)]
+fn assert_told_over(mut screen: Screen, why: &str) {
+    assert_eq!(screen.failure().map(String::as_str), Some(why));
+    if let Some(failure) = screen.failure_mut() {
+        *failure = None;
+    }
+    assert_eq!(screen.failure(), None);
+}
+
 /// Where a key or a click leads.
 enum Go {
     Stay,
@@ -152,6 +202,14 @@ enum Go {
     /// the gyms, from the home or from the training of a team (back there)
     Venues(Option<String>),
     Team(String),
+    /// the profile of a player (the second) of a team
+    Player(String, String),
+    /// the numbers of that profile, worked out off the thread of the screen
+    LoadProfile(String, String),
+    /// back to the statistics of the profile of a player of a team
+    PlayerStatistics(String, String, Box<player_stats::Filters>),
+    /// the analysis of a team narrowed to a player, named
+    PlayerDetail(String, String, String, Box<player_stats::Filters>),
     /// the training of the team: what it opens on
     Training(String, training::screen::Open),
     Match(String, String),
@@ -172,7 +230,7 @@ enum Go {
         String,
     ),
     /// the actions of the team picked in its statistics, match after match
-    TeamClips(String, Vec<scout4all_mobile::MatchClips>, String),
+    TeamClips(Vec<scout4all_mobile::MatchClips>, String),
     /// back to the statistics the actions were picked in
     Unpark,
     /// the file of the video to choose
@@ -210,8 +268,10 @@ struct App {
     /// the system's theme is dark (until it's known, and with none)
     system_dark: bool,
     screen: Screen,
+    /// what went wrong, whatever the screen: in a dialog over it
     error: Option<String>,
-    /// what went well: a file saved, imported
+    /// what went well: a file saved, imported; told until the next key or
+    /// click, not stopping anything
     notice: Option<String>,
     /// an archive chosen, to confirm, over the screen
     importing: Option<transfer::Importing>,
@@ -253,6 +313,8 @@ enum Update {
 #[derive(Debug, Clone)]
 enum Message {
     Key(KeyCombination),
+    /// the dialog of a failure closed
+    Dismiss,
     ToggleTheme,
     /// the theme of the system, at the start and as it changes
     SystemTheme(iced::theme::Mode),
@@ -353,7 +415,12 @@ impl App {
         let dir = data_dir().unwrap_or_else(|| PathBuf::from(".scout4all"));
         let (language, keys, theme) = config(&dir);
         let strings = strings::strings(language);
-        let core = Scout4All::new(dir.to_string_lossy().into_owned(), language.to_string());
+        let clock = Arc::new(SystemClock);
+        let core = Scout4All::with_clock(
+            dir.to_string_lossy().into_owned(),
+            language.to_string(),
+            clock.clone(),
+        );
         let (core, error) = match core {
             // what the start has to tell: the data folder of the versions
             // before not all moved into the database
@@ -364,22 +431,16 @@ impl App {
             // a new empty folder in place of the data (never one with
             // something in it: the start moves it into a database): the
             // error tells why
-            Err(e) => match Scout4All::new(
+            Err(e) => match Scout4All::with_clock(
                 empty_data_dir().to_string_lossy().into_owned(),
                 language.to_string(),
+                clock,
             ) {
                 Ok(core) => (core, Some(e.to_string())),
                 Err(_) => std::process::exit(1),
             },
         };
-        let home = HomeScreen::new(
-            &core,
-            Home {
-                in_progress: vec![],
-                recent: vec![],
-                teams: vec![],
-            },
-        );
+        let home = HomeScreen::new(&core, Home::default());
         let mut app = App {
             core,
             dir,
@@ -469,17 +530,16 @@ impl App {
     /// Opens the screen `go` leads to; an error stays on the one shown.
     fn go(&mut self, go: Go) -> Task<Message> {
         let core = self.core.clone();
+        // what the screen opened asks for next
+        let mut then = None;
         let opened = match go {
             Go::Stay => return Task::none(),
             Go::CropFace(bytes) => {
-                return Task::perform(
-                    async move {
-                        tokio::task::spawn_blocking(move || form::crop(&bytes))
-                            .await
-                            .unwrap_or_else(|e| Err(form::Face::Other(e.to_string())))
-                    },
-                    |face| Message::Team(team::Message::Form(form::Message::Cropped(face))),
-                );
+                // the executor of iced is a pool of threads: not the thread
+                // of the screen, and no runtime of tokio on it
+                return Task::perform(async move { form::crop(&bytes) }, |face| {
+                    Message::Team(team::Message::Form(form::Message::Cropped(face)))
+                });
             }
             Go::Export(export) => return self.export(export),
             Go::Import(team) => {
@@ -498,6 +558,30 @@ impl App {
                 Screen::Venues(Box::new(screen))
             }),
             Go::Team(team) => TeamScreen::new(core, team).map(|t| Screen::Team(Box::new(t))),
+            Go::Player(team, player) => TeamScreen::new(core, team.clone()).map(|mut screen| {
+                if screen.show_profile(&player) {
+                    then = Some(Go::LoadProfile(team, player));
+                }
+                Screen::Team(Box::new(screen))
+            }),
+            Go::PlayerStatistics(team, player, filters) => {
+                TeamScreen::new(core, team.clone()).map(|mut screen| {
+                    if screen.show_profile(&player) {
+                        screen.show_statistics(*filters);
+                        then = Some(Go::LoadProfile(team, player));
+                    }
+                    Screen::Team(Box::new(screen))
+                })
+            }
+            Go::PlayerDetail(team, player, name, filters) => {
+                stats::StatsScreen::player(core, team, player, &name, *filters, self.strings)
+                    .map(|screen| Screen::Stats(Box::new(screen)))
+            }
+            Go::LoadProfile(team, player) => {
+                return Task::perform(team::load_profile(core, team, player), |loaded| {
+                    Message::Team(loaded)
+                });
+            }
             Go::Training(team, open) => training::screen::TrainingScreen::new(core, team, open)
                 .map(|t| Screen::Training(Box::new(t))),
             Go::Match(team, m) => {
@@ -530,9 +614,8 @@ impl App {
                 self.watch(opened);
                 return Task::none();
             }
-            Go::TeamClips(team, matches, title) => {
-                let opened =
-                    video::VideoScreen::with_tour(core, self.dir.clone(), team, matches, title);
+            Go::TeamClips(matches, title) => {
+                let opened = video::VideoScreen::with_tour(core, self.dir.clone(), matches, title);
                 self.watch(opened);
                 return Task::none();
             }
@@ -552,6 +635,7 @@ impl App {
                         m,
                         the_match.opponent,
                         self.dir.clone(),
+                        core.clock(),
                     )))
                 }),
             },
@@ -583,6 +667,7 @@ impl App {
                     heading,
                     name,
                     content: transfer::Content::File(path),
+                    contacts: None,
                 });
             }
             Go::PickVideo => {
@@ -631,7 +716,10 @@ impl App {
             }
             Err(e) => self.error = Some(e.to_string()),
         }
-        Task::none()
+        match then {
+            Some(go) => self.go(go),
+            None => Task::none(),
+        }
     }
 
     /// The actions picked in the statistics, in the video: the statistics
@@ -662,11 +750,18 @@ impl App {
             transfer::Export::Microcycle(_) => s.plan_pdf,
         };
         match transfer::archive(&self.core, &export) {
-            Ok((name, bytes)) => self.offer(transfer::Sharing {
-                heading: heading.to_string(),
-                name,
-                content: transfer::Content::Bytes(Arc::new(bytes)),
-            }),
+            Ok((name, bytes)) => {
+                let contacts = export.is_archive().then(|| transfer::ContactsChoice {
+                    included: self.core.archive_contacts(),
+                    export,
+                });
+                self.offer(transfer::Sharing {
+                    heading: heading.to_string(),
+                    name,
+                    content: transfer::Content::Bytes(Arc::new(bytes)),
+                    contacts,
+                })
+            }
             Err(e) => {
                 self.error = Some(e.to_string());
                 Task::none()
@@ -674,15 +769,40 @@ impl App {
         }
     }
 
-    /// A file made, to share or save: asked in a dialog, or saved where
-    /// the system has no sheet to share with.
+    /// A file made, to share or save: asked in a dialog; where the system
+    /// has no sheet to share with, saved at once when there's nothing else
+    /// to choose.
     fn offer(&mut self, sharing: transfer::Sharing) -> Task<Message> {
-        match share::NATIVE {
+        match share::NATIVE || sharing.contacts.is_some() {
             true => {
                 self.sharing = Some(sharing);
                 Task::none()
             }
             false => save(sharing),
+        }
+    }
+
+    /// The archive made again with the contacts taken in or left out, the
+    /// choice remembered.
+    fn choose_contacts(&mut self, sharing: transfer::Sharing) {
+        let Some(choice) = sharing.contacts else {
+            return;
+        };
+        let included = !choice.included;
+        let made = self
+            .core
+            .set_archive_contacts(included)
+            .and_then(|()| transfer::archive(&self.core, &choice.export));
+        match made {
+            Ok((name, bytes)) => {
+                self.sharing = Some(transfer::Sharing {
+                    name,
+                    content: transfer::Content::Bytes(Arc::new(bytes)),
+                    contacts: Some(transfer::ContactsChoice { included, ..choice }),
+                    ..sharing
+                })
+            }
+            Err(e) => self.error = Some(e.to_string()),
         }
     }
 
@@ -695,6 +815,10 @@ impl App {
         match message {
             transfer::ShareMessage::Cancel => Task::none(),
             transfer::ShareMessage::Save => save(sharing),
+            transfer::ShareMessage::Contacts => {
+                self.choose_contacts(sharing);
+                Task::none()
+            }
             transfer::ShareMessage::Share => match match &sharing.content {
                 transfer::Content::Bytes(bytes) => {
                     share::staged(&sharing.name, bytes).map_err(|e| ui::io_error(&e, self.language))
@@ -927,6 +1051,13 @@ impl App {
 
     /// Updates, then moves the focus where the keys went.
     fn update(&mut self, message: Message) -> Task<Message> {
+        // the terms at the first start, scrolled by the keys
+        // a key may move the focus of a form: the field kept in sight
+        let keyed = matches!(message, Message::Key(_));
+        let terms_scroll = match (&message, &self.terms) {
+            (Message::Key(ck), Some(_)) => general::scrolling(*ck),
+            _ => None,
+        };
         let handled = match message {
             Message::WindowClosed(id) => self.window_closed(id),
             Message::LiveTick => self.live_tick(),
@@ -957,6 +1088,16 @@ impl App {
             message => self.handle(message),
         };
         let handled = Task::batch([handled, self.video_window(), self.preview_window()]);
+        // the terms or the licenses read, scrolled by the keys
+        let reading = terms_scroll.or_else(|| {
+            self.settings
+                .as_mut()
+                .and_then(|settings| settings.general.take_scroll())
+        });
+        let handled = match reading {
+            Some(scroll) => Task::batch([handled, general::scrolled(scroll)]),
+            None => handled,
+        };
         // the event chosen kept in sight
         let scroll = match &mut self.screen {
             Screen::Events(screen) => Some(screen.scroll()),
@@ -996,6 +1137,10 @@ impl App {
             },
             _ => task,
         };
+        let task = match keyed {
+            true => Task::batch([task, form::Form::reveal()]),
+            false => task,
+        };
         let focus = self.focus_id();
         match focus == self.focused {
             true => task,
@@ -1019,12 +1164,12 @@ impl App {
             return Task::none();
         };
         let (team, m) = (screen.team_id.clone(), screen.match_id.clone());
-        let started = chrono::Local::now();
+        let started = self.core.clock().zoned_now();
         let base = live::capture::base_name(&folder, started);
         let sidecar = live::Sidecar {
             team_id: team.clone(),
             match_id: m.clone(),
-            started: started.fixed_offset(),
+            started,
         };
         let written = std::fs::create_dir_all(&folder)
             .map_err(|e| format!("{}: {e}", folder.display()))
@@ -1249,6 +1394,25 @@ impl App {
         }
     }
 
+    /// The failure to tell: the app's, then the settings', then the
+    /// screen's.
+    fn failure(&self) -> Option<&String> {
+        self.error
+            .as_ref()
+            .or_else(|| self.settings.as_ref().and_then(SettingsScreen::failure))
+            .or_else(|| self.screen.failure())
+    }
+
+    /// The failure told closed, in the order they're told.
+    fn dismiss(&mut self) {
+        let settings = self.settings.as_mut().filter(|s| s.failure().is_some());
+        match (self.error.take(), settings, self.screen.failure_mut()) {
+            (Some(_), _, _) | (None, None, None) => {}
+            (None, Some(settings), _) => settings.dismiss_failure(),
+            (None, None, Some(failure)) => *failure = None,
+        }
+    }
+
     fn handle(&mut self, message: Message) -> Task<Message> {
         let s = self.strings;
         if let Some(task) = self.on_update(&message) {
@@ -1260,6 +1424,21 @@ impl App {
             Message::Frame(_) | Message::Loaded(_) | Message::Exported(..) | Message::Picked(..)
         ) {
             self.notice = None;
+        }
+        // a failure told over the screen: it takes the keys until closed
+        let failed = self.failure().is_some();
+        match (&message, failed) {
+            (Message::Dismiss, _) => {
+                self.dismiss();
+                return Task::none();
+            }
+            (Message::Key(ck), true) => {
+                if notice::closes(*ck) {
+                    self.dismiss();
+                }
+                return Task::none();
+            }
+            _ => {}
         }
         // the files: chosen or saved, whatever the screen
         let message = match message {
@@ -1604,15 +1783,31 @@ impl App {
             .concat(),
             _ => hints,
         };
-        let error: Element<'_, Message> = match (&self.error, &self.notice) {
-            (Some(e), _) => ui::body(e.clone()).color(c.danger).into(),
-            (None, Some(notice)) => ui::body(notice.clone()).color(c.accent).into(),
-            (None, None) => space::vertical().height(0).into(),
+        // a failure told: only its keys
+        let hints = match self.failure().is_some() {
+            true => notice::hints(s),
+            false => hints,
         };
-        let content = container(column![error, screen].spacing(10))
+        let told: Element<'_, Message> = match &self.notice {
+            Some(notice) => notice::banner(notice::Level::Info, notice, c),
+            None => space::vertical().height(0).into(),
+        };
+        let content: Element<'_, Message> = container(column![told, screen].spacing(10))
             .padding(16)
             .width(Length::Fill)
-            .height(Length::Fill);
+            .height(Length::Fill)
+            .into();
+        // the failure over the page, the bars around it still there
+        let content = match self.failure() {
+            Some(why) => notice::dialog(
+                content,
+                &notice::Notice::error(why.clone()),
+                s,
+                Message::Dismiss,
+                c,
+            ),
+            None => content,
+        };
         container(column![top, content, ui::bottom_bar(hints, c)])
             .width(Length::Fill)
             .height(Length::Fill)
@@ -1664,10 +1859,12 @@ impl App {
 
     fn terms_hints(&self) -> Vec<(String, String)> {
         let s = self.strings;
-        vec![
+        let mut hints = general::scrolling_hints();
+        hints.extend([
             (s.space.to_string(), s.send_statistics.to_string()),
             ("Enter".to_string(), s.accept_terms.to_string()),
-        ]
+        ]);
+        hints
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -1752,6 +1949,13 @@ fn team_go(team_id: &str, outcome: team::Outcome) -> Go {
         team::Outcome::Export => Go::Export(transfer::Export::Team(team_id.to_string())),
         team::Outcome::Analysis => Go::Analysis(team_id.to_string()),
         team::Outcome::OpenTeam(team) => Go::Team(team),
+        team::Outcome::OpenPlayer { team, player } => Go::Player(team, player),
+        team::Outcome::LoadProfile(player) => Go::LoadProfile(team_id.to_string(), player),
+        team::Outcome::PlayerDetail {
+            player,
+            name,
+            filters,
+        } => Go::PlayerDetail(team_id.to_string(), player, name, filters),
         team::Outcome::Training(open) => Go::Training(team_id.to_string(), open),
         team::Outcome::Crop(bytes) => Go::CropFace(bytes),
     }
@@ -1863,12 +2067,13 @@ fn stats_go(screen: &stats::StatsScreen, outcome: stats::Outcome, s: &Strings) -
             ),
             None => Go::Stay,
         },
-        stats::Outcome::WatchTour(matches) => {
-            Go::TeamClips(screen.team_id.clone(), matches, screen.clips_title(s))
-        }
-        stats::Outcome::Back => match screen.match_id() {
-            Some(m) => Go::Match(screen.of_b.clone().unwrap_or(screen.team_id.clone()), m),
-            None => Go::Team(screen.team_id.clone()),
+        stats::Outcome::WatchTour(matches) => Go::TeamClips(matches, screen.clips_title(s)),
+        stats::Outcome::Back => match (screen.match_id(), screen.player_filters()) {
+            (Some(m), _) => Go::Match(screen.of_b.clone().unwrap_or(screen.team_id.clone()), m),
+            (None, Some((player, filters))) => {
+                Go::PlayerStatistics(screen.team_id.clone(), player, Box::new(filters))
+            }
+            (None, None) => Go::Team(screen.team_id.clone()),
         },
     }
 }
@@ -2062,6 +2267,9 @@ impl Main {
                         shots::Next::Do(shots::Step::Keys(keys)) => {
                             tasks.extend(keys.into_iter().map(|key| app.update(Message::Key(key))));
                         }
+                        shots::Next::Do(shots::Step::Theme(theme)) => {
+                            app.theme = Some(theme == shots::Theme::Dark);
+                        }
                         // waits, captures and recordings come as such
                         shots::Next::Do(
                             shots::Step::Wait(_)
@@ -2181,6 +2389,7 @@ fn main() -> iced::Result {
         .title(Main::title)
         .font(fonts.bytes[0])
         .font(fonts.bytes[1])
+        .font(fonts.bytes[2])
         .default_font(fonts.regular)
         .theme(Main::theme)
         .subscription(Main::subscription)

@@ -4,16 +4,18 @@
 //! serve, each a line of choices (↑ ↓ among them, ← → change); Enter saves
 //! if the events after it still fit and the set ends as it did, Esc
 //! leaves it as it was. The changes of the lineup can't be corrected.
+//! The photo of who touched beside their name.
 
 use {
     crate::{
+        editors,
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL},
         ui,
     },
     iced::{
         Alignment, Element, Length,
-        widget::{Column, Id, column, container, row, scrollable, space, text},
+        widget::{Column, Id, column, container, image, row, scrollable, space, text},
     },
     scout4all_core::{
         event_edit::EditField,
@@ -24,7 +26,7 @@ use {
     },
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{Correction, CorrectionState, MobileError, Scout4All, SetEvent, SetEvents},
-    std::sync::Arc,
+    std::{collections::HashMap, sync::Arc},
 };
 
 /// The list, to keep the event chosen in sight.
@@ -123,6 +125,8 @@ pub struct EventsScreen {
     pub team_id: String,
     pub match_id: String,
     set: SetEvents,
+    /// of who touched in the events, by player id
+    photos: HashMap<String, image::Handle>,
     selected: usize,
     correcting: Option<Correcting>,
     error: Option<String>,
@@ -138,8 +142,11 @@ impl EventsScreen {
         set_number: u8,
     ) -> Result<EventsScreen, MobileError> {
         let set = core.set_events(team_id.clone(), match_id.clone(), set_number)?;
+        let players = set.events.iter().filter_map(|e| e.event.player.as_ref());
+        let photos = editors::person_photos(&core, players.map(|p| p.id.clone()));
         Ok(EventsScreen {
             core,
+            photos,
             team_id,
             match_id,
             // the last events first in sight: the ones just scouted
@@ -166,6 +173,15 @@ impl EventsScreen {
     pub fn scroll(&self) -> (Id, f32) {
         let last = self.set.events.len().saturating_sub(1).max(1);
         (Id::new(LIST), self.selected as f32 / last as f32)
+    }
+
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
     }
 
     fn correct(&mut self, index: usize) {
@@ -343,12 +359,12 @@ impl EventsScreen {
 
     pub fn view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
         let paired = self.paired();
-        let rows = self
-            .set
-            .events
-            .iter()
-            .enumerate()
-            .map(|(i, e)| event_row(e, i == self.selected, paired.contains(&i), i, c));
+        let photo_of = |e: &SetEvent| self.photos.get(&e.event.player.as_ref()?.id);
+        let pictured = self.set.events.iter().any(|e| photo_of(e).is_some());
+        let rows = self.set.events.iter().enumerate().map(|(i, e)| {
+            let photo = pictured.then(|| photo_of(e));
+            event_row(e, photo, i == self.selected, paired.contains(&i), i, c)
+        });
         let list: Element<'a, Message> = match self.set.events.is_empty() {
             true => ui::body(s.no_events).color(c.muted).into(),
             false => scrollable(Column::with_children(rows).spacing(2))
@@ -382,11 +398,10 @@ impl EventsScreen {
         let Some(e) = self.set.events.get(self.selected) else {
             return column![].into();
         };
-        let note: Element<'a, Message> = match (self.saved, &self.error, e.editable) {
-            (_, Some(error), _) => ui::body(error.clone()).color(c.danger).into(),
-            (true, None, _) => ui::body(s.corrected).color(c.accent).into(),
-            (false, None, false) => ui::body(s.lineup_fixed).color(c.muted).into(),
-            (false, None, true) => ui::answers(
+        let note: Element<'a, Message> = match (self.saved, e.editable) {
+            (true, _) => ui::body(s.corrected).color(c.accent).into(),
+            (false, false) => ui::body(s.lineup_fixed).color(c.muted).into(),
+            (false, true) => ui::answers(
                 None,
                 theme::icons::EDIT,
                 s.correct,
@@ -484,10 +499,6 @@ impl EventsScreen {
             .find(|e| Some(e.value) == st.eval)
             .map(|e| e.name.clone())
             .unwrap_or_default();
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => column![].into(),
-        };
         let player = st
             .event
             .player
@@ -513,7 +524,6 @@ impl EventsScreen {
                     .spacing(12)
                 )
                 .height(Length::Fill),
-                error,
                 ui::answers(
                     Some((theme::icons::CLOSE, s.cancel, Message::Cancel)),
                     theme::icons::CHECK,
@@ -553,6 +563,8 @@ fn player_line<'a>(e: &SetEvent, c: Colors) -> Element<'a, Message> {
 /// player, the score after it; the changes of the lineup dimmed.
 fn event_row<'a>(
     e: &SetEvent,
+    // its place, empty without one; none when no event listed has a photo
+    photo: Option<Option<&image::Handle>>,
     chosen: bool,
     paired: bool,
     i: usize,
@@ -578,16 +590,21 @@ fn event_row<'a>(
             .font(bold)
             .color(color)
             .width(Length::Fixed(20.0)),
+    ]
+    .push(photo.map(ui::row_photo))
+    .push(
         column![
             text(describe(e)).size(SIZE_BODY).color(color),
             player_line(e, c),
         ]
         .width(Length::Fill),
+    )
+    .push(
         text(format!("{}–{}", e.score_us, e.score_them))
             .size(SIZE_BODY)
             .font(bold)
             .color(color),
-    ]
+    )
     .spacing(10)
     .align_y(Alignment::Center);
     // the touch paired with the chosen one moves with it: a mark and a tint
@@ -628,7 +645,8 @@ mod tests {
 
     /// The match of the tests of the TUI, three sets, imported.
     fn imported(dir: &tempfile::TempDir) -> (Arc<Scout4All>, String, String) {
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let bytes = include_bytes!("../../core/src/tests/fixtures/three_sets.dvw").to_vec();
         let choice = DvwChoice {
             opponent: DvwOpponent::Name,
@@ -644,13 +662,45 @@ mod tests {
         (core, imported.team_id, imported.match_id)
     }
 
+    /// A correction that fails is told by the app in its dialog, and gone
+    /// once closed.
+    #[test]
+    fn a_failure_of_a_correction_is_told_over_the_screen() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team_id, match_id) = imported(&dir);
+        let mut events = EventsScreen::new(core, team_id, match_id, 1).unwrap();
+        events.error = Some("not saved".into());
+        crate::assert_told_over(crate::Screen::Events(Box::new(events)), "not saved");
+    }
+
+    /// The photos of who touched in the events: only who has one.
+    #[test]
+    fn the_photos_of_the_players_in_the_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let (core, team_id, match_id) = imported(&dir);
+        let open =
+            || EventsScreen::new(core.clone(), team_id.clone(), match_id.clone(), 1).unwrap();
+        let screen = open();
+        assert!(screen.photos.is_empty());
+        let player = screen
+            .set
+            .events
+            .iter()
+            .find_map(|e| Some(e.event.player.as_ref()?.id.clone()))
+            .unwrap();
+        core.set_person_photo(player.clone(), Some(crate::scouting::tests::PNG.to_vec()))
+            .unwrap();
+        assert_eq!(open().photos.keys().collect::<Vec<_>>(), vec![&player]);
+    }
+
     /// B serving, its point lost without a cause (`PL`, as ⇧W does for B):
     /// A scores and serves.
     #[test]
     fn the_point_lost_by_b_without_a_cause_goes_to_a_who_serves() {
         use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum::*, TeamSideEnum};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team_id, match_id) = crate::scouting::tests::both_sides_started(&core);
         let scouting = core
             .scouting_in_order(
@@ -698,7 +748,8 @@ mod tests {
     fn a_pair_of_touches_of_both_sides_is_corrected_from_the_keys() {
         use scout4all_core::shapes::enums::{EvalEnum, EventTypeEnum::*};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let (team_id, match_id) = crate::scouting::tests::both_sides_started(&core);
         let scouting = core
             .scouting_in_order(

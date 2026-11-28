@@ -8,7 +8,10 @@ use {
     crate::theme::{self, Colors, grade_color},
     iced::{
         Color, Point, Rectangle, Renderer, Size, Theme, mouse,
-        widget::canvas::{self, Action, Event, Frame, Geometry, Path, Stroke, Text},
+        widget::{
+            canvas::{self, Action, Event, Frame, Geometry, Path, Stroke, Text},
+            image,
+        },
     },
     scout4all_core::shapes::court_zone::ServeStartEnum,
     scout4all_mobile::{CourtCellChoice, CourtPlayer, ServeStartChoice},
@@ -39,7 +42,8 @@ pub enum Content {
 pub struct Court {
     pub content: Content,
     pub colors: Colors,
-    /// the photos of the players, by player id: they fill the circle
+    /// the photos of the players, by player id, as `disc` makes them: they
+    /// fill the circle
     pub photos: std::collections::HashMap<String, iced::widget::image::Handle>,
 }
 
@@ -247,6 +251,52 @@ impl canvas::Program<Touch> for Court {
     }
 }
 
+/// How much of the light of a photo the circle keeps, so the number reads.
+const PHOTO_LIGHT: f32 = 0.6;
+
+/// The photo as the circle on the court shows it: cut to the disc in its
+/// middle, darkened so the white number on it reads. Made once, when the
+/// photos are read: a canvas draws its images over its shapes (no veil can
+/// go on top) and leaves their corners square. A photo that is not pixels
+/// stays as it is.
+pub fn disc(photo: &image::Handle) -> image::Handle {
+    match photo {
+        image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        } => image::Handle::from_rgba(*width, *height, disc_pixels(*width, *height, pixels)),
+        other => other.clone(),
+    }
+}
+
+/// `disc` on RGBA pixels, `width` by `height`: outside the circle
+/// transparent (its edge smoothed over a pixel), inside darkened.
+fn disc_pixels(width: u32, height: u32, pixels: &[u8]) -> Vec<u8> {
+    let radius = width.min(height) as f32 / 2.0;
+    let (cx, cy) = (width as f32 / 2.0, height as f32 / 2.0);
+    let row = width.max(1) as usize;
+    pixels
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .enumerate()
+        .flat_map(|(i, [r, g, b, a])| {
+            let (x, y) = ((i % row) as f32 + 0.5, (i / row) as f32 + 0.5);
+            let inside =
+                (radius - ((x - cx).powi(2) + (y - cy).powi(2)).sqrt() + 0.5).clamp(0.0, 1.0);
+            let dark = |v: u8| (f32::from(v) * PHOTO_LIGHT).round() as u8;
+            [
+                dark(*r),
+                dark(*g),
+                dark(*b),
+                (f32::from(*a) * inside).round() as u8,
+            ]
+        })
+        .collect()
+}
+
 impl Court {
     fn draw_players(&self, frame: &mut Frame, court: Rectangle, meter: f32) {
         let c = self.colors;
@@ -270,20 +320,14 @@ impl Court {
                 (false, _) => c.button,
             };
             frame.fill(&Path::circle(center, radius), fill);
-            // the photo fills the circle, darkened so the number reads
+            // the photo fills the circle, already cut and darkened (`disc`)
             if let Some(handle) = self.photos.get(&p.id) {
-                let mut image = iced::advanced::image::Image::new(handle.clone());
-                image.border_radius = radius.into();
                 frame.draw_image(
                     Rectangle::new(
                         Point::new(center.x - radius, center.y - radius),
                         Size::new(radius * 2.0, radius * 2.0),
                     ),
-                    image,
-                );
-                frame.fill(
-                    &Path::circle(center, radius),
-                    Color::from_rgba(0.0, 0.0, 0.0, 0.35),
+                    iced::advanced::image::Image::new(handle.clone()),
                 );
             }
             let pickable = matches!(self.content, Content::Players { pickable: true, .. });
@@ -499,5 +543,60 @@ impl Court {
                 ..Text::default()
             });
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A white opaque square, `side` pixels.
+    fn white(side: u32) -> Vec<u8> {
+        vec![255; (side * side * 4) as usize]
+    }
+
+    fn pixel(pixels: &[u8], side: u32, x: u32, y: u32) -> [u8; 4] {
+        let at = ((y * side + x) * 4) as usize;
+        [pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]]
+    }
+
+    #[test]
+    fn the_corners_of_a_photo_are_cut_away() {
+        let cut = disc_pixels(20, 20, &white(20));
+        for (x, y) in [(0, 0), (19, 0), (0, 19), (19, 19)] {
+            assert_eq!(pixel(&cut, 20, x, y)[3], 0, "corner {x},{y}");
+        }
+    }
+
+    #[test]
+    fn inside_the_circle_the_photo_is_darkened() {
+        let cut = disc_pixels(20, 20, &white(20));
+        let light = (255.0 * PHOTO_LIGHT).round() as u8;
+        assert_eq!(pixel(&cut, 20, 10, 10), [light, light, light, 255]);
+        // the middle of each side, on the edge of the circle: almost whole
+        assert!(pixel(&cut, 20, 10, 0)[3] > 240);
+        assert!(pixel(&cut, 20, 0, 10)[3] > 240);
+    }
+
+    #[test]
+    fn what_is_transparent_stays_transparent() {
+        let cut = disc_pixels(4, 4, &[0; 64]);
+        assert!(cut.as_chunks::<4>().0.iter().all(|px| px[3] == 0));
+    }
+
+    #[test]
+    fn a_photo_of_pixels_becomes_the_disc() {
+        let made = disc(&image::Handle::from_rgba(20, 20, white(20)));
+        let image::Handle::Rgba {
+            width,
+            height,
+            pixels,
+            ..
+        } = made
+        else {
+            panic!("not pixels: {made:?}");
+        };
+        assert_eq!((width, height), (20, 20));
+        assert_eq!(pixel(&pixels, 20, 0, 0)[3], 0);
     }
 }

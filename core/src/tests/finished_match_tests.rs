@@ -23,7 +23,7 @@ mod tests {
         },
         tests::Sqlite,
     };
-    use chrono::Utc;
+
     use std::sync::{Arc, atomic::AtomicBool};
     use uuid::Uuid;
 
@@ -32,7 +32,7 @@ mod tests {
     fn their_errors(n: usize) -> Vec<EventEntry> {
         (0..n)
             .map(|_| EventEntry {
-                timestamp: Utc::now(),
+                timestamp: crate::tests::clock::now(),
                 event_type: EventTypeEnum::OE,
                 player: None,
                 eval: None,
@@ -99,7 +99,7 @@ mod tests {
             queue: queue.clone(),
             enabled: Arc::new(AtomicBool::new(enabled)),
         };
-        let mut session = set_start::resume(m, set, set_writer)
+        let mut session = set_start::resume(m, set, set_writer, crate::tests::clock::utc_now())
             .unwrap()
             .with_finished(Arc::new(finished));
         session.choose_event(EventTypeEnum::OE).await.unwrap();

@@ -44,8 +44,12 @@ pub fn write_reports(dir: &Path, out: &Path) -> R<()> {
     let language = Language::new(LanguageEnum::En);
     let labels = language.labels();
     // first: it migrates a folder of before the database
-    let app = Scout4All::new(dir.to_string_lossy().into_owned(), "en".to_string())
-        .map_err(|e| e.to_string())?;
+    let app = Scout4All::with_clock(
+        dir.to_string_lossy().into_owned(),
+        "en".to_string(),
+        std::sync::Arc::new(scout4all_mobile::clock::SystemClock),
+    )
+    .map_err(|e| e.to_string())?;
     if let Some(notice) = app.startup_notice() {
         eprintln!("{}: {notice}", dir.display());
     }

@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.telephony.TelephonyManager
+import io.github.naighes.scout4all.core.Clock
 import io.github.naighes.scout4all.core.InternalException
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.Scout4All
@@ -24,6 +25,9 @@ open class Scout4AllApplication : Application() {
      * activity made again as it turns mustn't put it upright. */
     var turning = false
 
+    /** What time it is, for the app and the core alike. */
+    open val clock: Clock get() = SystemClock
+
     // the language chosen for the app, from the activity
     @Volatile private var language: String = Locale.getDefault().language
 
@@ -33,7 +37,7 @@ open class Scout4AllApplication : Application() {
     private val lazyCore = lazy {
         val dataDir = File(filesDir, "scout4all").apply { mkdirs() }
         startLog(dataDir.path)
-        Scout4All(dataDir.path, language).also {
+        Scout4All.withClock(dataDir.path, language, AskingClock { clock }).also {
             mutableStartupNotice.value = it.startupNotice()
             addExampleTeam(it)
         }
@@ -49,8 +53,8 @@ open class Scout4AllApplication : Application() {
         mutableStartupNotice.value = null
     }
 
-    /** The log of the core, one for the process. */
-    protected open fun startLog(dataDir: String) = startCoreLog(dataDir)
+    /** The log of the core, one for the process, at the time of the app's clock. */
+    protected open fun startLog(dataDir: String) = startCoreLog(dataDir, AskingClock { clock })
 
     /** A new installation starts with the example team, before the teams
      * are listed; without it the app works all the same. Then, once, the

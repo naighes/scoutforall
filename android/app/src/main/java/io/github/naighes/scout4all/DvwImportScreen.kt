@@ -63,7 +63,6 @@ import io.github.naighes.scout4all.core.TeamClassificationEnum
 import io.github.naighes.scout4all.core.TeamField
 import java.time.Instant
 import java.time.LocalDate
-import java.time.Year
 import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -138,7 +137,7 @@ class DvwImportViewModel(private val app: Scout4AllApplication, private val file
             mutableState.value = try {
                 app.core { core ->
                     val preview = core.previewDvw(bytes)
-                    val form = core.newTeamForm(Year.now().value.toUShort())
+                    val form = core.newTeamForm(app.clock.today().year.toUShort())
                     // from a team: the side like it to start, the home one
                     // when neither
                     val like = { side: DvwSide ->
@@ -350,7 +349,7 @@ fun DvwImportScreen(file: DvwOpened?, onBack: () -> Unit, onTeam: (String) -> Un
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val step = state.step) {
             DvwStep.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is DvwStep.Failed -> Centered(modifier) { Text(step.message, Modifier.padding(16.dp)) }
+            is DvwStep.Failed -> LoadFailed(step.message, modifier)
             else -> DvwContent(state, model, onBack, onTeam, modifier)
         }
     }
@@ -439,7 +438,7 @@ private fun DvwContent(
                     state.selected,
                     model::select,
                 )
-                state.opponentError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                state.opponentError?.let { FieldNote(it) }
             }
             is DvwStep.Ready -> {
                 val ready = step.ready
@@ -456,9 +455,7 @@ private fun DvwContent(
                     Text(stringResource(R.string.dvw_match_numbers, ready.matchNumbers.toInt()))
                 }
                 ready.competition?.let { Text(stringResource(R.string.dvw_competition, it)) }
-                ready.oneSide?.let { why ->
-                    Text(why.replaceFirstChar { it.uppercase() }, color = MaterialTheme.colorScheme.error)
-                }
+                ready.oneSide?.let { why -> Banner(Level.WARNING, why) }
             }
             DvwStep.Done -> {
                 Question(stringResource(R.string.dvw_done))

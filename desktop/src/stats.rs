@@ -8,17 +8,20 @@
 //! the rotation, the phase and the situation (role, our reception in the
 //! rally, the touch before, the set, the reception formation, the P1).
 
+use scout4all_mobile::clock::ClockExt;
 use {
     crate::{
-        calendar::{self, Calendar},
+        calendar,
         charts::{self, MatchesTrend, Trend},
-        form::Mask,
         keymap,
+        notice::{self, Level},
+        period::{self, Kind, PeriodChoice},
+        player_stats::Filters,
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL, grade_color},
         ui,
     },
-    chrono::{Local, NaiveDate},
+    chrono::NaiveDate,
     iced::{
         Alignment, Color, Element, Length,
         widget::{
@@ -98,19 +101,6 @@ const SITUATION: [Filter; 8] = [
     Filter::Close,
 ];
 
-/// How the period of a team is told.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Kind {
-    LastMonth,
-    LastMatches,
-    Between,
-}
-
-const KINDS: [Kind; 3] = [Kind::LastMonth, Kind::LastMatches, Kind::Between];
-
-/// The last matches offered first, as in the coach's "the last 4".
-const LAST_MATCHES: u32 = 4;
-
 /// Where the statistics come from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Source {
@@ -142,14 +132,7 @@ pub enum Message {
     Rotations(Vec<u8>),
     Phase(Option<PhaseEnum>),
     Efficiency(bool),
-    Kind(Kind),
-    Last(u32),
-    /// a day picked on the calendar
-    Day(NaiveDate),
-    /// the calendar a month back (-1) or on (1)
-    Month(i32),
-    /// the day to write: the last of the period (true) or the first
-    Editing(bool),
+    Period(period::Message),
     /// the roles chosen: none, all of them
     Roles(Vec<RoleEnum>),
     Reception(Vec<EvalEnum>),
@@ -191,80 +174,15 @@ pub enum Outcome {
     WatchTour(Vec<MatchClips>),
 }
 
-/// The two days of a period, as written, and the month of the calendar.
-#[derive(Debug, Clone)]
-struct Days {
-    from: String,
-    to: String,
-    /// the last day is written (or picked) next, not the first
-    editing_to: bool,
-    /// the first day of the month shown
-    month: NaiveDate,
-}
-
-impl Days {
-    /// A day written whole: chrono would take "2026-10-2" too.
-    fn parse(text: &str) -> Option<NaiveDate> {
-        (text.len() == 10)
-            .then(|| NaiveDate::parse_from_str(text, "%Y-%m-%d").ok())
-            .flatten()
-    }
-
-    fn period(&self) -> Option<AnalysisPeriod> {
-        Self::parse(&self.from)
-            .zip(Self::parse(&self.to))
-            .map(|(from, to)| AnalysisPeriod::Between {
-                from: from.to_string(),
-                to: to.to_string(),
-            })
-    }
-
-    fn editing(&mut self) -> &mut String {
-        match self.editing_to {
-            true => &mut self.to,
-            false => &mut self.from,
-        }
-    }
-
-    /// A digit written on the day being written: the first day done, the
-    /// last one next.
-    fn type_digit(&mut self, digit: u8) {
-        let text = Mask::Date.apply(&format!("{}{digit}", self.editing()));
-        let done = Self::parse(&text);
-        *self.editing() = text;
-        if let (Some(day), false) = (done, self.editing_to) {
-            self.month = calendar::month_of(day);
-            self.editing_to = true;
-        }
-    }
-
-    /// The last digit written taken back, with the separator before it.
-    fn erase(&mut self) {
-        let mut digits: String = self
-            .editing()
-            .chars()
-            .filter(char::is_ascii_digit)
-            .collect();
-        digits.pop();
-        *self.editing() = Mask::Date.apply(&digits);
-    }
-
-    /// A day picked: the first, then the last (the two the right way round).
-    fn pick(&mut self, day: NaiveDate) {
-        let text = day.format("%Y-%m-%d").to_string();
-        match (self.editing_to, Self::parse(&self.from)) {
-            (true, Some(from)) if day < from => {
-                self.to = self.from.clone();
-                self.from = text;
-            }
-            (true, _) => self.to = text,
-            (false, _) => self.from = text,
-        }
-        self.editing_to = !self.editing_to;
-    }
+/// The player the analysis is narrowed to, opened from their profile.
+struct Locked {
+    player: String,
+    /// the ones of the profile, to open it again with
+    filters: Filters,
 }
 
 pub struct StatsScreen {
+    locked: Option<Locked>,
     core: Arc<Scout4All>,
     pub team_id: String,
     pub source: Source,
@@ -298,6 +216,9 @@ pub struct StatsScreen {
     /// the points of the sets shown, under the chart
     points: Vec<scout4all_mobile::SetPoints>,
     event: EventTypeEnum,
+    /// the fundamental chosen: `event`, the one of the detail, is another
+    /// while the phase asked doesn't have it
+    asked: EventTypeEnum,
     filter: DetailFilter,
     /// the zones of the detail by efficiency, not by how many
     efficiency: bool,
@@ -316,12 +237,12 @@ pub struct StatsScreen {
     team_name: String,
     /// the opponents scouted on both sides, to analyse from their side
     opponents: Vec<ScoutedOpponent>,
+    /// the pictures of the team and of the opponents, in their order
+    team_picture: ui::TeamPicture,
+    opponent_pictures: Vec<ui::TeamPicture>,
     /// the opponent analysed, none for the team
     opponent: Option<uuid::Uuid>,
-    kind: Kind,
-    last: u32,
-    days: Days,
-    today: NaiveDate,
+    choice: PeriodChoice,
     /// the days with a match, for the calendar
     played: Vec<NaiveDate>,
     /// of the detail, to watch in the video: only these evaluations (all
@@ -350,8 +271,8 @@ const FILTERS: &str = "stats-filters";
 const FILTERS_ON_TOP: usize = 2;
 
 /// A day under the trend: day and month.
-fn short_day(s: &Strings, day: &str) -> String {
-    Days::parse(day).map_or_else(|| day.to_string(), |d| s.short_date(d))
+pub(crate) fn short_day(s: &Strings, day: &str) -> String {
+    calendar::day_of(day).map_or_else(|| day.to_string(), |d| s.short_date(d))
 }
 
 /// The same evaluations, whatever their order.
@@ -385,6 +306,36 @@ fn pct(v: Option<f64>) -> String {
 
 fn small<'a>(s: impl ToString, c: Colors) -> iced::widget::Text<'a> {
     text(s.to_string()).size(SIZE_SMALL).color(c.muted)
+}
+
+/// The lines of a trend match by match, and the figure in all of them.
+pub(crate) fn matches_legend<'a, M: 'a>(
+    matches: usize,
+    overall: Option<f64>,
+    s: &'static Strings,
+    c: Colors,
+) -> Element<'a, M> {
+    row![
+        text(format!("━● {}", s.per_match))
+            .size(SIZE_SMALL)
+            .color(c.text),
+        text(format!(
+            "━━ {}",
+            ui::fill(s.moving_average, &[MOVING_WINDOW.to_string()])
+        ))
+        .size(SIZE_SMALL)
+        .color(c.accent),
+        small(
+            format!(
+                "- - {}: {}",
+                ui::fill(s.matches_count, &[matches.to_string()]),
+                pct(overall)
+            ),
+            c
+        ),
+    ]
+    .spacing(14)
+    .into()
 }
 
 fn big<'a>(s: impl ToString, color: Color) -> iced::widget::Text<'a> {
@@ -752,6 +703,13 @@ impl StatsScreen {
             .core
             .analysis_opponents(screen.team_id.clone())
             .unwrap_or_default();
+        screen.team_picture =
+            ui::TeamPicture::of(&screen.core, Some(&screen.team_id), &screen.team_name);
+        screen.opponent_pictures = screen
+            .opponents
+            .iter()
+            .map(|o| ui::TeamPicture::of(&screen.core, Some(&o.id.to_string()), &o.name))
+            .collect();
         screen.load();
         match &screen.error {
             Some(e) if screen.analysis.is_none() => Err(MobileError::Failed { reason: e.clone() }),
@@ -760,9 +718,10 @@ impl StatsScreen {
     }
 
     fn with(core: Arc<Scout4All>, team_id: String, source: Source, title: String) -> Self {
-        let today = Local::now().date_naive();
         let choices = core.situation_choices();
+        let today = core.clock().today();
         StatsScreen {
+            locked: None,
             photos: crate::editors::team_photos(&core, &team_id),
             core,
             team_id,
@@ -784,6 +743,7 @@ impl StatsScreen {
             trend: Trend::of_stats(None, 0, false),
             points: vec![],
             event: EventTypeEnum::S,
+            asked: EventTypeEnum::S,
             filter: DetailFilter::default(),
             efficiency: false,
             row: 0,
@@ -795,16 +755,10 @@ impl StatsScreen {
             competition: None,
             team_name: String::new(),
             opponents: vec![],
+            team_picture: ui::TeamPicture::Initials(String::new()),
+            opponent_pictures: vec![],
             opponent: None,
-            kind: Kind::LastMonth,
-            last: LAST_MATCHES,
-            days: Days {
-                from: String::new(),
-                to: String::new(),
-                editing_to: false,
-                month: calendar::month_of(today),
-            },
-            today,
+            choice: PeriodChoice::new(Kind::LastMonth, today),
             played: vec![],
             clip_evals: vec![],
             clip_zone: None,
@@ -817,6 +771,41 @@ impl StatsScreen {
 
     pub fn title(&self) -> String {
         self.title.clone()
+    }
+
+    /// The analysis of the team narrowed to one of its players, with the
+    /// filters of their profile: no players to choose.
+    pub fn player(
+        core: Arc<Scout4All>,
+        team_id: String,
+        player: String,
+        name: &str,
+        filters: Filters,
+        s: &Strings,
+    ) -> Result<StatsScreen, MobileError> {
+        let title = format!("{name} – {}", s.analysis);
+        let mut screen = StatsScreen::with(core, team_id, Source::Team, title);
+        screen.filter.players = vec![player.clone()];
+        screen.locked = Some(Locked {
+            player,
+            filters: filters.clone(),
+        });
+        screen.choice = filters.choice;
+        screen.period = filters.period;
+        screen.competition = filters.competition;
+        screen.load();
+        match &screen.error {
+            Some(e) if screen.analysis.is_none() => Err(MobileError::Failed { reason: e.clone() }),
+            _ => Ok(screen),
+        }
+    }
+
+    /// The player of a narrowed analysis and the filters of their profile,
+    /// to go back to it.
+    pub fn player_filters(&self) -> Option<(String, Filters)> {
+        self.locked
+            .as_ref()
+            .map(|locked| (locked.player.clone(), locked.filters.clone()))
     }
 
     /// Opened from the page of team B `team_b`: the statistics of B.
@@ -902,7 +891,7 @@ impl StatsScreen {
                             m.clone(),
                             side,
                             self.scope,
-                            self.event,
+                            self.asked,
                             self.filter.clone(),
                         ),
                     )
@@ -934,14 +923,14 @@ impl StatsScreen {
                         opponent,
                         self.period.clone(),
                         self.competition,
-                        self.event,
+                        self.asked,
                         self.filter.clone(),
                     ),
                     None => self.core.team_analysis(
                         team,
                         self.period.clone(),
                         self.competition,
-                        self.event,
+                        self.asked,
                         self.filter.clone(),
                     ),
                 };
@@ -953,7 +942,7 @@ impl StatsScreen {
                             opponent,
                             self.period.clone(),
                             self.competition,
-                            self.event,
+                            self.asked,
                             self.filter.clone(),
                         )
                         .ok(),
@@ -965,16 +954,21 @@ impl StatsScreen {
                     Ok(a) => {
                         self.live = Some(a.summary.clone());
                         self.detail = Some(a.detail.clone());
-                        self.played = a
-                            .played_days
-                            .iter()
-                            .filter_map(|d| Days::parse(d))
-                            .collect();
+                        self.played = period::played_days(&a.played_days);
                         self.analysis = Some(a);
+                        // fewer series with players chosen: the last one
+                        self.series = self.series.min(self.series_count().saturating_sub(1));
                     }
                     Err(e) => self.error = Some(e.to_string()),
                 }
             }
+        }
+        // the phase asked may not have the fundamental asked for: the
+        // detail is of another one
+        let detailed = self.detail.as_ref().map(|d| d.event);
+        if let Some(event) = detailed.filter(|e| *e != self.event) {
+            self.event = event;
+            self.clear_pick();
         }
         self.recount();
         self.retrend();
@@ -1002,14 +996,16 @@ impl StatsScreen {
                 .ok()
                 .map(|clips| clips.len()),
             Source::Team => {
-                // the actions are in the video of our side: none of an opponent
-                self.tour = match self.opponent {
-                    Some(_) => vec![],
-                    None => self
-                        .core
-                        .team_clips(&self.team_id, &self.period, self.competition, &self.pick())
-                        .unwrap_or_default(),
-                };
+                self.tour = self
+                    .core
+                    .team_clips(
+                        &self.team_id,
+                        &self.period,
+                        self.competition,
+                        self.opponent,
+                        &self.pick(),
+                    )
+                    .unwrap_or_default();
                 self.has_video = self.tour.iter().any(|m| m.has_video);
                 Some(self.watched().map(|m| m.events.len()).sum())
             }
@@ -1241,7 +1237,7 @@ impl StatsScreen {
             .and_then(|d| d.fundamental.as_ref())
             .is_some_and(|f| !f.targets.is_empty());
         // side by side, no player: they're of one of the two teams
-        let player = (!self.compare).then_some(Filter::Player);
+        let player = (!self.compare && self.locked.is_none()).then_some(Filter::Player);
         let narrow = player.into_iter().chain([Filter::Rotation, Filter::Phase]);
         let competition = self.has_competitions().then_some(Filter::Competition);
         let opponent = (self.is_team() && !self.opponents.is_empty()).then_some(Filter::Opponent);
@@ -1311,7 +1307,7 @@ impl StatsScreen {
                 ui::cycle(all, &now, forward).map(Message::Side)
             }
             Filter::Scope => ui::cycle(&self.scopes(), &self.scope, forward).map(Message::Scope),
-            Filter::Period => ui::cycle(&KINDS, &self.kind, forward).map(Message::Kind),
+            Filter::Period => self.choice.cycle(forward).map(Message::Period),
             Filter::Opponent => {
                 // each opponent, then the comparison with it (the summary)
                 let comparable = self.current() != Page::Trend;
@@ -1431,19 +1427,9 @@ impl StatsScreen {
         }
     }
 
-    /// The period of the kind chosen: two days not written yet keep the
-    /// period as it was.
-    fn period_of(&self, kind: Kind) -> Option<AnalysisPeriod> {
-        match kind {
-            Kind::LastMonth => Some(AnalysisPeriod::LastMonth),
-            Kind::LastMatches => Some(AnalysisPeriod::LastMatches { count: self.last }),
-            Kind::Between => self.days.period(),
-        }
-    }
-
     /// A period changed: read again if it's whole and new.
     fn reperiod(&mut self) {
-        if let Some(period) = self.period_of(self.kind).filter(|p| *p != self.period) {
+        if let Some(period) = self.choice.period().filter(|p| *p != self.period) {
             self.period = period;
             self.load();
         }
@@ -1508,10 +1494,12 @@ impl StatsScreen {
                 self.retrend();
             }
             Message::Event(event) => {
+                self.asked = event;
                 self.event = event;
                 self.clear_pick();
                 self.load();
             }
+            Message::Players(_) if self.locked.is_some() => {}
             Message::Players(players) => {
                 self.filter.players = players;
                 self.load();
@@ -1525,33 +1513,14 @@ impl StatsScreen {
                 self.load();
             }
             Message::Efficiency(efficiency) => self.efficiency = efficiency,
-            Message::Kind(kind) => {
-                self.kind = kind;
-                // the days of the period shown, to start from
-                if let (Kind::Between, true, Some(a)) =
-                    (kind, self.days.from.is_empty(), &self.analysis)
-                {
-                    self.days.from = a.from.clone().unwrap_or_default();
-                    self.days.to = a.to.clone().unwrap_or_default();
-                    self.days.editing_to = false;
-                    if let Some(to) = Days::parse(&self.days.to) {
-                        self.days.month = calendar::month_of(to);
-                    }
-                }
+            Message::Period(message) => {
+                let shown = self
+                    .analysis
+                    .as_ref()
+                    .and_then(|a| a.from.as_deref().zip(a.to.as_deref()));
+                self.choice.update(message, shown);
                 self.reperiod();
             }
-            Message::Last(last) => {
-                self.last = last.clamp(1, 99);
-                self.kind = Kind::LastMatches;
-                self.reperiod();
-            }
-            Message::Day(day) => {
-                self.days.pick(day);
-                self.kind = Kind::Between;
-                self.reperiod();
-            }
-            Message::Month(months) => self.days.month = calendar::shift(self.days.month, months),
-            Message::Editing(to) => self.days.editing_to = to,
             Message::Roles(roles) => {
                 self.filter.roles = roles;
                 self.load();
@@ -1648,42 +1617,15 @@ impl StatsScreen {
 
     /// The keys of the period: + − the last matches; the digits, ⌫,
     /// space, PgUp PgDn the two days.
-    fn period_key(&mut self, ck: KeyCombination) -> Option<Outcome> {
-        let letter = ck.as_letter();
-        match (self.kind, keymap::digit(&ck)) {
-            (Kind::LastMatches, _) if matches!(letter, Some('+' | '=')) => {
-                Some(self.update(Message::Last(self.last + 1)))
-            }
-            (Kind::LastMatches, _) if letter == Some('-') => {
-                Some(self.update(Message::Last(self.last.saturating_sub(1))))
-            }
-            (Kind::Between, Some(digit)) => {
-                self.days.type_digit(digit);
-                self.reperiod();
-                Some(Outcome::Stay)
-            }
-            (Kind::Between, None) if ck == key!(backspace) => {
-                self.days.erase();
-                Some(Outcome::Stay)
-            }
-            (Kind::Between, None) if ck == key!(space) => {
-                Some(self.update(Message::Editing(!self.days.editing_to)))
-            }
-            (Kind::Between, None) if ck == key!(pageup) => Some(self.update(Message::Month(-1))),
-            (Kind::Between, None) if ck == key!(pagedown) => Some(self.update(Message::Month(1))),
-            _ => None,
-        }
-    }
-
     pub fn key(&mut self, ck: KeyCombination) -> Outcome {
         let rows = self.filters().len().max(1);
         let pages = PAGES.len();
         let previous_page =
             ck == key!(shift - tab) || ck == key!(shift - backtab) || ck == key!(backtab);
         if self.filters().get(self.row) == Some(&Filter::Period)
-            && let Some(outcome) = self.period_key(ck)
+            && let Some(message) = self.choice.key(ck)
         {
-            return outcome;
+            return self.update(Message::Period(message));
         }
         // on the trend of a match, the number of a set shows or hides it
         let set =
@@ -1719,18 +1661,8 @@ impl StatsScreen {
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
-        let period = match (self.filters().get(self.row), self.kind) {
-            (Some(Filter::Period), Kind::LastMatches) => {
-                vec![(
-                    "+ −".to_string(),
-                    ui::fill(s.last_matches, &["N".to_string()]),
-                )]
-            }
-            (Some(Filter::Period), Kind::Between) => vec![
-                ("0–9 ⌫".to_string(), s.date.to_string()),
-                ("␣".to_string(), s.from_to.to_string()),
-                ("PgUp PgDn".to_string(), s.calendar_month.to_string()),
-            ],
+        let period = match self.filters().get(self.row) {
+            Some(Filter::Period) => self.choice.hints(s),
             _ => vec![],
         };
         [
@@ -1775,7 +1707,7 @@ impl StatsScreen {
             .map(|(i, f)| self.filter_row(f, i == self.row, few, s, c))
             .collect();
         let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
+            Some(e) => notice::banner(Level::Error, e, c),
             None => space::vertical().height(0).into(),
         };
         let empty = self
@@ -1925,49 +1857,47 @@ impl StatsScreen {
                     .vertical_spacing(4)
                     .into();
             }
-            Filter::Opponent => (
-                s.stats_team,
-                [pill(
-                    self.team_name.clone(),
-                    self.opponent.is_none(),
-                    Message::Opponent(None),
-                )]
-                .into_iter()
-                .chain(self.opponents.iter().map(|o| {
-                    pill(
-                        o.name.clone(),
-                        self.opponent == Some(o.id) && !self.compare,
-                        Message::Opponent(Some(o.id)),
-                    )
-                }))
-                .chain(
-                    (self.opponent.is_some() && self.current() == Page::Summary)
-                        .then(|| pill(s.compare.to_string(), self.compare, Message::Versus)),
-                )
-                .collect(),
-            ),
-            Filter::Competition => (
-                s.competition,
-                [all(self.competition.is_none(), Message::Competition(None))]
+            Filter::Opponent => {
+                (
+                    s.stats_team,
+                    [ui::team_pill(
+                        &self.team_picture,
+                        &self.team_name,
+                        self.opponent.is_none(),
+                        Message::Opponent(None),
+                        c,
+                    )]
                     .into_iter()
+                    .chain(self.opponents.iter().zip(&self.opponent_pictures).map(
+                        |(o, picture)| {
+                            ui::team_pill(
+                                picture,
+                                &o.name,
+                                self.opponent == Some(o.id) && !self.compare,
+                                Message::Opponent(Some(o.id)),
+                                c,
+                            )
+                        },
+                    ))
                     .chain(
-                        self.analysis
-                            .iter()
-                            .flat_map(|a| a.competitions.iter())
-                            .map(|c| {
-                                let label = match &c.season {
-                                    Some(season) => format!("{} {season}", c.name),
-                                    None => c.name.clone(),
-                                };
-                                pill(
-                                    label,
-                                    self.competition == Some(c.id),
-                                    Message::Competition(Some(c.id)),
-                                )
-                            }),
+                        (self.opponent.is_some() && self.current() == Page::Summary)
+                            .then(|| pill(s.compare.to_string(), self.compare, Message::Versus)),
                     )
                     .collect(),
-            ),
+                )
+            }
+            Filter::Competition => {
+                return period::competition_line(
+                    on,
+                    self.analysis
+                        .as_ref()
+                        .map_or(&[], |a| a.competitions.as_slice()),
+                    self.competition,
+                    Message::Competition,
+                    s,
+                    c,
+                );
+            }
             Filter::Scope => (
                 s.sets,
                 self.scopes()
@@ -2226,143 +2156,22 @@ impl StatsScreen {
     /// The period: the last month, the last matches (+ −), two days written
     /// or picked on the calendar; then the matches it takes.
     fn period_row<'a>(&'a self, on: bool, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let pill = |label: String, chosen: bool, message: Message| {
-            ui::pill(&label, chosen, Some(message), c)
-        };
-        let step = |label: &'static str, message: Message| {
-            button(text(label).size(SIZE_SMALL).align_x(Alignment::Center))
-                .padding([2, 8])
-                .on_press(message)
-                .style(move |_, status| button::Style {
-                    background: matches!(status, button::Status::Hovered)
-                        .then_some(iced::Background::Color(c.button)),
-                    text_color: c.accent,
-                    border: iced::border::rounded(6).color(c.border).width(1),
-                    ..button::Style::default()
-                })
-        };
-        let last = row![
-            pill(
-                ui::fill(s.last_matches, &[self.last.to_string()]),
-                self.kind == Kind::LastMatches,
-                Message::Last(self.last),
-            ),
-            step("−", Message::Last(self.last.saturating_sub(1))),
-            step("+", Message::Last(self.last + 1)),
-        ]
-        .spacing(4)
-        .align_y(Alignment::Center);
-        let pills: Vec<Element<'a, Message>> = vec![
-            pill(
-                s.last_month.to_string(),
-                self.kind == Kind::LastMonth,
-                Message::Kind(Kind::LastMonth),
-            ),
-            last.into(),
-            pill(
-                s.between.to_string(),
-                self.kind == Kind::Between,
-                Message::Kind(Kind::Between),
-            ),
-        ];
-        let line = ui::choice_line(s.period, on, pills, c);
         let chosen: Element<'a, Message> = match &self.analysis {
-            Some(a) => {
-                let days = a
-                    .from
-                    .as_deref()
-                    .zip(a.to.as_deref())
-                    .map(|(from, to)| format!("{} → {}  ·  ", s.day(from), s.day(to)))
-                    .unwrap_or_default();
-                let skipped = match a.skipped.is_empty() {
-                    true => String::new(),
-                    false => format!("\n{}", ui::fill(s.skipped, &[a.skipped.join(", ")])),
-                };
-                small(
-                    format!(
-                        "{days}{}{skipped}",
-                        ui::fill(s.matches_count, &[a.matches.len().to_string()])
-                    ),
-                    c,
-                )
-                .into()
-            }
+            Some(a) => small(
+                period::caption(
+                    a.from.as_deref(),
+                    a.to.as_deref(),
+                    a.matches.len(),
+                    &a.skipped,
+                    s,
+                ),
+                c,
+            )
+            .into(),
             None => space::vertical().height(0).into(),
         };
-        let between: Element<'a, Message> = match self.kind {
-            Kind::Between => self.days_view(s, c),
-            _ => space::vertical().height(0).into(),
-        };
-        column![line, row![space::horizontal().width(148), chosen], between]
-            .spacing(6)
-            .into()
-    }
-
-    /// The two days, as written (the one being written lit), and the
-    /// calendar.
-    fn days_view<'a>(&'a self, s: &'static Strings, c: Colors) -> Element<'a, Message> {
-        let field = |label: &'static str, value: &str, editing: bool, to: bool| {
-            let shown = match value.is_empty() {
-                true => s.date_placeholder.to_string(),
-                false => value.to_string(),
-            };
-            let caret = match editing {
-                true => "▏",
-                false => "",
-            };
-            button(
-                column![
-                    small(label, c),
-                    text(format!("{shown}{caret}"))
-                        .size(SIZE_BODY)
-                        .font(theme::fonts().bold)
-                        .color(match value.is_empty() {
-                            true => c.muted,
-                            false => c.text,
-                        }),
-                ]
-                .spacing(2),
-            )
-            .padding([6, 10])
-            .width(Length::Fixed(140.0))
-            .on_press(Message::Editing(to))
-            .style(move |_, _| button::Style {
-                border: iced::border::rounded(8)
-                    .color(match editing {
-                        true => c.accent,
-                        false => c.border,
-                    })
-                    .width(match editing {
-                        true => 2,
-                        false => 1,
-                    }),
-                ..button::Style::default()
-            })
-        };
-        let fields = row![
-            field(s.from_day, &self.days.from, !self.days.editing_to, false),
-            field(s.to_day, &self.days.to, self.days.editing_to, true),
-        ]
-        .spacing(8);
-        let calendar = Calendar {
-            month: self.days.month,
-            from: Days::parse(&self.days.from),
-            to: Days::parse(&self.days.to),
-            marked: &self.played,
-            today: self.today,
-        }
-        .view(s, c, Message::Day, Message::Month);
-        column![
-            fields,
-            small(s.period_hint, c),
-            container(calendar).padding([4, 0])
-        ]
-        .spacing(6)
-        .padding(iced::Padding {
-            left: 148.0,
-            ..iced::Padding::ZERO
-        })
-        .into()
+        self.choice
+            .view(on, chosen, &self.played, Message::Period, s, c)
     }
 
     fn trend_page<'a>(
@@ -2490,26 +2299,7 @@ impl StatsScreen {
             a.matches.iter().map(|m| m.opponent.clone()).collect(),
             s.touches,
         );
-        let legend = row![
-            text(format!("━● {}", s.per_match))
-                .size(SIZE_SMALL)
-                .color(c.text),
-            text(format!(
-                "━━ {}",
-                ui::fill(s.moving_average, &[MOVING_WINDOW.to_string()])
-            ))
-            .size(SIZE_SMALL)
-            .color(c.accent),
-            small(
-                format!(
-                    "- - {}: {}",
-                    ui::fill(s.matches_count, &[a.matches.len().to_string()]),
-                    pct(line.overall)
-                ),
-                c
-            ),
-        ]
-        .spacing(14);
+        let legend = matches_legend(a.matches.len(), line.overall, s, c);
         let chart: Element<'a, Message> = match trend.is_empty() {
             true => small(s.no_rallies, c).into(),
             false => charts::matches_view(trend, c),
@@ -3325,6 +3115,37 @@ fn summary<'a>(
         .align_y(Alignment::Center)
         .into()
     });
+    // the figures of the team, its rallies: none with players chosen; of
+    // the phases in the figures, one or both
+    let nothing = || -> Element<'a, Message> { space::vertical().height(0).into() };
+    let side_out = live.phases.contains(&PhaseEnum::SideOut);
+    let at_break = live.phases.contains(&PhaseEnum::Break);
+    let phases: Element<'a, Message> = match live.team_figures {
+        true => Column::with_children(
+            [
+                side_out.then(|| phase(s.side_out, &live.side_out)),
+                at_break.then(|| phase(s.break_point, &live.break_points)),
+            ]
+            .into_iter()
+            .flatten(),
+        )
+        .spacing(6)
+        .into(),
+        false => nothing(),
+    };
+    let by_possession: Element<'a, Message> = match live.team_figures && side_out {
+        true => column![
+            gap(tall),
+            ui::section(s.side_out_by_possession, c),
+            Column::with_children(possessions).spacing(match tall {
+                true => 10,
+                false => 4,
+            }),
+        ]
+        .spacing(6)
+        .into(),
+        false => nothing(),
+    };
     let first = ui::panel(
         Some(s.summary),
         column![
@@ -3335,16 +3156,10 @@ fn summary<'a>(
             }),
             level,
             gap(tall),
-            phase(s.side_out, &live.side_out),
-            phase(s.break_point, &live.break_points),
+            phases,
             attack(s.first_attack, &live.first_attack),
             attack(s.counter_attack, &live.counter_attack),
-            gap(tall),
-            ui::section(s.side_out_by_possession, c),
-            Column::with_children(possessions).spacing(match tall {
-                true => 10,
-                false => 4,
-            }),
+            by_possession,
         ]
         .spacing(6)
         .height(height(tall)),
@@ -3358,7 +3173,9 @@ fn summary<'a>(
             .width(Length::FillPortion(2))
             .into()
     };
-    let rotations = live.rotations.iter().map(|r| {
+    // one phase has the figures of all the rallies already
+    let both = side_out && at_break;
+    let rotations = live.rotations.iter().map(move |r| {
         // the points won minus lost, then the rallies won
         let side = |p: &Option<PhaseStats>| {
             cell(
@@ -3375,29 +3192,39 @@ fn summary<'a>(
                 p.as_ref().map(played).unwrap_or_default(),
             )
         };
-        let total = cell(
-            text(
-                r.total
-                    .as_ref()
-                    .map_or("-".to_string(), |t| signed(t.balance)),
+        let total = || {
+            cell(
+                text(
+                    r.total
+                        .as_ref()
+                        .map_or("-".to_string(), |t| signed(t.balance)),
+                )
+                .size(SIZE_BODY)
+                .font(theme::fonts().bold)
+                .color(match r.total.as_ref().map(|t| t.balance) {
+                    Some(1..) => c.won,
+                    Some(..=-1) => c.lost,
+                    _ => c.text,
+                })
+                .into(),
+                r.total.as_ref().map(played).unwrap_or_default(),
             )
-            .size(SIZE_BODY)
-            .font(theme::fonts().bold)
-            .color(match r.total.as_ref().map(|t| t.balance) {
-                Some(1..) => c.won,
-                Some(..=-1) => c.lost,
-                _ => c.text,
-            })
-            .into(),
-            r.total.as_ref().map(played).unwrap_or_default(),
-        );
+        };
         share(
-            row![
-                ui::body(r.name.clone()).width(Length::Fixed(ROTATION_NAME)),
-                side(&r.side_out),
-                side(&r.break_points),
-                total,
-            ]
+            Row::with_children(
+                [
+                    Some(
+                        ui::body(r.name.clone())
+                            .width(Length::Fixed(ROTATION_NAME))
+                            .into(),
+                    ),
+                    side_out.then(|| side(&r.side_out)),
+                    at_break.then(|| side(&r.break_points)),
+                    both.then(total),
+                ]
+                .into_iter()
+                .flatten(),
+            )
             .spacing(12)
             .align_y(Alignment::Center),
             tall,
@@ -3411,12 +3238,20 @@ fn summary<'a>(
     let second = ui::panel(
         Some(s.rotations),
         column![
-            row![
-                space::horizontal().width(Length::Fixed(ROTATION_NAME)),
-                header(s.side_out),
-                header(s.break_point),
-                header(s.total),
-            ]
+            Row::with_children(
+                [
+                    Some(
+                        space::horizontal()
+                            .width(Length::Fixed(ROTATION_NAME))
+                            .into()
+                    ),
+                    side_out.then(|| header(s.side_out).into()),
+                    at_break.then(|| header(s.break_point).into()),
+                    both.then(|| header(s.total).into()),
+                ]
+                .into_iter()
+                .flatten()
+            )
             .spacing(12),
             Column::with_children(rotations)
                 .spacing(6)
@@ -3501,6 +3336,33 @@ fn summary<'a>(
         ]
         .spacing(6)
     };
+    // ours come at break point, theirs in side out
+    let aces = || {
+        let (value, whose) = match (at_break, side_out) {
+            (true, true) => (
+                format!("{} – {}", live.aces, live.aces_against),
+                s.ours_theirs,
+            ),
+            (true, false) => (live.aces.to_string(), s.ours),
+            (false, _) => (live.aces_against.to_string(), s.theirs),
+        };
+        tile(s.aces, value, c.text, Some(whose.to_string()), c)
+    };
+    // theirs: of the team, not with players chosen
+    let counts = match live.team_figures {
+        true => row![
+            tile(
+                s.opponent_errors,
+                live.opponent_errors.to_string(),
+                c.text,
+                Some(format!("{} {}", s.opponent_points, live.opponent_points)),
+                c,
+            ),
+            aces(),
+        ],
+        false => row![aces()],
+    }
+    .spacing(8);
     let fourth = ui::panel(
         Some(s.errors),
         column![
@@ -3518,23 +3380,7 @@ fn summary<'a>(
                 true
             ),
             gap(tall),
-            row![
-                tile(
-                    s.opponent_errors,
-                    live.opponent_errors.to_string(),
-                    c.text,
-                    Some(format!("{} {}", s.opponent_points, live.opponent_points)),
-                    c
-                ),
-                tile(
-                    s.aces,
-                    format!("{} – {}", live.aces, live.aces_against),
-                    c.text,
-                    Some(s.ours_theirs.to_string()),
-                    c
-                ),
-            ]
-            .spacing(8),
+            counts,
         ]
         .spacing(14)
         .height(height(tall)),
@@ -3545,16 +3391,23 @@ fn summary<'a>(
             .width(Length::FillPortion(1))
             .height(height(tall)),
         container(
-            column![
-                container(second).height(match tall {
-                    true => Length::FillPortion(3),
+            match live.team_figures {
+                true => column![
+                    container(second).height(match tall {
+                        true => Length::FillPortion(3),
+                        false => Length::Shrink,
+                    }),
+                    container(third).height(match tall {
+                        true => Length::FillPortion(2),
+                        false => Length::Shrink,
+                    }),
+                ],
+                // the rotations are of the team
+                false => column![container(third).height(match tall {
+                    true => Length::Fill,
                     false => Length::Shrink,
-                }),
-                container(third).height(match tall {
-                    true => Length::FillPortion(2),
-                    false => Length::Shrink,
-                }),
-            ]
+                })],
+            }
             .spacing(14)
         )
         .width(Length::FillPortion(1))
@@ -3628,7 +3481,7 @@ pub(crate) mod tests {
     }
 
     /// As `team_with_two_matches`, each match of its competition (a cup).
-    fn team_with_matches(core: &Scout4All, competitions: [&str; 2]) -> String {
+    pub(crate) fn team_with_matches(core: &Scout4All, competitions: [&str; 2]) -> String {
         let team = core
             .save_team(
                 None,
@@ -3652,6 +3505,13 @@ pub(crate) mod tests {
                     birth_date: String::new(),
                     height_cm: String::new(),
                     notes: String::new(),
+                    nationality: None,
+                    dominant_hand: None,
+                    federation_id: String::new(),
+                    email: String::new(),
+                    phone_country: None,
+                    phone: String::new(),
+                    birth_place: String::new(),
                     person: None,
                 },
                 false,
@@ -3723,7 +3583,8 @@ pub(crate) mod tests {
     fn the_actions_of_the_detail_to_watch() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let siena = core
             .matches(team.clone())
@@ -3794,7 +3655,8 @@ pub(crate) mod tests {
         use scout4all_core::shapes::court_zone::ServeStartEnum::{Z1, Z5};
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let arezzo = match_against(&core, &team, "Arezzo");
         let scouting = core.scouting(team.clone(), arezzo.clone()).unwrap();
@@ -3852,7 +3714,8 @@ pub(crate) mod tests {
     fn the_serves_along_an_arrow() {
         use scout4all_core::shapes::court_zone::ServeStartEnum::{Z1, Z5};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let arezzo = match_against(&core, &team, "Arezzo");
         let scouting = core.scouting(team.clone(), arezzo.clone()).unwrap();
@@ -3904,7 +3767,9 @@ pub(crate) mod tests {
     /// just scouted, in it.
     pub(crate) fn with_a_video(core: &Scout4All, team: &str, m: &str) {
         let (the_match, _) = core.video(team, m).unwrap();
-        let start = chrono::Utc::now().fixed_offset() - chrono::TimeDelta::seconds(60);
+        let start = scout4all_mobile::clock::ClockExt::zoned_now(
+            &scout4all_mobile::clock::TestClock::new(),
+        ) - chrono::TimeDelta::seconds(60);
         let profile = scout4all_core::video::VideoProfile {
             files: vec![scout4all_core::video::VideoFile {
                 path: format!("{m}.mp4"),
@@ -3921,11 +3786,12 @@ pub(crate) mod tests {
     fn the_actions_of_the_team_to_watch() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let open = |core: &Arc<Scout4All>| {
             let mut screen = StatsScreen::team(core.clone(), team.clone(), s).unwrap();
-            screen.update(Message::Kind(Kind::LastMatches));
+            screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
             screen.update(Message::Page(2));
             screen
         };
@@ -3976,7 +3842,8 @@ pub(crate) mod tests {
         use scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide};
         let s = strings(LanguageEnum::En);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let none = team_with_two_matches(&core);
         let screen = StatsScreen::team(core.clone(), none, s).unwrap();
         assert!(!screen.filters().contains(&Filter::Opponent));
@@ -4014,7 +3881,21 @@ pub(crate) mod tests {
             )
             .unwrap();
         let mut screen = StatsScreen::team(core, imported.team_id, s).unwrap();
-        screen.update(Message::Kind(Kind::LastMatches));
+        // every team of the choice with its picture
+        assert!(!screen.opponents.is_empty());
+        assert_eq!(
+            screen.opponent_pictures,
+            screen
+                .opponents
+                .iter()
+                .map(|o| ui::TeamPicture::Initials(scout4all_core::names::initials(&o.name)))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            screen.team_picture,
+            ui::TeamPicture::Initials(scout4all_core::names::initials(&screen.team_name))
+        );
+        screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
         assert_eq!(screen.filters().first(), Some(&Filter::Opponent));
         let ours = aces(&screen);
         let opponent = screen.opponents.first().map(|o| o.id);
@@ -4028,8 +3909,12 @@ pub(crate) mod tests {
         );
         screen.update(Message::Opponent(opponent));
         assert_eq!(aces(&screen), b.aces);
+        // its actions to watch: of its side, in the video of the match
+        assert!(!screen.tour.is_empty());
+        assert!(screen.tour.iter().all(|m| m.side == MatchSide::B));
         screen.update(Message::Opponent(None));
         assert_eq!(aces(&screen), ours);
+        assert!(screen.tour.iter().all(|m| m.side == MatchSide::A));
         // the comparison with the opponent: its matches, side by side, only
         // in the summary; → goes from the opponent to it
         screen.update(Message::Opponent(opponent));
@@ -4060,7 +3945,8 @@ pub(crate) mod tests {
     fn the_competition_of_a_team() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let none = team_with_two_matches(&core);
         let screen = StatsScreen::team(core.clone(), none, s).unwrap();
         assert_eq!(screen.filters().first(), Some(&Filter::Period));
@@ -4068,7 +3954,7 @@ pub(crate) mod tests {
         let mut screen = StatsScreen::team(core, team, s).unwrap();
         assert_eq!(screen.filters().first(), Some(&Filter::Competition));
         assert_eq!(screen.competition, None);
-        screen.update(Message::Kind(Kind::LastMatches));
+        screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
         assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
         // right: the first competition, by name (Coppa)
         screen.key(key!(right));
@@ -4102,11 +3988,61 @@ pub(crate) mod tests {
     /// The period by keys: the last matches (+ −), then the two days
     /// written; a day picked on the calendar; a filter on the situation;
     /// Esc back to the team.
+    /// The statistics of a player from their profile: the season first, the
+    /// detail the analysis narrowed to them with the same filters and no
+    /// player to choose, and back.
+    #[test]
+    fn the_statistics_of_a_player_and_their_detail() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let analysis = core
+            .team_analysis(
+                team.clone(),
+                AnalysisPeriod::Season,
+                None,
+                EventTypeEnum::S,
+                DetailFilter::default(),
+            )
+            .unwrap();
+        let server = analysis.detail.players[0].id.clone();
+        let mut page = crate::team::TeamScreen::new(core.clone(), team.clone()).unwrap();
+        assert!(page.show_profile(&server));
+        page.key(s, key!(tab));
+        // the next period of the season: the last matches
+        page.key(s, key!(right));
+        let crate::team::Outcome::PlayerDetail {
+            player,
+            name,
+            filters,
+        } = page.key(s, key!(enter))
+        else {
+            panic!("no detail");
+        };
+        assert_eq!(player, server);
+        assert_eq!(filters.period, AnalysisPeriod::LastMatches { count: 4 });
+        let mut detail = StatsScreen::player(core, team, player, &name, *filters, s).unwrap();
+        assert_eq!(detail.filter.players, std::slice::from_ref(&server));
+        assert_eq!(detail.period, AnalysisPeriod::LastMatches { count: 4 });
+        assert!(!detail.filters().contains(&Filter::Player));
+        detail.update(Message::Players(vec![]));
+        assert_eq!(detail.filter.players, std::slice::from_ref(&server));
+        assert!(matches!(detail.key(BACK_KEY), Outcome::Back));
+        let back = detail.player_filters().map(|(p, f)| (p, f.period));
+        assert_eq!(
+            back,
+            Some((server, AnalysisPeriod::LastMatches { count: 4 }))
+        );
+    }
+
     #[test]
     fn the_analysis_of_a_team_by_keys() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         // from the team, s
         let mut from = crate::team::TeamScreen::new(core.clone(), team.clone()).unwrap();
@@ -4116,9 +4052,11 @@ pub(crate) mod tests {
         ));
         let mut screen = StatsScreen::team(core, team, s).unwrap();
         assert_eq!(screen.filters().first(), Some(&Filter::Period));
-        // the last 4: both
+        // past the season, the last 4: both
         screen.key(key!(right));
-        assert_eq!(screen.kind, Kind::LastMatches);
+        assert_eq!(screen.period, AnalysisPeriod::Season);
+        screen.key(key!(right));
+        assert_eq!(screen.choice.kind(), Kind::LastMatches);
         assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
         assert_eq!(aces(&screen), 4);
         for _ in 0..3 {
@@ -4128,30 +4066,25 @@ pub(crate) mod tests {
         assert_eq!(opponents(&screen), ["Siena"]);
         // from and to, written: the first day done, the last one next
         screen.key(key!(right));
-        assert_eq!(screen.kind, Kind::Between);
-        screen.days.from.clear();
-        screen.days.to.clear();
-        screen.days.editing_to = false;
+        assert_eq!(screen.choice.kind(), Kind::Between);
+        screen.choice.forget_days();
         for d in "20261025".chars().chain("20261101".chars()) {
             let digit = KeyCombination::from(crokey::crossterm::event::KeyCode::Char(d));
             screen.key(digit);
         }
-        assert_eq!(screen.days.from, "2026-10-25");
-        assert_eq!(screen.days.to, "2026-11-01");
+        assert_eq!(screen.choice.written().0, "2026-10-25");
+        assert_eq!(screen.choice.written().1, "2026-11-01");
         assert_eq!(opponents(&screen), ["Siena"]);
         // ⌫ takes a digit back: the period stays the last whole one
         screen.key(key!(backspace));
-        assert_eq!(screen.days.to, "2026-11-0");
+        assert_eq!(screen.choice.written().1, "2026-11-0");
         assert_eq!(opponents(&screen), ["Siena"]);
         // picked on the calendar, the last day before the first: swapped
         let day = |d| NaiveDate::from_ymd_opt(2026, 10, d).unwrap();
-        screen.update(Message::Editing(false));
-        screen.update(Message::Day(day(31)));
-        screen.update(Message::Day(day(20)));
-        assert_eq!(
-            (screen.days.from.as_str(), screen.days.to.as_str()),
-            ("2026-10-20", "2026-10-31")
-        );
+        screen.update(Message::Period(period::Message::Editing(false)));
+        screen.update(Message::Period(period::Message::Day(day(31))));
+        screen.update(Message::Period(period::Message::Day(day(20))));
+        assert_eq!(screen.choice.written(), ("2026-10-20", "2026-10-31"));
         assert_eq!(opponents(&screen), ["Arezzo", "Siena"]);
         assert_eq!(screen.played, [day(24), day(31)]);
         // the serves are in break: none with the inverted P1 asked
@@ -4181,7 +4114,8 @@ pub(crate) mod tests {
     #[test]
     fn the_trend_has_the_errors_and_the_points() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let siena = core
             .matches(team.clone())
@@ -4293,7 +4227,8 @@ pub(crate) mod tests {
     #[test]
     fn the_photo_of_a_player_is_read_for_the_statistics() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let m = match core.matches(team.clone()).unwrap().into_iter().next() {
             Some(scout4all_mobile::MatchListing::Match { id, .. }) => id,
@@ -4312,7 +4247,8 @@ pub(crate) mod tests {
     fn the_detail_of_a_match_by_situation() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let first = match core
             .matches(team.clone())
@@ -4340,8 +4276,17 @@ pub(crate) mod tests {
         let live = screen.live.as_ref().unwrap();
         assert_eq!(live.filter.phase, Some(PhaseEnum::SideOut));
         assert!(live.break_points.is_none());
+        // no serve in side out: the detail is of the reception
+        assert_eq!(screen.event, EventTypeEnum::P);
+        assert!(
+            live.fundamentals
+                .iter()
+                .all(|f| f.event != EventTypeEnum::S)
+        );
         screen.update(Message::Phase(None));
         assert!(screen.live.as_ref().unwrap().break_points.is_some());
+        // the serve chosen comes back with it
+        assert_eq!(screen.event, EventTypeEnum::S);
         screen.update(Message::Page(2));
         assert!(screen.filters().contains(&Filter::Reception));
         let total = |screen: &StatsScreen| {
@@ -4402,7 +4347,8 @@ pub(crate) mod tests {
     #[test]
     fn the_digs_only_in_the_detail_of_the_defense() {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let s = strings(LanguageEnum::It);
         let mut screen = StatsScreen::team(core, team, s).unwrap();
@@ -4436,7 +4382,8 @@ pub(crate) mod tests {
     fn more_players_and_rotations_at_a_time() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_two_matches(&core);
         let ids: Vec<String> = core
             .team(team.clone())
@@ -4574,10 +4521,11 @@ pub(crate) mod tests {
     fn the_libero_in_the_filter_of_the_players_of_a_team() {
         let s = strings(LanguageEnum::It);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let team = team_with_a_libero_receiving(&core);
         let mut screen = StatsScreen::team(core, team, s).unwrap();
-        screen.update(Message::Kind(Kind::LastMatches));
+        screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
         let summary = players_by_arrows(&mut screen);
         assert!(summary.contains(&7), "{summary:?}");
         assert!(summary.windows(2).all(|w| w[0] <= w[1]), "{summary:?}");
@@ -4610,6 +4558,37 @@ pub(crate) mod tests {
         assert_eq!(aces(&screen), 0);
     }
 
+    /// With a player chosen the trend of the team has no side out nor
+    /// break point, of the team: the series asked stays one there is.
+    #[test]
+    fn the_series_of_the_team_are_not_of_a_player() {
+        use scout4all_core::trend::Series;
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = team_with_two_matches(&core);
+        let mut screen = StatsScreen::team(core, team, s).unwrap();
+        screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
+        screen.update(Message::Page(1));
+        let shown = |screen: &StatsScreen| {
+            screen
+                .analysis
+                .as_ref()
+                .and_then(|a| a.trend.get(screen.series))
+                .map(|t| t.series)
+        };
+        screen.update(Message::Series(Series::ALL.len() - 1));
+        assert_eq!(shown(&screen), Some(Series::BreakPoint));
+        assert!(screen.live.as_ref().is_some_and(|l| l.team_figures));
+        let player = screen.choosable_players()[0].id.clone();
+        screen.update(Message::Players(vec![player]));
+        assert_eq!(shown(&screen), Some(Series::Serve));
+        assert!(screen.live.as_ref().is_some_and(|l| !l.team_figures));
+        screen.update(Message::Players(vec![]));
+        assert!(screen.live.as_ref().is_some_and(|l| l.team_figures));
+    }
+
     /// The opponent and the team side by side: no filter of the players
     /// (theirs aren't ours), the ones chosen taken off: the same figures
     /// as with none chosen (TODO/000).
@@ -4617,10 +4596,11 @@ pub(crate) mod tests {
     fn side_by_side_no_filter_of_the_players() {
         let s = strings(LanguageEnum::En);
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "en".into()).unwrap();
         let team = team_with_a_libero_receiving(&core);
         let mut screen = StatsScreen::team(core, team, s).unwrap();
-        screen.update(Message::Kind(Kind::LastMatches));
+        screen.update(Message::Period(period::Message::Kind(Kind::LastMatches)));
         let opponent = screen.opponents.first().map(|o| o.id);
         screen.update(Message::Opponent(opponent));
         assert!(screen.filters().contains(&Filter::Player));
@@ -4652,7 +4632,8 @@ pub(crate) mod tests {
     fn the_statistics_of_either_team_of_a_match_on_both_sides() {
         use scout4all_mobile::{DvwChoice, DvwOpponent, DvwSide};
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let import = |opponent| {
             let choice = DvwChoice {
                 opponent,

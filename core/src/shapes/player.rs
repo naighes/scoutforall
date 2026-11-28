@@ -1,7 +1,14 @@
-use crate::shapes::enums::RoleEnum;
+use crate::shapes::{country::CountryCode, enums::RoleEnum};
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DominantHand {
+    Right,
+    Left,
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct PlayerEntry {
@@ -21,6 +28,19 @@ pub struct PlayerEntry {
     pub height_cm: Option<u16>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub notes: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nationality: Option<CountryCode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dominant_hand: Option<DominantHand>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub federation_id: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub email: String,
+    /// in E.164 (`+393331234567`)
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub phone: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub birth_place: String,
 }
 
 impl Default for PlayerEntry {
@@ -34,6 +54,12 @@ impl Default for PlayerEntry {
             birth_date: None,
             height_cm: None,
             notes: String::new(),
+            nationality: None,
+            dominant_hand: None,
+            federation_id: String::new(),
+            email: String::new(),
+            phone: String::new(),
+            birth_place: String::new(),
         }
     }
 }

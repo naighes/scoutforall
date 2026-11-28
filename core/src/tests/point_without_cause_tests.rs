@@ -12,7 +12,7 @@ mod tests {
     };
     use EvalEnum::*;
     use EventTypeEnum::*;
-    use chrono::Utc;
+
     use uuid::Uuid;
 
     /// The setter in position 1, outside hitter in 2.
@@ -63,7 +63,7 @@ mod tests {
 
     fn ev(event_type: EventTypeEnum, player: Option<Uuid>, eval: Option<EvalEnum>) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval,

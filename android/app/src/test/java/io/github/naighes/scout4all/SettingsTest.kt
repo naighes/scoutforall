@@ -11,6 +11,8 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.hasScrollToNodeAction
+import androidx.compose.ui.test.performScrollToNode
 import io.github.naighes.scout4all.core.VideoSeconds
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -40,6 +42,47 @@ class SettingsTest {
         rule.onNode(hasText(string(R.string.terms_of_use)) and hasClickAction()).performClick()
         rule.onNode(hasText(string(R.string.about)) and hasClickAction()).performClick()
         assertEquals(listOf("terms", "about"), opened)
+    }
+
+    @Test
+    fun theLicensesOfOthersOpenFromTheAboutAndCloseWithTheArrow() {
+        val opened = mutableListOf<String>()
+        rule.setContent { Scout4AllTheme { AboutScreen(onBack = {}, onLicenses = { opened += "licenses" }) } }
+        rule.onNode(hasText(string(R.string.third_party_licenses)) and hasClickAction()).performClick()
+        assertEquals(listOf("licenses"), opened)
+    }
+}
+
+/** The licenses of the parts of others: each with its text, closed with the
+ * arrow back; the terms read from the settings close the same way. */
+@RunWith(RobolectricTestRunner::class)
+class LicensesTest {
+    @get:Rule val rule = createComposeRule()
+
+    @Test
+    fun eachPartWithItsLicenseClosedWithTheArrow() {
+        var closed = false
+        rule.setContent { Scout4AllTheme { LicensesScreen(onBack = { closed = true }) } }
+        rule.waitForText("SeetaFace Engine")
+        val list = rule.onNode(hasScrollToNodeAction())
+        list.performScrollToNode(hasText("Redistributions in binary form", substring = true))
+        for (part in listOf("U-2-Net (U2NetP)", "Source Sans 3", "Rust crates, Android libraries")) {
+            list.performScrollToNode(hasText(part))
+        }
+        // the libraries, their thousands of lines in paragraphs
+        list.performScrollToNode(hasText("- serde ", substring = true))
+        list.performScrollToNode(hasText("Permission is hereby granted", substring = true))
+        rule.onNodeWithContentDescription(string(R.string.back)).performClick()
+        assertEquals(true, closed)
+    }
+
+    @Test
+    fun theTermsFromTheSettingsCloseWithTheArrow() {
+        var closed = false
+        rule.setContent { Scout4AllTheme { TermsScreen(onAccept = null, onBack = { closed = true }) } }
+        rule.waitForText(core { it.terms() }.paragraphs.first())
+        rule.onNodeWithContentDescription(string(R.string.back)).performClick()
+        assertEquals(true, closed)
     }
 }
 
@@ -85,7 +128,7 @@ class DefaultCountryTest {
         rule.waitForText(string(R.string.default_country_none))
         rule.onNode(hasText(string(R.string.default_country)) and hasClickAction()).performClick()
         rule.onNode(hasSetTextAction() and hasText(string(R.string.search_country))).performTextInput("japa")
-        rule.waitUntil(5_000) { rule.onAllNodes(hasText("Japan") and hasClickAction()).fetchSemanticsNodes().size == 1 }
+        rule.waitUntil(WAIT_MS) { rule.onAllNodes(hasText("Japan") and hasClickAction()).fetchSemanticsNodes().size == 1 }
         rule.onNode(hasText("Japan") and hasClickAction()).performClick()
         rule.waitFor { core { it.defaultCountry() }?.value == "JP" }
         rule.waitForText("🇯🇵  Japan")

@@ -1,6 +1,5 @@
 package io.github.naighes.scout4all
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,7 +19,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -93,7 +91,7 @@ fun CompetitionsScreen(onBack: () -> Unit, onCompetition: (String) -> Unit) {
         val modifier = Modifier.fillMaxSize().padding(padding)
         when (val s = state) {
             CompetitionsState.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is CompetitionsState.Failed -> Centered(modifier) { Text(s.message) }
+            is CompetitionsState.Failed -> LoadFailed(s.message, modifier)
             is CompetitionsState.Loaded -> {
                 when {
                     s.competitions.isEmpty() -> Centered(modifier.padding(16.dp)) {
@@ -124,21 +122,22 @@ fun CompetitionsScreen(onBack: () -> Unit, onCompetition: (String) -> Unit) {
 }
 
 @Composable
-private fun CompetitionRow(c: CompetitionListing, onClick: () -> Unit, onRemove: () -> Unit) = ListItem(
-    modifier = Modifier.clickable(onClick = onClick),
-    headlineContent = { Text(c.name) },
-    supportingContent = {
-        Column {
-            Text(listOfNotNull(c.season, c.format).joinToString(" · "))
-            Text(pluralStringResource(R.plurals.matches_count, c.matches.toInt(), c.matches.toInt()))
-        }
-    },
-    trailingContent = {
-        IconButton(onClick = onRemove) {
+private fun CompetitionRow(c: CompetitionListing, onClick: () -> Unit, onRemove: () -> Unit) = BoxRow(
+    onClick = onClick,
+    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+    head = { Initials(c.initials) },
+    tail = {
+        IconButton(onClick = onRemove, Modifier.padding(end = 4.dp)) {
             Icon(Icons.Filled.Delete, contentDescription = "${stringResource(R.string.delete_competition)}: ${c.name}")
         }
     },
-)
+) {
+    Text(c.name, style = MaterialTheme.typography.bodyLarge)
+    listOf(
+        listOfNotNull(c.season, c.format).joinToString(" · "),
+        pluralStringResource(R.plurals.matches_count, c.matches.toInt(), c.matches.toInt()),
+    ).forEach { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+}
 
 sealed interface CompetitionFormState {
     data object Loading : CompetitionFormState
@@ -188,6 +187,9 @@ class CompetitionFormViewModel(private val app: Scout4AllApplication, private va
         }
     }
 
+    /** The dialog of what went wrong closed. */
+    fun dismissError() = update { it.copy(error = null) }
+
     fun change(field: CompetitionField?, edit: (CompetitionForm) -> CompetitionForm) = update { s ->
         s.copy(form = edit(s.form), invalid = s.invalid?.takeIf { it.first != field }, error = null)
     }
@@ -235,7 +237,7 @@ fun CompetitionFormScreen(id: String, onBack: () -> Unit, onSaved: () -> Unit) {
         val modifier = Modifier.fillMaxSize().padding(padding).imePadding()
         when (val s = state) {
             CompetitionFormState.Loading, CompetitionFormState.Saved -> Centered(modifier) { CircularProgressIndicator() }
-            is CompetitionFormState.Failed -> Centered(modifier) { Text(s.message) }
+            is CompetitionFormState.Failed -> LoadFailed(s.message, modifier)
             is CompetitionFormState.Editing -> CompetitionFormContent(s, model, modifier)
         }
     }
@@ -273,7 +275,7 @@ private fun CompetitionFormContent(state: CompetitionFormState.Editing, model: C
                 label = { Text(stringResource(R.string.name)) },
                 singleLine = true,
                 isError = error(CompetitionField.NAME) != null,
-                supportingText = error(CompetitionField.NAME)?.let { { Text(it) } },
+                supportingText = noteOf(error(CompetitionField.NAME)),
                 keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words, imeAction = ImeAction.Next),
             )
             OutlinedTextField(
@@ -305,7 +307,7 @@ private fun CompetitionFormContent(state: CompetitionFormState.Editing, model: C
                 model.change(null) { it.copy(friendly = friendly) }
             })
         }
-        state.error?.let { Text(it, Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.error) }
+        state.error?.let { NoticeDialog(Notice.error(it), model::dismissError) }
         Button(
             onClick = model::save,
             enabled = !state.busy,

@@ -147,6 +147,68 @@ pub struct ActivitySearch {
     pub activity_search_team_only: bool,
 }
 
+/// What the home shows: the teams hidden from it, with their matches and
+/// appointments, and the blocks closed. A preference of the device.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq, Default)]
+pub struct HomeView {
+    #[serde(
+        default,
+        deserialize_with = "lenient_ids",
+        skip_serializing_if = "BTreeSet::is_empty"
+    )]
+    pub hidden_teams: BTreeSet<Uuid>,
+    #[serde(
+        default,
+        deserialize_with = "lenient_flag",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub home_week_closed: bool,
+    #[serde(
+        default,
+        deserialize_with = "lenient_flag",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub home_matches_closed: bool,
+    #[serde(
+        default,
+        deserialize_with = "lenient_flag",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub home_teams_closed: bool,
+}
+
+impl HomeView {
+    pub fn shows(&self, team: &Uuid) -> bool {
+        !self.hidden_teams.contains(team)
+    }
+
+    /// The view with the team hidden or not.
+    pub fn with_hidden(self, team: Uuid, hidden: bool) -> Self {
+        let mut hidden_teams = self.hidden_teams;
+        match hidden {
+            true => hidden_teams.insert(team),
+            false => hidden_teams.remove(&team),
+        };
+        Self {
+            hidden_teams,
+            ..self
+        }
+    }
+}
+
+/// Whether the archives exported carry the contacts of the persons (email,
+/// phone, birth place): off unless chosen. A preference of the device,
+/// remembered; missing or unreadable it's off.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ArchiveContacts {
+    #[serde(
+        default,
+        deserialize_with = "lenient_flag",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub archive_contacts: bool,
+}
+
 fn lenient_flag<'de, D: Deserializer<'de>>(deserializer: D) -> Result<bool, D::Error> {
     Ok(Option::<serde_json::Value>::deserialize(deserializer)?
         .as_ref()

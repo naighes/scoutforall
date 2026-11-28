@@ -22,6 +22,7 @@ mod tests {
     const TEAM: &str = "11111111-1111-1111-1111-111111111111";
     const PERSON: &str = "22222222-2222-2222-2222-222222222222";
     const REMOVED: &str = "33333333-3333-3333-3333-333333333333";
+    const SESSION: &str = "55555555-5555-5555-5555-555555555555";
 
     fn picture(pixel: [u8; 4]) -> Vec<u8> {
         let mut out = Cursor::new(Vec::new());
@@ -60,7 +61,12 @@ mod tests {
 
     #[test]
     fn the_images_go_as_files_and_the_rows_do_not_point_to_them() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let files = unzip(&archive).unwrap();
         let names: Vec<&str> = files.iter().map(|(n, _)| n.as_str()).collect();
         // the logo and the photo of the player; not the one of who was removed
@@ -78,7 +84,12 @@ mod tests {
 
     #[test]
     fn an_archive_without_images_has_none_of_the_files() {
-        let archive = export(&with_team(false), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(false),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         assert!(
             unzip(&archive)
                 .unwrap()
@@ -89,13 +100,21 @@ mod tests {
 
     #[test]
     fn the_images_come_back_with_the_team_and_the_person() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let there = database();
         import(&there, &archive, &en()).unwrap();
         let logo = assets::team_logo(&there, TEAM).unwrap().unwrap();
         assert_eq!((logo.width, logo.height, logo.mime), (40, 30, "image/png"));
         let photo = assets::person_photo(&there, PERSON).unwrap().unwrap();
-        assert_eq!((photo.width, photo.height), (256, 256));
+        assert_eq!(
+            (photo.width, photo.height),
+            (assets::PHOTO_SIDE, assets::PHOTO_SIDE)
+        );
         assert!(assets::person_photo(&there, REMOVED).unwrap().is_none());
         // again: nothing doubles
         import(&there, &archive, &en()).unwrap();
@@ -110,7 +129,12 @@ mod tests {
 
     #[test]
     fn the_local_images_win_and_the_missing_ones_come() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let here = with_team(false);
         let mine = picture([1, 2, 3, 255]);
         assets::store_team_logo(&here, TEAM, Some(&mine)).unwrap();
@@ -122,7 +146,12 @@ mod tests {
 
     #[test]
     fn what_is_not_an_image_refuses_the_archive() {
-        let archive = export(&with_team(true), Subject::Team(uuid(TEAM))).unwrap();
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
         let files: Vec<(String, Vec<u8>)> = unzip(&archive)
             .unwrap()
             .into_iter()
@@ -141,6 +170,139 @@ mod tests {
             })
             .unwrap();
         assert_eq!(teams, 0);
+    }
+
+    /// The archive with its JSON files changed.
+    fn rewritten(archive: &[u8], change: impl Fn(&str, &mut Json)) -> Vec<u8> {
+        let files: Vec<(String, Vec<u8>)> = unzip(archive)
+            .unwrap()
+            .into_iter()
+            .map(|(name, data)| match name.ends_with(".json") {
+                true => {
+                    let mut json: Json = serde_json::from_slice(&data).unwrap();
+                    change(&name, &mut json);
+                    (name, serde_json::to_vec(&json).unwrap())
+                }
+                false => (name, data),
+            })
+            .collect();
+        zip_files(&files, Deflated).unwrap()
+    }
+
+    fn each_row(json: &mut Json, change: impl Fn(&mut serde_json::Map<String, Json>)) {
+        json.as_array_mut()
+            .into_iter()
+            .flatten()
+            .filter_map(Json::as_object_mut)
+            .for_each(change);
+    }
+
+    /// As v1.3.0 wrote a team: schema 4 whatever the images (rows without
+    /// the pointers), without the later columns.
+    #[test]
+    fn a_team_of_v1_3_0_with_images_is_imported() {
+        let archive = export(
+            &with_team(true),
+            Subject::Team(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
+        let old = rewritten(&archive, |name, json| match name {
+            "manifest.json" => json["schema"] = Json::from(4),
+            "persons.json" => each_row(json, |row| {
+                [
+                    "nationality",
+                    "dominant_hand",
+                    "federation_id",
+                    "email",
+                    "phone",
+                    "birth_place",
+                ]
+                .iter()
+                .for_each(|c| {
+                    row.remove(*c);
+                })
+            }),
+            // no table of the gyms in v4
+            "venues.json" => assert_eq!(json, &Json::Array(vec![])),
+            _ => {}
+        });
+        let there = database();
+        import(&there, &old, &en()).unwrap();
+        assert!(assets::team_logo(&there, TEAM).unwrap().is_some());
+        assert!(assets::person_photo(&there, PERSON).unwrap().is_some());
+    }
+
+    /// A team with images and a session the player attended.
+    fn trained() -> Database {
+        let db = with_team(true);
+        execute(
+            &db,
+            &format!(
+                "INSERT INTO training_sessions (id, team_id, start_local, duration_min, status)
+                     VALUES ('{SESSION}', '{TEAM}', '2026-11-10T18:00', 90, 'completed');
+                 INSERT INTO training_attendance (session_id, person_id, status)
+                     VALUES ('{SESSION}', '{PERSON}', 'present');"
+            ),
+        );
+        db
+    }
+
+    #[test]
+    fn the_training_rows_do_not_point_to_the_images() {
+        let archive = export(
+            &trained(),
+            Subject::Training(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
+        unzip(&archive)
+            .unwrap()
+            .into_iter()
+            .for_each(|(name, data)| {
+                let text = String::from_utf8(data).unwrap();
+                assert!(!text.contains("asset_id"), "{name}");
+            });
+        import(&with_team(false), &archive, &en()).unwrap();
+    }
+
+    /// v1.3.0 left the pointers in the rows of the training, without the
+    /// images: the archive is imported all the same.
+    #[test]
+    fn a_training_of_v1_3_0_with_pointers_is_imported() {
+        let archive = export(
+            &trained(),
+            Subject::Training(uuid(TEAM)),
+            crate::tests::clock::now(),
+        )
+        .unwrap();
+        let pointer = Json::from("44444444-4444-4444-4444-444444444444");
+        let old = rewritten(&archive, |name, json| match name {
+            "manifest.json" => json["schema"] = Json::from(7),
+            "teams.json" => each_row(json, |row| {
+                row.insert("logo_asset_id".into(), pointer.clone());
+            }),
+            "persons.json" => each_row(json, |row| {
+                row.insert("photo_asset_id".into(), pointer.clone());
+                [
+                    "nationality",
+                    "dominant_hand",
+                    "federation_id",
+                    "email",
+                    "phone",
+                    "birth_place",
+                ]
+                .iter()
+                .for_each(|c| {
+                    row.remove(*c);
+                })
+            }),
+            _ => {}
+        });
+        let here = with_team(false);
+        let imported = import(&here, &old, &en()).unwrap();
+        assert_eq!(imported.training.sessions.added, 1);
+        assert!(assets::team_logo(&here, TEAM).unwrap().is_none());
     }
 
     #[tokio::test]

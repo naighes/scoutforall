@@ -106,6 +106,8 @@ jobs:
           toolchain: stable
       - name: check lockfile matches Cargo.toml
         run: cargo metadata --locked --format-version 1 > /dev/null
+      - name: check the licenses of the libraries are up to date
+        run: python3 scripts/licenses.py --check
 
   clippy:
     name: clippy
@@ -262,4 +264,5 @@ jobs:
       # the screens on the JVM, with the core built for the runner: no NDK
       - name: run the tests of the app
         working-directory: android
-        run: ./gradlew testDebugUnitTest
+        # one JVM per SDK (app/build.gradle.kts); --continue: both report
+        run: ./gradlew --continue testDebugUnitTest

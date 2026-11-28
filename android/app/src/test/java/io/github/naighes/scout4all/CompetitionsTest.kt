@@ -37,6 +37,8 @@ class CompetitionsTest {
         var opened: String? = null
         rule.setContent { Scout4AllTheme { CompetitionsScreen(onBack = {}, onCompetition = { opened = it }) } }
         rule.waitForText("Serie A1")
+        // the initials at the head of its box
+        rule.waitForText("SA")
         rule.waitForText(app.resources.getQuantityString(R.plurals.matches_count, 2, 2))
         rule.onNodeWithText("Serie A1").performClick()
         assertEquals(core { it.competitions() }.single().id, opened)

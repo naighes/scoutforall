@@ -3,6 +3,7 @@ package io.github.naighes.scout4all
 import io.github.naighes.scout4all.core.MobileException
 import io.github.naighes.scout4all.core.MontagePiece
 import io.github.naighes.scout4all.core.TeamClipMatch
+import io.github.naighes.scout4all.core.VideoLogos
 import io.github.naighes.scout4all.core.VideoReview
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,6 +15,8 @@ data class MontageMatch(
     val pieces: List<MontagePiece>,
     val team: String,
     val opponent: String,
+    /** of the two teams, for how it stands; null when they can't be read */
+    val logos: VideoLogos?,
     /** the opponent, then the day and which match of how many */
     val title: List<String>?,
 )
@@ -27,6 +30,8 @@ enum class LeftOut { NO_VIDEO, UNREADABLE, NOT_LINED_UP }
 data class MontagePlan(
     val matches: List<MontageMatch>,
     val actions: Int,
+    /** the actions of the matches in it not in their video */
+    val outside: Int,
     val leftOut: List<Pair<String, LeftOut>>,
 )
 
@@ -52,9 +57,13 @@ suspend fun montagePlan(
 ): MontagePlan {
     val leftOut = request.leftOut.map { it.opponent to LeftOut.NO_VIDEO }.toMutableList()
     val kept = mutableListOf<Triple<TeamClipMatch, VideoReview, List<MontagePiece>>>()
+    var outside = 0
     request.matches.forEach { m ->
         when (val read = readMatch(app, request, m, shown, beforeS, afterS)) {
-            is Read.Kept -> kept += Triple(m, read.review, read.pieces)
+            is Read.Kept -> {
+                kept += Triple(m, read.review, read.pieces)
+                outside += app.onCore { read.review.outside() }.toInt()
+            }
             is Read.Out -> leftOut += m.opponent to read.why
         }
     }
@@ -63,12 +72,18 @@ suspend fun montagePlan(
     var n = 0
     val matches = kept.mapIndexed { i, (m, review, pieces) ->
         val (team, opponent) = app.onCore { review.team() to review.opponent() }
+        val logos = try {
+            app.core { review.logos() }
+        } catch (_: MobileException) {
+            null
+        }
         val actions = pieces.sumOf { it.actions.toInt() }
         MontageMatch(
             review = review,
             pieces = pieces.map { it.copy(number = (++n).toUInt(), count = count.toUInt()) },
             team = team,
             opponent = opponent,
+            logos = logos,
             title = when (several) {
                 true -> listOf(
                     opponent,
@@ -79,7 +94,7 @@ suspend fun montagePlan(
             },
         )
     }
-    return MontagePlan(matches, matches.sumOf { m -> m.pieces.sumOf { it.actions.toInt() } }, leftOut)
+    return MontagePlan(matches, matches.sumOf { m -> m.pieces.sumOf { it.actions.toInt() } }, outside, leftOut)
 }
 
 private sealed interface Read {
@@ -100,7 +115,7 @@ private suspend fun readMatch(
     val review = when (shown?.first) {
         m.matchId -> shown.second
         else -> try {
-            app.core { it.videoReview(request.teamId, m.matchId, request.side, request.pick) }
+            app.core { it.videoReview(m.teamId, m.matchId, m.side, request.pick) }
         } catch (_: MobileException) {
             return Read.Out(LeftOut.UNREADABLE)
         }

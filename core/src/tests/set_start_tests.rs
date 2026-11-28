@@ -21,7 +21,7 @@ mod tests {
         },
         tests::{EN, Sqlite},
     };
-    use chrono::Utc;
+
     use std::sync::Arc;
     use uuid::Uuid;
 
@@ -41,6 +41,12 @@ mod tests {
                 birth_date: None,
                 height_cm: None,
                 notes: String::new(),
+                nationality: None,
+                dominant_hand: None,
+                federation_id: String::new(),
+                email: String::new(),
+                phone: String::new(),
+                birth_place: String::new(),
             })
             .collect();
         TeamEntry {
@@ -354,7 +360,7 @@ mod tests {
                 &team,
                 crate::match_form::MatchInput::against(
                     "Cortona Volley",
-                    Utc::now().fixed_offset(),
+                    crate::tests::clock::now().fixed_offset(),
                     true,
                     DEFAULT_MAX_SUBSTITUTIONS,
                     "",
@@ -365,13 +371,25 @@ mod tests {
             .unwrap();
         let set_writer: Arc<dyn SetWriter + Send + Sync> = Arc::new(p.set_writer);
         let input = complete(&team).validate(&team).unwrap();
-        let session = set_start::start(m.clone(), input, Arc::clone(&set_writer), None)
-            .await
-            .unwrap();
+        let session = set_start::start(
+            m.clone(),
+            input,
+            Arc::clone(&set_writer),
+            None,
+            crate::tests::clock::utc_now(),
+        )
+        .await
+        .unwrap();
         assert_eq!(session.set().set_number, 1);
         assert_eq!(session.set().serving_team, TeamSideEnum::Us);
         assert_eq!(session.step(), ScoutingStep::Event);
-        let resumed = set_start::resume(m, session.set().clone(), set_writer).unwrap();
+        let resumed = set_start::resume(
+            m,
+            session.set().clone(),
+            set_writer,
+            crate::tests::clock::utc_now(),
+        )
+        .unwrap();
         assert_eq!(resumed.set().setter, id(&team, 0));
         assert_eq!(resumed.step(), ScoutingStep::Event);
     }

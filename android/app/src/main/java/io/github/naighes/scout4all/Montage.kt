@@ -2,12 +2,14 @@ package io.github.naighes.scout4all
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.net.Uri
 import androidx.annotation.OptIn
+import androidx.compose.ui.graphics.toArgb
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
 import androidx.media3.common.MediaItem
@@ -29,7 +31,14 @@ import androidx.media3.transformer.Transformer
 import io.github.naighes.scout4all.core.MontagePiece
 import io.github.naighes.scout4all.core.PhaseEnum
 import io.github.naighes.scout4all.core.VideoStanding
+import io.github.naighes.scout4all.core.initials
+import io.github.naighes.scout4all.core.logoBackdrop
+import io.github.naighes.scout4all.core.logoTone
 import java.io.File
+
+private val AMBER = 0xFFFCD34D.toInt()
+private val SIDE_OUT = 0xFF38BDF8.toInt()
+private val BREAK = 0xFFFB923C.toInt()
 
 /** The size of the video made: 720p, as on the desktop. */
 private const val WIDTH = 1280
@@ -185,10 +194,16 @@ class Montage(
     }
 
     /** How the match stands over the piece, top left on a veil: a line a
-     * team (the ball by the one to serve, its name, its sets and points),
+     * team (the ball by the one to serve, its logo or initials, its name, its
+     * sets and points),
      * then the set, the phase in its color, the rotation. The same bitmap
      * while the match stands the same. */
     private inner class Board(private val match: MontageMatch, private val startMs: Long) : BitmapOverlay() {
+        private val emblems = listOf(
+            emblemOf(match.logos?.team, match.team),
+            emblemOf(match.logos?.opponent, match.opponent),
+        )
+        private val teams = listOf(match.team, match.opponent)
         private var firstUs: Long? = null
         private var shown: VideoStanding? = null
         private var bitmap: Bitmap = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
@@ -204,62 +219,12 @@ class Montage(
             val st = match.review.standing(ms.coerceAtLeast(0).toULong())
             if (st != shown || shown == null) {
                 shown = st
-                bitmap = st?.let { board(match, it) } ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
+                bitmap = st?.let { boardBitmap(context, texts, teams, emblems, it) } ?: Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888)
             }
             return bitmap
         }
 
         override fun getOverlaySettings(presentationTimeUs: Long): OverlaySettings = settings
-    }
-
-    private fun board(match: MontageMatch, st: VideoStanding): Bitmap {
-        val name = paint(30f, android.graphics.Color.WHITE, bold = true, center = false)
-        val sets = paint(30f, 0xCCFFFFFF.toInt(), bold = false, center = false)
-        val points = paint(40f, android.graphics.Color.WHITE, bold = true, center = false)
-        val soft = paint(28f, 0xCCFFFFFF.toInt(), bold = false, center = false)
-        val serving = st.phase == PhaseEnum.BREAK
-        val (color, phase) = when (serving) {
-            true -> BREAK to texts.breakPoint
-            false -> SIDE_OUT to texts.sideOut
-        }
-        val names = listOf(match.team, match.opponent).map { overlayName(it) }
-        val nameWidth = names.maxOf { name.measureText(it) }
-        val right = listOf(texts.setN.format(st.setNumber.toInt()), "$phase  ${st.rotation}").maxOf { soft.measureText(it) }
-        val ball = 30f
-        val width = (16 + ball + 10 + nameWidth + 16 + 50 + 70 + 24 + right + 20).toInt()
-        val height = 112
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bitmap)
-        canvas.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 18f, 18f, Paint().apply { this.color = 0x8C000000.toInt() })
-        val icon = ContextCompat.getDrawable(context, R.drawable.ic_ball)?.apply { setTint(android.graphics.Color.WHITE) }
-            ?.toBitmap(ball.toInt(), ball.toInt())
-        listOf(
-            Triple(names[0], st.setsUs, st.scoreUs) to serving,
-            Triple(names[1], st.setsThem, st.scoreThem) to !serving,
-        ).forEachIndexed { i, (team, serves) ->
-            val base = 46f + i * 46f
-            if (serves) icon?.let { canvas.drawBitmap(it, 16f, base - ball + 4f, null) }
-            var x = 16 + ball + 10
-            canvas.drawText(team.first, x, base, name)
-            x += nameWidth + 16
-            canvas.drawText(team.second.toString(), x + 50 - sets.measureText(team.second.toString()), base, sets)
-            x += 50
-            canvas.drawText(team.third.toString(), x + 70 - points.measureText(team.third.toString()), base, points)
-        }
-        val divider = 16 + ball + 10 + nameWidth + 16 + 50 + 70 + 12
-        canvas.drawRect(divider, 18f, divider + 1.5f, height - 18f, Paint().apply { this.color = 0x59FFFFFF })
-        canvas.drawText(texts.setN.format(st.setNumber.toInt()), divider + 12, 46f, soft)
-        canvas.drawText(phase, divider + 12, 92f, paint(28f, color, bold = true, center = false))
-        val phaseWidth = paint(28f, color, bold = true, center = false).measureText(phase)
-        canvas.drawText(st.rotation, divider + 12 + phaseWidth + 12, 92f, paint(28f, android.graphics.Color.WHITE, bold = true, center = false))
-        return bitmap
-    }
-
-    private fun paint(size: Float, color: Int, bold: Boolean, center: Boolean = true) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        textSize = size
-        this.color = color
-        typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
-        if (center) textAlign = Paint.Align.CENTER
     }
 
     /** The text cut to fit the width. */
@@ -270,12 +235,101 @@ class Montage(
             text.take(count).trimEnd() + "…"
         }
     }
+}
 
-    companion object {
-        private val AMBER = 0xFFFCD34D.toInt()
-        private val SIDE_OUT = 0xFF38BDF8.toInt()
-        private val BREAK = 0xFFFB923C.toInt()
+/** How the match stands as drawn over the video made: `teams` and their
+ * `emblems`, ours first. */
+internal fun boardBitmap(
+    context: Context,
+    texts: MontageTexts,
+    teams: List<String>,
+    emblems: List<Emblem>,
+    st: VideoStanding,
+): Bitmap {
+    val name = paint(30f, android.graphics.Color.WHITE, bold = true, center = false)
+    val sets = paint(30f, 0xCCFFFFFF.toInt(), bold = false, center = false)
+    val points = paint(40f, android.graphics.Color.WHITE, bold = true, center = false)
+    val soft = paint(28f, 0xCCFFFFFF.toInt(), bold = false, center = false)
+    val serving = st.phase == PhaseEnum.BREAK
+    val (color, phase) = when (serving) {
+        true -> BREAK to texts.breakPoint
+        false -> SIDE_OUT to texts.sideOut
     }
+    val names = teams.map { overlayName(it) }
+    val nameWidth = names.maxOf { name.measureText(it) }
+    val right = listOf(texts.setN.format(st.setNumber.toInt()), "$phase  ${st.rotation}").maxOf { soft.measureText(it) }
+    val ball = 30f
+    val emblem = 36f
+    val width = (16 + ball + 10 + emblem + 10 + nameWidth + 16 + 50 + 70 + 24 + right + 20).toInt()
+    val height = 112
+    val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    canvas.drawRoundRect(RectF(0f, 0f, width.toFloat(), height.toFloat()), 18f, 18f, Paint().apply { this.color = 0x8C000000.toInt() })
+    val icon = ContextCompat.getDrawable(context, R.drawable.ic_ball)?.apply { setTint(android.graphics.Color.WHITE) }
+        ?.toBitmap(ball.toInt(), ball.toInt())
+    listOf(
+        Triple(names[0], st.setsUs, st.scoreUs) to serving,
+        Triple(names[1], st.setsThem, st.scoreThem) to !serving,
+    ).forEachIndexed { i, (team, serves) ->
+        val base = 46f + i * 46f
+        if (serves) icon?.let { canvas.drawBitmap(it, 16f, base - ball + 4f, null) }
+        var x = 16 + ball + 10
+        emblems[i].draw(canvas, RectF(x, base - 29f, x + emblem, base - 29f + emblem))
+        x += emblem + 10
+        canvas.drawText(team.first, x, base, name)
+        x += nameWidth + 16
+        canvas.drawText(team.second.toString(), x + 50 - sets.measureText(team.second.toString()), base, sets)
+        x += 50
+        canvas.drawText(team.third.toString(), x + 70 - points.measureText(team.third.toString()), base, points)
+    }
+    val divider = 16 + ball + 10 + emblem + 10 + nameWidth + 16 + 50 + 70 + 12
+    canvas.drawRect(divider, 18f, divider + 1.5f, height - 18f, Paint().apply { this.color = 0x59FFFFFF })
+    canvas.drawText(texts.setN.format(st.setNumber.toInt()), divider + 12, 46f, soft)
+    canvas.drawText(phase, divider + 12, 92f, paint(28f, color, bold = true, center = false))
+    val phaseWidth = paint(28f, color, bold = true, center = false).measureText(phase)
+    canvas.drawText(st.rotation, divider + 12 + phaseWidth + 12, 92f, paint(28f, android.graphics.Color.WHITE, bold = true, center = false))
+    return bitmap
+}
+
+private fun paint(size: Float, color: Int, bold: Boolean, center: Boolean = true) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+    textSize = size
+    this.color = color
+    typeface = if (bold) Typeface.DEFAULT_BOLD else Typeface.DEFAULT
+    if (center) textAlign = Paint.Align.CENTER
+}
+
+/** What stands for a team beside its name over the video: its logo, on a
+ * backdrop when it would vanish on the veil, or its initials. */
+internal sealed interface Emblem {
+    data class Logo(val bitmap: Bitmap, val backdrop: Int?) : Emblem
+    data class Initials(val letters: String) : Emblem
+
+    fun draw(canvas: Canvas, square: RectF) = when (this) {
+        is Logo -> {
+            backdrop?.let {
+                val corner = square.width() * 0.15f
+                canvas.drawRoundRect(square, corner, corner, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = it })
+            }
+            val room = if (backdrop == null) square.width() else square.width() * 0.8f
+            val scale = room / maxOf(bitmap.width, bitmap.height)
+            val (w, h) = bitmap.width * scale to bitmap.height * scale
+            val into = RectF(square.centerX() - w / 2, square.centerY() - h / 2, square.centerX() + w / 2, square.centerY() + h / 2)
+            canvas.drawBitmap(bitmap, null, into, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+        }
+        is Initials -> {
+            val small = paint(square.height() * 0.65f, 0xCCFFFFFF.toInt(), bold = false)
+            canvas.drawText(letters, square.centerX(), square.centerY() + small.textSize * 0.35f, small)
+        }
+    }
+}
+
+/** The emblem of the team `name` from the PNG of its logo: its initials
+ * without one that can be read. */
+internal fun emblemOf(logo: ByteArray?, name: String): Emblem {
+    val bitmap = logo?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+        ?: return Emblem.Initials(initials(name))
+    // on the veil, dark in both themes
+    return Emblem.Logo(bitmap, backdropColor(logoBackdrop(logoTone(logo), true))?.toArgb())
 }
 
 /** The name of a team over the video: whole up to a point, then cut, so

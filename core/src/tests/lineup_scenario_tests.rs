@@ -13,7 +13,7 @@ mod tests {
         snapshot::{EventEntry, Snapshot},
         team::TeamEntry,
     };
-    use chrono::Utc;
+
     use uuid::Uuid;
 
     /// Starting lineup in rotation 0: setter in position 1.
@@ -89,6 +89,12 @@ mod tests {
                         birth_date: None,
                         height_cm: None,
                         notes: String::new(),
+                        nationality: None,
+                        dominant_hand: None,
+                        federation_id: String::new(),
+                        email: String::new(),
+                        phone: String::new(),
+                        birth_place: String::new(),
                     })
                     .collect(),
                 ..TeamEntry::default()
@@ -110,7 +116,7 @@ mod tests {
 
     fn event(event_type: EventTypeEnum, player: Option<Uuid>, target: Option<Uuid>) -> EventEntry {
         EventEntry {
-            timestamp: Utc::now(),
+            timestamp: crate::tests::clock::now(),
             event_type,
             player,
             eval: None,

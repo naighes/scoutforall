@@ -166,11 +166,11 @@ mod tests {
         assert_eq!(overlaps(&e), [Slot::session(at(23, 20, 0), 90)]);
         assert_eq!(
             e.message(labels(LanguageEnum::En)),
-            "overlaps the training of 2026-11-23 20:00"
+            "overlaps the training of 11/23/2026 20:00"
         );
         assert_eq!(
             e.message(labels(LanguageEnum::It)),
-            "si sovrappone all'allenamento del 2026-11-23 20:00"
+            "si sovrappone all'allenamento del 23/11/2026 20:00"
         );
         assert_eq!(w.training.sessions(&t.id).await.unwrap().len(), 1);
     }
@@ -255,7 +255,7 @@ mod tests {
             assert_eq!(overlaps(&e), [clash]);
             assert_eq!(
                 e.message(labels(LanguageEnum::En)),
-                "overlaps the match of 2026-11-23 18:00"
+                "overlaps the match of 11/23/2026 18:00"
             );
             w.training
                 .create_session(&team.id, session(at(23, 20, 0), 60))
@@ -306,7 +306,7 @@ mod tests {
         assert_eq!(overlaps(&e), [Slot::session(at(23, 17, 0), 120)]);
         assert_eq!(
             e.message(labels(LanguageEnum::Ja)),
-            "2026-11-23 17:00の練習と重なっています"
+            "2026/11/23 17:00の練習と重なっています"
         );
         // against a name B has no sessions: only A's count
         the_match(&w.p, &a, None, when(23, 18)).await.unwrap();

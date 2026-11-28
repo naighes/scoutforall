@@ -174,10 +174,12 @@ impl Roll {
                             .join(", ")
                     ),
                     value: c.name.clone(),
+                    picture: None,
                 })
                 .chain((!written.is_empty()).then(|| Suggestion {
                     label: ui::fill(s.new_person, std::slice::from_ref(&written)),
                     value: written.clone(),
+                    picture: None,
                 }))
                 .collect(),
         );
@@ -186,6 +188,15 @@ impl Roll {
             .map(|c| c.person_id.clone())
             .chain((!written.is_empty()).then(|| NEW_PERSON.to_string()))
             .collect()
+    }
+
+    /// What went wrong doing something: the app tells it over the screen.
+    pub fn failure(&self) -> &Option<String> {
+        &self.error
+    }
+
+    pub fn failure_mut(&mut self) -> &mut Option<String> {
+        &mut self.error
     }
 
     fn toggle_makeup(&mut self, i: usize) {
@@ -409,7 +420,7 @@ impl Roll {
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
         match &self.over {
-            Some(_) => Form::hints(s),
+            Some(Over::Note(form) | Over::Guest { form, .. }) => form.on_field(s, Form::hints(s)),
             None => vec![
                 ("↑ ↓".to_string(), String::new()),
                 (format!("← → {}", s.space), s.change.to_string()),
@@ -494,10 +505,6 @@ impl Roll {
                 ui::list_row(line, i == self.selected, Some(Message::Row(i)), c)
             })
             .collect();
-        let error: Element<'a, Message> = match &self.error {
-            Some(e) => ui::body(e.clone()).color(c.danger).into(),
-            None => space::vertical().height(0).into(),
-        };
         let buttons = ui::answers(
             Some((theme::icons::CLOSE, s.cancel, Message::Cancel)),
             theme::icons::CHECK,
@@ -516,7 +523,6 @@ impl Roll {
             actions,
             column![
                 scrollable(Column::with_children(rows).spacing(3)).height(Length::Fill),
-                error,
                 buttons
             ]
             .spacing(10),

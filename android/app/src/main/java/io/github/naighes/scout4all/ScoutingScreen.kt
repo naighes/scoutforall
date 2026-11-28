@@ -40,6 +40,7 @@ import androidx.work.ExistingWorkPolicy
 import io.github.naighes.scout4all.core.EventTypeEnum
 import io.github.naighes.scout4all.core.TeamSideEnum
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.draw.drawBehind
@@ -72,12 +73,9 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -150,6 +148,9 @@ data class ScoutingView(
     val evals: List<EvalChoice>,
     val techniques: List<TechniqueChoice>,
     val replacements: List<ScoutingPlayer>,
+    /** who can go out though not on court: out while the libero plays in
+     * their place */
+    val outForTheLibero: List<ScoutingPlayer> = emptyList(),
     /** how many blocked, to tell with the evaluation of our attack or our
      * block: empty for the other events */
     val blockers: List<BlockersChoice> = emptyList(),
@@ -425,6 +426,10 @@ class ScoutingViewModel(
             evals = s.availableEvals(),
             techniques = s.availableTechniques(),
             replacements = s.replacementChoices(),
+            outForTheLibero = s.playerChoices()
+                .takeIf { state.step == ScoutingStep.PLAYER }
+                .orEmpty()
+                .filter { it.outForTheLibero },
             blockers = s.availableBlockers(),
             targets = s.targetCourt(),
             targetTold = s.targetTold(),
@@ -440,14 +445,7 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
     val app = LocalContext.current.applicationContext as Scout4AllApplication
     val model = viewModel { ScoutingViewModel(app, teamId, matchId) }
     val state by model.state.collectAsState()
-    val snackbar = remember { SnackbarHostState() }
     val error = (state as? ScoutingUi.Choosing)?.error
-    LaunchedEffect(error) {
-        if (error != null) {
-            snackbar.showSnackbar(error)
-            model.errorShown()
-        }
-    }
     val view = when (val s = state) {
         is ScoutingUi.Choosing -> s.view
         is ScoutingUi.SetOver -> s.view
@@ -483,12 +481,12 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbar) },
     ) { padding ->
-        val modifier = Modifier.fillMaxSize().padding(padding)
+        Box(Modifier.fillMaxSize().padding(padding)) {
+        val modifier = Modifier.fillMaxSize()
         when (val s = state) {
             ScoutingUi.Loading -> Centered(modifier) { CircularProgressIndicator() }
-            is ScoutingUi.Failed -> Centered(modifier) { Text(s.message) }
+            is ScoutingUi.Failed -> LoadFailed(s.message, modifier)
             is ScoutingUi.Choosing -> ScoutingContent(s.view, model, system, modifier)
             is ScoutingUi.SetOver -> {
                 ScoutingContent(s.view, model, system, modifier)
@@ -498,9 +496,26 @@ fun ScoutingScreen(teamId: String, matchId: String, onBack: () -> Unit) {
                 }
             }
         }
+        // never a dialog, and over the screen: nothing moves under the finger
+        error?.let { ScoutingError(it, model::errorShown, Modifier.align(Alignment.TopCenter)) }
+        }
     }
     }
 }
+
+/** A choice that didn't go: across the top until the next one, or touched
+ * away. */
+@Composable
+private fun ScoutingError(error: String, onDismiss: () -> Unit, modifier: Modifier) = Banner(
+    Level.ERROR,
+    error,
+    modifier
+        .padding(8.dp)
+        // the tint of the banner is light: nothing of the screen through it
+        .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(8.dp))
+        .clickable(onClick = onDismiss)
+        .semantics { liveRegion = LiveRegionMode.Polite },
+)
 
 /** The teams and the points in a line, the home team on the left, and the
  * rotation. */
@@ -1167,26 +1182,23 @@ private fun Choices(view: ScoutingView, model: ScoutingViewModel, startsHere: Bo
             if (state.teamChoice) {
                 Buttons(listOf(Triple("team", stringResource(R.string.the_team)) { model.team() }))
             }
+            // who goes out though not on court, told apart
+            view.outForTheLibero.forEach { p ->
+                PortraitRow(
+                    p.id, p.name, stringResource(R.string.out_for_the_libero), p.initials, p.number.toInt(),
+                    { model.player(p.id) },
+                )
+            }
         }
         ScoutingStep.REPLACEMENT -> {
             Title(listOfNotNull(state.event?.name, player).joinToString(" · "))
             Hint(stringResource(R.string.who_comes_in))
-            Column {
+            // at stopped play: the list may scroll
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 view.replacements.forEach { p ->
-                    ListItem(
-                        modifier = Modifier.tutorial("replacement:${p.number}").clickable { model.replacement(p) },
-                        leadingContent = {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    p.number.toString(),
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                PlayerPhoto(p.id, 40.dp)
-                            }
-                        },
-                        headlineContent = { Text(p.name) },
-                        supportingContent = { Text(p.role) },
+                    PortraitRow(
+                        p.id, p.name, role = null, p.initials, p.number.toInt(), { model.replacement(p) },
+                        Modifier.tutorial("replacement:${p.number}"),
                     )
                 }
             }

@@ -3,6 +3,7 @@
 //! activity written before, to copy. The fields of `form`, saved through
 //! `mobile`, which checks them; an error takes the keys to its field.
 
+use scout4all_mobile::clock::ClockExt;
 use {
     super::scope::{Answer, SCOPES, ScopeQuestion},
     crate::{
@@ -204,14 +205,16 @@ impl SessionEditor {
                 vec![s.single_session.to_string(), s.weekly_series.to_string()],
                 0,
             ),
-            Field::masked(s.date, &date, Mask::Date, s.date_placeholder).with_calendar(),
+            Field::masked(s.date, &date, Mask::Date, s.date_placeholder)
+                .with_calendar(core.clock().today()),
             Field::masked(s.time, &time, Mask::Time, s.time_placeholder),
             Field::text(s.session_duration, draft.duration.clone()),
             Field {
                 value: venue_value(&venues, draft.venue.as_deref()),
                 ..Field::choice(s.session_location, vec![], 0)
             },
-            Field::masked(s.until_day, "", Mask::Date, s.date_placeholder).with_calendar(),
+            Field::masked(s.until_day, "", Mask::Date, s.date_placeholder)
+                .with_calendar(core.clock().today()),
             Field::text(s.session_title, draft.title.clone()),
             Field::lines(s.objectives, draft.objectives.clone()),
             Field::lines(s.notes, draft.notes.clone()),
@@ -329,7 +332,7 @@ impl SessionEditor {
             Outcome::Stay => Edited::Stay,
             Outcome::Cancel => Edited::Cancel,
             Outcome::Changed(KIND) => {
-                self.form.error = None;
+                self.form.clear();
                 self.shape();
                 Edited::Stay
             }
@@ -387,7 +390,7 @@ impl SessionEditor {
 
     fn save(&mut self, core: &Scout4All) -> Edited {
         if let Some(warning) = self.warning(core) {
-            self.form.error = Some(warning);
+            self.form.warn(warning);
             return Edited::Stay;
         }
         // a session of a series whose time, duration or gym changed: where
@@ -418,20 +421,24 @@ impl SessionEditor {
         match saved {
             Ok(saved) => Edited::Saved(saved.id),
             Err(e) => {
-                self.focus_error(&e);
-                self.form.error = Some(e.to_string());
+                self.refused(&e);
                 Edited::Stay
             }
         }
     }
 
-    fn focus_error(&mut self, e: &MobileError) {
-        if let MobileError::InvalidTraining { field, .. } = e {
-            self.form.focused = match field {
-                TrainingField::Duration => DURATION,
-                TrainingField::ActualDuration => ACTUAL,
-                _ => DATE,
-            };
+    /// The session not written: why under the wrong field, or in a dialog.
+    fn refused(&mut self, e: &MobileError) {
+        match e {
+            MobileError::InvalidTraining { field, .. } => self.form.reject(
+                match field {
+                    TrainingField::Duration => DURATION,
+                    TrainingField::ActualDuration => ACTUAL,
+                    _ => DATE,
+                },
+                e.to_string(),
+            ),
+            _ => self.form.fail(e.to_string()),
         }
     }
 
@@ -468,8 +475,7 @@ impl SessionEditor {
         match self.entry() {
             Ok(entry) => Some(entry),
             Err(field) => {
-                self.form.focused = field;
-                self.form.error = Some(self.s.entry_invalid.to_string());
+                self.form.reject(field, self.s.entry_invalid);
                 None
             }
         }
@@ -486,7 +492,7 @@ impl SessionEditor {
             self.entries.push(entry);
             self.form.update(form::Message::Input(DATE, next));
             self.form.focused = DATE;
-            self.form.error = None;
+            self.form.clear();
             self.warned = false;
             self.shape();
         }
@@ -515,7 +521,7 @@ impl SessionEditor {
             );
             self.warned = warning.is_some();
             if warning.is_some() {
-                self.form.error = warning;
+                self.form.notice = warning.map(crate::notice::Notice::warning);
                 return Edited::Stay;
             }
         }
@@ -543,13 +549,13 @@ impl SessionEditor {
                     Edited::Stay
                 }
                 (true, true) => {
-                    self.form.error = Some(self.s.no_sessions.to_string());
+                    self.form.fail(self.s.no_sessions.to_string());
                     Edited::Stay
                 }
             },
             Err(e) => {
                 self.conflicts.clear();
-                self.form.error = Some(e.to_string());
+                self.form.fail(e.to_string());
                 Edited::Stay
             }
         }
@@ -622,7 +628,7 @@ impl SessionEditor {
             ],
             (None, true, true) => self
                 .form
-                .on_field(Form::hints(s))
+                .on_field(s, Form::hints(s))
                 .into_iter()
                 .map(|(k, what)| match k.as_str() {
                     "Enter" | "⌘Enter" | "⌃Enter" => (k, s.finish.to_string()),
@@ -630,7 +636,7 @@ impl SessionEditor {
                 })
                 .chain([(CONTINUE_HINT.to_string(), s.continue_entry.to_string())])
                 .collect(),
-            (None, true, false) => self.form.on_field(Form::hints(s)),
+            (None, true, false) => self.form.on_field(s, Form::hints(s)),
         }
     }
 
@@ -834,14 +840,17 @@ impl ActivityEditor {
         match core.save_activity(self.session_id.clone(), self.id.clone(), draft) {
             Ok(saved) => Edited::Saved(saved.id),
             Err(e) => {
-                if let MobileError::InvalidTraining { field, .. } = &e {
-                    self.form.focused = match field {
-                        TrainingField::Planned => PLANNED,
-                        TrainingField::Actual => ACTIVITY_ACTUAL,
-                        _ => NAME,
-                    };
+                match &e {
+                    MobileError::InvalidTraining { field, .. } => self.form.reject(
+                        match field {
+                            TrainingField::Planned => PLANNED,
+                            TrainingField::Actual => ACTIVITY_ACTUAL,
+                            _ => NAME,
+                        },
+                        e.to_string(),
+                    ),
+                    _ => self.form.fail(e.to_string()),
                 }
-                self.form.error = Some(e.to_string());
                 Edited::Stay
             }
         }
@@ -914,6 +923,7 @@ impl CopyEditor {
                     h.session_start.get(..10).unwrap_or_default()
                 ),
                 value: h.name.clone(),
+                picture: None,
             })
             .collect();
         self.form.suggest(QUERY, offered);
@@ -940,7 +950,7 @@ impl CopyEditor {
                     None => Edited::Stay,
                 },
                 None => {
-                    self.form.error = Some(s.no_activities.to_string());
+                    self.form.fail(s.no_activities.to_string());
                     Edited::Stay
                 }
             },
@@ -1019,7 +1029,8 @@ mod tests {
 
     fn two_teams() -> (tempfile::TempDir, Arc<Scout4All>, String, String, String) {
         let dir = tempfile::tempdir().unwrap();
-        let core = Scout4All::new(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
         let a = core.tutorial_team().unwrap();
         let b = core
             .save_team(
@@ -1065,7 +1076,7 @@ mod tests {
         }
         editor.update(&core, Message::Choose(LOCATION, 1));
         assert!(matches!(editor.update(&core, Message::Save), Edited::Stay));
-        let told = editor.form.error.clone().unwrap();
+        let told = editor.form.told().unwrap();
         assert!(told.contains("Terontola") && told.contains(s.save_anyway_hint));
         assert!(core.training_sessions(b.clone()).unwrap().is_empty());
         // another time: asked again
@@ -1094,5 +1105,24 @@ mod tests {
             editor.update(&core, Message::Save),
             Edited::Saved(_)
         ));
+    }
+
+    /// A wrong field of the session is told under it, not in a dialog.
+    #[test]
+    fn a_wrong_duration_is_told_under_its_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let core =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = core.tutorial_team().unwrap();
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let mut editor = SessionEditor::new(&core, s, team, None, None).unwrap();
+        editor.update(&core, Message::Input(DATE, "2026-03-02".into()));
+        editor.update(&core, Message::Input(TIME, "18:00".into()));
+        editor.update(&core, Message::Input(DURATION, "0".into()));
+        editor.key(&core, scout4all_keys::key!(enter));
+        assert_eq!(
+            editor.form.invalid.as_ref().map(|(at, _)| *at),
+            Some(DURATION)
+        );
     }
 }
