@@ -495,17 +495,20 @@ private fun AcesTile(stats: LiveStats, modifier: Modifier) {
 private fun Possessions(possessions: List<PossessionStats>) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Text(stringResource(R.string.side_out_by_possession), Modifier.title(), style = MaterialTheme.typography.titleMedium)
     possessions.forEach { p ->
-        Row(Modifier.semantics(mergeDescendants = true) {}, verticalAlignment = Alignment.Bottom) {
-            Text(p.name, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+        // texts of three sizes: on the same line of writing
+        Row(Modifier.semantics(mergeDescendants = true) {}) {
+            Text(p.name, Modifier.weight(1f).alignByBaseline(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             if (p.total > 0u) {
                 Text(
                     stringResource(R.string.rallies_detail, p.won.toInt(), p.total.toInt()) + "  ",
+                    Modifier.alignByBaseline(),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             Text(
                 pct(p.percentage),
+                Modifier.alignByBaseline(),
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
