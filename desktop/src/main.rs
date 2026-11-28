@@ -30,6 +30,7 @@ mod paths;
 mod period;
 mod player_stats;
 mod profile;
+mod reveal;
 mod scouting;
 mod settings;
 mod share;
@@ -1058,6 +1059,8 @@ impl App {
     /// Updates, then moves the focus where the keys went.
     fn update(&mut self, message: Message) -> Task<Message> {
         // the terms at the first start, scrolled by the keys
+        // a key may move the focus of a form: the field kept in sight
+        let keyed = matches!(message, Message::Key(_));
         let terms_scroll = match (&message, &self.terms) {
             (Message::Key(ck), Some(_)) => general::scrolling(*ck),
             _ => None,
@@ -1140,6 +1143,10 @@ impl App {
                 None => task,
             },
             _ => task,
+        };
+        let task = match keyed {
+            true => Task::batch([task, form::Form::reveal()]),
+            false => task,
         };
         let focus = self.focus_id();
         match focus == self.focused {

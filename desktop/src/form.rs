@@ -456,6 +456,9 @@ const SAVE_FROM_LINES: &str = match cfg!(target_os = "macos") {
 
 /// The focus on nothing: on a choice, no text field takes the keys.
 const NO_FIELD: &str = "form-no-field";
+/// The scrollable of the form and the field the keys are on in it.
+const SCROLL: &str = "form-scroll";
+const FOCUSED_ROW: &str = "form-focused-row";
 
 fn is_previous(ck: KeyCombination) -> bool {
     ck == key!(up) || ck == key!(shift - tab) || ck == key!(shift - backtab) || ck == key!(backtab)
@@ -618,6 +621,11 @@ impl Form {
             *suggestions = offered;
             *highlighted = None;
         }
+    }
+
+    /// The form scrolled to the field the keys are on, if out of sight.
+    pub fn reveal<T: Send + 'static>() -> iced::Task<T> {
+        crate::reveal::reveal(Id::from(SCROLL), Id::from(FOCUSED_ROW))
     }
 
     /// The widget to focus: the text field the keys are on.
@@ -1193,7 +1201,7 @@ impl Form {
             .filter(move |(i, _)| visible.contains(i))
             .map(|(i, f)| {
                 let field = self.field(i, f, s, c, on);
-                match self.sections.iter().find(|(at, _)| *at == i) {
+                let row: Element<'a, M> = match self.sections.iter().find(|(at, _)| *at == i) {
                     Some((_, title)) => column![
                         iced::widget::space::vertical().height(6),
                         ui::section(title, c),
@@ -1202,6 +1210,11 @@ impl Form {
                     .spacing(8)
                     .into(),
                     None => field,
+                };
+                // the field the keys are on, kept in sight (`Form::reveal`)
+                match i == self.focused {
+                    true => container(row).id(FOCUSED_ROW).into(),
+                    false => row,
                 }
             });
         let ((no_icon, no), (yes_icon, yes)) = self.actions.clone().unwrap_or_else(|| {
@@ -1249,7 +1262,10 @@ impl Form {
             .into(),
         };
         self.over(
-            iced::widget::scrollable(body).height(Length::Fill).into(),
+            iced::widget::scrollable(body)
+                .id(SCROLL)
+                .height(Length::Fill)
+                .into(),
             s,
             c,
             on,
