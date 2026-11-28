@@ -683,6 +683,19 @@ impl App {
             }),
             Go::Analysis(team) => stats::StatsScreen::team(core, team, self.strings)
                 .map(|screen| Screen::Stats(Box::new(screen))),
+            // the call-ups come before the first set
+            Go::Scout(open)
+                if open.start
+                    && matches!(
+                        core.callups_missing(open.team_id.clone(), open.match_id.clone()),
+                        Ok(Some(_))
+                    ) =>
+            {
+                MatchScreen::new(core, open.team_id, open.match_id).map(|mut m| {
+                    m.ask_callups(self.strings);
+                    Screen::Match(Box::new(m))
+                })
+            }
             Go::Scout(open) if open.start => core
                 .set_start(open.team_id.clone(), open.match_id.clone())
                 .and_then(|start| {

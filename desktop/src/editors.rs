@@ -32,7 +32,7 @@ use {
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         ClassificationChoice, CompetitionChoice, CompetitionField, ExistingPlayer, FormatChoice,
-        GenderChoice, MatchField, MatchRoster, MobileError, OpponentChoice, PlayerField,
+        GenderChoice, MatchField, MatchRoster, MatchSide, MobileError, OpponentChoice, PlayerField,
         RoleChoice, RosterPlayer, Scout4All, SeasonPlayer, StageChoice, TeamField, TeamListing,
     },
 };
@@ -259,6 +259,12 @@ pub struct MatchEditor {
     warned: bool,
     anyway_hint: String,
     step: MatchStep,
+    /// a match without its call-ups, new or saved so: they may wait
+    pending: bool,
+    /// the call-ups asked before the first set: only them, and no waiting
+    asked: bool,
+    /// saved without them
+    later: bool,
     /// a match scouted on both sides, saved: the id of the match, and the
     /// team B whose players the score sheet shows
     created: Option<(String, String)>,
@@ -1082,6 +1088,10 @@ impl Editor {
             (theme::icons::FORWARD_ARROW, s.go_on.to_string()),
         ));
         let opponents = core.opponent_choices(team_id.clone()).unwrap_or_default();
+        let pending = match &id {
+            None => true,
+            Some(id) => core.callups_missing(team_id.clone(), id.clone())? == Some(MatchSide::A),
+        };
         let mut editor = Editor {
             form,
             namesake: None,
@@ -1101,6 +1111,9 @@ impl Editor {
                 warned: false,
                 anyway_hint: s.save_anyway_hint.to_string(),
                 step: MatchStep::Match,
+                pending,
+                asked: false,
+                later: false,
                 created: None,
                 correcting: None,
                 columns: std::cell::Cell::new(ROSTER_COLUMNS),
@@ -1110,6 +1123,46 @@ impl Editor {
         editor.linked();
         editor.toggle(core, None)?;
         Ok(editor)
+    }
+
+    /// Straight to the call-ups still missing, asked before the first set:
+    /// of A, or else of B.
+    pub fn ask_callups(&mut self, core: &Scout4All) -> Result<(), MobileError> {
+        let Kind::Match(m) = &mut self.kind else {
+            return Ok(());
+        };
+        m.asked = true;
+        let Some(id) = m.id.clone() else {
+            return Ok(());
+        };
+        match core.callups_missing(m.team_id.clone(), id.clone())? {
+            Some(MatchSide::B) => self.start_b(core, &id),
+            _ => {
+                self.show(MatchStep::Roster);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn asked_callups(&self) -> bool {
+        matches!(&self.kind, Kind::Match(m) if m.asked)
+    }
+
+    /// The match may be saved without its call-ups: on the score sheet of
+    /// A, still without them and not asked for right now.
+    fn may_wait(&self) -> bool {
+        matches!(
+            &self.kind,
+            Kind::Match(m) if m.step == MatchStep::Roster && m.pending && !m.asked
+        )
+    }
+
+    /// Saved without the call-ups, to choose before the first set.
+    fn save_later(&mut self, core: &Scout4All, s: &Strings) -> Edited {
+        if let Kind::Match(m) = &mut self.kind {
+            m.later = true;
+        }
+        self.saved(core, s, false)
     }
 
     /// The fields of `step`, the keys on its first one.
@@ -1178,7 +1231,7 @@ impl Editor {
             )
         };
         MatchForm {
-            callups_later: false,
+            callups_later: m.later,
             opponent: f.text(MATCH_OPPONENT),
             date: parse_date(&f.text(MATCH_DATE), &f.text(MATCH_TIME), m.data.date),
             home: court == COURT_HOME,
@@ -1931,7 +1984,12 @@ impl Editor {
                 self.form.clear();
                 Edited::Stay
             }
-            Outcome::Save => self.saved(core, s, false),
+            Outcome::Save => {
+                if let Kind::Match(m) = &mut self.kind {
+                    m.later = false;
+                }
+                self.saved(core, s, false)
+            }
         }
     }
 
@@ -2014,8 +2072,9 @@ impl Editor {
         let Kind::Match(m) = &self.kind else {
             return false;
         };
+        // asked for the call-ups only, there's no step before them
         let to = match back {
-            true => m.step.previous(),
+            true => m.step.previous().filter(|_| !m.asked),
             false => m.step.next(),
         };
         match to {
@@ -2065,6 +2124,7 @@ impl Editor {
                 Edited::Stay
             }
             (Some(_), _) => Edited::Stay,
+            (None, form::Message::Another) if self.may_wait() => self.save_later(core, s),
             (None, form::Message::PickLogo) => {
                 let file = rfd::FileDialog::new()
                     .add_filter(s.logo, &["png", "jpg", "jpeg", "webp"])
@@ -2303,6 +2363,9 @@ impl Editor {
             self.form.key(ck);
             return Edited::Stay;
         }
+        if self.may_wait() && ck == key!(l) {
+            return self.save_later(core, s);
+        }
         if self.on_roster() && ck == key!(e) {
             self.open_correction(core, s, self.form.focused);
             return Edited::Stay;
@@ -2392,6 +2455,10 @@ impl Editor {
                 self.on_roster_of_b()
                     .then(|| ("n".to_string(), s.new_player.to_string())),
             )
+            .chain(
+                self.may_wait()
+                    .then(|| ("l".to_string(), s.callups_later.to_string())),
+            )
             .chain([
                 ("Enter".to_string(), s.save.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
@@ -2415,6 +2482,8 @@ impl Editor {
     /// players of B come next.
     fn both_to_scout(&self) -> bool {
         match &self.kind {
+            // the players of B wait with the ones of A
+            Kind::Match(m) if m.later => false,
             // a new match, as the form chose it
             Kind::Match(m) if m.id.is_none() && m.created.is_none() => {
                 self.form.index(MATCH_SCOUTING) == SCOUTING_BOTH
@@ -2477,7 +2546,16 @@ impl Editor {
                 (None, Some(sheet), Kind::Season(_)) => {
                     let chosen = sheet.tiles.iter().filter(|p| p.chosen).count();
                     let count = ui::fill(s.season_count, &[chosen.to_string()]);
-                    self.sheet_view(sheet, s.season_players.to_string(), count, None, s, c, on)
+                    self.sheet_view(
+                        sheet,
+                        s.season_players.to_string(),
+                        count,
+                        None,
+                        None,
+                        s,
+                        c,
+                        on,
+                    )
                 }
                 (None, Some(sheet), _) => {
                     let chosen = sheet.tiles.iter().filter(|p| p.chosen).count();
@@ -2490,7 +2568,8 @@ impl Editor {
                         ),
                         false => (s.roster.to_string(), None),
                     };
-                    self.sheet_view(sheet, title, count, add, s, c, on)
+                    let later = self.may_wait().then(|| on(form::Message::Another));
+                    self.sheet_view(sheet, title, count, add, later, s, c, on)
                 }
                 (None, None, Kind::Team(t)) => {
                     self.form
@@ -2519,6 +2598,7 @@ impl Editor {
         title: String,
         count: String,
         add: Option<M>,
+        later: Option<M>,
         s: &'static Strings,
         c: Colors,
         on: impl Fn(form::Message) -> M + Copy + 'a,
@@ -2683,8 +2763,12 @@ impl Editor {
             .into(),
             false => space::vertical().height(0).into(),
         };
-        let buttons = ui::answers(
+        let buttons = ui::answers_with(
             Some((theme::icons::CLOSE, s.cancel, on(form::Message::Cancel))),
+            later
+                .map(|message| (theme::icons::FORWARD_ARROW, s.callups_later, message))
+                .into_iter()
+                .collect(),
             theme::icons::CHECK,
             s.save,
             Some(on(form::Message::Save)),
@@ -2919,6 +3003,45 @@ mod tests {
             Edited::Saved(id) => id,
             _ => unreachable!("saved, without the players of B"),
         }
+    }
+
+    /// More players than a score sheet takes: `l` on it saves the match all
+    /// the same; asked before the set, there is no waiting nor step back,
+    /// and the match is saved with them.
+    #[test]
+    fn the_call_ups_wait_for_the_first_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 16);
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        assert_eq!(step(&e), MatchStep::Roster);
+        assert!(e.may_wait());
+        let Edited::Saved(id) = press(&mut e, &core, key!(l)) else {
+            unreachable!("saved without call-ups")
+        };
+        let missing = || core.callups_missing(cortona.clone(), id.clone()).unwrap();
+        assert_eq!(missing(), Some(MatchSide::A));
+
+        let mut e = edit_match(&core, &cortona, &id);
+        e.ask_callups(&core).unwrap();
+        assert_eq!(step(&e), MatchStep::Roster);
+        assert!(e.asked_callups() && !e.may_wait());
+        assert!(matches!(press(&mut e, &core, key!(esc)), Edited::Cancel));
+
+        let mut e = edit_match(&core, &cortona, &id);
+        e.ask_callups(&core).unwrap();
+        // 4 of the 16 taken off: 12 are a score sheet
+        for n in 0..4 {
+            send(&mut e, &core, Choose(MATCH_ROSTER + 8 + n, 0));
+        }
+        assert!(matches!(
+            press(&mut e, &core, key!(enter)),
+            Edited::Saved(_)
+        ));
+        assert_eq!(missing(), None);
     }
 
     fn edit_match(core: &Scout4All, team_id: &str, id: &str) -> Editor {
