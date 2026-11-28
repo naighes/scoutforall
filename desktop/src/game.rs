@@ -180,12 +180,29 @@ impl MatchScreen {
         }
     }
 
-    fn edited(&mut self, edited: Edited) {
+    /// The call-ups still missing, asked before the first set.
+    pub fn ask_callups(&mut self, s: &Strings) {
+        self.edit(s);
+        if let Some(Err(e)) = self.editor.as_mut().map(|ed| ed.ask_callups(&self.core)) {
+            self.error = Some(e.to_string());
+        }
+    }
+
+    fn edited(&mut self, edited: Edited) -> Outcome {
         match edited {
-            Edited::Stay | Edited::Crop(_) => {}
-            Edited::Cancel => self.editor = None,
-            Edited::Saved(_) => {
+            Edited::Stay | Edited::Crop(_) => Outcome::Stay,
+            Edited::Cancel => {
                 self.editor = None;
+                Outcome::Stay
+            }
+            Edited::Saved(_) => {
+                // asked before the set, and all chosen: on to it
+                let asked = self.editor.take().is_some_and(|e| e.asked_callups());
+                let chosen = asked
+                    && self
+                        .core
+                        .callups_missing(self.team_id.clone(), self.match_id.clone())
+                        .is_ok_and(|missing| missing.is_none());
                 match self
                     .core
                     .match_details(self.team_id.clone(), self.match_id.clone())
@@ -195,6 +212,10 @@ impl MatchScreen {
                         self.details = details;
                     }
                     Err(e) => self.error = Some(e.to_string()),
+                }
+                match chosen {
+                    true => Outcome::Scout(true),
+                    false => Outcome::Stay,
                 }
             }
         }
@@ -230,8 +251,7 @@ impl MatchScreen {
             (_, None) if self.asking => Outcome::Stay,
             (Message::Form(m), Some(editor)) => {
                 let edited = editor.update(&self.core, s, m);
-                self.edited(edited);
-                Outcome::Stay
+                self.edited(edited)
             }
             (_, Some(_)) | (Message::Form(_), None) => Outcome::Stay,
             (Message::OpenAsA, None) => self.open_as_a(),
@@ -261,8 +281,7 @@ impl MatchScreen {
         match (&mut self.editor, ck) {
             (Some(editor), ck) => {
                 let edited = editor.key(&self.core, s, ck);
-                self.edited(edited);
-                Outcome::Stay
+                self.edited(edited)
             }
             (None, k) if self.asking && k == key!(enter) => self.delete(),
             (None, _) if self.asking => {

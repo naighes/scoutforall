@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onFirst
 import io.github.naighes.scout4all.core.CompetitionFormat
 import io.github.naighes.scout4all.core.MatchForm
 import io.github.naighes.scout4all.core.MatchListing
+import io.github.naighes.scout4all.core.MatchSide
 import io.github.naighes.scout4all.core.Stage
 import io.github.naighes.scout4all.core.TeamListing
 import io.github.naighes.scout4all.core.PlayerForm
@@ -416,5 +417,54 @@ class MatchFormTest {
         rule.onNode(hasText(string(R.string.cancel)) and hasClickAction()).performClick()
         rule.waitFor { rule.onAllNodesWithText("8 Alessia Orro").fetchSemanticsNodes().isEmpty() }
         pencil(8, "Alessia Orro").assertExists()
+    }
+
+    /** More players than a score sheet takes: the match is saved all the
+     * same, and its call-ups are asked before the first set. */
+    @Test
+    fun theCallUpsWaitForTheFirstSet() {
+        core { c -> (1..8).forEach { n -> c.savePlayer(team, null, PlayerForm("Extra $n", RoleEnum.OUTSIDE_HITTER, "${60 + n}"), false) } }
+        var later = ""
+        rule.setContent {
+            Scout4AllTheme {
+                MatchFormScreen(team, null, onBack = {}, onSaved = { _, m -> saved += m }, onLater = { _, m -> later = m })
+            }
+        }
+        rule.waitForText(string(R.string.opponent))
+        rule.type(string(R.string.opponent), "Cortona")
+        rule.goOn()
+        rule.waitForText(string(R.string.callups_later))
+        rule.onNode(hasText(string(R.string.callups_later)) and hasClickAction()).performClick()
+        rule.waitFor({ "not saved" }) { later.isNotEmpty() }
+        assertEquals(emptyList<String>(), saved)
+        assertEquals(MatchSide.A, core { it.callupsMissing(team, later) })
+    }
+
+    @Test
+    fun theSetAsksForTheMissingCallUps() {
+        val match = core {
+            it.saveMatch(team, null, MatchForm("Cortona", "2026-11-28T18:00:00+01:00", true, "6", callupsLater = true))
+        }
+        var asked = false
+        rule.setContent {
+            Scout4AllTheme { SetStartScreen(team, match, onBack = {}, onStarted = {}, onCallups = { asked = true }) }
+        }
+        rule.waitFor({ "not asked" }) { asked }
+    }
+
+    @Test
+    fun theCallUpsChosenBeforeTheSet() {
+        val match = core {
+            it.saveMatch(team, null, MatchForm("Cortona", "2026-11-28T18:00:00+01:00", true, "6", callupsLater = true))
+        }
+        rule.setContent {
+            Scout4AllTheme { MatchFormScreen(team, match, callups = true, onBack = {}, onSaved = { _, m -> saved += m }) }
+        }
+        // straight to the score sheet, where they can't wait any more
+        rule.waitForText(string(R.string.roster_hint))
+        rule.onNode(hasText(string(R.string.callups_later))).assertDoesNotExist()
+        rule.save()
+        rule.waitFor({ "not saved" }) { saved.isNotEmpty() }
+        assertEquals(null, core { it.callupsMissing(team, match) })
     }
 }

@@ -32,6 +32,7 @@ use {
 
 const EMPTY: &str = "–";
 
+use crate::venue_choice::{NEW_KEY, NewVenue, Step, new_hint, venue_field};
 pub(super) use crate::venue_choice::{venue_at, venue_options, venue_value};
 
 /// What a key or a click did to a form.
@@ -157,6 +158,8 @@ pub struct SessionEditor {
     pub conflicts: Vec<String>,
     /// the question of the series of a saved session, when asked
     pub asking: Option<ScopeQuestion>,
+    /// a new gym being written, over the form
+    new_venue: Option<NewVenue>,
     /// the words of the forms (the choices are written again on a change)
     s: &'static Strings,
 }
@@ -209,10 +212,7 @@ impl SessionEditor {
                 .with_calendar(core.clock().today()),
             Field::masked(s.time, &time, Mask::Time, s.time_placeholder),
             Field::text(s.session_duration, draft.duration.clone()),
-            Field {
-                value: venue_value(&venues, draft.venue.as_deref()),
-                ..Field::choice(s.session_location, vec![], 0)
-            },
+            venue_field(s, &venues, draft.venue.as_deref()),
             Field::masked(s.until_day, "", Mask::Date, s.date_placeholder)
                 .with_calendar(core.clock().today()),
             Field::text(s.session_title, draft.title.clone()),
@@ -239,6 +239,7 @@ impl SessionEditor {
             entries: vec![],
             conflicts: vec![],
             asking: None,
+            new_venue: None,
             s,
         };
         editor.form.focused = DATE;
@@ -249,7 +250,27 @@ impl SessionEditor {
     }
 
     /// The field the keys are on; none over a question or a dialog.
+    /// What became of the new gym: made, it's the one chosen.
+    fn venue_step(&mut self, step: Step) -> Edited {
+        match step {
+            Step::Stay => {}
+            Step::Close => self.new_venue = None,
+            Step::Made(id, name) => {
+                self.new_venue = None;
+                self.warned = false;
+                self.venues.push((id.clone(), name));
+                if let Some(field) = self.form.fields.get_mut(LOCATION) {
+                    field.value = venue_value(&self.venues, Some(&id));
+                }
+            }
+        }
+        Edited::Stay
+    }
+
     pub fn focus_id(&self) -> Option<iced::widget::Id> {
+        if let Some(venue) = &self.new_venue {
+            return Some(venue.focus_id());
+        }
         (self.asking.is_none() && self.conflicts.is_empty()).then(|| self.form.focus_id())
     }
 
@@ -574,6 +595,10 @@ impl SessionEditor {
     }
 
     pub fn update(&mut self, core: &Scout4All, message: form::Message) -> Edited {
+        if let Some(venue) = &mut self.new_venue {
+            let step = venue.update(core, message);
+            return self.venue_step(step);
+        }
         match (self.asking.is_some(), self.conflicts.is_empty(), message) {
             (true, _, form::Message::Choose(PICK, i)) => match SCOPES.get(i) {
                 Some(scope) => self.write(core, *scope),
@@ -588,6 +613,10 @@ impl SessionEditor {
             (_, false, form::Message::Cancel) => self.answer_conflicts(core, false),
             (_, false, _) => Edited::Stay,
             (_, true, form::Message::Another) if self.is_series() => self.next_entry(),
+            (_, true, form::Message::Details(LOCATION)) => {
+                self.new_venue = Some(NewVenue::new(self.s));
+                Edited::Stay
+            }
             (_, true, message) => {
                 let outcome = self.form.update(message);
                 self.outcome(core, outcome)
@@ -596,6 +625,18 @@ impl SessionEditor {
     }
 
     pub fn key(&mut self, core: &Scout4All, ck: KeyCombination) -> Edited {
+        if let Some(venue) = &mut self.new_venue {
+            let step = venue.key(core, ck);
+            return self.venue_step(step);
+        }
+        if self.asking.is_none()
+            && self.conflicts.is_empty()
+            && self.form.focused == LOCATION
+            && ck == NEW_KEY
+        {
+            self.new_venue = Some(NewVenue::new(self.s));
+            return Edited::Stay;
+        }
         let continues = ck == CONTINUE_KEY && self.is_series();
         match (&mut self.asking, self.conflicts.is_empty()) {
             (Some(question), _) => match question.key(ck) {
@@ -620,6 +661,10 @@ impl SessionEditor {
     }
 
     pub fn hints(&self, s: &Strings) -> Vec<(String, String)> {
+        if self.new_venue.is_some() {
+            return Form::hints(s);
+        }
+        let new_venue = (self.form.focused == LOCATION).then(|| new_hint(s));
         match (&self.asking, self.conflicts.is_empty(), self.is_series()) {
             (Some(_), _, _) => ScopeQuestion::hints(s, s.save),
             (None, false, _) => vec![
@@ -635,8 +680,14 @@ impl SessionEditor {
                     _ => (k, what),
                 })
                 .chain([(CONTINUE_HINT.to_string(), s.continue_entry.to_string())])
+                .chain(new_venue)
                 .collect(),
-            (None, true, false) => self.form.on_field(s, Form::hints(s)),
+            (None, true, false) => self
+                .form
+                .on_field(s, Form::hints(s))
+                .into_iter()
+                .chain(new_venue)
+                .collect(),
         }
     }
 
@@ -648,6 +699,9 @@ impl SessionEditor {
         c: Colors,
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
+        if let Some(venue) = &self.new_venue {
+            return venue.view(s, c, on);
+        }
         match (&self.asking, self.conflicts.is_empty()) {
             (Some(question), _) => question.view(
                 s,
@@ -1055,6 +1109,34 @@ mod tests {
             .unwrap()
             .id;
         (dir, core, a, b, venue)
+    }
+
+    /// `n` on the gym, or its "+": a small form with the name, the gym made
+    /// and chosen; an empty name isn't taken, Esc gives up.
+    #[test]
+    fn a_gym_is_made_from_the_session_form() {
+        let s = crate::strings::strings(scout4all_core::shapes::enums::LanguageEnum::It);
+        let (_dir, core, a, ..) = two_teams();
+        let mut editor = SessionEditor::new(&core, s, a, None, None).unwrap();
+        editor.update(&core, Message::Details(LOCATION));
+        editor.key(&core, key!(esc));
+        assert!(editor.new_venue.is_none());
+        editor.form.focused = LOCATION;
+        editor.key(&core, key!(n));
+        editor.key(&core, key!(enter));
+        assert!(editor.new_venue.is_some());
+        assert_eq!(core.venues().unwrap().len(), 1);
+        editor.update(&core, Message::Input(0, "Palazzetto".into()));
+        editor.key(&core, key!(enter));
+        assert!(editor.new_venue.is_none());
+        let made = core
+            .venues()
+            .unwrap()
+            .into_iter()
+            .find(|v| v.name == "Palazzetto")
+            .map(|v| v.id);
+        assert_eq!(editor.draft().venue, made);
+        assert!(made.is_some());
     }
 
     /// Another team holds the gym then: the first save tells which one and

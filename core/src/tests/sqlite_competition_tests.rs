@@ -60,7 +60,7 @@ mod tests {
                         true,
                         DEFAULT_MAX_SUBSTITUTIONS,
                         "",
-                        vec![],
+                        team.players.iter().map(|p| p.id).collect(),
                     )
                 },
             )
@@ -313,6 +313,11 @@ mod tests {
         assert_eq!(competition, None);
         let form = MatchForm::of(&m, &match_row, competition.as_ref());
         assert_eq!((form.competition.as_str(), form.competition_id), ("", None));
+        // a team without players: its match is still without call-ups
+        let form = MatchForm {
+            callups_later: true,
+            ..form
+        };
         let input = form.validate(&a, Some(&m)).unwrap();
         p.match_writer.update(&m, input).await.unwrap();
 

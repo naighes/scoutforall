@@ -56,6 +56,9 @@ pub struct MatchForm {
     pub both: bool,
     /// the gym, if any
     pub venue: Option<Uuid>,
+    /// the match saved without its score sheet, to choose before its first
+    /// set: only for a new match, or one still without it
+    pub callups_later: bool,
 }
 
 /// The number and the role of a player on the score sheet of a match:
@@ -243,6 +246,7 @@ impl MatchForm {
             numbers: vec![],
             both: row.scouting == ScoutingMode::Both,
             venue: row.venue_id,
+            callups_later: false,
         }
     }
 
@@ -521,7 +525,8 @@ impl MatchForm {
     }
 
     /// The roster to save, with the numbers and roles of its players: none
-    /// for a match saved without one and left so, else from `MIN_ROSTER` to
+    /// when left for later, or for a match saved without one and played so,
+    /// else from `MIN_ROSTER` to
     /// `MAX_ROSTER` players with all who played, a number each, and a libero
     /// when more than `MAX_ROSTER_WITHOUT_LIBERO`.
     fn valid_roster(
@@ -538,10 +543,13 @@ impl MatchForm {
         let with_libero = chosen.iter().any(|p| p.role == Some(RoleEnum::Libero));
         let roster: Vec<Uuid> = chosen.iter().map(|p| p.id).collect();
         let played = existing.map(MatchEntry::played).unwrap_or_default();
-        let undeclared = self.roster.is_none() && existing.is_some_and(|m| m.roster.is_empty());
+        let undeclared = self.roster.is_none()
+            && existing.is_some_and(|m| m.roster.is_empty() && !m.sets.is_empty());
+        let later =
+            self.callups_later && existing.is_none_or(|m| m.roster.is_empty() && m.sets.is_empty());
         let numbers: HashSet<u8> = chosen.iter().map(|p| p.number).collect();
         match roster.len() {
-            _ if undeclared => Ok((vec![], vec![])),
+            _ if undeclared || later => Ok((vec![], vec![])),
             n if n < MIN_ROSTER => Err(MatchFormError::RosterTooSmall),
             n if n > MAX_ROSTER => Err(MatchFormError::RosterTooLarge),
             _ if !played.iter().all(|p| roster.contains(p)) => {

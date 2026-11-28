@@ -12,7 +12,7 @@ use {
         strings::Strings,
         theme::{self, Colors, SIZE_BODY, SIZE_SMALL, SIZE_TITLE},
         ui,
-        venue_choice::{venue_at, venue_options, venue_value},
+        venue_choice::{self, NewVenue, Step, venue_at, venue_field, venue_options},
     },
     chrono::{DateTime, FixedOffset, Local, NaiveDate, NaiveDateTime, TimeZone},
     iced::{
@@ -32,7 +32,7 @@ use {
     scout4all_keys::{BACK_KEY, KeyCombination, key},
     scout4all_mobile::{
         ClassificationChoice, CompetitionChoice, CompetitionField, ExistingPlayer, FormatChoice,
-        GenderChoice, MatchField, MatchRoster, MobileError, OpponentChoice, PlayerField,
+        GenderChoice, MatchField, MatchRoster, MatchSide, MobileError, OpponentChoice, PlayerField,
         RoleChoice, RosterPlayer, Scout4All, SeasonPlayer, StageChoice, TeamField, TeamListing,
     },
 };
@@ -254,11 +254,19 @@ pub struct MatchEditor {
     stages: Vec<StageChoice>,
     /// the gyms of the choice after the empty one: id and name
     venues: Vec<(String, String)>,
+    /// a new gym being written, over the form
+    new_venue: Option<NewVenue>,
     /// another team holds the gym then and the user was told: Enter again
     /// saves
     warned: bool,
     anyway_hint: String,
     step: MatchStep,
+    /// a match without its call-ups, new or saved so: they may wait
+    pending: bool,
+    /// the call-ups asked before the first set: only them, and no waiting
+    asked: bool,
+    /// saved without them
+    later: bool,
     /// a match scouted on both sides, saved: the id of the match, and the
     /// team B whose players the score sheet shows
     created: Option<(String, String)>,
@@ -1038,10 +1046,7 @@ impl Editor {
                 theme::icons::AWAY,
                 theme::icons::VOLLEYBALL,
             ]),
-            Field {
-                value: venue_value(&venues, data.venue.map(|v| v.to_string()).as_deref()),
-                ..Field::choice(s.session_location, vec![], 0)
-            },
+            venue_field(s, &venues, data.venue.map(|v| v.to_string()).as_deref()),
             Field::choice(
                 s.scouting,
                 vec![s.scouting_one.to_string(), s.scouting_both.to_string()],
@@ -1082,6 +1087,10 @@ impl Editor {
             (theme::icons::FORWARD_ARROW, s.go_on.to_string()),
         ));
         let opponents = core.opponent_choices(team_id.clone()).unwrap_or_default();
+        let pending = match &id {
+            None => true,
+            Some(id) => core.callups_missing(team_id.clone(), id.clone())? == Some(MatchSide::A),
+        };
         let mut editor = Editor {
             form,
             namesake: None,
@@ -1098,9 +1107,13 @@ impl Editor {
                 formats,
                 stages,
                 venues,
+                new_venue: None,
                 warned: false,
                 anyway_hint: s.save_anyway_hint.to_string(),
                 step: MatchStep::Match,
+                pending,
+                asked: false,
+                later: false,
                 created: None,
                 correcting: None,
                 columns: std::cell::Cell::new(ROSTER_COLUMNS),
@@ -1110,6 +1123,46 @@ impl Editor {
         editor.linked();
         editor.toggle(core, None)?;
         Ok(editor)
+    }
+
+    /// Straight to the call-ups still missing, asked before the first set:
+    /// of A, or else of B.
+    pub fn ask_callups(&mut self, core: &Scout4All) -> Result<(), MobileError> {
+        let Kind::Match(m) = &mut self.kind else {
+            return Ok(());
+        };
+        m.asked = true;
+        let Some(id) = m.id.clone() else {
+            return Ok(());
+        };
+        match core.callups_missing(m.team_id.clone(), id.clone())? {
+            Some(MatchSide::B) => self.start_b(core, &id),
+            _ => {
+                self.show(MatchStep::Roster);
+                Ok(())
+            }
+        }
+    }
+
+    pub fn asked_callups(&self) -> bool {
+        matches!(&self.kind, Kind::Match(m) if m.asked)
+    }
+
+    /// The match may be saved without its call-ups: on the score sheet of
+    /// A, still without them and not asked for right now.
+    fn may_wait(&self) -> bool {
+        matches!(
+            &self.kind,
+            Kind::Match(m) if m.step == MatchStep::Roster && m.pending && !m.asked
+        )
+    }
+
+    /// Saved without the call-ups, to choose before the first set.
+    fn save_later(&mut self, core: &Scout4All, s: &Strings) -> Edited {
+        if let Kind::Match(m) = &mut self.kind {
+            m.later = true;
+        }
+        self.saved(core, s, false)
     }
 
     /// The fields of `step`, the keys on its first one.
@@ -1178,6 +1231,7 @@ impl Editor {
             )
         };
         MatchForm {
+            callups_later: m.later,
             opponent: f.text(MATCH_OPPONENT),
             date: parse_date(&f.text(MATCH_DATE), &f.text(MATCH_TIME), m.data.date),
             home: court == COURT_HOME,
@@ -1930,7 +1984,12 @@ impl Editor {
                 self.form.clear();
                 Edited::Stay
             }
-            Outcome::Save => self.saved(core, s, false),
+            Outcome::Save => {
+                if let Kind::Match(m) = &mut self.kind {
+                    m.later = false;
+                }
+                self.saved(core, s, false)
+            }
         }
     }
 
@@ -2013,8 +2072,9 @@ impl Editor {
         let Kind::Match(m) = &self.kind else {
             return false;
         };
+        // asked for the call-ups only, there's no step before them
         let to = match back {
-            true => m.step.previous(),
+            true => m.step.previous().filter(|_| !m.asked),
             false => m.step.next(),
         };
         match to {
@@ -2055,6 +2115,12 @@ impl Editor {
     }
 
     pub fn update(&mut self, core: &Scout4All, s: &Strings, message: form::Message) -> Edited {
+        if let Kind::Match(m) = &mut self.kind
+            && let Some(venue) = &mut m.new_venue
+        {
+            let step = venue.update(core, message);
+            return self.venue_step(step);
+        }
         match (&self.namesake, message) {
             (Some(_), form::Message::Save) => self.answered(core, s, true),
             (Some(_), form::Message::Another) => self.answered(core, s, false),
@@ -2064,6 +2130,11 @@ impl Editor {
                 Edited::Stay
             }
             (Some(_), _) => Edited::Stay,
+            (None, form::Message::Another) if self.may_wait() => self.save_later(core, s),
+            (None, form::Message::Details(MATCH_VENUE)) if !self.on_roster() => {
+                self.open_venue(s);
+                Edited::Stay
+            }
             (None, form::Message::PickLogo) => {
                 let file = rfd::FileDialog::new()
                     .add_filter(s.logo, &["png", "jpg", "jpeg", "webp"])
@@ -2293,6 +2364,16 @@ impl Editor {
     }
 
     fn form_key(&mut self, core: &Scout4All, s: &Strings, ck: KeyCombination) -> Edited {
+        if let Kind::Match(m) = &mut self.kind
+            && let Some(venue) = &mut m.new_venue
+        {
+            let step = venue.key(core, ck);
+            return self.venue_step(step);
+        }
+        if self.on_venue() && ck == venue_choice::NEW_KEY {
+            self.open_venue(s);
+            return Edited::Stay;
+        }
         if let Some(form) = self.correction() {
             let outcome = form.key(ck);
             return self.correction_outcome(core, s, outcome);
@@ -2301,6 +2382,9 @@ impl Editor {
         if self.form.notice.is_some() {
             self.form.key(ck);
             return Edited::Stay;
+        }
+        if self.may_wait() && ck == key!(l) {
+            return self.save_later(core, s);
         }
         if self.on_roster() && ck == key!(e) {
             self.open_correction(core, s, self.form.focused);
@@ -2358,6 +2442,9 @@ impl Editor {
         if told {
             return crate::notice::hints(s);
         }
+        if self.new_venue().is_some() {
+            return Form::hints(s);
+        }
         let correcting = self.correcting().is_some();
         let toggle = match self.kind {
             Kind::Season(_) => s.season_toggle,
@@ -2391,22 +2478,31 @@ impl Editor {
                 self.on_roster_of_b()
                     .then(|| ("n".to_string(), s.new_player.to_string())),
             )
+            .chain(
+                self.may_wait()
+                    .then(|| ("l".to_string(), s.callups_later.to_string())),
+            )
             .chain([
                 ("Enter".to_string(), s.save.to_string()),
                 ("Esc".to_string(), s.back.to_string()),
             ])
             .collect(),
             // the details of a match: Enter goes on to the score sheet
-            (false, false) => self.form.on_field(
-                s,
-                Form::hints(s)
-                    .into_iter()
-                    .map(|(k, what)| match (k.as_str(), &self.kind) {
-                        ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
-                        _ => (k, what),
-                    })
-                    .collect(),
-            ),
+            (false, false) => self
+                .form
+                .on_field(
+                    s,
+                    Form::hints(s)
+                        .into_iter()
+                        .map(|(k, what)| match (k.as_str(), &self.kind) {
+                            ("Enter", Kind::Match(_) | Kind::Season(_)) => (k, s.go_on.to_string()),
+                            _ => (k, what),
+                        })
+                        .collect(),
+                )
+                .into_iter()
+                .chain(self.on_venue().then(|| venue_choice::new_hint(s)))
+                .collect(),
         }
     }
 
@@ -2414,6 +2510,8 @@ impl Editor {
     /// players of B come next.
     fn both_to_scout(&self) -> bool {
         match &self.kind {
+            // the players of B wait with the ones of A
+            Kind::Match(m) if m.later => false,
             // a new match, as the form chose it
             Kind::Match(m) if m.id.is_none() && m.created.is_none() => {
                 self.form.index(MATCH_SCOUTING) == SCOUTING_BOTH
@@ -2430,7 +2528,49 @@ impl Editor {
         matches!(&self.kind, Kind::Match(m) if m.id.is_none())
     }
 
+    fn new_venue(&self) -> Option<&NewVenue> {
+        match &self.kind {
+            Kind::Match(m) => m.new_venue.as_ref(),
+            _ => None,
+        }
+    }
+
+    /// The small form of a new gym, over the details of a match.
+    fn open_venue(&mut self, s: &Strings) {
+        if let Kind::Match(m) = &mut self.kind {
+            m.new_venue = Some(NewVenue::new(s));
+        }
+    }
+
+    /// What became of the new gym: made, it's the one chosen.
+    fn venue_step(&mut self, step: Step) -> Edited {
+        if let Kind::Match(m) = &mut self.kind {
+            match step {
+                Step::Stay => {}
+                Step::Close => m.new_venue = None,
+                Step::Made(id, name) => {
+                    m.new_venue = None;
+                    m.warned = false;
+                    m.venues.push((id.clone(), name));
+                    if let Some(field) = self.form.fields.get_mut(MATCH_VENUE) {
+                        field.value = venue_choice::venue_value(&m.venues, Some(&id));
+                    }
+                }
+            }
+        }
+        Edited::Stay
+    }
+
+    /// The keys are on the choice of the gym of a match.
+    fn on_venue(&self) -> bool {
+        matches!(&self.kind, Kind::Match(m) if m.step == MatchStep::Match)
+            && self.form.focused == MATCH_VENUE
+    }
+
     pub fn focus_id(&self) -> Id {
+        if let Some(venue) = self.new_venue() {
+            return venue.focus_id();
+        }
         self.correcting()
             .map_or_else(|| self.form.focus_id(), |c| c.form.focus_id())
     }
@@ -2441,6 +2581,9 @@ impl Editor {
         c: Colors,
         on: impl Fn(form::Message) -> M + Copy + 'a,
     ) -> Element<'a, M> {
+        if let Some(venue) = self.new_venue() {
+            return venue.view(s, c, on);
+        }
         match (&self.namesake, &self.kind) {
             (Some(namesake), _) if self.same_person.is_some() => ui::confirm_with(
                 s,
@@ -2476,7 +2619,16 @@ impl Editor {
                 (None, Some(sheet), Kind::Season(_)) => {
                     let chosen = sheet.tiles.iter().filter(|p| p.chosen).count();
                     let count = ui::fill(s.season_count, &[chosen.to_string()]);
-                    self.sheet_view(sheet, s.season_players.to_string(), count, None, s, c, on)
+                    self.sheet_view(
+                        sheet,
+                        s.season_players.to_string(),
+                        count,
+                        None,
+                        None,
+                        s,
+                        c,
+                        on,
+                    )
                 }
                 (None, Some(sheet), _) => {
                     let chosen = sheet.tiles.iter().filter(|p| p.chosen).count();
@@ -2489,7 +2641,8 @@ impl Editor {
                         ),
                         false => (s.roster.to_string(), None),
                     };
-                    self.sheet_view(sheet, title, count, add, s, c, on)
+                    let later = self.may_wait().then(|| on(form::Message::Another));
+                    self.sheet_view(sheet, title, count, add, later, s, c, on)
                 }
                 (None, None, Kind::Team(t)) => {
                     self.form
@@ -2518,6 +2671,7 @@ impl Editor {
         title: String,
         count: String,
         add: Option<M>,
+        later: Option<M>,
         s: &'static Strings,
         c: Colors,
         on: impl Fn(form::Message) -> M + Copy + 'a,
@@ -2682,8 +2836,12 @@ impl Editor {
             .into(),
             false => space::vertical().height(0).into(),
         };
-        let buttons = ui::answers(
+        let buttons = ui::answers_with(
             Some((theme::icons::CLOSE, s.cancel, on(form::Message::Cancel))),
+            later
+                .map(|message| (theme::icons::FORWARD_ARROW, s.callups_later, message))
+                .into_iter()
+                .collect(),
             theme::icons::CHECK,
             s.save,
             Some(on(form::Message::Save)),
@@ -2918,6 +3076,67 @@ mod tests {
             Edited::Saved(id) => id,
             _ => unreachable!("saved, without the players of B"),
         }
+    }
+
+    /// More players than a score sheet takes: `l` on it saves the match all
+    /// the same; asked before the set, there is no waiting nor step back,
+    /// and the match is saved with them.
+    #[test]
+    fn the_call_ups_wait_for_the_first_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 16);
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        assert_eq!(step(&e), MatchStep::Roster);
+        assert!(e.may_wait());
+        let Edited::Saved(id) = press(&mut e, &core, key!(l)) else {
+            unreachable!("saved without call-ups")
+        };
+        let missing = || core.callups_missing(cortona.clone(), id.clone()).unwrap();
+        assert_eq!(missing(), Some(MatchSide::A));
+
+        let mut e = edit_match(&core, &cortona, &id);
+        e.ask_callups(&core).unwrap();
+        assert_eq!(step(&e), MatchStep::Roster);
+        assert!(e.asked_callups() && !e.may_wait());
+        assert!(matches!(press(&mut e, &core, key!(esc)), Edited::Cancel));
+
+        let mut e = edit_match(&core, &cortona, &id);
+        e.ask_callups(&core).unwrap();
+        // 4 of the 16 taken off: 12 are a score sheet
+        for n in 0..4 {
+            send(&mut e, &core, Choose(MATCH_ROSTER + 8 + n, 0));
+        }
+        assert!(matches!(
+            press(&mut e, &core, key!(enter)),
+            Edited::Saved(_)
+        ));
+        assert_eq!(missing(), None);
+    }
+
+    /// A gym made from the details of a match is the one of the match.
+    #[test]
+    fn a_gym_is_made_from_the_match_form() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let cortona = team(&core, "Cortona", 7);
+        let mut e = new_match(&core, &cortona);
+        send(&mut e, &core, Input(MATCH_OPPONENT, "Arezzo".into()));
+        send(&mut e, &core, form::Message::Details(MATCH_VENUE));
+        send(&mut e, &core, Input(0, "Palazzetto".into()));
+        assert!(matches!(press(&mut e, &core, key!(enter)), Edited::Stay));
+        assert!(e.new_venue().is_none());
+        press(&mut e, &core, key!(enter));
+        press(&mut e, &core, key!(enter));
+        let Edited::Saved(id) = press(&mut e, &core, key!(enter)) else {
+            unreachable!("saved")
+        };
+        let made = core.venues().unwrap().remove(0);
+        let saved = core.match_form(cortona, id).unwrap().venue;
+        assert_eq!(saved.map(|v| v.to_string()), Some(made.id));
     }
 
     fn edit_match(core: &Scout4All, team_id: &str, id: &str) -> Editor {

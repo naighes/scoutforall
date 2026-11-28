@@ -410,6 +410,8 @@ pub struct MatchForm {
     pub both: bool,
     #[uniffi(default = None)]
     pub venue: Option<Uuid>,
+    #[uniffi(default = false)]
+    pub callups_later: bool,
 }
 
 /// The form of a competition: edited in their list, created in the form
@@ -4669,6 +4671,27 @@ impl Scout4All {
         Ok(())
     }
 
+    /// The side of the match still without its score sheet, to choose
+    /// before its first set: A first, then B when scouted too.
+    pub fn callups_missing(
+        &self,
+        team_id: String,
+        match_id: String,
+    ) -> Result<Option<MatchSide>, MobileError> {
+        let missing = |m: &MatchEntry| m.roster.is_empty() && m.sets.is_empty();
+        if missing(&self.read_match(&team_id, &match_id)?) {
+            return Ok(Some(MatchSide::A));
+        }
+        let team = self.read_team(&team_id)?;
+        match self.match_reader.details(&team, &match_id)?.0.scouting {
+            ScoutingMode::A => Ok(None),
+            ScoutingMode::Both => {
+                let b = self.read_match_of(&team_id, &match_id, MatchSide::B);
+                Ok(b.is_ok_and(|b| missing(&b)).then_some(MatchSide::B))
+            }
+        }
+    }
+
     /// The start of the next set of the match, to choose who serves and the
     /// lineup.
     pub fn set_start(
@@ -7973,6 +7996,71 @@ pub(crate) mod tests {
             max_substitutions: max_substitutions.into(),
             ..MatchForm::default()
         }
+    }
+
+    /// A match saved without its call-ups, with more players than a score
+    /// sheet takes: it stays without them, also edited, until they're
+    /// chosen; on both sides, A first, then B.
+    #[test]
+    fn call_ups_are_chosen_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let app =
+            Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap();
+        let team = app.save_team(None, form("Cortona")).unwrap();
+        let other = app.save_team(None, form("Livorno")).unwrap();
+        for (t, players) in [(&team, 16), (&other, 7)] {
+            for n in 1..=players {
+                app.save_player(
+                    t.clone(),
+                    None,
+                    player(&format!("P{n}"), &n.to_string()),
+                    false,
+                )
+                .unwrap();
+            }
+        }
+        let new = MatchForm {
+            opponent_team: Some(parse_id(&other).unwrap()),
+            both: true,
+            ..match_form("Livorno", "2026-11-28T18:00:00+01:00", "6")
+        };
+        assert!(app.save_match(team.clone(), None, new.clone()).is_err());
+        let later = MatchForm {
+            callups_later: true,
+            ..new
+        };
+        let m = app.save_match(team.clone(), None, later).unwrap();
+        let missing = || app.callups_missing(team.clone(), m.clone()).unwrap();
+        assert_eq!(missing(), Some(MatchSide::A));
+        // edited and still without them
+        let edited = MatchForm {
+            callups_later: true,
+            ..app.match_form(team.clone(), m.clone()).unwrap()
+        };
+        assert_eq!(edited.roster, None);
+        app.save_match(team.clone(), Some(m.clone()), edited)
+            .unwrap();
+        assert_eq!(missing(), Some(MatchSide::A));
+        // chosen: 12 of the 16
+        let mut chosen = app.match_form(team.clone(), m.clone()).unwrap();
+        let roster = app
+            .match_roster(team.clone(), Some(m.clone()), chosen.clone(), None)
+            .unwrap();
+        chosen.roster = Some(roster.players.iter().take(12).map(|p| p.id).collect());
+        app.save_match(team.clone(), Some(m.clone()), chosen)
+            .unwrap();
+        assert_eq!(missing(), Some(MatchSide::B));
+        app.save_roster_of_b(team.clone(), m.clone(), MatchForm::default())
+            .unwrap();
+        assert_eq!(missing(), None);
+        // once chosen, they aren't taken back
+        let undone = MatchForm {
+            callups_later: true,
+            ..app.match_form(team.clone(), m.clone()).unwrap()
+        };
+        app.save_match(team.clone(), Some(m.clone()), undone)
+            .unwrap();
+        assert_eq!(missing(), None);
     }
 
     /// The teams first, with their ids and years, then the names met that

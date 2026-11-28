@@ -551,6 +551,7 @@
     </plurals>
     <string name="scout_both">Rejestruj obie drużyny</string>
     <string name="roster_of_b">Skład %1$s</string>
+    <string name="callups_later">Powołania później</string>
     <string name="tr_programming">Plan treningów</string>
     <string name="tr_sessions">Sesje</string>
     <string name="tr_new_session">Nowa sesja</string>

@@ -549,6 +549,7 @@
     </plurals>
     <string name="scout_both">Scout both teams</string>
     <string name="roster_of_b">Score sheet of %1$s</string>
+    <string name="callups_later">Call-ups later</string>
     <string name="tr_programming">Training plan</string>
     <string name="tr_sessions">Sessions</string>
     <string name="tr_new_session">New session</string>
