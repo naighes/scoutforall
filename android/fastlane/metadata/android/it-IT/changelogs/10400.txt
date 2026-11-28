@@ -1,0 +1,10 @@
+- Scheda del giocatore con statistiche, partita per partita.
+- Contatti (email, telefono, WhatsApp); esportati solo se vuoi.
+- Nazionalità, mano dominante, matricola.
+- Foto dei giocatori senza sfondo.
+- Nuova home: calendario, partite e squadre; nascondi quelle che vuoi.
+- Oggi e prossima gara ufficiale nella pagina della squadra.
+- Loghi delle squadre su report e video.
+- Azioni degli avversari anche in video.
+- Messaggi di errore più chiari.
+- Correzioni varie.

@@ -1,0 +1,10 @@
+- Profil zawodnika ze statystykami, mecz po meczu.
+- Kontakty (e-mail, telefon, WhatsApp); eksport tylko, gdy zechcesz.
+- Narodowość, ręka dominująca, numer federacyjny.
+- Zdjęcia zawodników bez tła.
+- Nowy ekran główny: kalendarz, mecze i zespoły; możesz je ukrywać.
+- Dzisiejsze wydarzenia i następny mecz oficjalny na stronie zespołu.
+- Logo zespołów w raportach i na wideo.
+- Akcje rywali także na wideo.
+- Czytelniejsze komunikaty o błędach.
+- Różne poprawki.

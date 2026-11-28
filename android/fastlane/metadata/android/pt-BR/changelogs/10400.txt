@@ -1,0 +1,10 @@
+- Perfil do atleta com estatísticas, partida a partida.
+- Contatos (e-mail, telefone, WhatsApp); exportados só se quiser.
+- Nacionalidade, mão dominante, registro na federação.
+- Fotos dos atletas sem fundo.
+- Nova tela inicial: calendário, partidas e equipes; oculte as que quiser.
+- Hoje e próximo jogo oficial na página da equipe.
+- Logos nos relatórios e vídeos.
+- Ações dos adversários também em vídeo.
+- Mensagens de erro mais claras.
+- Correções diversas.

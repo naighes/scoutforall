@@ -1,0 +1,10 @@
+- Player profile with statistics, match by match.
+- Player contacts (email, phone, WhatsApp); exported only if you choose.
+- Nationality, dominant hand, federation ID.
+- Player photos without background.
+- New home: calendar, matches and teams; hide the teams you want.
+- Today and next official match on the team page.
+- Team logos on reports and videos.
+- Opponents' actions on video too.
+- Clearer error messages.
+- Various fixes.
