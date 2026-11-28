@@ -422,7 +422,7 @@
     <string name="video_aligned_file">Alinhada pelo início do arquivo: %1$s</string>
     <string name="video_aligned_chosen">Alinhada manualmente</string>
     <string name="video_not_aligned">Não alinhada ao vídeo: o nome do arquivo não diz quando começa. Escolha um evento, leve o vídeo ao seu momento e toque em Sincronizar o evento aqui.</string>
-    <string name="video_outside">%1$d eventos fora do vídeo</string>
+    <string name="video_outside">Eventos fora do vídeo: %1$d</string>
     <string name="video_events">Eventos</string>
     <string name="video_sync">Sincronização</string>
     <string name="video_files">Arquivos</string>

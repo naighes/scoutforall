@@ -423,7 +423,7 @@
     <string name="video_aligned_file">Lined up from the start of the file: %1$s</string>
     <string name="video_aligned_chosen">Lined up by hand</string>
     <string name="video_not_aligned">Not lined up with the video: the name of the file doesn\'t tell when it starts. Choose an event, go to its moment in the video and tap Sync the event here.</string>
-    <string name="video_outside">%1$d events outside the video</string>
+    <string name="video_outside">Events outside the video: %1$d</string>
     <string name="video_events">Events</string>
     <string name="video_sync">Sync</string>
     <string name="video_files">Files</string>
