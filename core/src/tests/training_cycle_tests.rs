@@ -371,7 +371,7 @@ mod tests {
         ));
         assert_eq!(
             e.message(labels(LanguageEnum::En)),
-            "overlaps the cycle of 2026-11-02 – 2026-11-15"
+            "overlaps the cycle of 11/02/2026 – 11/15/2026"
         );
         assert_eq!(t.cycles(&a.id, Level::Microcycle).await.unwrap().len(), 2);
         // a mesocycle of the same days is another level: no clash
@@ -568,7 +568,7 @@ mod tests {
         ));
         assert_eq!(
             e.message(labels(LanguageEnum::It)),
-            "lascia fuori: 2026-11-11"
+            "lascia fuori: 11/11/2026"
         );
         // nothing changed
         assert_eq!(t.cycle(Level::Microcycle, &micro.id).await.unwrap(), micro);

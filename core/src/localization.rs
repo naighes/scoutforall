@@ -6,7 +6,9 @@
 //! of a language (`labels`), or holds a `Language` shared with the user
 //! interface.
 
+use crate::training::cycles::Window;
 use crate::{constants::DEFAULT_LANGUAGE, shapes::enums::LanguageEnum};
+use chrono::{Datelike, NaiveDate};
 use std::str::FromStr;
 use std::sync::{Arc, PoisonError, RwLock};
 
@@ -416,6 +418,10 @@ pub struct Labels {
     pub sheet_printed: &'static str,
     /// Monday to Sunday, short
     pub sheet_weekdays: [&'static str; 7],
+    /// a day in digits, in the order of the language: `{dd}`, `{mm}`, `{y}`
+    pub date_digits: &'static str,
+    /// day and month only
+    pub short_date_digits: &'static str,
     pub max_substitutions_below_existing_substitutions: &'static str,
     pub roster_too_small: &'static str,
     pub roster_too_large: &'static str,
@@ -794,6 +800,8 @@ const EN: Labels = Labels {
     sheet_guest: "guest",
     sheet_printed: "printed on {}",
     sheet_weekdays: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+    date_digits: "{mm}/{dd}/{y}",
+    short_date_digits: "{mm}/{dd}",
     max_substitutions_below_existing_substitutions: "substitutions per set cannot be less than the number already used in a set",
     roster_too_small: "the score sheet needs at least 7 players: six and the libero",
     roster_too_large: "at most 14 players on the score sheet",
@@ -1165,6 +1173,8 @@ const IT: Labels = Labels {
     sheet_guest: "ospite",
     sheet_printed: "stampato il {}",
     sheet_weekdays: ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"],
+    date_digits: "{dd}/{mm}/{y}",
+    short_date_digits: "{dd}/{mm}",
     max_substitutions_below_existing_substitutions: "le sostituzioni per set non possono essere inferiori al numero già utilizzato in un set",
     roster_too_small: "a referto servono almeno 7 giocatori: sei e il libero",
     roster_too_large: "a referto al massimo 14 giocatori",
@@ -1536,6 +1546,8 @@ const PT: Labels = Labels {
     sheet_guest: "convidado",
     sheet_printed: "impresso em {}",
     sheet_weekdays: ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"],
+    date_digits: "{dd}/{mm}/{y}",
+    short_date_digits: "{dd}/{mm}",
     max_substitutions_below_existing_substitutions: "as substituições por set não podem ser menos do que as já usadas em um set",
     roster_too_small: "a súmula precisa de pelo menos 7 jogadores: seis e o líbero",
     roster_too_large: "no máximo 14 jogadores na súmula",
@@ -1907,6 +1919,8 @@ const PL: Labels = Labels {
     sheet_guest: "gość",
     sheet_printed: "wydrukowano {}",
     sheet_weekdays: ["pon.", "wt.", "śr.", "czw.", "pt.", "sob.", "niedz."],
+    date_digits: "{dd}.{mm}.{y}",
+    short_date_digits: "{dd}.{mm}",
     max_substitutions_below_existing_substitutions: "liczba zmian w secie nie może być mniejsza niż liczba zmian już wykonanych w secie",
     roster_too_small: "protokół wymaga co najmniej 7 zawodników: sześciu i libero",
     roster_too_large: "w protokole najwyżej 14 zawodników",
@@ -2278,6 +2292,8 @@ const JA: Labels = Labels {
     sheet_guest: "ゲスト",
     sheet_printed: "{}に印刷",
     sheet_weekdays: ["月", "火", "水", "木", "金", "土", "日"],
+    date_digits: "{y}/{mm}/{dd}",
+    short_date_digits: "{mm}/{dd}",
     max_substitutions_below_existing_substitutions: "セットごとの交代数は、すでにセットで使った交代数より少なくできません",
     roster_too_small: "スコアシートには少なくとも7人(6人とリベロ)が必要です",
     roster_too_large: "スコアシートは最大14人です",
@@ -2312,6 +2328,34 @@ impl Labels {
     pub const fn terms(&self, data: &'static str) -> [&'static str; 4] {
         [self.terms_free, self.terms_license, data, self.terms_full]
     }
+}
+
+impl Labels {
+    /// `day` in digits as the language writes it.
+    pub fn date(&self, day: NaiveDate) -> String {
+        digits(self.date_digits, day)
+    }
+
+    /// Day and month of `day`.
+    pub fn short_date(&self, day: NaiveDate) -> String {
+        digits(self.short_date_digits, day)
+    }
+
+    /// The first and last day of a window, one date when it is one day.
+    pub fn days(&self, window: Window) -> String {
+        let last = window.end.pred_opt().unwrap_or(window.start);
+        match last > window.start {
+            true => format!("{} – {}", self.date(window.start), self.date(last)),
+            false => self.date(window.start),
+        }
+    }
+}
+
+fn digits(pattern: &str, day: NaiveDate) -> String {
+    pattern
+        .replace("{dd}", &format!("{:02}", day.day()))
+        .replace("{mm}", &format!("{:02}", day.month()))
+        .replace("{y}", &day.year().to_string())
 }
 
 pub const fn labels(language: LanguageEnum) -> &'static Labels {

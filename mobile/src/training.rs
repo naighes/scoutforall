@@ -2042,7 +2042,7 @@ mod tests {
         else {
             unreachable!("not an overlap");
         };
-        assert!(reason.contains("2030-03-04 18:30"), "{reason}");
+        assert!(reason.contains("04/03/2030 18:30"), "{reason}");
     }
 
     #[test]

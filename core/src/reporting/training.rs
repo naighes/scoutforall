@@ -3,7 +3,7 @@
 
 use crate::localization::Labels;
 use crate::reporting::logo::Logo;
-use crate::training::cycles::{Cycle, Window};
+use crate::training::cycles::Cycle;
 use crate::training::venue::Venue;
 use crate::training::{Activity, AttendanceRow, AttendanceStatus, SessionStatus, TrainingSession};
 use chrono::{Datelike, NaiveDateTime};
@@ -168,7 +168,7 @@ fn sheet_session(
     let day = format!(
         "{} {}",
         weekday(labels, session.start),
-        session.start.format("%d/%m")
+        labels.short_date(session.start.date())
     );
     let time = session.start.format("%H:%M").to_string();
     let heading = match (session.title.as_str(), activities) {
@@ -213,9 +213,14 @@ fn base(labels: &Labels, ctx: &Context, kind: &'static str) -> Sheet {
         season: ctx.year.to_string(),
         title: String::new(),
         subtitle: String::new(),
-        printed: labels
-            .sheet_printed
-            .replace("{}", &ctx.printed.format("%d/%m/%Y %H:%M").to_string()),
+        printed: labels.sheet_printed.replace(
+            "{}",
+            &format!(
+                "{} {}",
+                labels.date(ctx.printed.date()),
+                ctx.printed.format("%H:%M")
+            ),
+        ),
         objectives: String::new(),
         table: false,
         sessions: Vec::new(),
@@ -239,7 +244,7 @@ pub fn session_sheet(
         std::iter::once(format!(
             "{} {} · {}",
             weekday(labels, session.start),
-            session.start.format("%d/%m/%Y"),
+            labels.date(session.start.date()),
             session.start.format("%H:%M")
         ))
         .chain(place.map(str::to_string)),
@@ -263,16 +268,6 @@ fn once_joined(parts: impl Iterator<Item = String>) -> String {
     parts.collect::<Vec<_>>().join(" · ")
 }
 
-/// The first and last day of a window, written as the dates of the sheets.
-fn days(window: Window) -> String {
-    let last = window.end.pred_opt().unwrap_or(window.start);
-    format!(
-        "{} – {}",
-        window.start.format("%d/%m/%Y"),
-        last.format("%d/%m/%Y")
-    )
-}
-
 /// The plan of a microcycle: its window, objectives and sessions (by
 /// start, as given), each with its activities. Neither attendance nor
 /// notes.
@@ -284,7 +279,7 @@ pub fn microcycle_sheet(
 ) -> Sheet {
     Sheet {
         title: cycle.title.clone(),
-        subtitle: days(cycle.window),
+        subtitle: labels.days(cycle.window),
         objectives: cycle.objectives.clone(),
         table: true,
         sessions: sessions

@@ -276,7 +276,7 @@ pub fn build_report(m: &MatchEntry, labels: &Labels) -> Result<Report, AppError>
             from_the_bench: labels.from_the_bench,
         },
         header: Header {
-            date: m.date.format("%d/%m/%Y").to_string(),
+            date: labels.date(m.date.date_naive()),
             teams: [left, right],
         },
         kpis: kpis(labels, &replay.stats),

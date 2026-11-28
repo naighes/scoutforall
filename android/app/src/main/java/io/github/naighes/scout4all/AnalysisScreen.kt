@@ -525,10 +525,8 @@ internal fun TrendLegend(matches: Int) = FlowRow(
     legend("- - " + stringResource(R.string.matches_count, matches)) {}
 }
 
-private val shortDay = DateTimeFormatter.ofPattern("dd/MM")
-
 internal fun shortDay(day: String): String = try {
-    LocalDate.parse(day).format(shortDay)
+    LocalDate.parse(day).format(dayMonth())
 } catch (_: DateTimeException) {
     day
 }

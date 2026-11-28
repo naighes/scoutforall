@@ -55,12 +55,17 @@ internal fun windowText(first: String, last: String): String {
     return if (first == last) days.first else "${days.first} – ${days.second}"
 }
 
+/** Day and month in digits, in the order of the language. */
+internal fun dayMonth(): DateTimeFormatter {
+    val locale = Locale.getDefault()
+    return DateTimeFormatter.ofPattern(android.text.format.DateFormat.getBestDateTimePattern(locale, "Md"), locale)
+}
+
 /** The days of a week from the first to the last ("11/23 – 11/29"), day
  * and month in the order of the language; nothing until they are read. */
 internal fun weekRange(days: List<String>): String {
     if (days.isEmpty()) return ""
-    val locale = Locale.getDefault()
-    val written = DateTimeFormatter.ofPattern(android.text.format.DateFormat.getBestDateTimePattern(locale, "Md"), locale)
+    val written = dayMonth()
     return listOf(days.first(), days.last()).joinToString(" – ") { LocalDate.parse(it).format(written) }
 }
 

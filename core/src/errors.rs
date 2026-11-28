@@ -54,13 +54,18 @@ impl TrainingError {
                         SlotKind::Session => labels.overlaps_session,
                         SlotKind::Match => labels.overlaps_match,
                     };
-                    template.replace("{}", &slot.start.format("%Y-%m-%d %H:%M").to_string())
+                    let start = format!(
+                        "{} {}",
+                        labels.date(slot.start.date()),
+                        slot.start.format("%H:%M")
+                    );
+                    template.replace("{}", &start)
                 })
                 .collect::<Vec<_>>()
                 .join("\n"),
             TrainingError::CycleOverlap(windows) => windows
                 .iter()
-                .map(|w| labels.overlaps_cycle.replace("{}", &w.text()))
+                .map(|w| labels.overlaps_cycle.replace("{}", &labels.days(*w)))
                 .collect::<Vec<_>>()
                 .join("\n"),
             TrainingError::OutsideParent => labels.outside_parent.to_string(),
@@ -68,7 +73,7 @@ impl TrainingError {
                 "{}",
                 &children
                     .iter()
-                    .map(|c| c.window.text())
+                    .map(|c| labels.days(c.window))
                     .collect::<Vec<_>>()
                     .join(", "),
             ),

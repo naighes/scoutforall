@@ -120,7 +120,7 @@ mod tests {
         );
         assert_eq!(full.sessions[0].activities[0].minutes, "20 min");
         assert_eq!(full.sessions[0].activities[1].minutes, "");
-        assert_eq!(full.subtitle, "Mon 23/11/2026 · 18:30 · Palestra Łódź");
+        assert_eq!(full.subtitle, "Mon 11/23/2026 · 18:30 · Palestra Łódź");
         for sheet in [&plain, &full] {
             let text = json(sheet);
             assert!(!text.contains("SECRET"), "{text}");
@@ -224,6 +224,38 @@ mod tests {
                 None,
             ]
         );
+    }
+
+    /// The dates in digits follow the language of the app.
+    #[test]
+    fn the_dates_are_written_as_the_language_does() {
+        let day = |d| NaiveDate::from_ymd_opt(2026, 11, d).unwrap_or_default();
+        let window = Window {
+            start: day(2),
+            end: day(9),
+        };
+        let written: Vec<_> = [
+            LanguageEnum::En,
+            LanguageEnum::It,
+            LanguageEnum::Pt,
+            LanguageEnum::Pl,
+            LanguageEnum::Ja,
+        ]
+        .into_iter()
+        .map(|language| {
+            let l = labels(language);
+            (l.days(window), l.short_date(day(2)))
+        })
+        .collect();
+        let expected = [
+            ("11/02/2026 – 11/08/2026", "11/02"),
+            ("02/11/2026 – 08/11/2026", "02/11"),
+            ("02/11/2026 – 08/11/2026", "02/11"),
+            ("02.11.2026 – 08.11.2026", "02.11"),
+            ("2026/11/02 – 2026/11/08", "11/02"),
+        ]
+        .map(|(days, short)| (days.to_string(), short.to_string()));
+        assert_eq!(written, expected);
     }
 
     /// Both sheets in every language, with long and CJK names.
