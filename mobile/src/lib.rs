@@ -5449,10 +5449,7 @@ impl Scout4All {
         let labels = self.language.labels();
         // the logo here wins over the archive's, as the import does
         let logo = |id: Uuid, archived: Option<Vec<u8>>| {
-            self.team_logo(id.to_string())
-                .ok()
-                .flatten()
-                .or(archived)
+            self.team_logo(id.to_string()).ok().flatten().or(archived)
         };
         let team_preview = |team: TeamEntry, archived| ArchivePreview::Team {
             logo: logo(team.id, archived),
@@ -11061,7 +11058,10 @@ pub(crate) mod tests {
             ArchivePreview::Match { teams, .. } => teams.into_iter().find_map(|t| t.logo),
         };
         assert!(stored.is_some());
-        assert_eq!(logo_of(from.export_team(team.clone()).unwrap().bytes), stored);
+        assert_eq!(
+            logo_of(from.export_team(team.clone()).unwrap().bytes),
+            stored
+        );
         assert_eq!(logo_of(from.export_match(team, m).unwrap().bytes), stored);
     }
 
