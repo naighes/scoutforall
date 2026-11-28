@@ -3448,7 +3448,7 @@ pub(crate) mod tests {
     }
 
     /// As `team_with_two_matches`, each match of its competition (a cup).
-    fn team_with_matches(core: &Scout4All, competitions: [&str; 2]) -> String {
+    pub(crate) fn team_with_matches(core: &Scout4All, competitions: [&str; 2]) -> String {
         let team = core
             .save_team(
                 None,

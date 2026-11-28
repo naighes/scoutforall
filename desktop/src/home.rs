@@ -237,9 +237,8 @@ impl HomeScreen {
             || ck == key!(shift - backtab)
             || ck == key!(backtab);
         let selected = self.selected.get(self.panel).copied().unwrap_or(0);
-        if self.panel == WEEK
-            && !(next || previous || ck == key!(n) || ck == key!(i) || ck == key!(c))
-        {
+        let letter = [key!(n), key!(i), key!(c), key!(g)].contains(&ck);
+        if self.panel == WEEK && !(next || previous || letter) {
             return HomeScreen::picked(self.week.key(core, ck));
         }
         let moved = match ck {
@@ -554,4 +553,142 @@ fn list<'a>(
         .width(Length::FillPortion(1))
         .height(Length::Fill)
         .into()
+}
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::{scouting::tests::PNG, stats::tests::team_with_two_matches, strings::strings},
+        scout4all_core::{
+            scouting::Progress,
+            shapes::enums::{EvalEnum, LanguageEnum, TeamSideEnum},
+        },
+        scout4all_mobile::MatchListing,
+        std::sync::Arc,
+    };
+
+    fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    /// The set in progress of `m` (we serve) played to its end, then the
+    /// others until the match is over: all aces.
+    fn play_out(core: &Scout4All, team: &str, m: &str) {
+        let ids: Vec<String> = core
+            .team(team.into())
+            .unwrap()
+            .players
+            .into_iter()
+            .map(|p| p.id)
+            .collect();
+        let mut scouting = core.scouting(team.into(), m.into()).unwrap();
+        loop {
+            while scouting.choose_eval(EvalEnum::Perfect).unwrap() != Progress::SetOver {}
+            let Ok(start) = core.set_start(team.into(), m.into()) else {
+                break;
+            };
+            start.choose_serving_team(TeamSideEnum::Us);
+            for (position, id) in (1..=6).zip(&ids) {
+                start.place(position, Some(id.clone())).unwrap();
+            }
+            start.choose_setter(Some(ids[0].clone())).unwrap();
+            start.choose_libero(Some(ids[6].clone())).unwrap();
+            core.start_set(start).unwrap();
+            scouting = core.scouting(team.into(), m.into()).unwrap();
+        }
+    }
+
+    /// Enter opens the row chosen of each panel: a match in progress to
+    /// scout on, a recent one on its page, a team; the week empty nothing.
+    #[test]
+    fn enter_opens_the_row_of_each_panel() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = team_with_two_matches(&core);
+        let over = core
+            .matches(team.clone())
+            .unwrap()
+            .into_iter()
+            .find_map(|m| match m {
+                MatchListing::Match { id, opponent, .. } if opponent == "Arezzo" => Some(id),
+                _ => None,
+            })
+            .unwrap();
+        play_out(&core, &team, &over);
+        let mut home = HomeScreen::new(&core, core.home().unwrap());
+        let resumed = home.home.in_progress[0].id.clone();
+        assert_ne!(resumed, over);
+        assert_eq!(home.panel_name(), "in progress");
+        assert!(matches!(
+            home.key(&core, s, key!(enter)),
+            Outcome::Scout(Open { team_id, match_id, start: false })
+                if team_id == team && match_id == resumed
+        ));
+        home.key(&core, s, key!(right));
+        assert_eq!(home.panel_name(), "recent");
+        assert!(matches!(
+            home.key(&core, s, key!(enter)),
+            Outcome::Match(t, m) if t == team && m == over
+        ));
+        home.key(&core, s, key!(right));
+        assert_eq!(home.panel_name(), "teams");
+        let chosen = (0..home.home.teams.len())
+            .find(|&i| team_id(&home.home.teams[i]).as_deref() == Some(team.as_str()))
+            .unwrap();
+        for _ in 0..chosen {
+            home.key(&core, s, key!(down));
+        }
+        assert!(matches!(
+            home.key(&core, s, key!(enter)),
+            Outcome::Team(t) if t == team
+        ));
+        home.key(&core, s, key!(right));
+        assert_eq!(home.panel_name(), "week");
+        assert!(matches!(home.key(&core, s, key!(enter)), Outcome::Stay));
+    }
+
+    /// i, c, g and n do the same from every panel, the week too.
+    #[test]
+    fn the_letters_of_the_home_work_from_every_panel() {
+        let s = strings(LanguageEnum::It);
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        for panel in 0..PANELS {
+            let mut home = HomeScreen::new(&core, core.home().unwrap());
+            home.panel = panel;
+            let name = home.panel_name();
+            assert!(
+                matches!(home.key(&core, s, key!(i)), Outcome::Import),
+                "{name}"
+            );
+            assert!(
+                matches!(home.key(&core, s, key!(c)), Outcome::Competitions),
+                "{name}"
+            );
+            assert!(
+                matches!(home.key(&core, s, key!(g)), Outcome::Venues),
+                "{name}"
+            );
+            home.key(&core, s, key!(n));
+            assert!(home.focus_id().is_some(), "{name}");
+        }
+    }
+
+    /// The rows of the matches have the logo of their team, the teams
+    /// without one none.
+    #[test]
+    fn the_matches_have_the_logo_of_their_team() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = team_with_two_matches(&core);
+        core.set_team_logo(team.clone(), Some(PNG.to_vec()))
+            .unwrap();
+        let tutorial = core.tutorial_team().unwrap();
+        let home = HomeScreen::new(&core, core.home().unwrap());
+        assert!(home.logo_of(&team).is_some());
+        assert!(home.logo_of(&tutorial).is_none());
+        assert!(home.logo_of("not a team").is_none());
+    }
 }
