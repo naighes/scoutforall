@@ -1,6 +1,6 @@
 Scout4all - Data collection and privacy
 
-Last updated: 2026-11-20
+Last updated: 2026-11-28
 
 Data controller: Nicola Baldi, nic.baldi@gmail.com
 
@@ -32,6 +32,15 @@ computer or phone. The archive holds no names. The names of players, and
 any other text you type, are never sent. Without the files on your computer
 or phone the identifiers cannot be linked to real people: this is
 pseudonymous data, not anonymous.
+
+Photos, logos and contacts. The photos of players, the logos of teams and
+the contacts of players (e-mail, phone, place of birth) stay on your
+computer or phone: they are never uploaded, nor written in DataVolley
+files. They leave it only in an archive you share yourself (sharing a
+team, a match or the trainings): photos and logos always, contacts only if
+you tick "include contacts", off unless you choose it. The buttons of a
+player's contacts open your e-mail app, your phone or WhatsApp: nothing is
+sent until you do it there.
 
 Keys of teams and matches. So that the same team, and the same match, can
 be recognized among the uploads of different users, when the team has a
@@ -67,8 +76,8 @@ and are deleted when you uninstall it. Apart from the archives described
 above, the app sends nothing by itself.
 
 Backup. If the backup of your phone is turned on, Android copies the data of
-the app to your Google account, as it does for other apps, so that you find
-your matches on a new phone. The copy is made and kept by Google under its
+the app, photos and contacts included, to your Google account, as it does
+for other apps, so that you find your matches on a new phone. The copy is made and kept by Google under its
 own terms; the developer has no access to it. You can turn it off in the
 settings of the phone.
 
