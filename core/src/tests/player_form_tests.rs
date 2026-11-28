@@ -167,6 +167,30 @@ mod tests {
             "number already in use"
         );
         assert_eq!(PlayerFormError::MissingRole.message(EN), "role is required");
+        assert_eq!(
+            PlayerFormError::InvalidPhone.message(EN),
+            "invalid phone number for the country chosen"
+        );
+    }
+
+    #[test]
+    fn each_error_has_a_message_of_its_own() {
+        use PlayerFormError::*;
+        let messages: std::collections::HashSet<String> = [
+            EmptyName,
+            MissingRole,
+            InvalidNumber,
+            NumberInUse,
+            InvalidBirthDate,
+            InvalidHeight,
+            InvalidEmail,
+            InvalidPhone,
+        ]
+        .iter()
+        .map(|error| error.message(EN))
+        .collect();
+        assert_eq!(messages.len(), 8);
+        assert!(messages.iter().all(|message| !message.is_empty()));
     }
 
     fn with(birth_date: &str, height_cm: &str) -> PlayerForm {

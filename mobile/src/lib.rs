@@ -9456,6 +9456,48 @@ pub(crate) mod tests {
         assert!(lineup.complete);
     }
 
+    /// The matches in the calendar: to play without sets, in progress with
+    /// the sets so far, over with the result.
+    #[test]
+    fn the_agenda_tells_how_far_each_match_is() {
+        let dir = tempfile::tempdir().unwrap();
+        let app = app(&dir, "en");
+        let (team, _) = match_with_a_set(&app);
+        let over = match_on(&app, &team, "Over", 1);
+        play(&app, &team, &over, 3);
+        let between = match_on(&app, &team, "Between", 2);
+        play(&app, &team, &between, 1);
+        let started = match_on(&app, &team, "Started", 3);
+        started_set(&app, &team, &started);
+        match_on(&app, &team, "Later", 4);
+        let week = app
+            .training_agenda(Some(team), training::AgendaSpan::Week, "2026-10-01".into())
+            .unwrap();
+        let found: Vec<_> = week
+            .iter()
+            .flat_map(|d| &d.events)
+            .filter_map(|e| match &e.item {
+                training::AgendaItemRecord::Match {
+                    opponent,
+                    standing,
+                    ours,
+                    theirs,
+                    ..
+                } => Some((opponent.as_str(), *standing, *ours, *theirs)),
+                training::AgendaItemRecord::Session { .. } => None,
+            })
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("Over", MatchStanding::Over, Some(3), Some(0)),
+                ("Between", MatchStanding::InProgress, Some(1), Some(0)),
+                ("Started", MatchStanding::InProgress, Some(0), Some(0)),
+                ("Later", MatchStanding::ToPlay, None, None),
+            ]
+        );
+    }
+
     #[test]
     fn the_home_has_the_matches_of_every_team_not_over_and_the_last_over() {
         let dir = tempfile::tempdir().unwrap();

@@ -364,3 +364,103 @@ fn figure<'a>(f: &PlayerFundamental, s: &'static Strings, c: Colors) -> Element<
         c,
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use {
+        super::*,
+        crate::stats::tests::{team_with_matches, team_with_two_matches},
+        std::sync::Arc,
+    };
+
+    fn app(dir: &tempfile::TempDir) -> Arc<Scout4All> {
+        Scout4All::for_tests(dir.path().to_string_lossy().into_owned(), "it".into()).unwrap()
+    }
+
+    /// The statistics of the server of the matches (the first player).
+    fn stats_of(core: &Scout4All, team: &str) -> (PlayerStats, String) {
+        let player = core.team(team.into()).unwrap().players[0].id.clone();
+        let today = NaiveDate::from_ymd_opt(2026, 11, 26).unwrap();
+        let stats = PlayerStats::new(core, team, &player, Filters::season(today));
+        (stats, player)
+    }
+
+    /// ↑ ↓ go round the filters, ← → on the competition go round its
+    /// choices (all of them first), Enter opens the detail.
+    #[test]
+    fn the_arrows_go_round_the_filters_and_the_competitions() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = team_with_matches(&core, ["Coppa", "Trofeo"]);
+        let (mut stats, player) = stats_of(&core, &team);
+        let ids: Vec<Option<Uuid>> = std::iter::once(None)
+            .chain(
+                stats
+                    .read
+                    .iter()
+                    .flat_map(|r| r.competitions.iter().map(|c| Some(c.id))),
+            )
+            .collect();
+        assert_eq!(ids.len(), 3);
+        assert_eq!(stats.rows(), [Filter::Period, Filter::Competition]);
+        assert!(stats.key(key!(down)).is_none());
+        assert_eq!(stats.row, 1);
+        assert!(stats.key(key!(down)).is_none());
+        assert_eq!(stats.row, 0);
+        assert!(stats.key(key!(up)).is_none());
+        assert_eq!(stats.row, 1);
+        let mut chosen = vec![];
+        for _ in 0..3 {
+            let Some(Message::Competition(competition)) = stats.key(key!(right)) else {
+                panic!("not a competition");
+            };
+            stats.update(&core, &team, &player, Message::Competition(competition));
+            chosen.push(stats.filters.competition);
+        }
+        assert_eq!(chosen, [ids[1], ids[2], ids[0]]);
+        assert!(matches!(
+            stats.key(key!(left)),
+            Some(Message::Competition(last)) if last == ids[2]
+        ));
+        assert!(matches!(stats.key(key!(enter)), Some(Message::Detail)));
+    }
+
+    /// One competition only: no row for it, the arrows stay on the period
+    /// and change it.
+    #[test]
+    fn without_competitions_to_choose_the_arrows_change_the_period() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = team_with_two_matches(&core);
+        let (mut stats, _) = stats_of(&core, &team);
+        assert_eq!(stats.rows(), [Filter::Period]);
+        assert!(stats.key(key!(down)).is_none());
+        assert_eq!(stats.row, 0);
+        assert!(matches!(
+            stats.key(key!(right)),
+            Some(Message::Period(period::Message::Kind(_)))
+        ));
+    }
+
+    /// A chosen competition keeps its row even when the matches read are
+    /// of it alone, so it can be taken back.
+    #[test]
+    fn a_competition_chosen_keeps_its_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let core = app(&dir);
+        let team = team_with_matches(&core, ["Coppa", "Trofeo"]);
+        let (mut stats, player) = stats_of(&core, &team);
+        let first = stats
+            .read
+            .as_ref()
+            .ok()
+            .and_then(|r| r.competitions.first())
+            .map(|c| c.id);
+        stats.update(&core, &team, &player, Message::Competition(first));
+        assert_eq!(stats.rows(), [Filter::Period, Filter::Competition]);
+        stats.row = 1;
+        stats.update(&core, &team, &player, Message::Competition(None));
+        assert_eq!(stats.filters.competition, None);
+        assert_eq!(stats.row, 1);
+    }
+}

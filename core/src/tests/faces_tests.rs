@@ -217,6 +217,19 @@ mod tests {
     }
 
     #[test]
+    fn a_square_with_nothing_of_the_mask_under_it_keeps_all_of_the_photo() {
+        // past the right edge of the photo: no pixel of the mask under it
+        let square = Square {
+            x: 600,
+            y: 0,
+            side: 100,
+        };
+        let found = mask_in(&person_mask(), (600, 720), square);
+        assert_eq!(found.dimensions(), (100, 100));
+        assert!(found.pixels().all(|value| value[0] == u8::MAX));
+    }
+
+    #[test]
     fn a_large_photo_is_cropped_to_the_side_of_the_photo_stored() {
         let large = image::load_from_memory(ONE_FACE).unwrap().resize_exact(
             1500,
