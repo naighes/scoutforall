@@ -56,6 +56,15 @@ pub enum Step {
     /// the window recorded from here as `<name>.mkv`, up to `stop`
     Record(String),
     Stop,
+    /// the screens from here in this theme, not saved (the plan starts dark)
+    Theme(Theme),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    Dark,
+    Light,
 }
 
 #[derive(Debug, Deserialize)]
@@ -309,13 +318,15 @@ mod tests {
                     {"keys": ["down", "enter"]},
                     {"key": "shift-s"},
                     {"wait": 1500},
-                    {"shot": "video"}
+                    {"shot": "video"},
+                    {"theme": "light"}
                 ]
             }"#,
         )
         .unwrap();
         assert_eq!(plan.window, (1440.0, 900.0));
-        assert_eq!(plan.steps.len(), 6);
+        assert_eq!(plan.steps.len(), 7);
+        assert!(matches!(&plan.steps[6], Step::Theme(Theme::Light)));
         assert!(
             matches!(&plan.steps[1], Step::Go(Open::Video(t, m)) if t == "team" && m == "match")
         );
@@ -332,6 +343,7 @@ mod tests {
         let _ = (shots.next(), shots.next(), shots.next());
         assert!(matches!(shots.next(), Next::Wait(d) if d == Duration::from_millis(1500)));
         assert!(matches!(shots.next(), Next::Shot(n) if n == "video"));
+        assert!(matches!(shots.next(), Next::Do(Step::Theme(Theme::Light))));
         assert!(matches!(shots.next(), Next::Done));
     }
 }

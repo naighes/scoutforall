@@ -2274,6 +2274,9 @@ impl Main {
                         shots::Next::Do(shots::Step::Keys(keys)) => {
                             tasks.extend(keys.into_iter().map(|key| app.update(Message::Key(key))));
                         }
+                        shots::Next::Do(shots::Step::Theme(theme)) => {
+                            app.theme = Some(theme == shots::Theme::Dark);
+                        }
                         // waits, captures and recordings come as such
                         shots::Next::Do(
                             shots::Step::Wait(_)
