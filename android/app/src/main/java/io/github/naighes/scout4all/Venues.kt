@@ -58,6 +58,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
@@ -183,23 +188,43 @@ private fun VenueChoiceDialog(teamId: String, onDismiss: () -> Unit, onPick: (St
             emptyList()
         }
     }
+    val focus = remember { FocusRequester() }
+    fun create() {
+        if (query.isBlank()) return
+        scope.launch {
+            try {
+                onPick(app.core { it.createVenueNamed(query) }.id)
+            } catch (e: MobileException) {
+                failure = e.reason
+            }
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.venue)) },
+        // the platform width never idles with a focused field on SDK 28
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier.padding(24.dp).widthIn(max = 560.dp),
+        title = { Text(stringResource(if (adding) R.string.venue_new else R.string.venue)) },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (adding || all.size >= SEARCH_FROM) {
                     OutlinedTextField(
                         query,
                         { query = it },
-                        Modifier.fillMaxWidth(),
+                        Modifier.fillMaxWidth().focusRequester(focus),
                         label = { Text(stringResource(R.string.venue_name)) },
                         singleLine = true,
                         isError = failure != null,
                         supportingText = noteOf(failure),
-                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Words),
+                        keyboardOptions = KeyboardOptions(
+                            capitalization = KeyboardCapitalization.Words,
+                            imeAction = if (adding) ImeAction.Done else ImeAction.Search,
+                        ),
+                        keyboardActions = KeyboardActions(onDone = { create() }),
                     )
                 }
+                // a new gym: its name is asked right away
+                if (adding) LaunchedEffect(Unit) { focus.requestFocus() }
                 found.take(SEARCH_FROM).forEach { v ->
                     ListItem(
                         modifier = Modifier.clickable { onPick(v.id) },
@@ -210,28 +235,22 @@ private fun VenueChoiceDialog(teamId: String, onDismiss: () -> Unit, onPick: (St
                         } else null,
                     )
                 }
-                ListItem(
-                    modifier = Modifier.clickable(enabled = !adding || query.isNotBlank()) {
-                        if (!adding) {
-                            adding = true
-                        } else {
-                            scope.launch {
-                                try {
-                                    onPick(app.core { it.createVenueNamed(query) }.id)
-                                } catch (e: MobileException) {
-                                    failure = e.reason
-                                }
-                            }
-                        }
-                    },
-                    leadingContent = { Icon(Icons.Filled.Add, contentDescription = null) },
-                    headlineContent = {
-                        Text(if (adding) "${stringResource(R.string.venue_create)}: ${query.trim()}" else stringResource(R.string.venue_new))
-                    },
-                )
+                if (!adding) {
+                    ListItem(
+                        modifier = Modifier.clickable { adding = true },
+                        leadingContent = { Icon(Icons.Filled.Add, contentDescription = null) },
+                        headlineContent = { Text(stringResource(R.string.venue_new)) },
+                    )
+                }
             }
         },
-        confirmButton = {},
+        confirmButton = {
+            if (adding) {
+                TextButton(onClick = { create() }, enabled = query.isNotBlank()) {
+                    Text(stringResource(R.string.venue_create))
+                }
+            }
+        },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel)) } },
     )
 }

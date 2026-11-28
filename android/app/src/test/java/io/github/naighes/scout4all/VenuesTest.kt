@@ -1,11 +1,15 @@
 package io.github.naighes.scout4all
 
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -66,6 +70,29 @@ class VenuesTest {
         rule.save()
         rule.waitFor({ "not saved" }) { saved.isNotEmpty() }
         assertEquals(id, core { it.trainingSession(saved.single()) }.venueId)
+    }
+
+    @Test
+    fun aGymIsMadeFromTheChoiceOfTheForm() {
+        val saved = mutableListOf<String>()
+        rule.setContent { Scout4AllTheme { SessionFormScreen(team, null, onBack = {}, onSaved = { saved += it }) } }
+        rule.waitForText(string(R.string.tr_session_duration))
+        rule.onAllNodes(hasText(string(R.string.venue))).onFirst().performScrollTo().performClick()
+        rule.waitForText(string(R.string.venue_new))
+        rule.onNode(hasText(string(R.string.venue_new)) and hasClickAction()).performClick()
+        rule.waitForIdle()
+        // ready to be written, and the way to make it told
+        val name = rule.onNode(hasText(string(R.string.venue_name)) and hasSetTextAction())
+        name.assertIsFocused()
+        val create = rule.onNode(hasText(string(R.string.venue_create)) and hasClickAction())
+        create.assertIsNotEnabled()
+        name.performTextInput("Terontola")
+        create.performClick()
+        rule.waitFor({ "not made" }) { core { it.venues() }.isNotEmpty() }
+        rule.waitForText("Terontola")
+        rule.save()
+        rule.waitFor({ "not saved" }) { saved.isNotEmpty() }
+        assertEquals(core { it.venues() }.single().id, core { it.trainingSession(saved.single()) }.venueId)
     }
 
     @Test
