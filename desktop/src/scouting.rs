@@ -147,6 +147,8 @@ pub struct ScoutingScreen {
     pub refresh_ms: u128,
     /// the photos of the players of our team, by player id, read once
     photos: std::collections::HashMap<String, iced::widget::image::Handle>,
+    /// the same photos cut for the circles on the court (`court::disc`)
+    discs: std::collections::HashMap<String, iced::widget::image::Handle>,
 }
 
 impl ScoutingScreen {
@@ -183,6 +185,7 @@ impl ScoutingScreen {
             trend,
             refresh_ms: 0,
             photos: std::collections::HashMap::new(),
+            discs: std::collections::HashMap::new(),
         }
     }
 
@@ -190,6 +193,11 @@ impl ScoutingScreen {
     /// the players to choose.
     pub fn with_photos(mut self, core: &scout4all_mobile::Scout4All) -> Self {
         self.photos = crate::editors::team_photos(core, &self.team_id);
+        self.discs = self
+            .photos
+            .iter()
+            .map(|(id, photo)| (id.clone(), crate::court::disc(photo)))
+            .collect();
         self
     }
 
@@ -1600,7 +1608,7 @@ impl ScoutingScreen {
         let court = canvas(Court {
             content,
             colors: c,
-            photos: self.photos.clone(),
+            photos: self.discs.clone(),
         })
         .width(Length::Fill)
         .height(Length::Fill);
