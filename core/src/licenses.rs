@@ -1,6 +1,7 @@
 //! The parts made by others that the app carries inside it, with their
 //! licenses: each asks for its text to travel with the app, so the apps show
-//! them in the settings. The text of a license stays as written, in English.
+//! them in the settings. The words of a license stay as written, in English;
+//! the screens show its paragraphs `reflowed` to their width.
 //!
 //! The libraries the program is built with (Rust crates, Android libraries)
 //! come last, in one text written by `scripts/licenses.py`.
@@ -73,6 +74,49 @@ pub const THIRD_PARTIES: [ThirdParty; 4] = [
     },
 ];
 
+/// A line this long was broken to fit a page: the next one goes on with it.
+const WRAPPED: usize = 52;
+
+/// Whether the line stands on its own: an entry of a list, a notice of
+/// copyright, a rule.
+fn alone(line: &str) -> bool {
+    let first = line.split_whitespace().next().unwrap_or_default();
+    let numbered = first.ends_with([')', '.'])
+        && first.len() <= 4
+        && first.starts_with(|c: char| c.is_ascii_digit() || c == '(');
+    numbered
+        || matches!(first, "-" | "*" | "Copyright")
+        || line.starts_with("---")
+        || line.starts_with("===")
+}
+
+/// The text with the lines of each paragraph joined, for a screen to break
+/// them at its own width.
+pub fn reflowed(text: &str) -> String {
+    let (mut out, mut goes_on) = (String::new(), false);
+    for line in text.lines() {
+        let said = line.trim();
+        match (goes_on, said.is_empty() || alone(said), out.is_empty()) {
+            (true, false, _) => {
+                out.push(' ');
+                out.push_str(said);
+            }
+            (_, _, first) => {
+                if !first {
+                    out.push('\n');
+                }
+                out.push_str(line.trim_end());
+            }
+        }
+        let listed = said.starts_with("- ") || said.starts_with("Copyright (");
+        goes_on = said.chars().count() >= WRAPPED
+            && !said.ends_with(':')
+            && !listed
+            && !said.starts_with("---");
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -94,6 +138,24 @@ mod tests {
         assert!(libraries.text.contains("END OF TERMS AND CONDITIONS"));
         assert!(libraries.text.contains("- serde "));
         assert!(libraries.text.contains("AndroidX"));
+    }
+
+    #[test]
+    fn the_lines_of_a_paragraph_are_joined() {
+        let font = reflowed(THIRD_PARTIES[2].text);
+        assert!(font.contains("are to stimulate worldwide development of collaborative"));
+        // the headings, the rules and the conditions keep their lines
+        assert!(font.contains("\nPREAMBLE\nThe goals"));
+        assert!(font.contains("\n1) Neither the Font Software"));
+        assert!(font.contains("\n\n2) Original or Modified Versions"));
+        // not the list of the libraries, nor their notices
+        let libraries = reflowed(THIRD_PARTIES[3].text);
+        assert!(libraries.contains("\n- aes 0.9.4\n    Copyright (c) 2018-2024"));
+        // no word is lost
+        let words = |t: &str| t.split_whitespace().collect::<Vec<_>>().join(" ");
+        for part in THIRD_PARTIES {
+            assert_eq!(words(&reflowed(part.text)), words(part.text));
+        }
     }
 
     #[test]

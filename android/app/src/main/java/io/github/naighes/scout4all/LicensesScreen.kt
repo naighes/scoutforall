@@ -64,7 +64,7 @@ fun LicensesScreen(onBack: () -> Unit) {
 }
 
 /** A part: its name, what it's for, its license and where it comes from;
- * the text of the license follows (monospaced, as its lines are laid out). */
+ * the text of the license follows (monospaced, as its lists are laid out). */
 @Composable
 private fun Part(part: ThirdPartyLicense) = Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
     Text(part.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)

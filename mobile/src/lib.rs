@@ -5640,7 +5640,7 @@ impl Scout4All {
                     purpose: p.purpose.label(labels).to_string(),
                     source: p.source.to_string(),
                     license: p.license.to_string(),
-                    text: p.text.trim().to_string(),
+                    text: scout4all_core::licenses::reflowed(p.text.trim()),
                 })
                 .collect(),
         }
