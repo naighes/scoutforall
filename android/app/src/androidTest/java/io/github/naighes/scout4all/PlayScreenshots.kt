@@ -6,10 +6,12 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollToIndexAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performScrollTo
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -61,7 +63,9 @@ class PlayScreenshots {
         shot("8_home")
 
         // the team, its analysis: each figure match by match
-        touch(hasText(teamName()) and hasClickAction())
+        val team = hasText(teamName()) and hasClickAction()
+        scrollHome(team)
+        touch(team)
         touch(hasText(text(R.string.matches)) and hasClickAction())
         touch(hasContentDescription(text(R.string.analysis)) and hasClickAction())
         touch(hasText(text(R.string.stats_trend)) and hasClickAction())
@@ -74,6 +78,7 @@ class PlayScreenshots {
         back()
 
         // the match in progress
+        scrollHome(resume)
         touch(resume)
         val statistics = hasText(text(R.string.stats_swipe)) and hasClickAction()
         waitFor(statistics)
@@ -133,6 +138,15 @@ class PlayScreenshots {
         val node = rule.onNode(touchable)
         if (scroll) node.performScrollTo()
         node.performClick()
+        rule.waitForIdle()
+    }
+
+    /** The home scrolled until `matcher`: the blocks out of sight aren't
+     * there yet. */
+    private fun scrollHome(matcher: SemanticsMatcher) {
+        val list = hasScrollToIndexAction()
+        waitFor(list)
+        rule.onNode(list).performScrollToNode(matcher)
         rule.waitForIdle()
     }
 
