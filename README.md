@@ -30,7 +30,7 @@ It runs on **Windows, macOS and Linux**; an **Android** app is in testing.
 | match statistics | team analysis |
 | --- | --- |
 | ![The summary of the statistics of a match](web/src/assets/screens/en/stats-summary.webp) | ![The analysis of a team over its last matches](web/src/assets/screens/en/team-analysis.webp) |
-| ![The detail of the statistics: serve evaluations, players, serves by zone](web/src/assets/screens/en/stats-detail.webp) | ![The home screen: matches in progress, recent matches and teams](web/src/assets/screens/en/home.webp) |
+| ![The detail of the statistics: serve evaluations, players, serves by zone](web/src/assets/screens/en/stats-detail.webp) | ![The home screen: the calendar of the week, the matches to resume and the latest results, the teams](web/src/assets/screens/en/home.webp) |
 
 ## download
 

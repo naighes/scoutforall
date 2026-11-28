@@ -42,6 +42,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -140,6 +141,13 @@ def set_language(data, lang):
     config_path.write_text(json.dumps(config, indent=2))
 
 
+def to_last_friday():
+    """In the week view, a week back: the keys from that day to its Friday,
+    a day with a session done whatever the day it's taken."""
+    days = 4 - date.today().weekday()
+    return [{"key": "right" if days > 0 else "left"}] * abs(days)
+
+
 def examples_plan(data, out):
     """Home, scouting, statistics, analysis and training on the example matches."""
     t = the_team(data)
@@ -156,8 +164,9 @@ def examples_plan(data, out):
             {"wait": 800},
             {"shot": "scouting"},
             # a reception of Sylla, positive, then an attack of Egonu on a
-            # super: the evaluation and the zones (the copy is scouted on)
-            {"keys": ["p", "2", "+", "a", "4", "s"]},
+            # super: the evaluation and the zones (the copy is scouted on).
+            # The players by their shirt number: Sylla 17, Egonu 18
+            {"keys": ["p", "1", "7", "+", "a", "1", "8", "s"]},
             {"wait": 400},
             {"shot": "scouting-attack"},
             {"go": {"stats": [t, over]}},
@@ -170,7 +179,7 @@ def examples_plan(data, out):
             {"wait": 800},
             # the last 4 matches, not the last month: the same whatever the
             # day it's taken
-            {"key": "right"},
+            {"keys": ["right", "right"]},
             {"wait": 1200},
             {"shot": "team-analysis"},
             # the training plan (written by `training_plan`): the month with
@@ -185,6 +194,8 @@ def examples_plan(data, out):
             {"wait": 400},
             {"key": "pageup"},
             {"wait": 500},
+            *to_last_friday(),
+            {"wait": 300},
             {"key": "enter"},
             {"wait": 700},
             {"shot": "training-session"},
@@ -299,8 +310,8 @@ def scouting_hero_plan(data, out):
         steps.append({"wait": 350})
         key("space", 400)
 
-    key("p"), key("2"), zone(["left", "down"]), key("+", 900)
-    key("a"), key("4"), key("s"), zone(["up", "up", "left", "left"]), key("#", 1200)
+    key("p"), key("1", 250), key("7"), zone(["left", "down"]), key("+", 900)
+    key("a"), key("1", 250), key("8"), key("s"), zone(["up", "up", "left", "left"]), key("#", 1200)
     key("s"), key("f"), zone(["down", "right", "down"]), key("+", 1500)
     steps.append({"stop": None})
     return {"window": WINDOW, "out": str(out), "steps": steps}
