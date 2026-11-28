@@ -1,14 +1,15 @@
 package io.github.naighes.scout4all
 
 import android.content.Intent
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
-import androidx.compose.ui.test.performScrollTo
-import org.robolectric.Shadows.shadowOf
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import io.github.naighes.scout4all.core.PlayerForm
 import io.github.naighes.scout4all.core.RoleEnum
 import org.junit.Assert.assertEquals
@@ -16,6 +17,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 
 @RunWith(RobolectricTestRunner::class)
 class PlayerProfileTest {
@@ -83,6 +85,8 @@ class PlayerProfileTest {
         }
         show(player)
         rule.waitForText("Cittadella")
+        // each button with its icon: mail, handset, WhatsApp
+        rule.onAllNodesWithTag("contact-icon", useUnmergedTree = true).assertCountEquals(3)
         val opened = { button: String ->
             rule.onNodeWithText(button).performScrollTo().performClick()
             shadowOf(app).nextStartedActivity.let { it.action to it.dataString }

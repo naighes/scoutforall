@@ -6,18 +6,23 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material3.*
+import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -31,10 +36,10 @@ import io.github.naighes.scout4all.core.Player
 import io.github.naighes.scout4all.core.PlayerProfile
 import io.github.naighes.scout4all.core.Scout4All
 import io.github.naighes.scout4all.core.TeamDetails
-import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
+import kotlinx.coroutines.launch
 
 private data class ProfileData(
     val team: TeamDetails,
@@ -303,7 +308,9 @@ private fun ContactLines(contacts: Contacts) {
     contacts.email?.let { email ->
         ContactLine(
             ProfileItem(stringResource(R.string.email), email.address),
-            listOf(stringResource(R.string.write_email) to to(Intent.ACTION_SENDTO, email.link)),
+            listOf(
+                ContactAction(R.drawable.ic_mail, stringResource(R.string.write_email), to(Intent.ACTION_SENDTO, email.link)),
+            ),
         )
     }
     contacts.phone?.let { phone ->
@@ -311,19 +318,43 @@ private fun ContactLines(contacts: Contacts) {
             ProfileItem(stringResource(R.string.phone), phone.shown),
             listOfNotNull(
                 // the dialer, which needs no permission
-                phone.callLink?.let { stringResource(R.string.call) to to(Intent.ACTION_DIAL, it) },
-                phone.whatsappLink?.let { "WhatsApp" to to(Intent.ACTION_VIEW, it) },
+                phone.callLink?.let {
+                    ContactAction(R.drawable.ic_call, stringResource(R.string.call), to(Intent.ACTION_DIAL, it))
+                },
+                phone.whatsappLink?.let {
+                    // the logo keeps its colors
+                    ContactAction(R.drawable.ic_whatsapp, "WhatsApp", to(Intent.ACTION_VIEW, it), tinted = false)
+                },
             ),
         )
     }
 }
 
+/** What can be done with a contact: its icon, [tinted] as the words of
+ * the button unless in its own colors. */
+private data class ContactAction(
+    val icon: Int,
+    val label: String,
+    val act: () -> Unit,
+    val tinted: Boolean = true,
+)
+
 @Composable
-private fun ContactLine(item: ProfileItem, actions: List<Pair<String, () -> Unit>>) =
+private fun ContactLine(item: ProfileItem, actions: List<ContactAction>) =
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         ProfileValue(item, 18.sp)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            actions.forEach { (label, act) -> OutlinedButton(onClick = act) { Text(label) } }
+            actions.forEach { action ->
+                OutlinedButton(onClick = action.act) {
+                    Icon(
+                        painterResource(action.icon),
+                        contentDescription = null,
+                        modifier = Modifier.padding(end = 8.dp).size(18.dp).testTag("contact-icon"),
+                        tint = if (action.tinted) LocalContentColor.current else Color.Unspecified,
+                    )
+                    Text(action.label)
+                }
+            }
         }
     }
 

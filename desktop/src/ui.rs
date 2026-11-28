@@ -601,6 +601,36 @@ pub fn action_maybe<'a, M: Clone + 'a>(
     filled: bool,
     c: Colors,
 ) -> iced::widget::Button<'a, M> {
+    let picture = move |color| icon(icon_bytes, 20.0, color).into();
+    action_around(picture, label, message, filled, c)
+}
+
+/// An `action` with a picture of its own colors in place of the icon, as
+/// the logo of another app.
+pub fn picture_action<'a, M: Clone + 'a>(
+    svg_bytes: &'static [u8],
+    label: &str,
+    message: M,
+    c: Colors,
+) -> iced::widget::Button<'a, M> {
+    let picture = |_| {
+        svg(svg::Handle::from_memory(svg_bytes))
+            .width(Length::Fixed(20.0))
+            .height(Length::Fixed(20.0))
+            .into()
+    };
+    action_around(picture, label, Some(message), false, c)
+}
+
+/// The button of an action: `picture`, told the color of the words, before
+/// them.
+fn action_around<'a, M: Clone + 'a>(
+    picture: impl FnOnce(Color) -> Element<'a, M>,
+    label: &str,
+    message: Option<M>,
+    filled: bool,
+    c: Colors,
+) -> iced::widget::Button<'a, M> {
     let faded = |color: Color| match message.is_some() {
         true => color,
         false => Color { a: 0.45, ..color },
@@ -613,7 +643,7 @@ pub fn action_maybe<'a, M: Clone + 'a>(
     button(
         container(
             row![
-                icon(icon_bytes, 20.0, color),
+                picture(color),
                 text(label.to_string()).size(SIZE_BODY).color(color),
             ]
             .spacing(10)

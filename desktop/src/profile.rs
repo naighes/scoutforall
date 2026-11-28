@@ -353,10 +353,10 @@ fn contacts<'a>(player: &Player, s: &'static Strings, c: Colors) -> Option<Eleme
             .call_link
             .as_ref()
             .map(|link| action(theme::icons::CALL, s.call, link));
-        let whatsapp = phone
-            .whatsapp_link
-            .as_ref()
-            .map(|link| action(theme::icons::CHAT, "WhatsApp", link));
+        let whatsapp = phone.whatsapp_link.as_ref().map(|link| {
+            let open = Message::OpenLink(link.to_string());
+            ui::picture_action(theme::icons::WHATSAPP, "WhatsApp", open, c).into()
+        });
         line(
             s.phone,
             &phone.shown,
